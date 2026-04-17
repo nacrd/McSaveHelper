@@ -1,0 +1,41 @@
+# 1. 虚拟环境 (Virtual Environment)
+# 你的项目中有 .venv 和 venv 两个，务必全部忽略
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# 2. Python 缓存和编译文件
+# 项目根目录和 core/, ui/ 等子目录下都有 __pycache__/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 3. 项目构建和打包产物 (PyInstaller)
+# 你的项目里已经有一个 build.spec 文件
+build/
+dist/
+*.spec
+*.manifest
+
+# 4. 开发工具和操作系统文件
+# 你的项目中有 .idea/ 目录，是 PyCharm 的配置，必须忽略
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# 5. 测试、日志和敏感信息
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+.env
+.env.local
+*.db
+*.sqlite3

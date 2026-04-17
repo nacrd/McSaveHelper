@@ -1,0 +1,5 @@
+customtkinter
+nbtlib
+anvil-parser
+requests
+send2trash
