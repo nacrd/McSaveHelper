@@ -18,7 +18,6 @@ __pycache__/
 # 你的项目里已经有一个 build.spec 文件
 build/
 dist/
-*.spec
 *.manifest
 
 # 4. 开发工具和操作系统文件
