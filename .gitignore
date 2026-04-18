@@ -26,3 +26,4 @@ htmlcov/
 *.db
 *.sqlite3
 world/
+plans/
