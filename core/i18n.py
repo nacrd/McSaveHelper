@@ -16,14 +16,15 @@ except ImportError:
         from typing_extensions import StrEnum  # type: ignore
     except ImportError:
         # 自定义 StrEnum 作为回退
-        class StrEnum(str, Enum):
+        class _StrEnum(str, Enum):
             """自定义字符串枚举，兼容 Python <3.11"""
             pass
+        StrEnum = _StrEnum
 
 from .config import config_manager
 
 
-class Language(StrEnum):
+class Language(StrEnum):  # type: ignore
     """支持的语言枚举"""
     ZH_CN = "zh_CN"  # 简体中文
     EN_US = "en_US"  # 英文（美国）
