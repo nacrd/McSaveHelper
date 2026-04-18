@@ -1,0 +1,106 @@
+{
+  "language_display_name": "简体中文",
+  "app": {
+    "title": "Minecraft 存档转换工具",
+    "subtitle": "存档转换工具"
+  },
+  "top_bar": {
+    "ready": "就绪",
+    "start_conversion": "开始转换"
+  },
+  "left_panel": {
+    "archive_config": "存档目录设置",
+    "client_archive": "客户端存档",
+    "server_root": "服务端目录",
+    "world_folder_name": "世界文件夹名",
+    "batch_archive_dir": "批量存档目录",
+    "browse": "浏览",
+    "scan": "扫描",
+    "placeholder_select_world": "选择世界文件夹 (需包含 level.dat)",
+    "placeholder_default_dir": "默认当前目录",
+    "placeholder_world_name": "例如: world",
+    "placeholder_batch_dir": "选择包含多个世界存档的目录"
+  },
+  "right_panel": {
+    "mode_settings": "⚙️ 迁移模式",
+    "fast_mode": "快速模式",
+    "full_mode": "完整模式",
+    "mode_description": "快速：仅复制双 UUID 文件   |   完整：深度转换 + 可选精简",
+    "uuid_query": "🔍 UUID 查询",
+    "query_button": "🔎 查询",
+    "query_result_placeholder": "💡 查询结果会显示在这里...\n离线 UUID 与 正版 UUID",
+    "migration_options": "🔧 迁移选项",
+    "offline_mode": "强制离线模式 (不请求 Mojang API)",
+    "clean_mode": "精简存档 (删除缓存/日志等)",
+    "batch_mode": "批量处理模式",
+    "advanced_settings": "⚙️ 高级配置",
+    "version_detection": "自动检测Minecraft版本",
+    "max_concurrent": "最大并发数:",
+    "uuid_mapping": "🔗 自定义UUID映射",
+    "player_name": "玩家名:",
+    "uuid": "UUID:",
+    "add": "添加",
+    "remove": "移除",
+    "clear_all_mappings": "🗑️ 清空所有映射",
+    "manual_names": "手动指定玩家名 (逗号分隔)",
+    "placeholder_player_name": "输入玩家名，如: Steve",
+    "placeholder_uuid": "输入UUID",
+    "placeholder_manual_names": "player1,player2,player3"
+  },
+  "common": {
+    "select": "选择",
+    "confirm": "确认",
+    "cancel": "取消",
+    "save": "保存",
+    "reset": "重置",
+    "clear_log": "清空日志",
+    "browse": "浏览"
+  },
+  "dialogs": {
+    "select_client_archive": "选择客户端存档目录",
+    "select_server_root": "选择服务端目录",
+    "select_batch_dir": "选择包含多个世界存档的目录",
+    "warning": "提示",
+    "error": "错误",
+    "success": "成功"
+  },
+  "messages": {
+    "please_select_batch_dir": "请先选择批量存档目录",
+    "batch_dir_not_exist": "批量存档目录不存在",
+    "scanned_worlds": "扫描到 {count} 个世界存档: {names}",
+    "no_valid_worlds": "未找到有效的世界存档（需要包含 level.dat）",
+    "batch_scan_complete": "批量扫描完成: 找到 {count} 个世界存档",
+    "batch_scan_no_worlds": "批量扫描: 未找到有效的世界存档",
+    "conversion_started": "转换开始...",
+    "conversion_completed": "转换完成!",
+    "conversion_failed": "转换失败: {error}",
+    "enter_player_name": "请输入玩家名",
+    "invalid_player_name_format": "玩家名格式不正确 (3-16个字符，仅字母数字下划线)",
+    "scan_batch_dir_first": "请先扫描批量存档目录",
+    "fill_src_and_world_name": "请填写源存档路径和世界文件夹名",
+    "invalid_source_archive": "源存档无效，必须包含 level.dat",
+    "server_dir_not_exist": "服务端目录不存在",
+    "migration_success": "迁移成功！\n输出目录：{output_path}",
+    "migration_exception": "迁移过程中发生异常:\n{error}",
+    "fill_player_name_and_uuid": "请填写玩家名和UUID",
+    "invalid_uuid_format": "UUID格式不正确",
+    "confirm_clear_all_mappings": "确定要清空所有自定义UUID映射吗？",
+    "preparing": "准备中...",
+    "preparing_batch": "准备批量处理...",
+    "completed": "完成",
+    "failed": "失败",
+    "batch_completed": "批量处理完成",
+    "batch_failed": "批量处理失败"
+  },
+  "log_levels": {
+    "INFO": "信息",
+    "SUCCESS": "成功",
+    "WARN": "警告",
+    "ERROR": "错误",
+    "API": "API"
+  },
+  "__meta__": {
+    "language": "zh_CN",
+    "display_name": "简体中文"
+  }
+}

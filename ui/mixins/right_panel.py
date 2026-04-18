@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox, ModernEntry, ModernButton, ModernCheckbox
+from core.i18n import t
 
 if TYPE_CHECKING:
     from ui.mixins.common import CommonUIMixin
@@ -41,12 +42,12 @@ class RightPanelMixin:
         # 模式选择
         mode_card = self._create_card(parent)
         mode_card.pack(fill="x", pady=(0, 18))
-        self._add_section_title(mode_card, "⚙️ 迁移模式", icon_only=False)
+        self._add_section_title(mode_card, t("right_panel.mode_settings"), icon_only=False)
         mode_frame = ctk.CTkFrame(mode_card, fg_color="transparent")
         mode_frame.pack(fill="x", padx=20, pady=(12, 8))
         ctk.CTkRadioButton(
             mode_frame,
-            text="⚡ 快速模式",
+            text="⚡ " + t("right_panel.fast_mode"),
             variable=self.mode_var,
             value="fast",
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -54,7 +55,7 @@ class RightPanelMixin:
         ).pack(side="left", padx=(0, 30))
         ctk.CTkRadioButton(
             mode_frame,
-            text="🧠 完整模式",
+            text="🧠 " + t("right_panel.full_mode"),
             variable=self.mode_var,
             value="full",
             font=ctk.CTkFont(size=14, weight="bold"),
@@ -62,7 +63,7 @@ class RightPanelMixin:
         ).pack(side="left")
         ctk.CTkLabel(
             mode_card,
-            text="快速：仅复制双 UUID 文件   |   完整：深度转换 + 可选精简",
+            text=t("right_panel.mode_description"),
             font=ctk.CTkFont(size=11),
             text_color=COLORS["text_muted"]
         ).pack(anchor="w", padx=20, pady=(0, 18))
@@ -70,18 +71,18 @@ class RightPanelMixin:
         # UUID 查询
         uuid_card = self._create_card(parent)
         uuid_card.pack(fill="x", pady=(0, 18))
-        self._add_section_title(uuid_card, "🔍 UUID 查询", icon_only=False)
+        self._add_section_title(uuid_card, t("right_panel.uuid_query"), icon_only=False)
         query_frame = ctk.CTkFrame(uuid_card, fg_color="transparent")
         query_frame.pack(fill="x", padx=20, pady=(12, 8))
         ModernEntry(
             query_frame,
             textvariable=self.query_name_var,
-            placeholder_text="输入玩家名，如: Steve",
+            placeholder_text=t("right_panel.placeholder_player_name"),
             height=38,
         ).pack(side="left", fill="x", expand=True, padx=(0, 10))
         ModernButton(
             query_frame,
-            text="🔎 查询",
+            text=t("right_panel.query_button"),
             width=90,
             height=38,
             command=self.query_uuid,
@@ -92,28 +93,28 @@ class RightPanelMixin:
         self.query_result.pack(fill="x", padx=20, pady=(8, 18))
         self._set_readonly_text(
             self.query_result,
-            "💡 查询结果会显示在这里...\n离线 UUID 与 正版 UUID"
+            t("right_panel.query_result_placeholder")
         )
         
         # 迁移选项
         opt_card = self._create_card(parent)
         opt_card.pack(fill="x", pady=(0, 18))
-        self._add_section_title(opt_card, "🔧 迁移选项", icon_only=False)
+        self._add_section_title(opt_card, t("right_panel.migration_options"), icon_only=False)
         opt_frame = ctk.CTkFrame(opt_card, fg_color="transparent")
         opt_frame.pack(fill="x", padx=20, pady=(12, 8))
         ModernCheckbox(
             opt_frame,
-            text="强制离线模式 (不请求 Mojang API)",
+            text=t("right_panel.offline_mode"),
             variable=self.offline_mode
         ).pack(anchor="w", pady=6)
         ModernCheckbox(
             opt_frame,
-            text="精简存档 (删除缓存/日志等)",
+            text=t("right_panel.clean_mode"),
             variable=self.clean_mode
         ).pack(anchor="w", pady=6)
         ModernCheckbox(
             opt_frame,
-            text="批量处理模式",
+            text=t("right_panel.batch_mode"),
             variable=self.batch_mode,
             command=self._toggle_batch_mode
         ).pack(anchor="w", pady=6)
@@ -121,14 +122,14 @@ class RightPanelMixin:
         # 高级配置
         adv_card = self._create_card(parent)
         adv_card.pack(fill="x", pady=(0, 18))
-        self._add_section_title(adv_card, "⚙️ 高级配置", icon_only=False)
+        self._add_section_title(adv_card, t("right_panel.advanced_settings"), icon_only=False)
         
         # 版本检测
         config_frame1 = ctk.CTkFrame(adv_card, fg_color="transparent")
         config_frame1.pack(fill="x", padx=20, pady=(12, 8))
         ModernCheckbox(
             config_frame1,
-            text="自动检测Minecraft版本",
+            text=t("right_panel.version_detection"),
             variable=self.version_detection,
             command=self._save_config
         ).pack(side="left", padx=(0, 20))
@@ -138,7 +139,7 @@ class RightPanelMixin:
         batch_frame.pack(fill="x", padx=20, pady=(8, 18))
         ctk.CTkLabel(
             batch_frame,
-            text="最大并发数:",
+            text=t("right_panel.max_concurrent"),
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["text_secondary"]
         ).pack(side="left")
@@ -154,7 +155,7 @@ class RightPanelMixin:
         # UUID映射管理
         uuid_card = self._create_card(parent)
         uuid_card.pack(fill="x")
-        self._add_section_title(uuid_card, "🔗 自定义UUID映射", icon_only=False)
+        self._add_section_title(uuid_card, t("right_panel.uuid_mapping"), icon_only=False)
         
         uuid_frame = ctk.CTkFrame(uuid_card, fg_color="transparent")
         uuid_frame.pack(fill="x", padx=20, pady=(12, 8))
@@ -164,7 +165,7 @@ class RightPanelMixin:
         add_frame.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(
             add_frame,
-            text="玩家名:",
+            text=t("right_panel.player_name"),
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["text_secondary"]
         ).pack(side="left")
@@ -176,7 +177,7 @@ class RightPanelMixin:
         ).pack(side="left", padx=(5, 20))
         ctk.CTkLabel(
             add_frame,
-            text="UUID:",
+            text=t("right_panel.uuid"),
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["text_secondary"]
         ).pack(side="left")
@@ -188,7 +189,7 @@ class RightPanelMixin:
         ).pack(side="left", padx=(5, 10))
         ModernButton(
             add_frame,
-            text="添加",
+            text=t("right_panel.add"),
             width=70,
             height=38,
             command=self._add_uuid_mapping,
@@ -203,7 +204,7 @@ class RightPanelMixin:
         
         ModernButton(
             uuid_card,
-            text="🗑️ 清空所有映射",
+            text=t("right_panel.clear_all_mappings"),
             width=130,
             height=38,
             command=self._clear_uuid_mappings,

@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox, ModernEntry, ModernButton
+from core.i18n import t
 
 if TYPE_CHECKING:
     from ui.mixins.common import CommonUIMixin
@@ -38,20 +39,20 @@ class LeftPanelMixin:
         # 目录设置
         dir_card = self._create_card(parent)
         dir_card.pack(fill="x", pady=(0, 18))
-        self._add_section_title(dir_card, "📁 存档目录配置", icon_only=False)
+        self._add_section_title(dir_card, t("left_panel.archive_config", "📁 存档目录配置"), icon_only=False)
         
         self._add_labeled_entry(
             dir_card,
-            "客户端存档",
+            t("left_panel.client_archive", "客户端存档"),
             self.src_path,
-            "选择世界文件夹 (包含 level.dat)",
+            t("left_panel.placeholder_select_world", "选择世界文件夹 (包含 level.dat)"),
             self.choose_src
         )
         self._add_labeled_entry(
             dir_card,
-            "服务端根目录",
+            t("left_panel.server_root", "服务端根目录"),
             self.dest_path,
-            "默认为程序当前目录",
+            t("left_panel.placeholder_default_dir", "默认为程序当前目录"),
             self.choose_dest
         )
         
@@ -59,14 +60,14 @@ class LeftPanelMixin:
         name_frame.pack(fill="x", padx=20, pady=(8, 18))
         ctk.CTkLabel(
             name_frame,
-            text="世界文件夹名",
+            text=t("left_panel.world_folder_name", "世界文件夹名"),
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["text_secondary"]
         ).pack(anchor="w", pady=(0, 6))
         ModernEntry(
             name_frame,
             textvariable=self.world_name,
-            placeholder_text="例如: world",
+            placeholder_text=t("left_panel.placeholder_world_name", "例如: world"),
             height=38,
         ).pack(fill="x")
         
@@ -75,7 +76,7 @@ class LeftPanelMixin:
         self.batch_frame.pack(fill="x", padx=20, pady=(8, 0))
         ctk.CTkLabel(
             self.batch_frame,
-            text="批量存档目录",
+            text=t("left_panel.batch_archive_dir", "批量存档目录"),
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["text_secondary"]
         ).pack(anchor="w", pady=(0, 6))
@@ -84,12 +85,12 @@ class LeftPanelMixin:
         ModernEntry(
             batch_entry_frame,
             textvariable=self.batch_dir_path,
-            placeholder_text="选择包含多个世界存档的目录",
+            placeholder_text=t("left_panel.placeholder_batch_dir", "选择包含多个世界存档的目录"),
             height=38,
         ).pack(side="left", fill="x", expand=True, padx=(0, 10))
         ModernButton(
             batch_entry_frame,
-            text="📂 浏览",
+            text=t("left_panel.browse", "📂 浏览"),
             width=90,
             height=38,
             command=self.choose_batch_dir,
@@ -99,7 +100,7 @@ class LeftPanelMixin:
         ).pack(side="right")
         ModernButton(
             batch_entry_frame,
-            text="🔍 扫描",
+            text=t("left_panel.scan", "🔍 扫描"),
             width=90,
             height=38,
             command=self.scan_batch_worlds,

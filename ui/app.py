@@ -1,4 +1,4 @@
-"""MC Migrator Pro - Minecraft存档迁移工具
+"""Minecraft存档转换工具
 
 主要功能：
 - 将Minecraft客户端存档转换为服务端兼容格式
@@ -31,16 +31,20 @@ from ui.mixins.top_bar import TopBarMixin
 from ui.mixins.left_panel import LeftPanelMixin
 from ui.mixins.right_panel import RightPanelMixin
 from core.types import LogCallback, ProgressCallback
+from core.i18n import init_translations, t
 
 
 # ------------------ 主题系统 ------------------
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+# 初始化翻译系统
+init_translations()
+
 class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title("MC Migrator Pro · 存档迁移工具")
+        self.title(t("app.title", "MC Migrator Pro · 存档迁移工具"))
         self.geometry("1100x820")
         self.minsize(1000, 720)
 
@@ -120,18 +124,18 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
     # ---------- 功能方法 ----------
     def choose_src(self) -> None:
-        path = filedialog.askdirectory(title="选择客户端存档目录")
+        path = filedialog.askdirectory(title=t("dialogs.select_client_archive", "选择客户端存档目录"))
         if path:
             self.src_path.set(path)
 
     def choose_dest(self) -> None:
-        path = filedialog.askdirectory(title="选择服务端根目录")
+        path = filedialog.askdirectory(title=t("dialogs.select_server_root", "选择服务端根目录"))
         if path:
             self.dest_path.set(path)
     
     def choose_batch_dir(self) -> None:
         """选择批量存档目录"""
-        path = filedialog.askdirectory(title="选择包含多个世界存档的目录")
+        path = filedialog.askdirectory(title=t("dialogs.select_batch_dir", "选择包含多个世界存档的目录"))
         if path:
             self.batch_dir_path.set(path)
     
@@ -139,28 +143,37 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         """扫描批量存档目录"""
         batch_dir = self.batch_dir_path.get().strip()
         if not batch_dir:
-            messagebox.showwarning("提示", "请先选择批量存档目录")
+            messagebox.showwarning(t("dialogs.warning", "提示"), t("messages.please_select_batch_dir", "请先选择批量存档目录"))
             return
         
         batch_path = Path(batch_dir)
         if not batch_path.exists():
-            messagebox.showerror("错误", "批量存档目录不存在")
+            messagebox.showerror(t("dialogs.error", "错误"), t("messages.batch_dir_not_exist", "批量存档目录不存在"))
             return
         
         self.batch_worlds = scan_worlds_directory(batch_path)
         
         if self.batch_worlds:
+            world_names = ', '.join([w.name for w in self.batch_worlds[:3]])
+            if len(self.batch_worlds) > 3:
+                world_names += '...'
             self.batch_result_label.configure(
-                text=f"扫描到 {len(self.batch_worlds)} 个世界存档: {', '.join([w.name for w in self.batch_worlds[:3]])}{'...' if len(self.batch_worlds) > 3 else ''}",
+                text=t("messages.scanned_worlds", "扫描到 {count} 个世界存档: {names}").format(
+                    count=len(self.batch_worlds),
+                    names=world_names
+                ),
                 text_color=COLORS["terminal_green"]
             )
-            self.log_msg(f"批量扫描完成: 找到 {len(self.batch_worlds)} 个世界存档", "SUCCESS")
+            self.log_msg(
+                t("messages.batch_scan_complete", "批量扫描完成: 找到 {count} 个世界存档").format(count=len(self.batch_worlds)),
+                "SUCCESS"
+            )
         else:
             self.batch_result_label.configure(
-                text="未找到有效的世界存档（需要包含level.dat）",
+                text=t("messages.no_valid_worlds", "未找到有效的世界存档（需要包含level.dat）"),
                 text_color=COLORS["terminal_red"]
             )
-            self.log_msg("批量扫描: 未找到有效的世界存档", "WARN")
+            self.log_msg(t("messages.batch_scan_no_worlds", "批量扫描: 未找到有效的世界存档"), "WARN")
 
     def log_msg(self, msg: str, level: str = "INFO") -> None:
         """线程安全的日志写入 (支持终端彩色标签)"""
@@ -206,10 +219,10 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
     def query_uuid(self) -> None:
         name = self.query_name_var.get().strip()
         if not name:
-            messagebox.showwarning("提示", "请输入玩家名")
+            messagebox.showwarning(t("dialogs.warning"), t("messages.enter_player_name"))
             return
         if not re.match(r"^[A-Za-z0-9_]{3,16}$", name):
-            messagebox.showwarning("提示", "玩家名格式不正确 (3-16个字符，仅字母数字下划线)")
+            messagebox.showwarning(t("dialogs.warning"), t("messages.invalid_player_name_format"))
             return
 
         official_name = None
@@ -255,13 +268,13 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         # 批量处理模式
         if self.batch_mode.get():
             if not self.batch_worlds:
-                messagebox.showerror("错误", "请先扫描批量存档目录")
+                messagebox.showerror(t("dialogs.error"), t("messages.scan_batch_dir_first"))
                 return
             
             self.clear_log()
             self.start_btn.configure(state="disabled")
             self.update_progress(0)
-            self.progress_label.configure(text="准备批量处理...")
+            self.progress_label.configure(text=t("messages.preparing_batch"))
             
             threading.Thread(
                 target=self.run_batch_task, args=(dest,), daemon=True
@@ -270,23 +283,23 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
         # 单文件处理模式
         if not src or not world_name:
-            messagebox.showerror("错误", "请填写源存档路径和世界文件夹名")
+            messagebox.showerror(t("dialogs.error"), t("messages.fill_src_and_world_name"))
             return
 
         src_path = Path(src)
         dest_path = Path(dest)
 
         if not (src_path / "level.dat").exists():
-            messagebox.showerror("错误", "源存档无效，必须包含 level.dat")
+            messagebox.showerror(t("dialogs.error"), t("messages.invalid_source_archive"))
             return
         if not dest_path.exists():
-            messagebox.showerror("错误", "服务端目录不存在")
+            messagebox.showerror(t("dialogs.error"), t("messages.server_dir_not_exist"))
             return
 
         self.clear_log()
         self.start_btn.configure(state="disabled")
         self.update_progress(0)
-        self.progress_label.configure(text="准备中...")
+        self.progress_label.configure(text=t("messages.preparing"))
 
         threading.Thread(
             target=self.run_task, args=(src_path, dest_path, world_name), daemon=True
@@ -343,10 +356,10 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.after(
                 0,
                 lambda: messagebox.showinfo(
-                    "完成", f"迁移成功！\n输出目录：{output_path}"
+                    t("dialogs.success"), t("messages.migration_success").format(output_path=output_path)
                 ),
             )
-            self.after(0, lambda: self.progress_label.configure(text="完成"))
+            self.after(0, lambda: self.progress_label.configure(text=t("messages.completed")))
 
         except Exception as e:
             self.log_msg(f"发生错误: {e}", "ERROR")
@@ -355,10 +368,10 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.after(
                 0,
                 lambda: messagebox.showerror(
-                    "错误", f"迁移过程中发生异常:\n{str(e)}"
+                    t("dialogs.error"), t("messages.migration_exception").format(error=str(e))
                 ),
             )
-            self.after(0, lambda: self.progress_label.configure(text="失败"))
+            self.after(0, lambda: self.progress_label.configure(text=t("messages.failed")))
         finally:
             self.after(0, lambda: self.start_btn.configure(state="normal"))
             self.after(0, lambda: self.progress.set(0))
@@ -406,13 +419,13 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.log_header("批量处理完成")
             self.log_msg(f"成功: {success_count}/{total_count}", "SUCCESS")
             
-            self.after(0, lambda: self.progress_label.configure(text="批量处理完成"))
+            self.after(0, lambda: self.progress_label.configure(text=t("messages.batch_completed")))
             
         except Exception as e:
             self.log_msg(f"批量处理发生错误: {e}", "ERROR")
             import traceback
             traceback.print_exc()
-            self.after(0, lambda: self.progress_label.configure(text="批量处理失败"))
+            self.after(0, lambda: self.progress_label.configure(text=t("messages.batch_failed")))
         finally:
             self.after(0, lambda: self.start_btn.configure(state="normal"))
             self.after(0, lambda: self.progress.set(0))
@@ -449,12 +462,12 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         uuid = self.new_uuid.get().strip()
         
         if not player_name or not uuid:
-            messagebox.showwarning("提示", "请填写玩家名和UUID")
+            messagebox.showwarning(t("dialogs.warning"), t("messages.fill_player_name_and_uuid"))
             return
         
         # 验证UUID格式
         if not re.match(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$', uuid):
-            messagebox.showwarning("提示", "UUID格式不正确")
+            messagebox.showwarning(t("dialogs.warning"), t("messages.invalid_uuid_format"))
             return
         
         self.custom_uuid_mappings[player_name] = uuid
@@ -479,9 +492,25 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         
         self.uuid_listbox.configure(state="disabled")
     
+    def update_all_ui_texts(self) -> None:
+        """更新所有UI文本（语言切换时调用）"""
+        # 更新应用程序标题
+        self.title(t("app.title", "Minecraft 存档转换工具"))
+        
+        # 调用各个混入类的UI更新方法
+        if hasattr(self, '_update_ui_texts'):
+            self._update_ui_texts()  # TopBarMixin的方法
+        
+        # 注意：LeftPanelMixin和RightPanelMixin的文本在构建时已经使用t()函数
+        # 所以它们不需要动态更新，因为t()函数会实时返回当前语言的文本
+        # 但是静态构建的文本需要重新配置
+        
+        # 记录日志
+        self.log_msg(f"UI文本已更新为: {t('app.title')}", "INFO")
+    
     def _clear_uuid_mappings(self) -> None:
         """清空所有UUID映射"""
-        if messagebox.askyesno("确认", "确定要清空所有自定义UUID映射吗？"):
+        if messagebox.askyesno(t("common.confirm", "确认"), t("messages.confirm_clear_all_mappings")):
             self.custom_uuid_mappings.clear()
             self._save_config()
             self._update_uuid_list()

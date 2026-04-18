@@ -29,7 +29,8 @@ class ConfigSchema:
             "type": dict,
             "schema": {
                 "theme": {"type": str, "default": "dark", "choices": ["dark", "light"]},
-                "auto_clear_log": {"type": bool, "default": True}
+                "auto_clear_log": {"type": bool, "default": True},
+                "language": {"type": str, "default": "zh_CN", "choices": ["zh_CN", "en_US"]}
             }
         },
         "api_timeout": {"type": int, "default": 10, "min": 1, "max": 60},

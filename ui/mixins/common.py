@@ -4,6 +4,7 @@ from typing import Any, Optional, Callable
 
 from ui.constants import COLORS
 from ui.widgets import ModernCard, ModernButton, ModernEntry, ModernCheckbox
+from core.i18n import t
 
 
 class CommonUIMixin:
@@ -50,7 +51,7 @@ class CommonUIMixin:
         ).pack(side="left", fill="x", expand=True, padx=(0, 10))
         ModernButton(
             entry_frame,
-            text="📂 浏览",
+            text="📂 " + t("common.browse"),
             width=90,
             height=38,
             command=browse_cmd,
