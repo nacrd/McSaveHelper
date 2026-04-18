@@ -39,8 +39,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("MC Migrator Pro · 存档迁移工具")
-        self.geometry("1050x780")
-        self.minsize(950, 700)
+        self.geometry("1100x820")
+        self.minsize(1000, 720)
 
         # 初始化变量
         self._initialize_variables()
@@ -60,6 +60,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.offline_mode = ctk.BooleanVar(value=False)
         self.clean_mode = ctk.BooleanVar(value=True)
         self.query_name_var = ctk.StringVar()
+        self.manual_names = ctk.StringVar()
         
         # 批量处理相关
         self.batch_mode = ctk.BooleanVar(value=False)
@@ -86,7 +87,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.new_uuid = ctk.StringVar()
 
     def build_ui(self):
-        """构建用户界面"""
+        """构建现代化用户界面"""
         # 主背景容器
         self.main_bg = ctk.CTkFrame(self, fg_color=COLORS["bg_primary"], corner_radius=0)
         self.main_bg.pack(fill="both", expand=True)
@@ -96,11 +97,11 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
         # 核心内容区域
         content_frame = ctk.CTkFrame(self.main_bg, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=25, pady=15)
+        content_frame.pack(fill="both", expand=True, padx=30, pady=20)
 
         # 左右两列容器
         self.left_panel = ctk.CTkFrame(content_frame, fg_color="transparent")
-        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 15))
+        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 18))
 
         self.right_panel = ctk.CTkFrame(content_frame, fg_color="transparent")
         self.right_panel.pack(side="left", fill="both", expand=True)
@@ -182,6 +183,17 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.log.see("end")
             self.log.configure(state="disabled")
 
+        self.after(0, _write)
+
+    def log_header(self, msg):
+        """记录标题行"""
+        def _write():
+            self.log.configure(state="normal")
+            self.log.insert("end", f"\n{'=' * 50}\n", "separator")
+            self.log.insert("end", f"{msg}\n", "header")
+            self.log.insert("end", f"{'=' * 50}\n", "separator")
+            self.log.see("end")
+            self.log.configure(state="disabled")
         self.after(0, _write)
 
     def update_progress(self, value):
@@ -283,6 +295,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
     def run_task(self, src_path, dest_path, world_name):
         try:
+            self.log_header("开始迁移任务")
+            
             # 检测版本
             version = config_manager.detect_minecraft_version(src_path)
             if version:
@@ -319,8 +333,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
                     self.update_progress,
                 )
 
-            self.log_msg("=" * 50, "SUCCESS")
-            self.log_msg("迁移完成！", "SUCCESS")
+            self.log_header("迁移完成")
+            self.log_msg("所有操作已成功完成！", "SUCCESS")
 
             output_path = dest_path / world_name
             if output_path.exists():
@@ -353,6 +367,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
     def run_batch_task(self, dest_dir: str):
         """批量处理任务"""
         try:
+            self.log_header("开始批量处理")
+            
             dest_path = Path(dest_dir)
             
             # 更新配置
@@ -388,8 +404,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             success_count = sum(1 for r in results.values() if r["success"])
             total_count = len(results)
             
-            self.log_msg("=" * 50, "SUCCESS")
-            self.log_msg(f"批量处理完成！成功: {success_count}/{total_count}", "SUCCESS")
+            self.log_header("批量处理完成")
+            self.log_msg(f"成功: {success_count}/{total_count}", "SUCCESS")
             
             self.after(0, lambda: self.progress_label.configure(text="批量处理完成"))
             

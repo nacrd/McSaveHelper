@@ -2,58 +2,59 @@
 import customtkinter as ctk
 
 from ui.constants import COLORS
+from ui.widgets import ModernCard, ModernButton, ModernEntry, ModernCheckbox
 
 
 class CommonUIMixin:
     """提供创建卡片、标题、带标签的输入框等通用 UI 方法"""
     
     def _create_card(self, parent):
-        """创建圆角卡片容器"""
-        return ctk.CTkFrame(
-            parent,
-            corner_radius=12,
-            fg_color=COLORS["bg_card"],
-            border_width=1,
-            border_color=COLORS["border"]
-        )
+        """创建现代化卡片容器"""
+        return ModernCard(parent)
     
     def _add_section_title(self, parent, text, icon_only=False):
-        """添加章节标题"""
+        """添加现代化章节标题"""
+        title_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        title_frame.pack(fill="x", padx=20, pady=(18, 8))
+        
         ctk.CTkLabel(
-            parent,
+            title_frame,
             text=text,
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color=COLORS["text_primary"]
-        ).pack(anchor="w", padx=20, pady=(15, 5))
+        ).pack(side="left")
+        
+        if not icon_only:
+            separator = ctk.CTkFrame(title_frame, height=1, fg_color=COLORS["border"])
+            separator.pack(side="left", fill="x", expand=True, padx=(15, 0))
     
     def _add_labeled_entry(self, parent, label_text, var, placeholder, browse_cmd):
-        """添加带标签的输入框和浏览按钮"""
+        """添加带标签的现代化输入框和浏览按钮"""
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", pady=5, padx=20)
+        frame.pack(fill="x", pady=8, padx=20)
         ctk.CTkLabel(
             frame,
             text=label_text,
-            font=ctk.CTkFont(size=13, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["text_secondary"]
-        ).pack(anchor="w")
+        ).pack(anchor="w", pady=(0, 6))
         entry_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        entry_frame.pack(fill="x", pady=(5, 0))
-        ctk.CTkEntry(
+        entry_frame.pack(fill="x")
+        ModernEntry(
             entry_frame,
             textvariable=var,
-            height=36,
             placeholder_text=placeholder,
-            border_width=1,
-            border_color=COLORS["border"]
+            height=38,
         ).pack(side="left", fill="x", expand=True, padx=(0, 10))
-        ctk.CTkButton(
+        ModernButton(
             entry_frame,
             text="📂 浏览",
             width=90,
-            height=36,
+            height=38,
             command=browse_cmd,
             fg_color=COLORS["bg_secondary"],
-            hover_color=COLORS["border"]
+            hover_color=COLORS["border_light"],
+            text_color=COLORS["text_primary"]
         ).pack(side="right")
     
     def _set_readonly_text(self, textbox, content):
