@@ -24,6 +24,11 @@ def process_region_file(file_path, mappings):
     except Exception as e:
         return str(file_path), -1, str(e)
 
+def dummy_progress(value):
+    """虚拟进度函数，用于批量处理"""
+    pass
+
+
 def process_regions_parallel(files, mappings, progress_callback, log_callback):
     """使用线程池并发处理区域文件"""
     total = len(files)
