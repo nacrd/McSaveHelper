@@ -46,17 +46,7 @@
    git clone https://github.com/yourusername/mc_migrator.git
    cd mc_migrator
    ```
-
-2. 安装依赖
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. 启动程序
-   ```bash
-   python main.py
-   ```
-   或直接运行 `startup.bat`（Windows）
+2. 直接运行 `startup.bat`（Windows）
 
 ### 使用说明
 1. **选择存档目录**
