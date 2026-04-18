@@ -59,4 +59,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     onefile=True,                  # 单文件模式
+    icon='mc_migrator_icon.ico',   # 应用程序图标文件路径
 )
