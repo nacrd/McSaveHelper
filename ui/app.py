@@ -492,6 +492,13 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         
         self.uuid_listbox.configure(state="disabled")
     
+    def _on_uuid_mappings_change(self, mappings):
+        """当UUID映射表格发生变化时调用"""
+        self.custom_uuid_mappings = mappings
+        self._save_config()
+        # 可选：更新旧的列表显示以保持同步（如果需要）
+        self._update_uuid_list()
+    
     def update_all_ui_texts(self) -> None:
         """更新所有UI文本（语言切换时调用）"""
         # 更新应用程序标题

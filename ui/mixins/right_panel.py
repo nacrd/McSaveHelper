@@ -1,9 +1,9 @@
 """右侧面板混入类"""
 import customtkinter as ctk
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Callable
 
 from ui.constants import COLORS
-from ui.widgets import TerminalLikeTextbox, ModernEntry, ModernButton, ModernCheckbox
+from ui.widgets import TerminalLikeTextbox, ModernEntry, ModernButton, ModernCheckbox, UUIDMappingTable
 from core.i18n import t
 
 if TYPE_CHECKING:
@@ -25,6 +25,8 @@ class RightPanelMixin:
         new_player_name: ctk.StringVar
         new_uuid: ctk.StringVar
         uuid_listbox: ctk.CTkTextbox
+        custom_uuid_mappings: dict
+        _on_uuid_mappings_change: Callable[[dict], None]
         
         def query_uuid(self) -> None: ...
         def _toggle_batch_mode(self) -> None: ...
@@ -156,58 +158,11 @@ class RightPanelMixin:
         uuid_card = self._create_card(parent)
         uuid_card.pack(fill="x")
         self._add_section_title(uuid_card, t("right_panel.uuid_mapping"), icon_only=False)
-        
-        uuid_frame = ctk.CTkFrame(uuid_card, fg_color="transparent")
-        uuid_frame.pack(fill="x", padx=20, pady=(12, 8))
-        
-        # 添加新映射
-        add_frame = ctk.CTkFrame(uuid_frame, fg_color="transparent")
-        add_frame.pack(fill="x", pady=(0, 12))
-        ctk.CTkLabel(
-            add_frame,
-            text=t("right_panel.player_name"),
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=COLORS["text_secondary"]
-        ).pack(side="left")
-        ModernEntry(
-            add_frame,
-            textvariable=self.new_player_name,
-            width=120,
-            height=38,
-        ).pack(side="left", padx=(5, 20))
-        ctk.CTkLabel(
-            add_frame,
-            text=t("right_panel.uuid"),
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=COLORS["text_secondary"]
-        ).pack(side="left")
-        ModernEntry(
-            add_frame,
-            textvariable=self.new_uuid,
-            width=250,
-            height=38,
-        ).pack(side="left", padx=(5, 10))
-        ModernButton(
-            add_frame,
-            text=t("right_panel.add"),
-            width=70,
-            height=38,
-            command=self._add_uuid_mapping,
-            fg_color=COLORS["accent"],
-            hover_color=COLORS["accent_hover"]
-        ).pack(side="left")
-        
-        # 映射列表
-        self.uuid_listbox = ctk.CTkTextbox(uuid_card, height=110, corner_radius=8, border_width=1, border_color=COLORS["log_border"])
-        self.uuid_listbox.pack(fill="x", padx=20, pady=(8, 18))
-        self._update_uuid_list()
-        
-        ModernButton(
+
+        # 可视化UUID映射编辑器
+        self.uuid_table = UUIDMappingTable(
             uuid_card,
-            text=t("right_panel.clear_all_mappings"),
-            width=130,
-            height=38,
-            command=self._clear_uuid_mappings,
-            fg_color=COLORS["error"],
-            hover_color=COLORS["error_light"]
-        ).pack(anchor="e", padx=20, pady=(0, 12))
+            mappings=self.custom_uuid_mappings,
+            on_mappings_change=self._on_uuid_mappings_change
+        )
+        self.uuid_table.pack(fill="x", padx=20, pady=(12, 18))
