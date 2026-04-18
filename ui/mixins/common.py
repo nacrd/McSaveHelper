@@ -1,0 +1,64 @@
+"""UI 通用工具混入类"""
+import customtkinter as ctk
+
+from ui.constants import COLORS
+
+
+class CommonUIMixin:
+    """提供创建卡片、标题、带标签的输入框等通用 UI 方法"""
+    
+    def _create_card(self, parent):
+        """创建圆角卡片容器"""
+        return ctk.CTkFrame(
+            parent,
+            corner_radius=12,
+            fg_color=COLORS["bg_card"],
+            border_width=1,
+            border_color=COLORS["border"]
+        )
+    
+    def _add_section_title(self, parent, text, icon_only=False):
+        """添加章节标题"""
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=COLORS["text_primary"]
+        ).pack(anchor="w", padx=20, pady=(15, 5))
+    
+    def _add_labeled_entry(self, parent, label_text, var, placeholder, browse_cmd):
+        """添加带标签的输入框和浏览按钮"""
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.pack(fill="x", pady=5, padx=20)
+        ctk.CTkLabel(
+            frame,
+            text=label_text,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(anchor="w")
+        entry_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        entry_frame.pack(fill="x", pady=(5, 0))
+        ctk.CTkEntry(
+            entry_frame,
+            textvariable=var,
+            height=36,
+            placeholder_text=placeholder,
+            border_width=1,
+            border_color=COLORS["border"]
+        ).pack(side="left", fill="x", expand=True, padx=(0, 10))
+        ctk.CTkButton(
+            entry_frame,
+            text="📂 浏览",
+            width=90,
+            height=36,
+            command=browse_cmd,
+            fg_color=COLORS["bg_secondary"],
+            hover_color=COLORS["border"]
+        ).pack(side="right")
+    
+    def _set_readonly_text(self, textbox, content):
+        """设置只读文本框的内容（线程安全）"""
+        textbox.configure(state="normal")
+        textbox.delete("1.0", "end")
+        textbox.insert("1.0", content)
+        textbox.configure(state="disabled")

@@ -2,6 +2,7 @@ import shutil
 
 from .cleaner import clean_world
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
+from .utils import update_server_properties
 
 
 def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_names, log):
@@ -84,20 +85,3 @@ def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_nam
 
     # 6. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
-
-def update_server_properties(dest_dir, world_name, log):
-    props = dest_dir / "server.properties"
-    if props.exists():
-        lines = props.read_text(encoding='utf-8').splitlines()
-        new_lines = []
-        found = False
-        for line in lines:
-            if line.startswith("level-name="):
-                new_lines.append(f"level-name={world_name}")
-                found = True
-            else:
-                new_lines.append(line)
-        if not found:
-            new_lines.append(f"level-name={world_name}")
-        props.write_text("\n".join(new_lines), encoding='utf-8')
-        log(f"已更新 server.properties: level-name={world_name}", "CONFIG")

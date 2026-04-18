@@ -1,13 +1,14 @@
 import os
 import shutil
 from pathlib import Path
+from typing import Callable
 
 CLEAN_PATTERNS = {
     "logs", "crash-reports", "session.lock", ".ds_store", "thumbs.db",
     "server-resource-packs", "downloads", "journeymap", "xaero", "voxelmap"
 }
 
-def should_clean(p: Path):
+def should_clean(p: Path) -> bool:
     name = p.name.lower()
     if name in CLEAN_PATTERNS:
         return True
@@ -15,7 +16,7 @@ def should_clean(p: Path):
         return True
     return False
 
-def clean_world(world_path, log):
+def clean_world(world_path: Path, log: Callable[[str, str], None]) -> None:
     cleaned = 0
     for root, dirs, files in os.walk(world_path, topdown=False):
         for file in files:
@@ -24,7 +25,7 @@ def clean_world(world_path, log):
                 try:
                     fp.unlink()
                     cleaned += 1
-                except:
+                except OSError:
                     pass
         for d in dirs:
             dp = Path(root) / d
@@ -32,7 +33,7 @@ def clean_world(world_path, log):
                 try:
                     shutil.rmtree(dp)
                     cleaned += 1
-                except:
+                except OSError:
                     pass
     if cleaned > 0:
         log(f"精简完成，删除了 {cleaned} 项", "CLEAN")

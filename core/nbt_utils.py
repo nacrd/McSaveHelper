@@ -34,7 +34,7 @@ def patch_nbt(tag, mappings, key_name=None):
                                 tag[k] = nbtlib.tag.Long(new_m)
                                 tag[least_k] = nbtlib.tag.Long(new_l)
                                 changes += 1
-                        except:
+                        except (ValueError, TypeError, KeyError):
                             pass
         for k in tag:
             tag[k], c = patch_nbt(tag[k], mappings, k)

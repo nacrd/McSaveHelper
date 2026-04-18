@@ -7,8 +7,6 @@ import requests
 
 from .config import config_manager
 
-from .config import config_manager
-
 
 def get_offline_uuid_str(name):
     md5 = hashlib.md5(f"OfflinePlayer:{name}".encode('utf-8')).hexdigest()
