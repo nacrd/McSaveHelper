@@ -11,6 +11,9 @@ datas = collect_data_files('anvil')
 # if os.path.exists('assets'):
 #     datas += [('assets', 'assets')]
 
+# 打包翻译文件
+datas += [('translations', 'translations')]
+
 # ---------- 2. 分析主脚本 ----------
 a = Analysis(
     ['main.py'],

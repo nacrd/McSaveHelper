@@ -6,6 +6,7 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, Set, List, Tuple
 from enum import Enum
@@ -57,12 +58,19 @@ class TranslationManager:
         """
         if translations_dir is None:
             # 默认翻译文件目录
-            self.translations_dir = Path(__file__).parent.parent / "translations"
+            if hasattr(sys, '_MEIPASS'):
+                # 打包后运行时
+                base_dir = Path(sys._MEIPASS)  # type: ignore
+            else:
+                # 开发环境
+                base_dir = Path(__file__).parent.parent
+            self.translations_dir = base_dir / "translations"
         else:
             self.translations_dir = Path(translations_dir)
         
-        # 确保目录存在
-        self.translations_dir.mkdir(parents=True, exist_ok=True)
+        # 确保目录存在（打包后目录已存在，无需创建）
+        if not self.translations_dir.exists():
+            self.translations_dir.mkdir(parents=True, exist_ok=True)
         
         # 当前语言，从配置中读取或使用默认
         self._current_language = Language.ZH_CN
