@@ -11,7 +11,8 @@ if not os.path.isfile(icon_path):
 datas = collect_data_files('anvil_parser2')
 
 # ===== 添加 Python DLL =====
-python_dll = os.path.join(os.path.dirname(sys.executable), 'python310.dll')
+python_version = f'python{sys.version_info.major}{sys.version_info.minor}'
+python_dll = os.path.join(os.path.dirname(sys.executable), f'{python_version}.dll')
 binaries = []
 if os.path.isfile(python_dll):
     binaries.append((python_dll, '.'))  # 拷贝到 exe 同级目录
@@ -31,7 +32,7 @@ exe_kwargs = {
     'scripts': a.scripts,
     'binaries': a.binaries,
     'datas': a.datas,
-    'name': 'MC-Migrator-Pro',
+    'name': 'MC-Migrator',
     'debug': False,
     'bootloader_ignore_signals': False,
     'strip': False,
