@@ -1,6 +1,7 @@
 """自定义 UI 组件"""
 import customtkinter as ctk
-from typing import Any
+from typing import Any, List, Dict, Tuple, Set, Optional
+from pathlib import Path
 from tkinter import filedialog, messagebox
 
 from .constants import COLORS
@@ -179,7 +180,7 @@ class UUIDMappingTable(ctk.CTkFrame):
         
         # 初始加载映射
         self._load_mappings()
-    
+
     def _load_mappings(self):
         """从当前映射字典加载行"""
         # 清除现有行
@@ -332,3 +333,214 @@ class UUIDMappingTable(ctk.CTkFrame):
         """设置映射字典并刷新表格"""
         self.mappings = mappings.copy()
         self._load_mappings()
+
+
+class MCAHeatmap(ctk.CTkFrame):
+    """区块热力图组件，显示区域文件密度网格"""
+    
+    def __init__(self, master: Any, cell_size: int = 20, **kwargs) -> None:
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.cell_size = cell_size
+        self.cells: Dict[Tuple[int, int], ctk.CTkButton] = {}
+        self.selected: Set[Tuple[int, int]] = set()
+        self._build_grid()
+    
+    def _build_grid(self) -> None:
+        """创建空网格（初始无数据）"""
+        # 留待 set_region_files 填充
+        pass
+    
+    def set_region_files(self, region_files: Dict[Tuple[int, int], Path]) -> None:
+        """
+        根据区域文件路径字典更新热力图。
+        
+        Args:
+            region_files: 键为 (x, z) 坐标，值为区域文件路径
+        """
+        # 清除现有网格
+        for cell in self.cells.values():
+            cell.destroy()
+        self.cells.clear()
+        
+        if not region_files:
+            return
+        
+        # 计算坐标范围
+        xs = [coord[0] for coord in region_files.keys()]
+        zs = [coord[1] for coord in region_files.keys()]
+        min_x, max_x = min(xs), max(xs)
+        min_z, max_z = min(zs), max(zs)
+        
+        # 计算网格尺寸
+        width = max_x - min_x + 1
+        height = max_z - min_z + 1
+        
+        # 创建网格
+        for z in range(height):
+            for x in range(width):
+                coord = (min_x + x, min_z + z)
+                path = region_files.get(coord)
+                # 创建单元格按钮
+                btn = ctk.CTkButton(
+                    self,
+                    text="",
+                    width=self.cell_size,
+                    height=self.cell_size,
+                    corner_radius=2,
+                    fg_color=self._color_for_file(path),
+                    border_width=1,
+                    border_color=COLORS["border"],
+                    hover_color=COLORS["bg_card_hover"],
+                    command=lambda c=coord: self._on_cell_click(c)
+                )
+                btn.grid(row=z, column=x, padx=1, pady=1)
+                self.cells[coord] = btn
+        
+        # 添加坐标标签（可选）
+        # 调整网格权重
+        for i in range(height):
+            self.grid_rowconfigure(i, weight=0)
+        for j in range(width):
+            self.grid_columnconfigure(j, weight=0)
+    
+    def _color_for_file(self, path: Optional[Path]) -> str:
+        """根据文件大小返回颜色（越深表示越大）"""
+        if path is None or not path.exists():
+            return COLORS["bg_card"]
+        try:
+            size = path.stat().st_size
+            # 将大小映射到颜色强度（0-255）
+            # 假设最大 10MB
+            max_size = 10 * 1024 * 1024
+            intensity = min(255, int(size / max_size * 255))
+            # 从浅蓝到深蓝
+            r = 100
+            g = 150
+            b = 200 + intensity // 3
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except Exception:
+            return COLORS["bg_card"]
+    
+    def _on_cell_click(self, coord: Tuple[int, int]) -> None:
+        """单元格点击事件，切换选择状态"""
+        if coord in self.selected:
+            self.selected.remove(coord)
+            self.cells[coord].configure(border_color=COLORS["border"])
+        else:
+            self.selected.add(coord)
+            self.cells[coord].configure(border_color=COLORS["accent"])
+    
+    def get_selected(self) -> List[Tuple[int, int]]:
+        """返回选中的坐标列表"""
+        return list(self.selected)
+    
+    def clear_selection(self) -> None:
+        """清空选择"""
+        for coord in self.selected:
+            if coord in self.cells:
+                self.cells[coord].configure(border_color=COLORS["border"])
+        self.selected.clear()
+
+
+
+class NBTTreeView(ctk.CTkFrame):
+    """NBT 树状视图组件，支持搜索和实时编辑"""
+    
+    def __init__(self, master: Any, **kwargs) -> None:
+        super().__init__(master, fg_color="transparent", **kwargs)
+        # 暂时使用标签占位
+        self.label = ctk.CTkLabel(
+            self,
+            text="NBT 树状视图（开发中）",
+            font=ctk.CTkFont(size=14),
+            text_color=COLORS["text_secondary"]
+        )
+        self.label.pack(expand=True, padx=20, pady=20)
+    
+    def load_nbt(self, nbt_data: Any) -> None:
+        """加载 NBT 数据到树中"""
+        # 占位实现
+        pass
+    
+    def search(self, query: str) -> None:
+        """搜索 NBT 树中的键值"""
+        pass
+    
+    def get_modified_data(self) -> Any:
+        """返回修改后的 NBT 数据"""
+        return None
+
+
+class InventoryGrid(ctk.CTkFrame):
+    """背包网格组件，显示 9x4 物品栏"""
+
+    def __init__(self, master: Any, slot_size: int = 48, **kwargs) -> None:
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.slot_size = slot_size
+        self.slots: List[ctk.CTkButton] = []
+        self._build_grid()
+
+    def _build_grid(self) -> None:
+        """创建空网格"""
+        for row in range(4):
+            for col in range(9):
+                slot = ctk.CTkButton(
+                    self,
+                    text="",
+                    width=self.slot_size,
+                    height=self.slot_size,
+                    corner_radius=6,
+                    fg_color=COLORS["bg_card"],
+                    border_width=1,
+                    border_color=COLORS["border"],
+                    hover_color=COLORS["bg_card_hover"],
+                )
+                slot.grid(row=row, column=col, padx=2, pady=2)
+                self.slots.append(slot)
+
+    def set_inventory(self, inventory: List[Dict[str, Any]]) -> None:
+        """
+        根据 inventory 列表更新网格显示。
+
+        Args:
+            inventory: 每个物品字典应包含:
+                - slot (int): 0-35（背包+快捷栏）
+                - id (str): 物品ID，例如 "minecraft:diamond"
+                - count (int): 数量
+                - tag (Optional[Compound]): 附加 NBT 标签
+        """
+        # 先清空所有格子
+        for slot in self.slots:
+            slot.configure(text="", image=None)
+
+        # 映射 slot 索引到网格位置（Minecraft 背包布局）
+        # 0-8 快捷栏（第4行），9-35 背包（第1-3行）
+        for item in inventory:
+            slot_idx = item.get("slot", -1)
+            if not 0 <= slot_idx < 36:
+                continue
+            # 计算行列
+            if slot_idx < 9:
+                # 快捷栏 (第4行)
+                row = 3
+                col = slot_idx
+            else:
+                # 背包 (第1-3行)
+                adjusted = slot_idx - 9
+                row = adjusted // 9
+                col = adjusted % 9
+            # 获取对应的按钮
+            btn = self.slots[row * 9 + col]
+            # 设置显示文本（数量）
+            count = item.get("count", 1)
+            id_str = item.get("id", "")
+            # 提取物品名称（去掉命名空间）
+            display_name = id_str.split(":")[-1] if ":" in id_str else id_str
+            btn.configure(text=f"{display_name}\n×{count}" if count > 1 else display_name)
+            # TODO: 未来可以添加图标
+
+    def clear(self) -> None:
+        """清空网格"""
+        for slot in self.slots:
+            slot.configure(text="", image=None)
+    

@@ -8,6 +8,8 @@ class SettingsView(ctk.CTkFrame):
     """设置视图"""
     
     def __init__(self, master: Any, **kwargs) -> None:
+        # 确保背景透明，移除可能冲突的fg_color参数
+        kwargs.pop('fg_color', None)
         super().__init__(master, fg_color="transparent", **kwargs)
         self._build_ui()
     

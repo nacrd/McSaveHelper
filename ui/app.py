@@ -28,6 +28,9 @@ from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox
 from ui.sidebar import Sidebar
 from ui.views.migrator import MigratorView
+from ui.views.explorer import ExplorerView
+from ui.views.mappings import MappingsView
+from ui.views.settings import SettingsView
 from ui.mixins.common import CommonUIMixin
 from ui.mixins.top_bar import TopBarMixin
 from ui.mixins.left_panel import LeftPanelMixin
@@ -145,36 +148,21 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.views["migrator"] = frame
 
     def _init_explorer_view(self) -> None:
-        """初始化存档探险视图（占位符）"""
-        frame = ctk.CTkFrame(self.view_container, fg_color="transparent")
-        ctk.CTkLabel(
-            frame,
-            text="存档探险功能开发中",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=COLORS["text_secondary"]
-        ).pack(expand=True)
+        """初始化存档探险视图（集成玩家看板、区块热力图、NBT树视图）"""
+        frame = ExplorerView(self.view_container, fg_color="transparent")
+        frame.pack(fill="both", expand=True)
         self.views["explorer"] = frame
 
     def _init_mappings_view(self) -> None:
-        """初始化映射管理视图（占位符）"""
-        frame = ctk.CTkFrame(self.view_container, fg_color="transparent")
-        ctk.CTkLabel(
-            frame,
-            text="映射管理功能开发中",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=COLORS["text_secondary"]
-        ).pack(expand=True)
+        """初始化映射管理视图（集成UUID映射编辑器）"""
+        frame = MappingsView(self.view_container, fg_color="transparent")
+        frame.pack(fill="both", expand=True)
         self.views["mappings"] = frame
 
     def _init_settings_view(self) -> None:
-        """初始化设置视图（占位符）"""
-        frame = ctk.CTkFrame(self.view_container, fg_color="transparent")
-        ctk.CTkLabel(
-            frame,
-            text="设置功能开发中",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=COLORS["text_secondary"]
-        ).pack(expand=True)
+        """初始化设置视图（配置选项与主题切换）"""
+        frame = SettingsView(self.view_container, fg_color="transparent")
+        frame.pack(fill="both", expand=True)
         self.views["settings"] = frame
 
     def _switch_view(self, view_id: str) -> None:
