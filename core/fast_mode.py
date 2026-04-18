@@ -4,7 +4,7 @@ from .cleaner import clean_world
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
 
 
-def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_names, log, progress):
+def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_names, log):
     dest_world = dest_dir / world_name
 
     # 1. 准备目标目录
