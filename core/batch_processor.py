@@ -19,13 +19,14 @@ class BatchProcessor:
         self.results: Dict[str, Dict[str, Any]] = {}
         self.is_running = False
     
-    def process_batch(self, 
-                     world_paths: List[Path], 
+    def process_batch(self,
+                     world_paths: List[Path],
                      dest_dir: Path,
                      world_names: Optional[List[str]] = None,
                      mode: str = "fast",
                      offline_mode: bool = False,
                      clean_mode: bool = True,
+                     pure_clean_mode: bool = False,
                      manual_names: Optional[List[str]] = None,
                      log_callback: Optional[LogCallback] = None,
                      progress_callback: Optional[ProgressCallback] = None) -> BatchResult:
@@ -39,6 +40,7 @@ class BatchProcessor:
             mode: 处理模式（fast/full）
             offline_mode: 是否离线模式
             clean_mode: 是否清理模式
+            pure_clean_mode: 是否进行纯净扫描（移除模组方块/实体）
             manual_names: 手动玩家名列表
             log_callback: 日志回调函数
             progress_callback: 进度回调函数
@@ -64,7 +66,7 @@ class BatchProcessor:
                 future = executor.submit(
                     self._process_single_world,
                     world_path, dest_dir, world_name, mode, offline_mode, clean_mode,
-                    manual_names, log_callback, i, total_tasks
+                    pure_clean_mode, manual_names, log_callback, i, total_tasks
                 )
                 future_to_world[future] = (world_path.name, world_name, i)
             
@@ -108,13 +110,14 @@ class BatchProcessor:
         
         return self.results
     
-    def _process_single_world(self, 
-                            world_path: Path, 
-                            dest_dir: Path, 
+    def _process_single_world(self,
+                            world_path: Path,
+                            dest_dir: Path,
                             world_name: str,
                             mode: str,
                             offline_mode: bool,
                             clean_mode: bool,
+                            pure_clean_mode: bool,
                             manual_names: Optional[List[str]],
                             log_callback: Optional[LogCallback],
                             task_index: int,
@@ -135,11 +138,11 @@ class BatchProcessor:
             # 导入对应的处理模块
             if mode == "fast":
                 from .fast_mode import run_fast
-                run_fast(world_path, dest_dir, world_name, offline_mode, clean_mode, manual_names, local_log)
+                run_fast(world_path, dest_dir, world_name, offline_mode, clean_mode, pure_clean_mode, manual_names, local_log)
             else:
                 from .full_mode import run_full
                 from .worker import dummy_progress
-                run_full(world_path, dest_dir, world_name, offline_mode, clean_mode, manual_names, local_log, dummy_progress)
+                run_full(world_path, dest_dir, world_name, offline_mode, clean_mode, pure_clean_mode, manual_names, local_log, dummy_progress)
             
             return {
                 "success": True,

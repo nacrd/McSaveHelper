@@ -32,6 +32,7 @@
     "migration_options": "🔧 迁移选项",
     "offline_mode": "强制离线模式 (不请求 Mojang API)",
     "clean_mode": "精简存档 (删除缓存/日志等)",
+    "pure_clean_mode": "纯净扫描 (移除模组方块/实体)",
     "batch_mode": "批量处理模式",
     "advanced_settings": "⚙️ 高级配置",
     "version_detection": "自动检测Minecraft版本",

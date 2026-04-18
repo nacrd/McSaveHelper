@@ -5,6 +5,7 @@ from typing import List, Optional
 import nbtlib
 
 from .cleaner import clean_world
+from .pure_cleaner import purge_mod_blocks_and_entities
 from .nbt_utils import patch_nbt
 from .scanner import scan_all_regions
 from .uuid_utils import build_mappings, load_usercache
@@ -19,6 +20,7 @@ def run_full(
     world_name: str,
     offline_mode: bool,
     do_clean: bool,
+    pure_clean: bool,
     manual_names: Optional[List[str]],
     log: LogCallback,
     progress: ProgressCallback
@@ -31,6 +33,7 @@ def run_full(
         world_name: 世界名称
         offline_mode: 是否离线模式
         do_clean: 是否清理
+        pure_clean: 是否进行纯净扫描（移除模组方块/实体）
         manual_names: 手动玩家名列表
         log: 日志回调函数
         progress: 进度回调函数
@@ -90,7 +93,14 @@ def run_full(
     if do_clean:
         clean_world(dest_world, log)
 
-    # 7. 修改 server.properties
+    # 7. 纯净扫描
+    if pure_clean:
+        log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
+        purge_mod_blocks_and_entities(dest_world, log)
+    else:
+        log("跳过纯净扫描", "INFO")
+
+    # 8. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
 
 

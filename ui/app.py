@@ -65,6 +65,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.world_name = ctk.StringVar(value="world")
         self.offline_mode = ctk.BooleanVar(value=False)
         self.clean_mode = ctk.BooleanVar(value=True)
+        self.pure_clean_mode = ctk.BooleanVar(value=False)
         self.query_name_var = ctk.StringVar()
         self.manual_names = ctk.StringVar()
         
@@ -330,6 +331,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
                     world_name,
                     offline,
                     clean,
+                    self.pure_clean_mode.get(),
                     manual,
                     self.log_msg,
                 )
@@ -340,6 +342,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
                     world_name,
                     offline,
                     clean,
+                    self.pure_clean_mode.get(),
                     manual,
                     self.log_msg,
                     self.update_progress,
@@ -407,6 +410,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
                 mode,
                 offline,
                 clean,
+                self.pure_clean_mode.get(),
                 manual,
                 self.log_msg,
                 self.update_progress

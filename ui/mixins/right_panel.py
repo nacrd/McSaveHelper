@@ -19,6 +19,7 @@ class RightPanelMixin:
         query_result: TerminalLikeTextbox
         offline_mode: ctk.BooleanVar
         clean_mode: ctk.BooleanVar
+        pure_clean_mode: ctk.BooleanVar
         batch_mode: ctk.BooleanVar
         version_detection: ctk.BooleanVar
         max_concurrent: ctk.IntVar
@@ -113,6 +114,11 @@ class RightPanelMixin:
             opt_frame,
             text=t("right_panel.clean_mode"),
             variable=self.clean_mode
+        ).pack(anchor="w", pady=6)
+        ModernCheckbox(
+            opt_frame,
+            text=t("right_panel.pure_clean_mode"),
+            variable=self.pure_clean_mode
         ).pack(anchor="w", pady=6)
         ModernCheckbox(
             opt_frame,

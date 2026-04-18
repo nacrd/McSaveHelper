@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .cleaner import clean_world
+from .pure_cleaner import purge_mod_blocks_and_entities
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
 from .utils import update_server_properties
 from .types import LogCallback
@@ -14,6 +15,7 @@ def run_fast(
     world_name: str,
     offline_mode: bool,
     do_clean: bool,
+    pure_clean: bool,
     manual_names: Optional[List[str]],
     log: LogCallback
 ) -> None:
@@ -25,6 +27,7 @@ def run_fast(
         world_name: 世界名称
         offline_mode: 是否离线模式
         do_clean: 是否清理
+        pure_clean: 是否进行纯净扫描（移除模组方块/实体）
         manual_names: 手动玩家名列表
         log: 日志回调函数
     """
@@ -105,5 +108,12 @@ def run_fast(
     else:
         log("跳过精简步骤", "INFO")
 
-    # 6. 修改 server.properties
+    # 6. 纯净扫描
+    if pure_clean:
+        log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
+        purge_mod_blocks_and_entities(dest_world, log)
+    else:
+        log("跳过纯净扫描", "INFO")
+
+    # 7. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
