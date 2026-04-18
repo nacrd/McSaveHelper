@@ -144,10 +144,46 @@ class EnhancedConfig:
         
         return merged
     
+    def _auto_fix_config(self) -> None:
+        """自动修复配置中的无效字段，用默认值替换"""
+        default_config = self._get_default_config()
+        
+        for key, field_def in self.schema.items():
+            if key not in self.config:
+                # 缺失的键，直接使用默认值
+                self.config[key] = default_config[key]
+                continue
+            
+            value = self.config[key]
+            
+            if "schema" in field_def:
+                # 嵌套配置
+                if not isinstance(value, dict):
+                    self.config[key] = default_config[key]
+                    continue
+                
+                # 递归修复嵌套字段
+                for sub_key, sub_field_def in field_def["schema"].items():
+                    if sub_key not in value:
+                        # 缺失子字段，使用默认值
+                        value[sub_key] = sub_field_def["default"]
+                    else:
+                        # 验证子字段
+                        if not self._validate_field(sub_field_def, value[sub_key]):
+                            value[sub_key] = sub_field_def["default"]
+            else:
+                # 简单字段验证
+                if not self._validate_field(field_def, value):
+                    self.config[key] = default_config[key]
+    
     def _validate_config(self) -> None:
-        """验证配置"""
+        """验证配置，失败时尝试自动修复"""
         if not self.validate():
-            raise ValueError("配置验证失败")
+            # 尝试自动修复
+            self._auto_fix_config()
+            # 修复后再次验证
+            if not self.validate():
+                raise ValueError("配置验证失败，且无法自动修复")
     
     def validate(self) -> bool:
         """基于schema验证配置"""
