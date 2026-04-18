@@ -6,11 +6,6 @@ from PyInstaller.utils.hooks import collect_data_files
 
 # ---------- 1. 收集 anvil 包中的所有数据文件（.json等） ----------
 datas = collect_data_files('anvil')
-
-# 如果你还有 assets 目录（如图标、图片），可以一并打包：
-# if os.path.exists('assets'):
-#     datas += [('assets', 'assets')]
-
 # 打包翻译文件
 datas += [('translations', 'translations')]
 

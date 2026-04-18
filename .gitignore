@@ -27,3 +27,4 @@ htmlcov/
 *.sqlite3
 world/
 plans/
+build.ps1
