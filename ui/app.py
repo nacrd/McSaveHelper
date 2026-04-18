@@ -1,3 +1,12 @@
+"""MC Migrator Pro - Minecraft存档迁移工具
+
+主要功能：
+- 将Minecraft客户端存档转换为服务端兼容格式
+- 支持快速模式和完整模式
+- 提供批量处理功能
+- 支持自定义UUID映射
+- 集成版本检测
+"""
 import os
 import platform
 import subprocess
@@ -12,6 +21,9 @@ import customtkinter as ctk
 from core.fast_mode import run_fast
 from core.full_mode import run_full
 from core.uuid_utils import get_offline_uuid_str, get_online_uuid
+from core.config import config_manager
+from core.batch_processor import BatchProcessor, scan_worlds_directory
+
 
 # ------------------ 主题系统 ------------------
 ctk.set_appearance_mode("dark")
@@ -67,7 +79,17 @@ class App(ctk.CTk):
         self.geometry("1050x780")
         self.minsize(950, 700)
 
-        # 变量
+        # 初始化变量
+        self._initialize_variables()
+        
+        # 初始化组件
+        self._initialize_components()
+        
+        # 构建UI
+        self.build_ui()
+
+    def _initialize_variables(self):
+        """初始化应用变量"""
         self.mode_var = ctk.StringVar(value="fast")
         self.src_path = ctk.StringVar()
         self.dest_path = ctk.StringVar()
@@ -75,12 +97,33 @@ class App(ctk.CTk):
         self.offline_mode = ctk.BooleanVar(value=False)
         self.clean_mode = ctk.BooleanVar(value=True)
         self.query_name_var = ctk.StringVar()
-
+        
+        # 批量处理相关
+        self.batch_mode = ctk.BooleanVar(value=False)
+        self.batch_processor = None
+        self.batch_worlds = []
+        
+        # 高级配置
+        self.version_detection = ctk.BooleanVar(value=config_manager.config["version_detection"])
+        self.max_concurrent = ctk.IntVar(value=config_manager.config["batch_processing"]["max_concurrent"])
+        
+        # UUID映射管理
+        self.custom_uuid_mappings = config_manager.config["custom_uuid_mappings"].copy()
+        
+        # 设置默认值
         self.dest_path.set(os.getcwd())
 
-        self.build_ui()
+    def _initialize_components(self):
+        """初始化组件变量"""
+        # 批量处理相关
+        self.batch_dir_path = ctk.StringVar()
+        
+        # UUID映射相关
+        self.new_player_name = ctk.StringVar()
+        self.new_uuid = ctk.StringVar()
 
     def build_ui(self):
+        """构建用户界面"""
         # 主背景容器
         self.main_bg = ctk.CTkFrame(self, fg_color=COLORS["bg_primary"], corner_radius=0)
         self.main_bg.pack(fill="both", expand=True)
@@ -104,6 +147,7 @@ class App(ctk.CTk):
         self._build_right_panel(self.right_panel)
 
     def _build_top_bar(self):
+        """构建顶部导航栏"""
         top_frame = ctk.CTkFrame(
             self.main_bg, fg_color=COLORS["bg_secondary"], corner_radius=0, height=70
         )
@@ -146,6 +190,7 @@ class App(ctk.CTk):
         self.start_btn.pack(side="right", padx=(0,25), pady=15)
 
     def _build_left_panel(self, parent):
+        """构建左侧面板"""
         # 目录设置
         dir_card = self._create_card(parent)
         dir_card.pack(fill="x", pady=(0,15))
@@ -174,6 +219,32 @@ class App(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"]
         ).pack(fill="x", pady=(5,0))
+
+        # 批量处理目录选择
+        self.batch_frame = ctk.CTkFrame(dir_card, fg_color="transparent")
+        self.batch_frame.pack(fill="x", padx=20, pady=(5,0))
+        ctk.CTkLabel(
+            self.batch_frame,
+            text="批量存档目录",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(anchor="w")
+        batch_entry_frame = ctk.CTkFrame(self.batch_frame, fg_color="transparent")
+        batch_entry_frame.pack(fill="x", pady=(5,0))
+        ctk.CTkEntry(batch_entry_frame, textvariable=self.batch_dir_path, height=36,
+                    placeholder_text="选择包含多个世界存档的目录", border_width=1, border_color=COLORS["border"]).pack(side="left", fill="x", expand=True, padx=(0,10))
+        ctk.CTkButton(batch_entry_frame, text="📂 浏览", width=90, height=36, command=self.choose_batch_dir,
+                     fg_color=COLORS["bg_secondary"], hover_color=COLORS["border"]).pack(side="right")
+        ctk.CTkButton(batch_entry_frame, text="🔍 扫描", width=90, height=36, command=self.scan_batch_worlds,
+                     fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"]).pack(side="right", padx=(0,10))
+
+        # 批量扫描结果
+        self.batch_result_label = ctk.CTkLabel(self.batch_frame, text="", font=ctk.CTkFont(size=11),
+                                              text_color=COLORS["text_muted"])
+        self.batch_result_label.pack(anchor="w", pady=(5,0))
+
+        # 隐藏批量处理相关控件，直到启用批量模式
+        self._toggle_batch_mode()
 
         # 手动玩家名
         manual_card = self._create_card(parent)
@@ -212,6 +283,7 @@ class App(ctk.CTk):
         self.log.pack(fill="both", expand=True)
 
     def _build_right_panel(self, parent):
+        """构建右侧面板"""
         # 模式选择
         mode_card = self._create_card(parent)
         mode_card.pack(fill="x", pady=(0,15))
@@ -241,14 +313,70 @@ class App(ctk.CTk):
         self.query_result.pack(fill="x", padx=20, pady=(5,15))
         self._set_readonly_text(self.query_result, "💡 查询结果会显示在这里...\n离线 UUID 与 正版 UUID")
 
-        # 附加选项
+        # 迁移选项
         opt_card = self._create_card(parent)
-        opt_card.pack(fill="x")
-        self._add_section_title(opt_card, "🔧 附加选项", icon_only=False)
+        opt_card.pack(fill="x", pady=(0,15))
+        self._add_section_title(opt_card, "🔧 迁移选项", icon_only=False)
         opt_frame = ctk.CTkFrame(opt_card, fg_color="transparent")
-        opt_frame.pack(fill="x", padx=20, pady=(10,15))
+        opt_frame.pack(fill="x", padx=20, pady=(10,5))
         ctk.CTkCheckBox(opt_frame, text="强制离线模式 (不请求 Mojang API)", variable=self.offline_mode).pack(anchor="w", pady=5)
         ctk.CTkCheckBox(opt_frame, text="精简存档 (删除缓存/日志等)", variable=self.clean_mode).pack(anchor="w", pady=5)
+        ctk.CTkCheckBox(opt_frame, text="批量处理模式", variable=self.batch_mode, 
+                       command=self._toggle_batch_mode).pack(anchor="w", pady=5)
+        
+        # 高级配置
+        adv_card = self._create_card(parent)
+        adv_card.pack(fill="x", pady=(0,15))
+        self._add_section_title(adv_card, "⚙️ 高级配置", icon_only=False)
+        
+        # 版本检测
+        config_frame1 = ctk.CTkFrame(adv_card, fg_color="transparent")
+        config_frame1.pack(fill="x", padx=20, pady=(10,5))
+        ctk.CTkCheckBox(config_frame1, text="自动检测Minecraft版本", variable=self.version_detection,
+                       command=self._save_config).pack(side="left", padx=(0,20))
+        
+        # 批量处理设置
+        batch_frame = ctk.CTkFrame(adv_card, fg_color="transparent")
+        batch_frame.pack(fill="x", padx=20, pady=(5,15))
+        ctk.CTkLabel(batch_frame, text="最大并发数:", font=ctk.CTkFont(size=12),
+                    text_color=COLORS["text_secondary"]).pack(side="left")
+        concurrent_spinbox = ctk.CTkEntry(batch_frame, textvariable=self.max_concurrent, width=60,
+                                         border_width=1, border_color=COLORS["border"])
+        concurrent_spinbox.pack(side="left", padx=(10,0))
+        concurrent_spinbox.bind("<FocusOut>", lambda e: self._save_config())
+        
+        # UUID映射管理
+        uuid_card = self._create_card(parent)
+        uuid_card.pack(fill="x")
+        self._add_section_title(uuid_card, "🔗 自定义UUID映射", icon_only=False)
+        
+        uuid_frame = ctk.CTkFrame(uuid_card, fg_color="transparent")
+        uuid_frame.pack(fill="x", padx=20, pady=(10,5))
+        
+        # 添加新映射
+        add_frame = ctk.CTkFrame(uuid_frame, fg_color="transparent")
+        add_frame.pack(fill="x", pady=(0,10))
+        
+        ctk.CTkLabel(add_frame, text="玩家名:", font=ctk.CTkFont(size=12),
+                    text_color=COLORS["text_secondary"]).pack(side="left")
+        ctk.CTkEntry(add_frame, textvariable=self.new_player_name, width=120,
+                    border_width=1, border_color=COLORS["border"]).pack(side="left", padx=(5,20))
+        
+        ctk.CTkLabel(add_frame, text="UUID:", font=ctk.CTkFont(size=12),
+                    text_color=COLORS["text_secondary"]).pack(side="left")
+        ctk.CTkEntry(add_frame, textvariable=self.new_uuid, width=250,
+                    border_width=1, border_color=COLORS["border"]).pack(side="left", padx=(5,10))
+        
+        ctk.CTkButton(add_frame, text="添加", width=60, command=self._add_uuid_mapping,
+                     fg_color=COLORS["accent"], hover_color=COLORS["accent_hover"]).pack(side="left")
+        
+        # 映射列表
+        self.uuid_listbox = ctk.CTkTextbox(uuid_card, height=100)
+        self.uuid_listbox.pack(fill="x", padx=20, pady=(5,15))
+        self._update_uuid_list()
+        
+        ctk.CTkButton(uuid_card, text="🗑️ 清空所有映射", width=120, command=self._clear_uuid_mappings,
+                     fg_color=COLORS["error"], hover_color="#DC2626").pack(anchor="e", padx=20, pady=(0,10))
 
     # ---------- 工具函数 ----------
     def _create_card(self, parent):
@@ -281,7 +409,7 @@ class App(ctk.CTk):
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
 
-    # ---------- 功能方法 (线程安全已加固) ----------
+    # ---------- 功能方法 ----------
     def choose_src(self):
         path = filedialog.askdirectory(title="选择客户端存档目录")
         if path:
@@ -291,6 +419,39 @@ class App(ctk.CTk):
         path = filedialog.askdirectory(title="选择服务端根目录")
         if path:
             self.dest_path.set(path)
+    
+    def choose_batch_dir(self):
+        """选择批量存档目录"""
+        path = filedialog.askdirectory(title="选择包含多个世界存档的目录")
+        if path:
+            self.batch_dir_path.set(path)
+    
+    def scan_batch_worlds(self):
+        """扫描批量存档目录"""
+        batch_dir = self.batch_dir_path.get().strip()
+        if not batch_dir:
+            messagebox.showwarning("提示", "请先选择批量存档目录")
+            return
+        
+        batch_path = Path(batch_dir)
+        if not batch_path.exists():
+            messagebox.showerror("错误", "批量存档目录不存在")
+            return
+        
+        self.batch_worlds = scan_worlds_directory(batch_path)
+        
+        if self.batch_worlds:
+            self.batch_result_label.configure(
+                text=f"扫描到 {len(self.batch_worlds)} 个世界存档: {', '.join([w.name for w in self.batch_worlds[:3]])}{'...' if len(self.batch_worlds) > 3 else ''}",
+                text_color=COLORS["terminal_green"]
+            )
+            self.log_msg(f"批量扫描完成: 找到 {len(self.batch_worlds)} 个世界存档", "SUCCESS")
+        else:
+            self.batch_result_label.configure(
+                text="未找到有效的世界存档（需要包含level.dat）",
+                text_color=COLORS["terminal_red"]
+            )
+            self.log_msg("批量扫描: 未找到有效的世界存档", "WARN")
 
     def log_msg(self, msg, level="INFO"):
         """线程安全的日志写入 (支持终端彩色标签)"""
@@ -371,6 +532,23 @@ class App(ctk.CTk):
             dest = os.getcwd()
             self.dest_path.set(dest)
 
+        # 批量处理模式
+        if self.batch_mode.get():
+            if not self.batch_worlds:
+                messagebox.showerror("错误", "请先扫描批量存档目录")
+                return
+            
+            self.clear_log()
+            self.start_btn.configure(state="disabled")
+            self.update_progress(0)
+            self.progress_label.configure(text="准备批量处理...")
+            
+            threading.Thread(
+                target=self.run_batch_task, args=(dest,), daemon=True
+            ).start()
+            return
+
+        # 单文件处理模式
         if not src or not world_name:
             messagebox.showerror("错误", "请填写源存档路径和世界文件夹名")
             return
@@ -396,6 +574,11 @@ class App(ctk.CTk):
 
     def run_task(self, src_path, dest_path, world_name):
         try:
+            # 检测版本
+            version = config_manager.detect_minecraft_version(src_path)
+            if version:
+                self.log_msg(f"检测到版本: {version}", "INFO")
+
             mode = self.mode_var.get()
             offline = self.offline_mode.get()
             clean = self.clean_mode.get()
@@ -458,6 +641,58 @@ class App(ctk.CTk):
             self.after(0, lambda: self.start_btn.configure(state="normal"))
             self.after(0, lambda: self.progress.set(0))
 
+    def run_batch_task(self, dest_dir: str):
+        """批量处理任务"""
+        try:
+            dest_path = Path(dest_dir)
+            
+            # 更新配置
+            self._save_config()
+            
+            mode = self.mode_var.get()
+            offline = self.offline_mode.get()
+            clean = self.clean_mode.get()
+            manual = [
+                n.strip()
+                for n in self.manual_names.get().split(",")
+                if n.strip()
+            ]
+            
+            self.batch_processor = BatchProcessor(self.max_concurrent.get())
+            
+            # 生成世界名称列表
+            world_names = [f"world_{i+1}" for i in range(len(self.batch_worlds))]
+            
+            results = self.batch_processor.process_batch(
+                self.batch_worlds,
+                dest_path,
+                world_names,
+                mode,
+                offline,
+                clean,
+                manual,
+                self.log_msg,
+                self.update_progress
+            )
+            
+            # 显示结果统计
+            success_count = sum(1 for r in results.values() if r["success"])
+            total_count = len(results)
+            
+            self.log_msg("=" * 50, "SUCCESS")
+            self.log_msg(f"批量处理完成！成功: {success_count}/{total_count}", "SUCCESS")
+            
+            self.after(0, lambda: self.progress_label.configure(text="批量处理完成"))
+            
+        except Exception as e:
+            self.log_msg(f"批量处理发生错误: {e}", "ERROR")
+            import traceback
+            traceback.print_exc()
+            self.after(0, lambda: self.progress_label.configure(text="批量处理失败"))
+        finally:
+            self.after(0, lambda: self.start_btn.configure(state="normal"))
+            self.after(0, lambda: self.progress.set(0))
+
     def open_folder(self, path):
         try:
             path_str = str(path)
@@ -469,6 +704,64 @@ class App(ctk.CTk):
                 subprocess.Popen(["xdg-open", path_str])
         except Exception as e:
             self.log_msg(f"无法打开文件夹: {e}", "WARN")
+    
+    def _toggle_batch_mode(self):
+        """切换批量处理模式"""
+        if self.batch_mode.get():
+            self.batch_frame.pack(fill="x", padx=20, pady=(5,0))
+        else:
+            self.batch_frame.pack_forget()
+    
+    def _save_config(self):
+        """保存配置"""
+        config_manager.config["version_detection"] = self.version_detection.get()
+        config_manager.config["batch_processing"]["max_concurrent"] = self.max_concurrent.get()
+        config_manager.config["custom_uuid_mappings"] = self.custom_uuid_mappings
+        config_manager.save_config()
+    
+    def _add_uuid_mapping(self):
+        """添加自定义UUID映射"""
+        player_name = self.new_player_name.get().strip()
+        uuid = self.new_uuid.get().strip()
+        
+        if not player_name or not uuid:
+            messagebox.showwarning("提示", "请填写玩家名和UUID")
+            return
+        
+        # 验证UUID格式
+        if not re.match(r'^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$', uuid):
+            messagebox.showwarning("提示", "UUID格式不正确")
+            return
+        
+        self.custom_uuid_mappings[player_name] = uuid
+        self._save_config()
+        self._update_uuid_list()
+        
+        self.new_player_name.set("")
+        self.new_uuid.set("")
+        
+        self.log_msg(f"已添加自定义UUID映射: {player_name} -> {uuid}", "SUCCESS")
+    
+    def _update_uuid_list(self):
+        """更新UUID映射列表显示"""
+        self.uuid_listbox.configure(state="normal")
+        self.uuid_listbox.delete("1.0", "end")
+        
+        if self.custom_uuid_mappings:
+            for player_name, uuid in self.custom_uuid_mappings.items():
+                self.uuid_listbox.insert("end", f"{player_name} -> {uuid}\n")
+        else:
+            self.uuid_listbox.insert("end", "暂无自定义UUID映射\n")
+        
+        self.uuid_listbox.configure(state="disabled")
+    
+    def _clear_uuid_mappings(self):
+        """清空所有UUID映射"""
+        if messagebox.askyesno("确认", "确定要清空所有自定义UUID映射吗？"):
+            self.custom_uuid_mappings.clear()
+            self._save_config()
+            self._update_uuid_list()
+            self.log_msg("已清空所有自定义UUID映射", "INFO")
 
 
 if __name__ == "__main__":
