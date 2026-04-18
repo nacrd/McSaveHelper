@@ -1,14 +1,42 @@
 """右侧面板混入类"""
 import customtkinter as ctk
+from typing import Any, TYPE_CHECKING
 
 from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox, ModernEntry, ModernButton, ModernCheckbox
+
+if TYPE_CHECKING:
+    from ui.mixins.common import CommonUIMixin
 
 
 class RightPanelMixin:
     """提供右侧面板构建方法"""
     
-    def _build_right_panel(self, parent):
+    if TYPE_CHECKING:
+        mode_var: ctk.StringVar
+        query_name_var: ctk.StringVar
+        query_result: TerminalLikeTextbox
+        offline_mode: ctk.BooleanVar
+        clean_mode: ctk.BooleanVar
+        batch_mode: ctk.BooleanVar
+        version_detection: ctk.BooleanVar
+        max_concurrent: ctk.IntVar
+        new_player_name: ctk.StringVar
+        new_uuid: ctk.StringVar
+        uuid_listbox: ctk.CTkTextbox
+        
+        def query_uuid(self) -> None: ...
+        def _toggle_batch_mode(self) -> None: ...
+        def _save_config(self) -> None: ...
+        def _add_uuid_mapping(self) -> None: ...
+        def _update_uuid_list(self) -> None: ...
+        def _clear_uuid_mappings(self) -> None: ...
+        
+        def _create_card(self, parent: Any) -> Any: ...
+        def _add_section_title(self, parent: Any, text: str, icon_only: bool = False) -> None: ...
+        def _set_readonly_text(self, textbox: Any, content: str) -> None: ...
+    
+    def _build_right_panel(self, parent: Any) -> None:
         """构建现代化右侧面板"""
         # 模式选择
         mode_card = self._create_card(parent)

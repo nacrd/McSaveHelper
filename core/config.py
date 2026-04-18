@@ -3,13 +3,14 @@ import json
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
 import nbtlib
 
 
 class MCConfig:
     """Minecraft配置管理类"""
     
-    def __init__(self, config_path: Path = None):
+    def __init__(self, config_path: Optional[Path] = None):
         self.config_path = config_path or Path.home() / ".mc_migrator" / "config.json"
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.config = self._load_config()
@@ -39,7 +40,7 @@ class MCConfig:
                 return default_config
         return default_config
     
-    def save_config(self):
+    def save_config(self) -> None:
         """保存配置文件"""
         try:
             with open(self.config_path, 'w', encoding='utf-8') as f:
@@ -51,12 +52,12 @@ class MCConfig:
         """获取自定义UUID映射"""
         return self.config["custom_uuid_mappings"].get(player_name)
     
-    def set_custom_uuid_mapping(self, player_name: str, uuid: str):
+    def set_custom_uuid_mapping(self, player_name: str, uuid: str) -> None:
         """设置自定义UUID映射"""
         self.config["custom_uuid_mappings"][player_name] = uuid
         self.save_config()
     
-    def remove_custom_uuid_mapping(self, player_name: str):
+    def remove_custom_uuid_mapping(self, player_name: str) -> None:
         """移除自定义UUID映射"""
         if player_name in self.config["custom_uuid_mappings"]:
             del self.config["custom_uuid_mappings"][player_name]
@@ -76,7 +77,7 @@ class MCConfig:
             data = nbt_data.get("Data", {})
             
             # 从level.dat获取版本信息
-            version_data = data.get("Version", {})
+            version_data = data.get("Version", {})  # type: ignore[union-attr]
             if version_data:
                 version_id = version_data.get("Id", 0)
                 version_name = version_data.get("Name", "")
@@ -112,6 +113,7 @@ class MCConfig:
             
         except Exception as e:
             return f"检测失败: {str(e)}"
-    
+
+
 # 全局配置实例
 config_manager = MCConfig()

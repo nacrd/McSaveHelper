@@ -1,12 +1,13 @@
 """自定义 UI 组件"""
 import customtkinter as ctk
+from typing import Any
 
 from .constants import COLORS
 
 
 class TerminalLikeTextbox(ctk.CTkTextbox):
     """自定义终端风格文本框，自动添加前缀和颜色标记"""
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
             font=ctk.CTkFont(family="Cascadia Code", size=11),
@@ -18,7 +19,7 @@ class TerminalLikeTextbox(ctk.CTkTextbox):
         )
         self._configure_tags()
 
-    def _configure_tags(self):
+    def _configure_tags(self) -> None:
         self.tag_config("info", foreground=COLORS["text_primary"])
         self.tag_config("success", foreground=COLORS["terminal_green"])
         self.tag_config("warn", foreground=COLORS["terminal_yellow"])
@@ -31,7 +32,7 @@ class TerminalLikeTextbox(ctk.CTkTextbox):
 
 class ModernCard(ctk.CTkFrame):
     """现代化卡片组件，带有渐变背景和阴影效果"""
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
             corner_radius=16,
@@ -42,14 +43,14 @@ class ModernCard(ctk.CTkFrame):
         )
         self._hover_bind()
     
-    def _hover_bind(self):
+    def _hover_bind(self) -> None:
         self.bind("<Enter>", lambda e: self.configure(border_color=COLORS["border_light"]))
         self.bind("<Leave>", lambda e: self.configure(border_color=COLORS["border"]))
 
 
 class ModernButton(ctk.CTkButton):
     """现代化按钮组件，带有更好的视觉效果"""
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
             corner_radius=10,
@@ -60,7 +61,7 @@ class ModernButton(ctk.CTkButton):
 
 class ModernEntry(ctk.CTkEntry):
     """现代化输入框组件，带有更好的焦点效果"""
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
             corner_radius=8,
@@ -70,14 +71,14 @@ class ModernEntry(ctk.CTkEntry):
         )
         self._focus_bind()
     
-    def _focus_bind(self):
+    def _focus_bind(self) -> None:
         self.bind("<FocusIn>", lambda e: self.configure(border_color=COLORS["accent"]))
         self.bind("<FocusOut>", lambda e: self.configure(border_color=COLORS["border"]))
 
 
 class ModernCheckbox(ctk.CTkCheckBox):
     """现代化复选框组件"""
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
             corner_radius=6,
@@ -88,7 +89,7 @@ class ModernCheckbox(ctk.CTkCheckBox):
 
 class ModernProgressBar(ctk.CTkProgressBar):
     """现代化进度条组件"""
-    def __init__(self, master, **kwargs):
+    def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
             corner_radius=10,

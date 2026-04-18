@@ -15,6 +15,7 @@ import time
 import re
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import Any, Optional, List, Tuple
 
 import customtkinter as ctk
 
@@ -29,6 +30,7 @@ from ui.mixins.common import CommonUIMixin
 from ui.mixins.top_bar import TopBarMixin
 from ui.mixins.left_panel import LeftPanelMixin
 from ui.mixins.right_panel import RightPanelMixin
+from core.types import LogCallback, ProgressCallback
 
 
 # ------------------ 主题系统 ------------------
@@ -36,7 +38,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.title("MC Migrator Pro · 存档迁移工具")
         self.geometry("1100x820")
@@ -51,7 +53,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         # 构建UI
         self.build_ui()
 
-    def _initialize_variables(self):
+    def _initialize_variables(self) -> None:
         """初始化应用变量"""
         self.mode_var = ctk.StringVar(value="fast")
         self.src_path = ctk.StringVar()
@@ -77,7 +79,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         # 设置默认值
         self.dest_path.set(os.getcwd())
 
-    def _initialize_components(self):
+    def _initialize_components(self) -> None:
         """初始化组件变量"""
         # 批量处理相关
         self.batch_dir_path = ctk.StringVar()
@@ -86,7 +88,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.new_player_name = ctk.StringVar()
         self.new_uuid = ctk.StringVar()
 
-    def build_ui(self):
+    def build_ui(self) -> None:
         """构建现代化用户界面"""
         # 主背景容器
         self.main_bg = ctk.CTkFrame(self, fg_color=COLORS["bg_primary"], corner_radius=0)
@@ -111,32 +113,29 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self._build_right_panel(self.right_panel)
 
 
-
-
-
-    def clear_log(self):
+    def clear_log(self) -> None:
         self.log.configure(state="normal")
         self.log.delete("1.0", "end")
         self.log.configure(state="disabled")
 
     # ---------- 功能方法 ----------
-    def choose_src(self):
+    def choose_src(self) -> None:
         path = filedialog.askdirectory(title="选择客户端存档目录")
         if path:
             self.src_path.set(path)
 
-    def choose_dest(self):
+    def choose_dest(self) -> None:
         path = filedialog.askdirectory(title="选择服务端根目录")
         if path:
             self.dest_path.set(path)
     
-    def choose_batch_dir(self):
+    def choose_batch_dir(self) -> None:
         """选择批量存档目录"""
         path = filedialog.askdirectory(title="选择包含多个世界存档的目录")
         if path:
             self.batch_dir_path.set(path)
     
-    def scan_batch_worlds(self):
+    def scan_batch_worlds(self) -> None:
         """扫描批量存档目录"""
         batch_dir = self.batch_dir_path.get().strip()
         if not batch_dir:
@@ -163,7 +162,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             )
             self.log_msg("批量扫描: 未找到有效的世界存档", "WARN")
 
-    def log_msg(self, msg, level="INFO"):
+    def log_msg(self, msg: str, level: str = "INFO") -> None:
         """线程安全的日志写入 (支持终端彩色标签)"""
         tag_map = {
             "INFO": "info",
@@ -185,7 +184,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
         self.after(0, _write)
 
-    def log_header(self, msg):
+    def log_header(self, msg: str) -> None:
         """记录标题行"""
         def _write():
             self.log.configure(state="normal")
@@ -196,7 +195,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.log.configure(state="disabled")
         self.after(0, _write)
 
-    def update_progress(self, value):
+    def update_progress(self, value: float) -> None:
         """线程安全的进度更新 (附带百分比显示)"""
         def _update():
             self.progress.set(value)
@@ -204,7 +203,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.progress_label.configure(text=f"进度 {percent}%")
         self.after(0, _update)
 
-    def query_uuid(self):
+    def query_uuid(self) -> None:
         name = self.query_name_var.get().strip()
         if not name:
             messagebox.showwarning("提示", "请输入玩家名")
@@ -244,7 +243,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         if online_uuid:
             self.log_msg(f"查询结果 -> 正版 UUID: {online_uuid}", "INFO")
 
-    def start(self):
+    def start(self) -> None:
         src = self.src_path.get().strip()
         dest = self.dest_path.get().strip()
         world_name = self.world_name.get().strip()
@@ -293,12 +292,12 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             target=self.run_task, args=(src_path, dest_path, world_name), daemon=True
         ).start()
 
-    def run_task(self, src_path, dest_path, world_name):
+    def run_task(self, src_path: str, dest_path: str, world_name: str) -> None:
         try:
             self.log_header("开始迁移任务")
             
             # 检测版本
-            version = config_manager.detect_minecraft_version(src_path)
+            version = config_manager.detect_minecraft_version(Path(src_path))
             if version:
                 self.log_msg(f"检测到版本: {version}", "INFO")
 
@@ -313,8 +312,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
             if mode == "fast":
                 run_fast(
-                    src_path,
-                    dest_path,
+                    Path(src_path),
+                    Path(dest_path),
                     world_name,
                     offline,
                     clean,
@@ -323,8 +322,8 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
                 )
             else:
                 run_full(
-                    src_path,
-                    dest_path,
+                    Path(src_path),
+                    Path(dest_path),
                     world_name,
                     offline,
                     clean,
@@ -336,9 +335,9 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.log_header("迁移完成")
             self.log_msg("所有操作已成功完成！", "SUCCESS")
 
-            output_path = dest_path / world_name
+            output_path = Path(dest_path) / world_name
             if output_path.exists():
-                self.after(0, lambda: self.open_folder(output_path))
+                self.after(0, lambda: self.open_folder(str(output_path)))
                 self.log_msg(f"已打开输出目录: {output_path}", "INFO")
 
             self.after(
@@ -364,7 +363,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.after(0, lambda: self.start_btn.configure(state="normal"))
             self.after(0, lambda: self.progress.set(0))
 
-    def run_batch_task(self, dest_dir: str):
+    def run_batch_task(self, dest_dir: str) -> None:
         """批量处理任务"""
         try:
             self.log_header("开始批量处理")
@@ -383,7 +382,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
                 if n.strip()
             ]
             
-            self.batch_processor = BatchProcessor(self.max_concurrent.get())
+            self.batch_processor = BatchProcessor(int(self.max_concurrent.get()))
             
             # 生成世界名称列表
             world_names = [f"world_{i+1}" for i in range(len(self.batch_worlds))]
@@ -418,7 +417,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.after(0, lambda: self.start_btn.configure(state="normal"))
             self.after(0, lambda: self.progress.set(0))
 
-    def open_folder(self, path):
+    def open_folder(self, path: str) -> None:
         try:
             path_str = str(path)
             if platform.system() == "Windows":
@@ -430,21 +429,21 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         except Exception as e:
             self.log_msg(f"无法打开文件夹: {e}", "WARN")
     
-    def _toggle_batch_mode(self):
+    def _toggle_batch_mode(self) -> None:
         """切换批量处理模式"""
         if self.batch_mode.get():
             self.batch_frame.pack(fill="x", padx=20, pady=(5,0))
         else:
             self.batch_frame.pack_forget()
     
-    def _save_config(self):
+    def _save_config(self) -> None:
         """保存配置"""
         config_manager.config["version_detection"] = self.version_detection.get()
         config_manager.config["batch_processing"]["max_concurrent"] = self.max_concurrent.get()
         config_manager.config["custom_uuid_mappings"] = self.custom_uuid_mappings
         config_manager.save_config()
     
-    def _add_uuid_mapping(self):
+    def _add_uuid_mapping(self) -> None:
         """添加自定义UUID映射"""
         player_name = self.new_player_name.get().strip()
         uuid = self.new_uuid.get().strip()
@@ -467,7 +466,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         
         self.log_msg(f"已添加自定义UUID映射: {player_name} -> {uuid}", "SUCCESS")
     
-    def _update_uuid_list(self):
+    def _update_uuid_list(self) -> None:
         """更新UUID映射列表显示"""
         self.uuid_listbox.configure(state="normal")
         self.uuid_listbox.delete("1.0", "end")
@@ -480,7 +479,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         
         self.uuid_listbox.configure(state="disabled")
     
-    def _clear_uuid_mappings(self):
+    def _clear_uuid_mappings(self) -> None:
         """清空所有UUID映射"""
         if messagebox.askyesno("确认", "确定要清空所有自定义UUID映射吗？"):
             self.custom_uuid_mappings.clear()

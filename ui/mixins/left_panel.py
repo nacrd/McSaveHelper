@@ -1,14 +1,39 @@
 """左侧面板混入类"""
 import customtkinter as ctk
+from typing import Any, TYPE_CHECKING
 
 from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox, ModernEntry, ModernButton
+
+if TYPE_CHECKING:
+    from ui.mixins.common import CommonUIMixin
 
 
 class LeftPanelMixin:
     """提供左侧面板构建方法"""
     
-    def _build_left_panel(self, parent):
+    if TYPE_CHECKING:
+        src_path: ctk.StringVar
+        dest_path: ctk.StringVar
+        world_name: ctk.StringVar
+        batch_dir_path: ctk.StringVar
+        manual_names: ctk.StringVar
+        batch_frame: ctk.CTkFrame
+        batch_result_label: ctk.CTkLabel
+        log: TerminalLikeTextbox
+        
+        def choose_src(self) -> None: ...
+        def choose_dest(self) -> None: ...
+        def choose_batch_dir(self) -> None: ...
+        def scan_batch_worlds(self) -> None: ...
+        def _toggle_batch_mode(self) -> None: ...
+        def clear_log(self) -> None: ...
+        
+        def _create_card(self, parent: Any) -> Any: ...
+        def _add_section_title(self, parent: Any, text: str, icon_only: bool = False) -> None: ...
+        def _add_labeled_entry(self, parent: Any, label_text: str, var: Any, placeholder: str, browse_cmd: Any) -> None: ...
+    
+    def _build_left_panel(self, parent: Any) -> None:
         """构建现代化左侧面板"""
         # 目录设置
         dir_card = self._create_card(parent)

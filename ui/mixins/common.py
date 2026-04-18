@@ -1,5 +1,6 @@
 """UI 通用工具混入类"""
 import customtkinter as ctk
+from typing import Any, Optional, Callable
 
 from ui.constants import COLORS
 from ui.widgets import ModernCard, ModernButton, ModernEntry, ModernCheckbox
@@ -8,11 +9,11 @@ from ui.widgets import ModernCard, ModernButton, ModernEntry, ModernCheckbox
 class CommonUIMixin:
     """提供创建卡片、标题、带标签的输入框等通用 UI 方法"""
     
-    def _create_card(self, parent):
+    def _create_card(self, parent: Any) -> ModernCard:
         """创建现代化卡片容器"""
         return ModernCard(parent)
     
-    def _add_section_title(self, parent, text, icon_only=False):
+    def _add_section_title(self, parent: Any, text: str, icon_only: bool = False) -> None:
         """添加现代化章节标题"""
         title_frame = ctk.CTkFrame(parent, fg_color="transparent")
         title_frame.pack(fill="x", padx=20, pady=(18, 8))
@@ -28,7 +29,8 @@ class CommonUIMixin:
             separator = ctk.CTkFrame(title_frame, height=1, fg_color=COLORS["border"])
             separator.pack(side="left", fill="x", expand=True, padx=(15, 0))
     
-    def _add_labeled_entry(self, parent, label_text, var, placeholder, browse_cmd):
+    def _add_labeled_entry(self, parent: Any, label_text: str, var: Any,
+                          placeholder: str, browse_cmd: Callable[[], None]) -> None:
         """添加带标签的现代化输入框和浏览按钮"""
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="x", pady=8, padx=20)
@@ -57,7 +59,7 @@ class CommonUIMixin:
             text_color=COLORS["text_primary"]
         ).pack(side="right")
     
-    def _set_readonly_text(self, textbox, content):
+    def _set_readonly_text(self, textbox: Any, content: str) -> None:
         """设置只读文本框的内容（线程安全）"""
         textbox.configure(state="normal")
         textbox.delete("1.0", "end")

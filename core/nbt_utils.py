@@ -1,7 +1,24 @@
 import nbtlib
+from typing import List, Optional, Tuple, Any
 
-def patch_nbt(tag, mappings, key_name=None):
-    """递归遍历 NBT，将旧 UUID 替换为新 UUID，返回 (修改后的tag, 修改次数)"""
+from .types import UUIDMapping
+
+
+def patch_nbt(
+    tag: Any,
+    mappings: List[UUIDMapping],
+    key_name: Optional[str] = None
+) -> Tuple[Any, int]:
+    """递归遍历 NBT，将旧 UUID 替换为新 UUID，返回 (修改后的tag, 修改次数)
+
+    Args:
+        tag: NBT 标签对象
+        mappings: UUID 映射列表
+        key_name: 当前键名（用于上下文）
+
+    Returns:
+        (修改后的 tag, 修改次数)
+    """
     changes = 0
 
     # IntArray (1.16+)
@@ -13,7 +30,7 @@ def patch_nbt(tag, mappings, key_name=None):
 
     # String (白名单内)
     if isinstance(tag, nbtlib.tag.String):
-        if key_name and key_name.lower() in {'owner','uuid','trusted','target','id','owneruuid','playeruuid'}:
+        if key_name and key_name.lower() in {'owner', 'uuid', 'trusted', 'target', 'id', 'owneruuid', 'playeruuid'}:
             curr = str(tag)
             for m in mappings:
                 if curr == m[2]:

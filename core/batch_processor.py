@@ -3,31 +3,32 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Optional, Callable
 import queue
 
 from .config import config_manager
+from .types import LogCallback, ProgressCallback, BatchResult
 
 
 class BatchProcessor:
     """批量处理器"""
     
-    def __init__(self, max_workers: int = None):
+    def __init__(self, max_workers: Optional[int] = None):
         self.max_workers = max_workers or config_manager.config["batch_processing"]["max_concurrent"]
         self.progress_queue = queue.Queue()
-        self.results = {}
+        self.results: Dict[str, Dict[str, Any]] = {}
         self.is_running = False
     
     def process_batch(self, 
                      world_paths: List[Path], 
                      dest_dir: Path,
-                     world_names: List[str] = None,
+                     world_names: Optional[List[str]] = None,
                      mode: str = "fast",
                      offline_mode: bool = False,
                      clean_mode: bool = True,
-                     manual_names: List[str] = None,
-                     log_callback: Callable = None,
-                     progress_callback: Callable = None) -> Dict[str, Dict[str, Any]]:
+                     manual_names: Optional[List[str]] = None,
+                     log_callback: Optional[LogCallback] = None,
+                     progress_callback: Optional[ProgressCallback] = None) -> BatchResult:
         """
         批量处理多个世界存档
         
@@ -114,8 +115,8 @@ class BatchProcessor:
                             mode: str,
                             offline_mode: bool,
                             clean_mode: bool,
-                            manual_names: List[str],
-                            log_callback: Callable,
+                            manual_names: Optional[List[str]],
+                            log_callback: Optional[LogCallback],
                             task_index: int,
                             total_tasks: int) -> Dict[str, Any]:
         """处理单个世界存档"""
@@ -168,7 +169,7 @@ class BatchProcessor:
 
 def scan_worlds_directory(directory: Path) -> List[Path]:
     """扫描目录中的世界存档"""
-    worlds = []
+    worlds: List[Path] = []
     
     if not directory.exists():
         return worlds

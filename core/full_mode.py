@@ -1,16 +1,40 @@
 import shutil
+from pathlib import Path
+from typing import List, Optional
 
 import nbtlib
 
 from .cleaner import clean_world
-from .nbt_utils import patch_nbt  # <-- 从新模块导入
+from .nbt_utils import patch_nbt
 from .scanner import scan_all_regions
 from .uuid_utils import build_mappings, load_usercache
 from .worker import process_regions_parallel
 from .utils import update_server_properties
+from .types import LogCallback, ProgressCallback, UUIDMapping
 
 
-def run_full(src_world, dest_dir, world_name, offline_mode, do_clean, manual_names, log, progress):
+def run_full(
+    src_world: Path,
+    dest_dir: Path,
+    world_name: str,
+    offline_mode: bool,
+    do_clean: bool,
+    manual_names: Optional[List[str]],
+    log: LogCallback,
+    progress: ProgressCallback
+) -> None:
+    """执行完整模式迁移
+
+    Args:
+        src_world: 源世界路径
+        dest_dir: 目标目录
+        world_name: 世界名称
+        offline_mode: 是否离线模式
+        do_clean: 是否清理
+        manual_names: 手动玩家名列表
+        log: 日志回调函数
+        progress: 进度回调函数
+    """
     dest_world = dest_dir / world_name
 
     # 1. 克隆
@@ -31,7 +55,7 @@ def run_full(src_world, dest_dir, world_name, offline_mode, do_clean, manual_nam
     # 3. 处理核心 NBT 文件
     log("处理核心 NBT 文件...", "NBT")
     l_c = process_nbt_file(dest_world / "level.dat", mappings, log)
-    log(f"level.dat 修改 {l_c} 处")
+    log(f"level.dat 修改 {l_c} 处", "INFO")
 
     data_dir = dest_world / "data"
     if data_dir.exists():
@@ -69,12 +93,27 @@ def run_full(src_world, dest_dir, world_name, offline_mode, do_clean, manual_nam
     # 7. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
 
-def process_nbt_file(path, mappings, log):
+
+def process_nbt_file(
+    path: Path,
+    mappings: List[UUIDMapping],
+    log: LogCallback
+) -> int:
+    """处理单个 NBT 文件
+
+    Args:
+        path: NBT 文件路径
+        mappings: UUID 映射列表
+        log: 日志回调函数
+
+    Returns:
+        修改次数
+    """
     try:
         tag = nbtlib.load(path)
         _, c = patch_nbt(tag, mappings)
         if c > 0:
-            nbtlib.save(tag, path)
+            nbtlib.save(tag, path)  # type: ignore[attr-defined]
         return c
     except Exception as e:
         log(f"处理失败 {path.name}: {e}", "ERROR")

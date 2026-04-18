@@ -1,11 +1,33 @@
 import shutil
+from pathlib import Path
+from typing import List, Optional
 
 from .cleaner import clean_world
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
 from .utils import update_server_properties
+from .types import LogCallback
 
 
-def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_names, log):
+def run_fast(
+    src_world: Path,
+    dest_dir: Path,
+    world_name: str,
+    offline_mode: bool,
+    do_clean: bool,
+    manual_names: Optional[List[str]],
+    log: LogCallback
+) -> None:
+    """执行快速模式迁移
+
+    Args:
+        src_world: 源世界路径
+        dest_dir: 目标目录
+        world_name: 世界名称
+        offline_mode: 是否离线模式
+        do_clean: 是否清理
+        manual_names: 手动玩家名列表
+        log: 日志回调函数
+    """
     dest_world = dest_dir / world_name
 
     # 1. 准备目标目录
@@ -59,7 +81,7 @@ def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_nam
                 if template_file:
                     shutil.copy2(template_file, offline_file)
                     dual_count += 1
-                    log(f"生成离线副本: {offline_uuid}.dat (玩家 {name})")
+                    log(f"生成离线副本: {offline_uuid}.dat (玩家 {name})", "INFO")
                 else:
                     log(f"警告: playerdata 目录为空，无法为 {name} 创建离线副本", "WARN")
 
@@ -71,7 +93,7 @@ def run_fast(src_world, dest_dir, world_name, offline_mode, do_clean, manual_nam
                     if template_file:
                         shutil.copy2(template_file, online_file)
                         dual_count += 1
-                        log(f"生成正版副本: {online_uuid}.dat (玩家 {name})")
+                        log(f"生成正版副本: {online_uuid}.dat (玩家 {name})", "INFO")
         log(f"共生成 {dual_count} 个双UUID副本", "INFO")
     else:
         log("未找到任何玩家数据，跳过双UUID生成", "WARN")

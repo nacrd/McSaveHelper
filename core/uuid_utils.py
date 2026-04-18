@@ -2,31 +2,70 @@ import hashlib
 import json
 import struct
 import time
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 import requests
 
 from .config import config_manager
+from .types import LogCallback, UUIDMapping
 
 
-def get_offline_uuid_str(name):
+def get_offline_uuid_str(name: str) -> str:
+    """生成离线 UUID 字符串
+
+    Args:
+        name: 玩家名
+
+    Returns:
+        格式化的 UUID 字符串 (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+    """
     md5 = hashlib.md5(f"OfflinePlayer:{name}".encode('utf-8')).hexdigest()
     return f"{md5[:8]}-{md5[8:12]}-{md5[12:16]}-{md5[16:20]}-{md5[20:32]}"
 
-def uuid_to_ints(uuid_str):
+
+def uuid_to_ints(uuid_str: str) -> List[int]:
+    """将 UUID 字符串转换为 4 个整数
+
+    Args:
+        uuid_str: UUID 字符串
+
+    Returns:
+        包含 4 个整数的列表
+    """
     hex_s = uuid_str.replace("-", "")
     return [int(hex_s[i:i+8], 16) for i in range(0, 32, 8)]
 
-def uuid_to_most_least(uuid_str):
+
+def uuid_to_most_least(uuid_str: str) -> Tuple[int, int]:
+    """将 UUID 字符串转换为 Most/Least 整数对
+
+    Args:
+        uuid_str: UUID 字符串
+
+    Returns:
+        (Most, Least) 整数对
+    """
     hex_s = uuid_str.replace("-", "")
     high = int(hex_s[:16], 16)
     low = int(hex_s[16:], 16)
     return struct.unpack('>q', struct.pack('>Q', high))[0], \
            struct.unpack('>q', struct.pack('>Q', low))[0]
 
-def get_online_uuid(name, log_callback=None):
+
+def get_online_uuid(
+    name: str,
+    log_callback: Optional[LogCallback] = None
+) -> Tuple[Optional[str], Optional[str]]:
     """
     联网获取正版 UUID 和官方大小写玩家名。
-    返回: (uuid_str, official_name) 或 (None, None)
+
+    Args:
+        name: 玩家名
+        log_callback: 可选的日志回调函数
+
+    Returns:
+        (uuid_str, official_name) 或 (None, None)
     """
     if log_callback:
         log_callback(f"正在查询正版UUID: {name} ...", "API")
@@ -49,8 +88,20 @@ def get_online_uuid(name, log_callback=None):
             log_callback(f"API请求失败: {e}", "ERROR")
     return None, None
 
-def get_name_from_uuid(uuid, log_callback=None):
-    """通过 UUID 查询官方玩家名"""
+
+def get_name_from_uuid(
+    uuid: str,
+    log_callback: Optional[LogCallback] = None
+) -> Optional[str]:
+    """通过 UUID 查询官方玩家名
+
+    Args:
+        uuid: UUID 字符串
+        log_callback: 可选的日志回调函数
+
+    Returns:
+        玩家名或 None
+    """
     if log_callback:
         log_callback(f"正在通过UUID查询玩家名: {uuid} ...", "API")
     try:
@@ -70,8 +121,17 @@ def get_name_from_uuid(uuid, log_callback=None):
             log_callback(f"API请求失败: {e}", "ERROR")
     return None
 
-def load_usercache(world_path):
-    cache = {}
+
+def load_usercache(world_path: Path) -> dict:
+    """加载 usercache.json 文件
+
+    Args:
+        world_path: 世界存档路径
+
+    Returns:
+        UUID 到玩家名的映射字典
+    """
+    cache: dict = {}
     for p in [world_path.parent / "usercache.json", world_path.parent.parent / "usercache.json"]:
         if p.exists():
             try:
@@ -84,11 +144,30 @@ def load_usercache(world_path):
                 pass
     return cache
 
-def build_mappings(world_path, cache, offline_mode, manual_names, log):
+
+def build_mappings(
+    world_path: Path,
+    cache: dict,
+    offline_mode: bool,
+    manual_names: Optional[List[str]],
+    log: LogCallback
+) -> List[UUIDMapping]:
+    """构建 UUID 映射列表
+
+    Args:
+        world_path: 世界存档路径
+        cache: UUID 缓存字典
+        offline_mode: 是否离线模式
+        manual_names: 手动指定的玩家名列表
+        log: 日志回调函数
+
+    Returns:
+        UUID 映射列表
+    """
     pd = world_path / "playerdata"
     if not pd.exists():
         return []
-    maps = []
+    maps: List[UUIDMapping] = []
     new_uuids = set()
     
     # 处理自定义UUID映射
@@ -135,7 +214,7 @@ def build_mappings(world_path, cache, offline_mode, manual_names, log):
                 uuid_to_most_least(new_u)
             ))
             new_uuids.add(new_u)
-            log(f"映射: {name} ({old_u} -> {new_u})")
+            log(f"映射: {name} ({old_u} -> {new_u})", "INFO")
         else:
             log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
     

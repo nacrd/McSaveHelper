@@ -1,12 +1,15 @@
 import os
 import shutil
 from pathlib import Path
-from typing import Callable
+
+from .types import LogCallback
+
 
 CLEAN_PATTERNS = {
     "logs", "crash-reports", "session.lock", ".ds_store", "thumbs.db",
     "server-resource-packs", "downloads", "journeymap", "xaero", "voxelmap"
 }
+
 
 def should_clean(p: Path) -> bool:
     name = p.name.lower()
@@ -16,7 +19,8 @@ def should_clean(p: Path) -> bool:
         return True
     return False
 
-def clean_world(world_path: Path, log: Callable[[str, str], None]) -> None:
+
+def clean_world(world_path: Path, log: LogCallback) -> None:
     cleaned = 0
     for root, dirs, files in os.walk(world_path, topdown=False):
         for file in files:

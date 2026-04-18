@@ -1,9 +1,10 @@
 """通用工具函数"""
 from pathlib import Path
-from typing import Callable, Optional
+
+from .types import LogCallback
 
 
-def update_server_properties(dest_dir: Path, world_name: str, log: Callable[[str, str], None]) -> None:
+def update_server_properties(dest_dir: Path, world_name: str, log: LogCallback) -> None:
     """
     修改 server.properties 文件中的 level-name 设置。
     

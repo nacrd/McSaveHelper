@@ -1,14 +1,26 @@
 """顶部导航栏混入类"""
 import customtkinter as ctk
+from typing import Any, TYPE_CHECKING
 
 from ui.constants import COLORS
 from ui.widgets import ModernButton, ModernProgressBar
+
+if TYPE_CHECKING:
+    pass
 
 
 class TopBarMixin:
     """提供顶部导航栏构建方法"""
     
-    def _build_top_bar(self):
+    if TYPE_CHECKING:
+        main_bg: ctk.CTkFrame
+        progress_label: ctk.CTkLabel
+        progress: ModernProgressBar
+        start_btn: ModernButton
+        
+        def start(self) -> None: ...
+    
+    def _build_top_bar(self) -> None:
         """构建现代化顶部导航栏"""
         top_frame = ctk.CTkFrame(
             self.main_bg,
