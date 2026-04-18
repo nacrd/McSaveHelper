@@ -3,20 +3,18 @@ import shutil
 from pathlib import Path
 
 from .types import LogCallback
+from .constants import MinecraftConstants
 
-
-CLEAN_PATTERNS = {
-    "logs", "crash-reports", "session.lock", ".ds_store", "thumbs.db",
-    "server-resource-packs", "downloads", "journeymap", "xaero", "voxelmap"
-}
 
 
 def should_clean(p: Path) -> bool:
     name = p.name.lower()
-    if name in CLEAN_PATTERNS:
+    if name in MinecraftConstants.CLEAN_PATTERNS:
         return True
-    if name.endswith(".clientcache") or name.endswith(".log"):
-        return True
+    # 检查扩展名是否在清理扩展名集合中
+    for ext in MinecraftConstants.CLEAN_EXTENSIONS:
+        if name.endswith(ext):
+            return True
     return False
 
 

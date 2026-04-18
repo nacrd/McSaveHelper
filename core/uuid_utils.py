@@ -9,6 +9,7 @@ import requests
 
 from .config import config_manager
 from .types import LogCallback, UUIDMapping
+from .constants import MinecraftConstants
 
 
 def get_offline_uuid_str(name: str) -> str:
@@ -70,7 +71,7 @@ def get_online_uuid(
     if log_callback:
         log_callback(f"正在查询正版UUID: {name} ...", "API")
     try:
-        url = f"https://api.mojang.com/users/profiles/minecraft/{name}"
+        url = f"{MinecraftConstants.MOJANG_PROFILE_URL}{name}"
         r = requests.get(url, timeout=5)
         if r.status_code == 200:
             data = r.json()
