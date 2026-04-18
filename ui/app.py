@@ -26,6 +26,8 @@ from core.config import config_manager
 from core.batch_processor import BatchProcessor, scan_worlds_directory
 from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox
+from ui.sidebar import Sidebar
+from ui.views.migrator import MigratorView
 from ui.mixins.common import CommonUIMixin
 from ui.mixins.top_bar import TopBarMixin
 from ui.mixins.left_panel import LeftPanelMixin
@@ -94,7 +96,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.new_uuid = ctk.StringVar()
 
     def build_ui(self) -> None:
-        """构建现代化用户界面"""
+        """构建侧边栏+动态视图现代化界面"""
         # 主背景容器
         self.main_bg = ctk.CTkFrame(self, fg_color=COLORS["bg_primary"], corner_radius=0)
         self.main_bg.pack(fill="both", expand=True)
@@ -102,20 +104,86 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         # 顶部导航栏
         self._build_top_bar()
 
-        # 核心内容区域
-        content_frame = ctk.CTkFrame(self.main_bg, fg_color="transparent")
-        content_frame.pack(fill="both", expand=True, padx=30, pady=20)
+        # 主内容容器（侧边栏 + 视图）
+        main_content = ctk.CTkFrame(self.main_bg, fg_color="transparent")
+        main_content.pack(fill="both", expand=True, padx=0, pady=0)
 
-        # 左右两列容器
-        self.left_panel = ctk.CTkFrame(content_frame, fg_color="transparent")
-        self.left_panel.pack(side="left", fill="both", expand=True, padx=(0, 18))
+        # 侧边栏
+        self.sidebar = Sidebar(
+            main_content,
+            tabs=[
+                {"id": "migrator", "label": "批量迁移", "icon": "📦"},
+                {"id": "explorer", "label": "存档探险", "icon": "🗺️"},
+                {"id": "mappings", "label": "映射管理", "icon": "🔗"},
+                {"id": "settings", "label": "设置", "icon": "⚙️"},
+            ],
+            on_tab_select=self._switch_view,
+            default_tab="migrator",
+        )
+        self.sidebar.pack(side="left", fill="y")
 
-        self.right_panel = ctk.CTkFrame(content_frame, fg_color="transparent")
-        self.right_panel.pack(side="left", fill="both", expand=True)
+        # 视图容器
+        self.view_container = ctk.CTkFrame(main_content, fg_color="transparent")
+        self.view_container.pack(side="left", fill="both", expand=True, padx=30, pady=20)
 
-        # 构建左侧和右侧
-        self._build_left_panel(self.left_panel)
-        self._build_right_panel(self.right_panel)
+        # 存储视图帧的字典
+        self.views: dict[str, ctk.CTkFrame] = {}
+
+        # 初始化各个视图
+        self._init_migrator_view()
+        self._init_explorer_view()
+        self._init_mappings_view()
+        self._init_settings_view()
+
+        # 默认显示迁移视图
+        self._switch_view("migrator")
+
+    def _init_migrator_view(self) -> None:
+        """初始化批量迁移视图（原左右面板）"""
+        frame = MigratorView(self.view_container, controller=self, fg_color="transparent")
+        frame.pack(fill="both", expand=True)
+        self.views["migrator"] = frame
+
+    def _init_explorer_view(self) -> None:
+        """初始化存档探险视图（占位符）"""
+        frame = ctk.CTkFrame(self.view_container, fg_color="transparent")
+        ctk.CTkLabel(
+            frame,
+            text="存档探险功能开发中",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(expand=True)
+        self.views["explorer"] = frame
+
+    def _init_mappings_view(self) -> None:
+        """初始化映射管理视图（占位符）"""
+        frame = ctk.CTkFrame(self.view_container, fg_color="transparent")
+        ctk.CTkLabel(
+            frame,
+            text="映射管理功能开发中",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(expand=True)
+        self.views["mappings"] = frame
+
+    def _init_settings_view(self) -> None:
+        """初始化设置视图（占位符）"""
+        frame = ctk.CTkFrame(self.view_container, fg_color="transparent")
+        ctk.CTkLabel(
+            frame,
+            text="设置功能开发中",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(expand=True)
+        self.views["settings"] = frame
+
+    def _switch_view(self, view_id: str) -> None:
+        """切换视图"""
+        # 隐藏所有视图
+        for vid, frame in self.views.items():
+            frame.pack_forget()
+        # 显示选中的视图
+        self.views[view_id].pack(fill="both", expand=True)
 
 
     def clear_log(self) -> None:
