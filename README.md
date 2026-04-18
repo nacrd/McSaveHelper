@@ -154,8 +154,19 @@ pyinstaller build.spec
 
 ### 添加新语言
 1. 复制 `translations/zh_CN.json` 为 `translations/xx_XX.json`
-2. 翻译所有键值对
-3. 在 `core/i18n.py` 中注册新语言代码
+2. 编辑新文件，在顶层添加 `__meta__` 对象，例如：
+   ```json
+   {
+     "__meta__": {
+       "language": "xx_XX",
+       "display_name": "语言显示名称"
+     },
+     ...
+   }
+   ```
+3. 翻译所有键值对（保留 `__meta__` 对象）
+
+程序会自动扫描 `translations/` 目录下所有带有 `__meta__` 标签的 JSON 文件，无需在代码中手动注册语言代码。
 
 ## ❓ 常见问题
 

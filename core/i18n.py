@@ -351,6 +351,8 @@ class TranslationManager:
     @property
     def available_languages(self) -> Dict[Language, str]:
         """获取可用语言列表（动态扫描）"""
+        # 重新扫描目录以获取最新的语言文件列表
+        self._scan_available_languages()
         result = {}
         for lang_code, display_name in self._language_display_map.items():
             # 将字符串语言代码转换为 Language 枚举成员
@@ -360,11 +362,6 @@ class TranslationManager:
                 # 如果动态枚举无法处理，跳过
                 continue
             result[lang] = display_name
-        # 确保至少包含默认语言
-        if Language.ZH_CN not in result:
-            result[Language.ZH_CN] = "简体中文"
-        if Language.EN_US not in result:
-            result[Language.EN_US] = "English (US)"
         return result
     
     def reload(self) -> None:
