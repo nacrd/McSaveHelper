@@ -12,7 +12,13 @@ from enum import Enum
 try:
     from enum import StrEnum  # type: ignore
 except ImportError:
-    from typing_extensions import StrEnum  # type: ignore
+    try:
+        from typing_extensions import StrEnum  # type: ignore
+    except ImportError:
+        # 自定义 StrEnum 作为回退
+        class StrEnum(str, Enum):
+            """自定义字符串枚举，兼容 Python <3.11"""
+            pass
 
 from .config import config_manager
 

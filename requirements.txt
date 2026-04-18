@@ -3,3 +3,4 @@ nbtlib
 anvil-parser2
 requests
 send2trash
+typing_extensions
