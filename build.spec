@@ -40,6 +40,7 @@ exe_kwargs = {
     'upx_exclude': [],
     'runtime_tmpdir': None,
     'console': False,
+    'onefile': True,
 }
 
 if icon_path:
