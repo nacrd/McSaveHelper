@@ -22,6 +22,7 @@ class LeftPanelMixin:
         batch_frame: ctk.CTkFrame
         batch_result_label: ctk.CTkLabel
         log: TerminalLikeTextbox
+        convert_platform: ctk.StringVar
         
         def choose_src(self) -> None: ...
         def choose_dest(self) -> None: ...
@@ -131,6 +132,44 @@ class LeftPanelMixin:
             height=38,
         ).pack(fill="x", padx=20, pady=(8, 18))
         
+        # 转换选项
+        convert_card = self._create_card(parent)
+        convert_card.pack(fill="x", pady=(0, 18))
+        self._add_section_title(convert_card, "🔄 存档转换 (实验性)", icon_only=False)
+        
+        # 平台选择
+        platform_frame = ctk.CTkFrame(convert_card, fg_color="transparent")
+        platform_frame.pack(fill="x", padx=20, pady=(8, 10))
+        ctk.CTkLabel(
+            platform_frame,
+            text="目标平台:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(side="left", padx=(0, 10))
+        self.convert_platform = ctk.StringVar(value="java")
+        platform_menu = ctk.CTkOptionMenu(
+            platform_frame,
+            values=["Java", "Bedrock"],
+            variable=self.convert_platform,
+            width=120,
+            height=32,
+            fg_color=COLORS["bg_secondary"],
+            button_color=COLORS["accent"],
+            button_hover_color=COLORS["accent_hover"]
+        )
+        platform_menu.pack(side="left")
+        
+        # 转换按钮
+        convert_button = ModernButton(
+            convert_card,
+            text="🚀 开始转换",
+            height=38,
+            command=self._perform_conversion,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"]
+        )
+        convert_button.pack(fill="x", padx=20, pady=(0, 18))
+        
         # 日志区域
         log_header = ctk.CTkFrame(parent, fg_color="transparent")
         log_header.pack(fill="x", pady=(0, 8))
@@ -153,3 +192,31 @@ class LeftPanelMixin:
         
         self.log = TerminalLikeTextbox(parent, height=220)
         self.log.pack(fill="both", expand=True)
+
+    def _perform_conversion(self) -> None:
+        """
+        执行存档转换操作。
+        """
+        # 获取目标平台
+        platform = self.convert_platform.get().lower()
+        # 检查是否有源路径
+        src = self.src_path.get()
+        if not src:
+            self.log.add_line("❌ 请先选择客户端存档路径", "ERROR")
+            return
+        from pathlib import Path
+        from core.omni.world_session import WorldSession
+        try:
+            session = WorldSession(Path(src), log=self.log.add_line)
+            session.queue_conversion(target_platform=platform)
+            # 提交到临时目录（示例）
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmpdir:
+                dest = Path(tmpdir) / "converted"
+                success = session.commit(dest)
+                if success:
+                    self.log.add_line(f"✅ 转换成功，结果保存在 {dest}", "SUCCESS")
+                else:
+                    self.log.add_line("❌ 转换失败，请查看日志", "ERROR")
+        except Exception as e:
+            self.log.add_line(f"❌ 转换过程发生错误: {e}", "ERROR")

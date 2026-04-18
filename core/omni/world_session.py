@@ -12,6 +12,7 @@ from nbtlib import Compound, Long, IntArray, String, File
 from ..scanner import scan_all_regions
 from ..types import LogCallback, ProgressCallback, NBTTag
 from ..utils import update_server_properties
+from ..converter import convert_endian, IdMapping, VersionDowngrader
 
 
 @dataclass
@@ -254,6 +255,29 @@ class WorldSession:
         )
         self._action_queue.append(action)
         self._log("已队列化自定义操作", "QUEUE")
+
+    def queue_conversion(self, target_platform: str = "java", target_version: Optional[int] = None) -> None:
+        """
+        队列化一个存档转换操作。
+        
+        Args:
+            target_platform: 目标平台，"java" 或 "bedrock"
+            target_version: 目标版本 ID（仅 Java 版有效）
+        """
+        def conversion_callback(target_world: Path) -> None:
+            # 这是一个简单的转换示例：仅转换 level.dat 的字节序
+            level_path = target_world / "level.dat"
+            if level_path.exists():
+                # 确定目标字节序
+                target_byteorder = "big" if target_platform == "java" else "little"
+                try:
+                    convert_endian(level_path, level_path, target_byteorder)
+                except Exception as e:
+                    self._log(f"转换字节序失败: {e}", "ERROR")
+            # TODO: 转换其他 NBT 文件、方块 ID 等
+        
+        self.queue_custom(conversion_callback)
+        self._log(f"已队列化转换操作到平台 {target_platform}", "QUEUE")
 
     def commit(self, dest_path: Optional[Path] = None, backup: bool = True) -> bool:
         """
