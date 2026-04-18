@@ -414,7 +414,6 @@ class App(ctk.CTk):
                     clean,
                     manual,
                     self.log_msg,
-                    self.update_progress,
                 )
             else:
                 run_full(
