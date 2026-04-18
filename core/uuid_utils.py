@@ -5,6 +5,10 @@ import time
 
 import requests
 
+from .config import config_manager
+
+from .config import config_manager
+
 
 def get_offline_uuid_str(name):
     md5 = hashlib.md5(f"OfflinePlayer:{name}".encode('utf-8')).hexdigest()
@@ -88,18 +92,42 @@ def build_mappings(world_path, cache, offline_mode, manual_names, log):
         return []
     maps = []
     new_uuids = set()
+    
+    # 处理自定义UUID映射
+    custom_mappings = config_manager.config["custom_uuid_mappings"]
+    if custom_mappings:
+        log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
+    
     for f in pd.glob("*.dat"):
         old_u = f.stem
         if old_u in new_uuids:
             continue
+        
         name = cache.get(old_u)
         if not name and not offline_mode:
             name = get_name_from_uuid(old_u, log)
+        
+        # 检查是否有自定义UUID映射
+        custom_uuid = None
+        if name and name in custom_mappings:
+            custom_uuid = custom_mappings[name]
+            log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
+        
         if not name and manual_names:
             name = manual_names[0]
             log(f"使用手动输入的玩家名: {name}", "MANUAL")
+            # 检查手动输入的玩家名是否有自定义映射
+            if name in custom_mappings:
+                custom_uuid = custom_mappings[name]
+                log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
+        
         if name:
-            new_u = get_offline_uuid_str(name)
+            # 优先使用自定义UUID，否则使用离线UUID
+            if custom_uuid:
+                new_u = custom_uuid
+            else:
+                new_u = get_offline_uuid_str(name)
+            
             maps.append((
                 uuid_to_ints(old_u),
                 uuid_to_ints(new_u),
@@ -112,4 +140,28 @@ def build_mappings(world_path, cache, offline_mode, manual_names, log):
             log(f"映射: {name} ({old_u} -> {new_u})")
         else:
             log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
+    
+    # 处理手动输入但不在playerdata中的玩家
+    if manual_names:
+        for name in manual_names:
+            if name not in [m[2] for m in maps]:  # 检查是否已经处理过
+                custom_uuid = custom_mappings.get(name)
+                if custom_uuid:
+                    new_u = custom_uuid
+                    log(f"为手动玩家 {name} 使用自定义UUID: {new_u}", "SUCCESS")
+                else:
+                    new_u = get_offline_uuid_str(name)
+                    log(f"为手动玩家 {name} 生成离线UUID: {new_u}", "INFO")
+                
+                # 添加一个虚拟映射（仅用于生成双UUID文件）
+                offline_uuid = get_offline_uuid_str(name)
+                maps.append((
+                    uuid_to_ints(offline_uuid),  # 使用离线UUID作为旧UUID
+                    uuid_to_ints(new_u),         # 新UUID
+                    offline_uuid,
+                    new_u,
+                    uuid_to_most_least(offline_uuid),
+                    uuid_to_most_least(new_u)
+                ))
+    
     return maps
