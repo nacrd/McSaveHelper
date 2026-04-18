@@ -34,60 +34,7 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-    - name: Prepare onefile spec with icon
-      run: |
-        $spec = @"
-# -*- mode: python ; coding: utf-8 -*-
-import sys, os
-from PyInstaller.utils.hooks import collect_data_files
-from PyInstaller.building.build_main import Analysis, PYZ, EXE
-
-spec_root = os.path.dirname(os.path.abspath(__file__))
-datas = collect_data_files('anvil_parser2')
-
-# 包含 python310.dll
-python_dll = os.path.join(os.path.dirname(sys.executable), 'python310.dll')
-binaries = []
-if os.path.isfile(python_dll):
-    binaries.append((python_dll, '.'))
-
-# 设置图标，如果存在
-icon_path = os.path.join(spec_root, 'assets', 'icon.ico')
-if not os.path.isfile(icon_path):
-    icon_path = None
-
-a = Analysis(
-    ['main.py'],
-    pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=['customtkinter','nbtlib','anvil_parser2','requests','send2trash'],
-)
-
-pyz = PYZ(a.pure)
-
-exe_kwargs = {
-    'pyz': pyz,
-    'scripts': a.scripts,
-    'binaries': a.binaries,
-    'datas': a.datas,
-    'name': 'MC-Migrator-Pro',
-    'debug': False,
-    'bootloader_ignore_signals': False,
-    'strip': False,
-    'upx': False,  # 禁用 UPX
-    'console': False,  # 隐藏控制台
-    'onefile': True
-}
-
-if icon_path:
-    exe_kwargs['icon'] = icon_path
-
-exe = EXE(**exe_kwargs)
-"@
-        $spec | Out-File -Encoding UTF8 build.spec
-
-    - name: Build onefile exe with PyInstaller
+    - name: Build with PyInstaller
       run: pyinstaller build.spec --noconfirm
 
     - name: Upload executable artifact
