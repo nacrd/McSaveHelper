@@ -1,49 +1,59 @@
+# -*- mode: python ; coding: utf-8 -*-
+
 import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files
 
-# 获取 spec 文件所在目录
-spec_root = os.path.dirname(os.path.abspath(SPECPATH))
-icon_path = os.path.join(spec_root, 'assets', 'icon.ico')
-if not os.path.isfile(icon_path):
-    icon_path = None
+# ---------- 1. 收集 anvil 包中的所有数据文件（.json等） ----------
+datas = collect_data_files('anvil')
 
-datas = collect_data_files('anvil_parser2')
+# 如果你还有 assets 目录（如图标、图片），可以一并打包：
+# if os.path.exists('assets'):
+#     datas += [('assets', 'assets')]
 
-# ===== 添加 Python DLL =====
-python_version = f'python{sys.version_info.major}{sys.version_info.minor}'
-python_dll = os.path.join(os.path.dirname(sys.executable), f'{python_version}.dll')
-binaries = []
-if os.path.isfile(python_dll):
-    binaries.append((python_dll, '.'))  # 拷贝到 exe 同级目录
-
+# ---------- 2. 分析主脚本 ----------
 a = Analysis(
     ['main.py'],
-    pathex=[],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=['customtkinter', 'nbtlib', 'anvil_parser2', 'requests', 'send2trash'],
+    pathex=[],                     # 可添加额外搜索路径，如 ['E:\\coding\\mc_migrator']
+    binaries=[],                   # 留空，让 PyInstaller 自动处理 DLL
+    datas=datas,                   # 包含 anvil 的数据文件
+    hiddenimports=[                # 显式导入可能被遗漏的模块
+        'customtkinter',
+        'nbtlib',
+        'requests',
+        'send2trash',
+        # 如果你的代码中还 import 了其他第三方库，请在此添加
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
 )
 
+# ---------- 3. 创建 PYZ 存档 ----------
 pyz = PYZ(a.pure)
 
-exe_kwargs = {
-    'pyz': pyz,
-    'scripts': a.scripts,
-    'binaries': a.binaries,
-    'datas': a.datas,
-    'name': 'MC-Migrator',
-    'debug': False,
-    'bootloader_ignore_signals': False,
-    'strip': False,
-    'upx': True,
-    'upx_exclude': [],
-    'runtime_tmpdir': None,
-    'console': False,
-    'onefile': True,
-}
-
-if icon_path:
-    exe_kwargs['icon'] = icon_path
-
-exe = EXE(**exe_kwargs)
+# ---------- 4. 生成单文件可执行文件 ----------
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [],
+    name='MC-Migrator',            # 输出的 exe 文件名
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,                      # 是否使用 UPX 压缩（需安装 upx 并加入 PATH）
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,                  # 显示控制台窗口（调试用，发布时可改为 False）
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    onefile=True,                  # 单文件模式
+)
