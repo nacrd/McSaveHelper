@@ -38,3 +38,4 @@ htmlcov/
 .env.local
 *.db
 *.sqlite3
+world/
