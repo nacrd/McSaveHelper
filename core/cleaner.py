@@ -4,7 +4,7 @@ from pathlib import Path
 
 CLEAN_PATTERNS = {
     "logs", "crash-reports", "session.lock", ".ds_store", "thumbs.db",
-    "server-resource-packs", "downloads", "backups", "journeymap", "xaero", "voxelmap"
+    "server-resource-packs", "downloads", "journeymap", "xaero", "voxelmap"
 }
 
 def should_clean(p: Path):
