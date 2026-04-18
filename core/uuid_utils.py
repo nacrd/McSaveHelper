@@ -80,7 +80,7 @@ def load_usercache(world_path):
                     for entry in data:
                         if 'uuid' in entry and 'name' in entry:
                             cache[entry['uuid']] = entry['name']
-            except:
+            except (OSError, json.JSONDecodeError, KeyError):
                 pass
     return cache
 
