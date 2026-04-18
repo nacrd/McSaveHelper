@@ -1,24 +1,27 @@
-# -*- mode: python ; coding: utf-8 -*-
+import sys
 import os
 from PyInstaller.utils.hooks import collect_data_files
 
 # 获取 spec 文件所在目录
 spec_root = os.path.dirname(os.path.abspath(SPECPATH))
 icon_path = os.path.join(spec_root, 'assets', 'icon.ico')
-
-# 检查图标是否存在
 if not os.path.isfile(icon_path):
-    icon_path = None  # 不存在则不用图标
+    icon_path = None
 
 datas = collect_data_files('anvil_parser2')
+
+# ===== 添加 Python DLL =====
+python_dll = os.path.join(os.path.dirname(sys.executable), 'python310.dll')
+binaries = []
+if os.path.isfile(python_dll):
+    binaries.append((python_dll, '.'))  # 拷贝到 exe 同级目录
 
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=['customtkinter', 'nbtlib', 'anvil_parser2', 'requests', 'send2trash'],
-    # ... 其余保持不变
 )
 
 pyz = PYZ(a.pure)
@@ -36,11 +39,6 @@ exe_kwargs = {
     'upx_exclude': [],
     'runtime_tmpdir': None,
     'console': False,
-    'disable_windowed_traceback': False,
-    'argv_emulation': False,
-    'target_arch': None,
-    'codesign_identity': None,
-    'entitlements_file': None,
 }
 
 if icon_path:
