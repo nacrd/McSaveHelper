@@ -24,6 +24,7 @@ from core.full_mode import run_full
 from core.uuid_utils import get_offline_uuid_str, get_online_uuid
 from core.config import config_manager
 from core.batch_processor import BatchProcessor, scan_worlds_directory
+from core.logger import LogLevel, logger, setup_default_logging
 from ui.constants import COLORS
 from ui.widgets import TerminalLikeTextbox
 from ui.sidebar import Sidebar
@@ -53,6 +54,9 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.geometry("1100x820")
         self.minsize(1000, 720)
 
+        # 初始化日志系统
+        self._initialize_logging()
+        
         # 初始化变量
         self._initialize_variables()
         
@@ -62,6 +66,35 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         # 构建UI
         self.build_ui()
 
+    def _initialize_logging(self) -> None:
+        """初始化日志系统"""
+        # 创建UI日志回调函数
+        def ui_log_callback(message: str, tag: str) -> None:
+            """将日志消息转发到UI文本框"""
+            def _write():
+                timestamp = time.strftime("%H:%M:%S")
+                self.log.configure(state="normal")
+                self.log.insert("end", f"[{timestamp}] ", "timestamp")
+                self.log.insert("end", f"[{tag.upper()}] ", tag)
+                self.log.insert("end", f"{message}\n", tag)
+                self.log.see("end")
+                self.log.configure(state="disabled")
+            
+            self.after(0, _write)
+        
+        # 设置默认日志配置
+        setup_default_logging(
+            enable_console=True,
+            enable_file=True,
+            file_path=None,  # 使用默认路径 ~/.mc_migrator/logs/app.log
+            enable_ui=True,
+            ui_callback=ui_log_callback,
+            level=LogLevel.INFO
+        )
+        
+        # 记录应用启动日志
+        logger.info("MC Migrator Pro 应用启动", module="App")
+    
     def _initialize_variables(self) -> None:
         """初始化应用变量"""
         self.mode_var = ctk.StringVar(value="fast")
@@ -151,7 +184,20 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
     def _init_explorer_view(self) -> None:
         """初始化存档探险视图（集成玩家看板、区块热力图、NBT树视图）"""
-        frame = ExplorerView(self.view_container, fg_color="transparent")
+        # 创建ExplorerView专用的日志回调
+        # ExplorerView._log()期望log_callback(message)单参数形式
+        # 但我们需要将其适配到中心化日志系统
+        def explorer_log_callback(message: str):
+            """将ExplorerView的日志转发到主应用日志系统"""
+            # 使用中心化日志系统，添加模块标识
+            # 默认使用INFO级别，因为ExplorerView没有提供级别信息
+            logger.info(f"[存档探险] {message}", module="ExplorerView")
+        
+        frame = ExplorerView(
+            self.view_container,
+            log_callback=explorer_log_callback,
+            fg_color="transparent"
+        )
         frame.pack(fill="both", expand=True)
         self.views["explorer"] = frame
 
@@ -235,26 +281,16 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.log_msg(t("messages.batch_scan_no_worlds", "批量扫描: 未找到有效的世界存档"), "WARN")
 
     def log_msg(self, msg: str, level: str = "INFO") -> None:
-        """线程安全的日志写入 (支持终端彩色标签)"""
-        tag_map = {
-            "INFO": "info",
-            "SUCCESS": "success",
-            "WARN": "warn",
-            "ERROR": "error",
-            "API": "api",
-        }
-        tag = tag_map.get(level, "info")
-
-        def _write():
-            timestamp = time.strftime("%H:%M:%S")
-            self.log.configure(state="normal")
-            self.log.insert("end", f"[{timestamp}] ", "timestamp")
-            self.log.insert("end", f"[{level}] ", tag)
-            self.log.insert("end", f"{msg}\n", tag)
-            self.log.see("end")
-            self.log.configure(state="disabled")
-
-        self.after(0, _write)
+        """
+        线程安全的日志写入 (支持终端彩色标签)
+        
+        注意：此方法现在作为新日志系统的兼容层，实际日志记录通过中心化日志系统处理。
+        """
+        # 将字符串级别转换为LogLevel枚举
+        log_level = LogLevel.from_string(level)
+        
+        # 使用中心化日志系统记录
+        logger.log(log_level, msg, module="App")
 
     def log_header(self, msg: str) -> None:
         """记录标题行"""

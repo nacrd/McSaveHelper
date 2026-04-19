@@ -120,14 +120,19 @@ class PlayerHUDCard(ModernCard):
 class ExplorerView(ctk.CTkFrame):
     """存档探险视图 - 集成玩家看板、区块热力图、NBT树视图"""
     
-    def __init__(self, master: Any, **kwargs) -> None:
+    def __init__(self, master: Any, log_callback=None, **kwargs) -> None:
         # 确保背景透明，移除可能冲突的fg_color参数
         kwargs.pop('fg_color', None)
         super().__init__(master, fg_color="transparent", **kwargs)
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
+        self.log_callback = log_callback
         self._build_ui()
+        
+        # 如果有外部日志回调，隐藏本地日志文本框
+        if self.log_callback:
+            self._hide_local_log_text()
     
     def _build_ui(self) -> None:
         # 顶部工具栏
@@ -174,29 +179,33 @@ class ExplorerView(ctk.CTkFrame):
         self.nbt_tab = self.tabview.add("NBT")
         self._build_nbt_tab()
         
-        # 日志区域
-        log_frame = ctk.CTkFrame(self, fg_color="transparent")
-        log_frame.pack(fill="x", padx=20, pady=(0, 20))
-        
-        ctk.CTkLabel(
-            log_frame,
-            text="📜 日志",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(anchor="w")
-        
-        self.log_text = ctk.CTkTextbox(
-            log_frame,
-            height=80,
-            font=ctk.CTkFont(family="Cascadia Code", size=11),
-            fg_color=COLORS["log_bg"],
-            border_width=1,
-            border_color=COLORS["log_border"],
-            corner_radius=8,
-        )
-        self.log_text.pack(fill="x", pady=(10, 0))
-        self.log_text.insert("1.0", "等待加载存档...")
-        self.log_text.configure(state="disabled")
+        # 日志区域 - 只有在没有外部日志回调时才创建
+        if not self.log_callback:
+            log_frame = ctk.CTkFrame(self, fg_color="transparent")
+            log_frame.pack(fill="x", padx=20, pady=(0, 20))
+            
+            ctk.CTkLabel(
+                log_frame,
+                text="📜 日志",
+                font=ctk.CTkFont(size=14, weight="bold"),
+                text_color=COLORS["text_primary"]
+            ).pack(anchor="w")
+            
+            self.log_text = ctk.CTkTextbox(
+                log_frame,
+                height=80,
+                font=ctk.CTkFont(family="Cascadia Code", size=11),
+                fg_color=COLORS["log_bg"],
+                border_width=1,
+                border_color=COLORS["log_border"],
+                corner_radius=8,
+            )
+            self.log_text.pack(fill="x", pady=(10, 0))
+            self.log_text.insert("1.0", "等待加载存档...")
+            self.log_text.configure(state="disabled")
+        else:
+            # 如果有外部日志回调，不创建本地日志文本框
+            self.log_text = None
     
     def _build_player_tab(self) -> None:
         """构建玩家标签页内容"""
@@ -320,12 +329,21 @@ class ExplorerView(ctk.CTkFrame):
         self.nbt_tree = NBTTreeView(self.nbt_tab)
         self.nbt_tree.pack(fill="both", expand=True)
     
+    def _hide_local_log_text(self) -> None:
+        """隐藏本地日志文本框（当使用外部日志回调时）"""
+        if hasattr(self, 'log_text') and self.log_text is not None:
+            # 隐藏日志文本框
+            self.log_text.pack_forget()
+    
     def _log(self, message: str) -> None:
         """添加日志"""
-        self.log_text.configure(state="normal")
-        self.log_text.insert("end", f"\n{message}")
-        self.log_text.see("end")
-        self.log_text.configure(state="disabled")
+        if hasattr(self, 'log_callback') and self.log_callback:
+            self.log_callback(message)
+        elif hasattr(self, 'log_text') and self.log_text is not None:
+            self.log_text.configure(state="normal")
+            self.log_text.insert("end", f"\n{message}")
+            self.log_text.see("end")
+            self.log_text.configure(state="disabled")
     
     def _load_world(self) -> None:
         """加载存档"""
