@@ -17,6 +17,7 @@ class ConfigSchema:
     BASE_SCHEMA = {
         "version": {"type": int, "default": 1, "min": 1},
         "version_detection": {"type": bool, "default": True},
+        "use_custom_mapping": {"type": bool, "default": False},
         "custom_uuid_mappings": {"type": dict, "default": {}},
         "batch_processing": {
             "type": dict,

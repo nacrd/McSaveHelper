@@ -91,7 +91,43 @@
     "completed": "完成",
     "failed": "失败",
     "batch_completed": "批量处理完成",
-    "batch_failed": "批量处理失败"
+    "batch_failed": "批量处理失败",
+    "settings_saved": "设置已保存",
+    "save_failed": "保存失败: {error}",
+    "settings_reset": "已重置为默认设置",
+    "changes_discarded": "更改已丢弃"
+  },
+  "settings": {
+    "general": {
+      "title": "通用设置",
+      "version_detection": "启用版本自动检测",
+      "api_timeout": "API 超时 (秒)"
+    },
+    "ui": {
+      "title": "界面设置",
+      "theme": "主题",
+      "language": "语言",
+      "auto_clear_log": "自动清除旧日志"
+    },
+    "batch": {
+      "title": "批量处理",
+      "max_concurrent": "最大并发处理数 (1‑16)",
+      "preserve_structure": "保留原始文件结构"
+    },
+    "uuid": {
+      "title": "自定义 UUID 映射",
+      "description": "在此添加玩家名与 UUID 的映射，用于离线模式下的玩家数据转换。"
+    },
+    "cleanup": {
+      "title": "清理模式",
+      "description": "转换完成后自动删除的文件/目录模式（每行一个，支持通配符）",
+      "restore_defaults": "恢复默认"
+    },
+    "actions": {
+      "save": "💾 保存设置",
+      "reset": "↻ 重置为默认",
+      "cancel": "取消"
+    }
   },
   "log_levels": {
     "INFO": "信息",

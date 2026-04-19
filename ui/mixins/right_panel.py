@@ -28,6 +28,8 @@ class RightPanelMixin:
         uuid_listbox: ctk.CTkTextbox
         custom_uuid_mappings: dict
         _on_uuid_mappings_change: Callable[[dict], None]
+        use_custom_mapping: ctk.BooleanVar
+        scan_result_text: ctk.StringVar
         
         def query_uuid(self) -> None: ...
         def _toggle_batch_mode(self) -> None: ...
@@ -35,6 +37,8 @@ class RightPanelMixin:
         def _add_uuid_mapping(self) -> None: ...
         def _update_uuid_list(self) -> None: ...
         def _clear_uuid_mappings(self) -> None: ...
+        def quick_scan_and_match(self) -> None: ...
+        def _switch_to_mappings_view(self) -> None: ...
         
         def _create_card(self, parent: Any) -> Any: ...
         def _add_section_title(self, parent: Any, text: str, icon_only: bool = False) -> None: ...
@@ -160,15 +164,49 @@ class RightPanelMixin:
         concurrent_spinbox.pack(side="left", padx=(10, 0))
         concurrent_spinbox.bind("<FocusOut>", lambda e: self._save_config())
         
-        # UUID映射管理
-        uuid_card = self._create_card(parent)
-        uuid_card.pack(fill="x")
-        self._add_section_title(uuid_card, t("right_panel.uuid_mapping"), icon_only=False)
+        # 自定义映射规则控制台
+        mapping_console_card = self._create_card(parent)
+        mapping_console_card.pack(fill="x")
+        self._add_section_title(mapping_console_card, "⚙️ 自定义映射规则", icon_only=False)
 
-        # 可视化UUID映射编辑器
-        self.uuid_table = UUIDMappingTable(
-            uuid_card,
-            mappings=self.custom_uuid_mappings,
-            on_mappings_change=self._on_uuid_mappings_change
+        # 开关：启用自定义映射规则
+        enable_frame = ctk.CTkFrame(mapping_console_card, fg_color="transparent")
+        enable_frame.pack(fill="x", padx=20, pady=(12, 8))
+        ModernCheckbox(
+            enable_frame,
+            text="启用自定义映射规则",
+            variable=self.use_custom_mapping,
+            command=self._save_config
+        ).pack(anchor="w")
+
+        # 快速扫描按钮
+        scan_frame = ctk.CTkFrame(mapping_console_card, fg_color="transparent")
+        scan_frame.pack(fill="x", padx=20, pady=(8, 8))
+        ModernButton(
+            scan_frame,
+            text="🔍 快速扫描并匹配",
+            height=38,
+            command=self.quick_scan_and_match,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"]
+        ).pack(side="left", padx=(0, 10))
+
+        # 跳转链接到映射管理视图
+        link_label = ctk.CTkLabel(
+            scan_frame,
+            text="编辑详细规则...",
+            font=ctk.CTkFont(size=12, underline=True),
+            text_color=COLORS["accent_light"],
+            cursor="hand2"
         )
-        self.uuid_table.pack(fill="x", padx=20, pady=(12, 18))
+        link_label.pack(side="left")
+        link_label.bind("<Button-1>", lambda e: self._switch_to_mappings_view())
+
+        # 扫描结果标签
+        result_label = ctk.CTkLabel(
+            mapping_console_card,
+            textvariable=self.scan_result_text,
+            font=ctk.CTkFont(size=11),
+            text_color=COLORS["text_muted"]
+        )
+        result_label.pack(anchor="w", padx=20, pady=(0, 18))

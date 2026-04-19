@@ -85,6 +85,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         
         # UUID映射管理
         self.custom_uuid_mappings = config_manager.config["custom_uuid_mappings"].copy()
+        self.use_custom_mapping = ctk.BooleanVar(value=config_manager.config.get("use_custom_mapping", False))
         
         # 设置默认值
         self.dest_path.set(os.getcwd())
@@ -97,6 +98,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         # UUID映射相关
         self.new_player_name = ctk.StringVar()
         self.new_uuid = ctk.StringVar()
+        self.scan_result_text = ctk.StringVar(value="")
 
     def build_ui(self) -> None:
         """构建侧边栏+动态视图现代化界面"""
@@ -155,7 +157,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
     def _init_mappings_view(self) -> None:
         """初始化映射管理视图（集成UUID映射编辑器）"""
-        frame = MappingsView(self.view_container, fg_color="transparent")
+        frame = MappingsView(self.view_container, controller=self, fg_color="transparent")
         frame.pack(fill="both", expand=True)
         self.views["mappings"] = frame
 
@@ -514,6 +516,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         config_manager.config["version_detection"] = self.version_detection.get()
         config_manager.config["batch_processing"]["max_concurrent"] = self.max_concurrent.get()
         config_manager.config["custom_uuid_mappings"] = self.custom_uuid_mappings
+        config_manager.config["use_custom_mapping"] = self.use_custom_mapping.get()
         config_manager.save_config()
     
     def _add_uuid_mapping(self) -> None:
@@ -551,6 +554,54 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
             self.uuid_listbox.insert("end", "暂无自定义UUID映射\n")
         
         self.uuid_listbox.configure(state="disabled")
+    
+    def quick_scan_and_match(self) -> None:
+        """快速扫描当前选中的世界存档，自动填充映射表"""
+        from core.uuid_utils import load_usercache
+        from pathlib import Path
+        
+        src_path = self.src_path.get()
+        if not src_path or not Path(src_path).exists():
+            messagebox.showwarning("警告", "请先选择一个有效的客户端存档目录")
+            return
+        
+        world_path = Path(src_path)
+        cache = load_usercache(world_path)
+        if not cache:
+            self.scan_result_text.set("未找到玩家缓存数据")
+            self.log_msg("扫描完成：未找到玩家缓存数据", "WARN")
+            return
+        
+        # 为每个缓存条目生成离线UUID映射
+        new_mappings = {}
+        for uuid_str, player_name in cache.items():
+            # 使用离线UUID作为映射值
+            from core.uuid_utils import get_offline_uuid_str
+            offline_uuid = get_offline_uuid_str(player_name)
+            new_mappings[player_name] = offline_uuid
+        
+        # 合并到现有映射（不覆盖已有条目）
+        updated = 0
+        for player_name, uuid in new_mappings.items():
+            if player_name not in self.custom_uuid_mappings:
+                self.custom_uuid_mappings[player_name] = uuid
+                updated += 1
+        
+        if updated > 0:
+            self._save_config()
+            self._update_uuid_list()
+            # 通知映射管理视图更新（如果已加载）
+            if "mappings" in self.views:
+                mappings_view = self.views["mappings"]
+                if hasattr(mappings_view, "refresh_mappings"):
+                    mappings_view.refresh_mappings()
+        
+        self.scan_result_text.set(f"已找到 {len(cache)} 个玩家，新增 {updated} 个映射")
+        self.log_msg(f"快速扫描完成：找到 {len(cache)} 个玩家，新增 {updated} 个映射", "SUCCESS")
+    
+    def _switch_to_mappings_view(self) -> None:
+        """切换到映射管理视图"""
+        self._switch_view("mappings")
     
     def _on_uuid_mappings_change(self, mappings):
         """当UUID映射表格发生变化时调用"""

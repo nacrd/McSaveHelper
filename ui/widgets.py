@@ -31,6 +31,20 @@ class TerminalLikeTextbox(ctk.CTkTextbox):
         self.tag_config("header", foreground=COLORS["accent_light"])
         self.tag_config("separator", foreground=COLORS["border_light"])
 
+    def add_line(self, message: str, level: str = "info") -> None:
+        """
+        添加一行日志，并自动应用颜色标签
+        """
+        # 根据级别选择标签
+        tag = level.lower()
+        if tag not in ["info", "success", "warn", "error", "api", "timestamp", "header", "separator"]:
+            tag = "info"
+        # 插入带标签的文本
+        self.configure(state="normal")
+        self.insert("end", message + "\n", tag)
+        self.see("end")
+        self.configure(state="disabled")
+
 
 class ModernCard(ctk.CTkFrame):
     """现代化卡片组件，带有渐变背景和阴影效果"""
@@ -543,4 +557,158 @@ class InventoryGrid(ctk.CTkFrame):
         """清空网格"""
         for slot in self.slots:
             slot.configure(text="", image=None)
+
+
+class PathSelectorWidget(ctk.CTkFrame):
+    """路径选择器组件，包含标签、输入框和浏览按钮"""
     
+    def __init__(self, master, label_text, var, placeholder, browse_cmd, scan_cmd=None, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.var = var
+        self.browse_cmd = browse_cmd
+        self.scan_cmd = scan_cmd
+        
+        # 标签
+        self.label = ctk.CTkLabel(
+            self,
+            text=label_text,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        )
+        self.label.pack(anchor="w", pady=(0, 6))
+        
+        # 输入框和按钮容器
+        entry_frame = ctk.CTkFrame(self, fg_color="transparent")
+        entry_frame.pack(fill="x")
+        
+        self.entry = ModernEntry(
+            entry_frame,
+            textvariable=var,
+            placeholder_text=placeholder,
+            height=38,
+        )
+        self.entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        self.browse_btn = ModernButton(
+            entry_frame,
+            text="📂 浏览",
+            width=90,
+            height=38,
+            command=browse_cmd,
+            fg_color=COLORS["bg_secondary"],
+            hover_color=COLORS["border_light"],
+            text_color=COLORS["text_primary"]
+        )
+        self.browse_btn.pack(side="right")
+        
+        if scan_cmd:
+            self.scan_btn = ModernButton(
+                entry_frame,
+                text="🔍 扫描",
+                width=90,
+                height=38,
+                command=scan_cmd,
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_hover"]
+            )
+            self.scan_btn.pack(side="right", padx=(0, 10))
+    
+    def get_path(self):
+        return self.var.get()
+    
+    def set_path(self, path):
+        self.var.set(path)
+
+
+class LogPanelWidget(ctk.CTkFrame):
+    """日志面板组件，包含标题、清空按钮和可滚动的文本框"""
+    
+    def __init__(self, master, title="日志", height=200, clear_cmd=None, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        
+        # 标题栏
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 8))
+        
+        ctk.CTkLabel(
+            header,
+            text=title,
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=COLORS["text_primary"]
+        ).pack(side="left")
+        
+        if clear_cmd:
+            ModernButton(
+                header,
+                text="🗑️ 清空",
+                width=80,
+                height=32,
+                command=clear_cmd,
+                fg_color=COLORS["bg_card"],
+                hover_color=COLORS["border_light"],
+                text_color=COLORS["text_secondary"]
+            ).pack(side="right")
+        
+        self.textbox = TerminalLikeTextbox(self, height=height)
+        self.textbox.pack(fill="both", expand=True)
+    
+    def log(self, message, level="info"):
+        """添加日志消息"""
+        self.textbox.add_line(message, level)
+    
+    def clear(self):
+        """清空日志"""
+        self.textbox.configure(state="normal")
+        self.textbox.delete("1.0", "end")
+        self.textbox.configure(state="disabled")
+
+
+class ModeSelectorWidget(ctk.CTkFrame):
+    """模式选择器组件（快速/完整模式）"""
+    
+    def __init__(self, master, var, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.var = var
+        
+        ctk.CTkRadioButton(
+            self,
+            text="⚡ 快速模式",
+            variable=self.var,
+            value="fast",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            hover_color=COLORS["accent_light"]
+        ).pack(side="left", padx=(0, 30))
+        
+        ctk.CTkRadioButton(
+            self,
+            text="🧠 完整模式",
+            variable=self.var,
+            value="full",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            hover_color=COLORS["accent_light"]
+        ).pack(side="left")
+    
+    def get_mode(self):
+        return self.var.get()
+    
+    def set_mode(self, mode):
+        self.var.set(mode)
+
+
+class OptionGroupWidget(ctk.CTkFrame):
+    """选项组组件，用于显示一组复选框"""
+    
+    def __init__(self, master, options, **kwargs):
+        """
+        options: 列表，每个元素为 (变量, 文本)
+        """
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.options = []
+        
+        for var, text in options:
+            chk = ModernCheckbox(self, text=text, variable=var)
+            chk.pack(anchor="w", pady=6)
+            self.options.append((var, chk))
+    
+    def get_values(self):
+        return {text: var.get() for var, text in self.options}

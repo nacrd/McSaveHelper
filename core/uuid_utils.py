@@ -172,7 +172,8 @@ def build_mappings(
     new_uuids = set()
     
     # 处理自定义UUID映射
-    custom_mappings = config_manager.config["custom_uuid_mappings"]
+    use_custom = config_manager.config.get("use_custom_mapping", False)
+    custom_mappings = config_manager.config["custom_uuid_mappings"] if use_custom else {}
     if custom_mappings:
         log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
     
