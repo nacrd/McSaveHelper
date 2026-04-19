@@ -127,7 +127,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
 
         # 视图容器
         self.view_container = ctk.CTkFrame(main_content, fg_color="transparent")
-        self.view_container.pack(side="left", fill="both", expand=True, padx=30, pady=20)
+        self.view_container.pack(side="left", fill="both", expand=True, padx=32, pady=24)
 
         # 存储视图帧的字典
         self.views: dict[str, ctk.CTkFrame] = {}

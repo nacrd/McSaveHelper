@@ -37,7 +37,7 @@ class ModernCard(ctk.CTkFrame):
     def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
-            corner_radius=16,
+            corner_radius=8,
             fg_color=COLORS["bg_card"],
             border_width=1,
             border_color=COLORS["border"],
@@ -55,7 +55,7 @@ class ModernButton(ctk.CTkButton):
     def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
-            corner_radius=10,
+            corner_radius=6,
             font=ctk.CTkFont(size=13, weight="bold"),
             **kwargs,
         )
@@ -66,7 +66,7 @@ class ModernEntry(ctk.CTkEntry):
     def __init__(self, master: Any, **kwargs: Any) -> None:
         super().__init__(
             master,
-            corner_radius=8,
+            corner_radius=6,
             border_width=1,
             border_color=COLORS["border"],
             **kwargs,

@@ -30,7 +30,7 @@ class Sidebar(ctk.CTkFrame):
         """
         super().__init__(
             master,
-            fg_color=COLORS["bg_secondary"],
+            fg_color=COLORS["bg_primary"],
             corner_radius=0,
             width=180,  # 侧边栏宽度
             **kwargs
