@@ -126,6 +126,7 @@ class ExplorerView(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent", **kwargs)
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
+        self.player_uuid_map: Dict[str, str] = {}
         self._build_ui()
     
     def _build_ui(self) -> None:
@@ -217,7 +218,17 @@ class ExplorerView(ctk.CTkFrame):
             state="disabled",
             command=self._on_player_selected
         )
-        self.player_selector.pack(fill="x", pady=(0, 20))
+        self.player_selector.pack(fill="x", pady=(0, 10))
+        
+        # 导入 usercache.json 按钮
+        import_btn = ctk.CTkButton(
+            left_panel,
+            text="导入 usercache.json",
+            command=self._import_usercache,
+            font=ctk.CTkFont(size=12),
+            height=30
+        )
+        import_btn.pack(fill="x", pady=(0, 20))
         
         # 玩家属性卡片
         self.hud_card = PlayerHUDCard(left_panel)
@@ -329,6 +340,29 @@ class ExplorerView(ctk.CTkFrame):
             self._log(f"加载失败: {e}")
             messagebox.showerror("加载错误", f"无法加载存档:\n{e}")
     
+    def _import_usercache(self) -> None:
+        """导入 usercache.json 文件"""
+        if not self.world_session:
+            messagebox.showwarning("未加载存档", "请先加载存档")
+            return
+        from tkinter import filedialog
+        from pathlib import Path
+        path = filedialog.askopenfilename(
+            title="选择 usercache.json 文件",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        session = self.world_session
+        try:
+            imported = session.import_usercache(Path(path))
+            self._log(f"已导入 {imported} 个玩家名称映射")
+            # 刷新玩家选择器
+            self.set_world_session(session)  # 这会重新计算显示名称
+        except Exception as e:
+            self._log(f"导入失败: {e}")
+            messagebox.showerror("导入错误", f"导入失败:\n{e}")
+    
     def _refresh_heatmap(self) -> None:
         """刷新热力图数据"""
         if self.world_session:
@@ -345,10 +379,19 @@ class ExplorerView(ctk.CTkFrame):
             self.nbt_tree.search(query)
             self._log(f"搜索 NBT: {query}")
     
-    def _on_player_selected(self, uuid: str) -> None:
-        """当玩家被选择时更新显示"""
-        if not self.world_session or uuid == "":
+    def _on_player_selected(self, selection: str) -> None:
+        """当玩家被选择时更新显示（selection 为显示字符串）"""
+        if not self.world_session or selection == "":
             return
+        # 将显示字符串转换为 UUID
+        uuid = self.player_uuid_map.get(selection, selection)
+        # 如果 selection 是 UUID 格式（不含括号），也可能直接是 UUID
+        if uuid == selection and "(" in selection:
+            # 尝试从 "Name (UUID)" 中提取 UUID
+            import re
+            match = re.search(r'\(([0-9a-f\-]{36})\)', selection)
+            if match:
+                uuid = match.group(1)
         self.current_uuid = uuid
         player_data = self.world_session.get_player_data(uuid)
         if player_data:
@@ -400,14 +443,29 @@ class ExplorerView(ctk.CTkFrame):
         self.world_path_label.configure(
             text=f"存档: {session.world_path.name}"
         )
-        uuids = session.get_player_uuids()
+        # 获取玩家名称映射
+        name_map = session.get_player_names()
+        # 调试：打印名称映射
+        print(f"DEBUG name_map: {name_map}")
+        uuids = list(name_map.keys())
+        display_values = []
+        self.player_uuid_map.clear()
+        for uuid in uuids:
+            name = name_map[uuid]
+            formatted_uuid = session._format_uuid_with_hyphens(uuid)
+            if name:
+                display = f"{name} ({formatted_uuid})"
+            else:
+                display = f"未知玩家 ({formatted_uuid})"
+            display_values.append(display)
+            self.player_uuid_map[display] = uuid
         self.player_selector.configure(
-            values=uuids,
+            values=display_values,
             state="readonly" if uuids else "disabled"
         )
         if uuids:
-            self.player_selector.set(uuids[0])
-            self._on_player_selected(uuids[0])
+            self.player_selector.set(display_values[0])
+            self._on_player_selected(display_values[0])
         # 刷新热力图
         self._refresh_heatmap()
         self._log(f"已加载存档，发现 {len(uuids)} 个玩家")
