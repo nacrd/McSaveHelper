@@ -16,7 +16,7 @@ a = Analysis(
     binaries=[],                   # 留空，让 PyInstaller 自动处理 DLL
     datas=datas,                   # 包含 anvil 的数据文件
     hiddenimports=[                # 显式导入可能被遗漏的模块
-        'customtkinter',
+        'flet',
         'nbtlib',
         'requests',
         'send2trash',

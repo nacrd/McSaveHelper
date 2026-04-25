@@ -1,4 +1,4 @@
-customtkinter
+flet>=0.84.0
 nbtlib
 anvil-parser2
 requests

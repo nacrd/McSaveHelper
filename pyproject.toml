@@ -15,7 +15,7 @@ strict_equality = true
 module = [
     "nbtlib.*",
     "anvil.*",
-    "customtkinter.*",
+    "flet.*",
     "requests.*"
 ]
 ignore_missing_imports = true

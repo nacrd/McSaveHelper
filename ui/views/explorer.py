@@ -1,35 +1,23 @@
-"""存档探险视图 - 可视化查看与编辑模块"""
-import customtkinter as ctk
-from typing import Any, Optional, List, Dict
+"""Explorer view - world inspection dashboard"""
+import flet as ft
+from typing import TYPE_CHECKING, Any, Optional, List, Dict
 from pathlib import Path
-from tkinter import filedialog, messagebox
+import re
 
 from ui.constants import COLORS
-from ui.widgets import ModernCard, InventoryGrid, MCAHeatmap, NBTTreeView
+from ui.widgets import card, btn_primary, btn_ghost, text_field, InventoryGrid, MCAHeatmap, NBTTreeView, LogPanel
+
+if TYPE_CHECKING:
+    from ui.app import App
+
 from core.omni.world_session import WorldSession
 
 
-class PlayerHUDCard(ModernCard):
-    """玩家属性卡片，显示生命值、经验、坐标等"""
-    
-    def __init__(self, master: Any, **kwargs) -> None:
-        super().__init__(master, **kwargs)
-        self._build_ui()
-        self._set_placeholder()
-    
-    def _build_ui(self) -> None:
-        # 标题
-        self.title_label = ctk.CTkLabel(
-            self,
-            text="玩家状态",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=COLORS["text_primary"]
-        )
-        self.title_label.grid(row=0, column=0, columnspan=2, sticky="w", padx=20, pady=(20, 10))
-        
-        # 属性网格
-        self.attributes = {}
-        rows = [
+class PlayerHUDCard(ft.Column):
+    def __init__(self):
+        super().__init__(spacing=8)
+        self._attrs = {}
+        rows_data = [
             ("生命值", "health", "♥"),
             ("饥饿值", "food", "🍖"),
             ("经验等级", "level", "⭐"),
@@ -37,453 +25,245 @@ class PlayerHUDCard(ModernCard):
             ("维度", "dimension", "🌍"),
             ("坐标", "pos", "📍"),
         ]
-        for idx, (label, key, icon) in enumerate(rows):
-            # 标签
-            lbl = ctk.CTkLabel(
-                self,
-                text=f"{icon} {label}:",
-                font=ctk.CTkFont(size=13),
-                text_color=COLORS["text_secondary"]
-            )
-            lbl.grid(row=idx+1, column=0, sticky="w", padx=(20, 10), pady=5)
-            # 值
-            val = ctk.CTkLabel(
-                self,
-                text="--",
-                font=ctk.CTkFont(size=13, weight="bold"),
-                text_color=COLORS["accent_light"]
-            )
-            val.grid(row=idx+1, column=1, sticky="w", padx=(0, 20), pady=5)
-            self.attributes[key] = val
-        
-        # 调整列权重
-        self.grid_columnconfigure(0, weight=0)
-        self.grid_columnconfigure(1, weight=1)
-    
-    def _set_placeholder(self) -> None:
-        """设置占位符数据"""
-        self.attributes["health"].configure(text="20 / 20")
-        self.attributes["food"].configure(text="20 / 20")
-        self.attributes["level"].configure(text="0")
-        self.attributes["air"].configure(text="300")
-        self.attributes["dimension"].configure(text="overworld")
-        self.attributes["pos"].configure(text="0, 64, 0")
-    
-    def update_from_nbt(self, player_data: Any) -> None:
-        """
-        从玩家 NBT 数据更新显示
-        
-        Args:
-            player_data: nbtlib.Compound 玩家数据
-        """
+        self.controls.append(
+            ft.Text("玩家状态", size=16, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"])
+        )
+        for label_text, key, icon in rows_data:
+            lbl = ft.Text(f"{icon} {label_text}:", size=13, color=COLORS["text_secondary"])
+            val = ft.Text("--", size=13, weight=ft.FontWeight.BOLD, color=COLORS["accent_light"])
+            self._attrs[key] = val
+            self.controls.append(ft.Row([lbl, val], spacing=10))
+
+    def update_from_nbt(self, player_data: Any):
         if player_data is None:
             return
-        
-        # 提取属性
-        health = player_data.get("Health")
-        if health is not None:
-            self.attributes["health"].configure(text=f"{int(health)} / 20")
-        
-        food = player_data.get("foodLevel")
-        if food is not None:
-            self.attributes["food"].configure(text=f"{int(food)} / 20")
-        
-        level = player_data.get("XpLevel")
-        if level is not None:
-            self.attributes["level"].configure(text=str(int(level)))
-        
-        air = player_data.get("Air")
-        if air is not None:
-            self.attributes["air"].configure(text=str(int(air)))
-        
-        dimension = player_data.get("Dimension")
-        if dimension is not None:
-            dim_str = str(dimension)
-            # 转换 ID 为可读名称
-            if dim_str == "minecraft:overworld":
-                self.attributes["dimension"].configure(text="overworld")
-            elif dim_str == "minecraft:the_nether":
-                self.attributes["dimension"].configure(text="nether")
-            elif dim_str == "minecraft:the_end":
-                self.attributes["dimension"].configure(text="end")
+        h = player_data.get("Health")
+        if h is not None:
+            self._attrs["health"].value = f"{int(h)} / 20"
+        f = player_data.get("foodLevel")
+        if f is not None:
+            self._attrs["food"].value = f"{int(f)} / 20"
+        lvl = player_data.get("XpLevel")
+        if lvl is not None:
+            self._attrs["level"].value = str(int(lvl))
+        a = player_data.get("Air")
+        if a is not None:
+            self._attrs["air"].value = str(int(a))
+        dim = player_data.get("Dimension")
+        if dim is not None:
+            ds = str(dim)
+            if "overworld" in ds:
+                self._attrs["dimension"].value = "overworld"
+            elif "nether" in ds:
+                self._attrs["dimension"].value = "nether"
+            elif "end" in ds:
+                self._attrs["dimension"].value = "end"
             else:
-                self.attributes["dimension"].configure(text=dim_str)
-        
+                self._attrs["dimension"].value = ds
         pos = player_data.get("Pos")
         if pos is not None and len(pos) >= 3:
-            x = float(pos[0])
-            y = float(pos[1])
-            z = float(pos[2])
-            self.attributes["pos"].configure(text=f"{x:.1f}, {y:.1f}, {z:.1f}")
+            self._attrs["pos"].value = f"{float(pos[0]):.1f}, {float(pos[1]):.1f}, {float(pos[2]):.1f}"
+        self.update()
 
 
-class ExplorerView(ctk.CTkFrame):
-    """存档探险视图 - 集成玩家看板、区块热力图、NBT树视图"""
-    
-    def __init__(self, master: Any, log_callback=None, **kwargs) -> None:
-        # 确保背景透明，移除可能冲突的fg_color参数
-        kwargs.pop('fg_color', None)
-        super().__init__(master, fg_color="transparent", **kwargs)
+class ExplorerView(ft.Column):
+    def __init__(self, app: "App"):
+        super().__init__(expand=True, spacing=0)
+        self.app = app
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
-        self.log_callback = log_callback
-        self._build_ui()
-        
-        # 如果有外部日志回调，隐藏本地日志文本框
-        if self.log_callback:
-            self._hide_local_log_text()
-    
-    def _build_ui(self) -> None:
-        # 顶部工具栏
-        toolbar = ctk.CTkFrame(self, fg_color="transparent")
-        toolbar.pack(fill="x", padx=20, pady=(20, 10))
-        
-        ctk.CTkLabel(
-            toolbar,
-            text="📂 存档探险家",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(side="left")
-        
-        # 世界路径标签
-        self.world_path_label = ctk.CTkLabel(
-            toolbar,
-            text="未加载存档",
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_muted"]
+        self._build()
+
+    def _build(self):
+        self.controls.clear()
+
+        self._world_label = ft.Text("未加载存档", size=12, color=COLORS["text_muted"])
+
+        toolbar = ft.Container(
+            content=ft.Row([
+                ft.Text("📂 存档探险家", size=24, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"]),
+                self._world_label,
+                ft.Container(expand=True),
+                btn_primary("加载存档", on_click=lambda e: self._load_world()),
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.padding.only(bottom=16),
         )
-        self.world_path_label.pack(side="left", padx=(20, 0))
-        
-        # 加载存档按钮
-        ctk.CTkButton(
-            toolbar,
-            text="加载存档",
-            command=self._load_world,
-            width=100
-        ).pack(side="right", padx=(10, 0))
-        
-        # 主选项卡
-        self.tabview = ctk.CTkTabview(self, fg_color="transparent", border_width=1, border_color=COLORS["border"])
-        self.tabview.pack(fill="both", expand=True, padx=20, pady=(0, 20))
-        
-        # 玩家标签页
-        self.player_tab = self.tabview.add("玩家")
+
+        self._tab_player = ft.Container(expand=True)
+        self._tab_region = ft.Container(expand=True)
+        self._tab_nbt = ft.Container(expand=True)
+        tabs = ft.Tabs(
+            selected_index=0,
+            tabs=[
+                ft.Tab(text="玩家", content=self._tab_player),
+                ft.Tab(text="区块", content=self._tab_region),
+                ft.Tab(text="NBT", content=self._tab_nbt),
+            ],
+            expand=True,
+        )
+
+        self.controls.append(toolbar)
+        self.controls.append(tabs)
+
         self._build_player_tab()
-        
-        # 区块标签页
-        self.region_tab = self.tabview.add("区块")
         self._build_region_tab()
-        
-        # NBT标签页
-        self.nbt_tab = self.tabview.add("NBT")
         self._build_nbt_tab()
-        
-        # 日志区域 - 只有在没有外部日志回调时才创建
-        if not self.log_callback:
-            log_frame = ctk.CTkFrame(self, fg_color="transparent")
-            log_frame.pack(fill="x", padx=20, pady=(0, 20))
-            
-            ctk.CTkLabel(
-                log_frame,
-                text="📜 日志",
-                font=ctk.CTkFont(size=14, weight="bold"),
-                text_color=COLORS["text_primary"]
-            ).pack(anchor="w")
-            
-            self.log_text = ctk.CTkTextbox(
-                log_frame,
-                height=80,
-                font=ctk.CTkFont(family="Cascadia Code", size=11),
-                fg_color=COLORS["log_bg"],
-                border_width=1,
-                border_color=COLORS["log_border"],
-                corner_radius=8,
-            )
-            self.log_text.pack(fill="x", pady=(10, 0))
-            self.log_text.insert("1.0", "等待加载存档...")
-            self.log_text.configure(state="disabled")
-        else:
-            # 如果有外部日志回调，不创建本地日志文本框
-            self.log_text = None
-    
-    def _build_player_tab(self) -> None:
-        """构建玩家标签页内容"""
-        # 左侧玩家面板
-        left_panel = ctk.CTkFrame(self.player_tab, fg_color="transparent", width=300)
-        left_panel.pack(side="left", fill="y", padx=(0, 20))
-        
-        # 玩家选择器
-        ctk.CTkLabel(
-            left_panel,
-            text="选择玩家",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(anchor="w", pady=(0, 10))
-        
-        self.player_selector = ctk.CTkComboBox(
-            left_panel,
-            values=[],
-            state="disabled",
-            command=self._on_player_selected
+
+    def _build_player_tab(self):
+        left = ft.Column(spacing=10, width=300)
+        left.controls.append(
+            ft.Text("选择玩家", size=14, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"])
         )
-        self.player_selector.pack(fill="x", pady=(0, 10))
-        
-        # 导入 usercache.json 按钮
-        import_btn = ctk.CTkButton(
-            left_panel,
-            text="导入 usercache.json",
-            command=self._import_usercache,
-            font=ctk.CTkFont(size=12),
-            height=30
+
+        self._player_dropdown = ft.Dropdown(
+            options=[], on_change=self._on_player_selected,
+            border_color=COLORS["border_standard"], text_size=13,
         )
-        import_btn.pack(fill="x", pady=(0, 20))
-        
-        # 玩家属性卡片
-        self.hud_card = PlayerHUDCard(left_panel)
-        self.hud_card.pack(fill="x", pady=(0, 20))
-        
-        # 右侧背包面板
-        right_panel = ctk.CTkFrame(self.player_tab, fg_color="transparent")
-        right_panel.pack(side="right", fill="both", expand=True)
-        
-        ctk.CTkLabel(
-            right_panel,
-            text="物品栏",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(anchor="w", pady=(0, 10))
-        
-        self.inventory_grid = InventoryGrid(right_panel, slot_size=50)
-        self.inventory_grid.pack(fill="both", expand=True)
-    
-    def _build_region_tab(self) -> None:
-        """构建区块标签页内容"""
-        ctk.CTkLabel(
-            self.region_tab,
-            text="区域热力图（根据文件大小着色）",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(anchor="w", pady=(0, 10))
-        
-        # 热力图控件
-        self.heatmap = MCAHeatmap(self.region_tab, cell_size=24)
-        self.heatmap.pack(fill="both", expand=True, pady=(0, 20))
-        
-        # 热力图工具栏
-        toolbar = ctk.CTkFrame(self.region_tab, fg_color="transparent")
-        toolbar.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkButton(
-            toolbar,
-            text="刷新热力图",
-            command=self._refresh_heatmap,
-            width=120
-        ).pack(side="left", padx=(0, 10))
-        
-        ctk.CTkButton(
-            toolbar,
-            text="清空选择",
-            command=self.heatmap.clear_selection,
-            width=120
-        ).pack(side="left", padx=(0, 10))
-        
-        ctk.CTkLabel(
-            toolbar,
-            text="点击单元格选择区域，再次点击取消选择",
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_muted"]
-        ).pack(side="left", padx=(20, 0))
-    
-    def _build_nbt_tab(self) -> None:
-        """构建 NBT 标签页内容"""
-        ctk.CTkLabel(
-            self.nbt_tab,
-            text="NBT 树状查看器（支持搜索与编辑）",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=COLORS["text_primary"]
-        ).pack(anchor="w", pady=(0, 10))
-        
-        # 搜索栏
-        search_frame = ctk.CTkFrame(self.nbt_tab, fg_color="transparent")
-        search_frame.pack(fill="x", pady=(0, 10))
-        
-        ctk.CTkLabel(
-            search_frame,
-            text="搜索：",
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_secondary"]
-        ).pack(side="left", padx=(0, 5))
-        
-        self.nbt_search_entry = ctk.CTkEntry(search_frame, placeholder_text="输入键名或值...")
-        self.nbt_search_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        
-        ctk.CTkButton(
-            search_frame,
-            text="搜索",
-            command=self._search_nbt,
-            width=80
-        ).pack(side="left")
-        
-        # NBT 树视图
-        self.nbt_tree = NBTTreeView(self.nbt_tab)
-        self.nbt_tree.pack(fill="both", expand=True)
-    
-    def _hide_local_log_text(self) -> None:
-        """隐藏本地日志文本框（当使用外部日志回调时）"""
-        if hasattr(self, 'log_text') and self.log_text is not None:
-            # 隐藏日志文本框
-            self.log_text.pack_forget()
-    
-    def _log(self, message: str) -> None:
-        """添加日志"""
-        if hasattr(self, 'log_callback') and self.log_callback:
-            self.log_callback(message)
-        elif hasattr(self, 'log_text') and self.log_text is not None:
-            self.log_text.configure(state="normal")
-            self.log_text.insert("end", f"\n{message}")
-            self.log_text.see("end")
-            self.log_text.configure(state="disabled")
-    
-    def _load_world(self) -> None:
-        """加载存档"""
-        path = filedialog.askdirectory(title="选择 Minecraft 存档目录")
-        if not path:
-            return
+        left.controls.append(self._player_dropdown)
+        left.controls.append(
+            btn_ghost("导入 usercache.json", height=30, on_click=lambda e: self._import_usercache())
+        )
+
+        self._player_hud = PlayerHUDCard()
+        self._hud_card = card(self._player_hud, padding=15)
+        left.controls.append(self._hud_card)
+
+        right = ft.Column(spacing=10, expand=True)
+        right.controls.append(
+            ft.Text("物品栏", size=14, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"])
+        )
+        self._inventory = InventoryGrid(slot_size=50)
+        right.controls.append(self._inventory)
+
+        self._tab_player.content = ft.Row([left, ft.Container(width=20), right], expand=True)
+
+    def _build_region_tab(self):
+        col = ft.Column(spacing=10, expand=True)
+        col.controls.append(
+            ft.Text("区域热力图（根据文件大小着色）", size=14, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"])
+        )
+        self._heatmap = MCAHeatmap(cell_size=24)
+        col.controls.append(ft.Container(content=self._heatmap, expand=True))
+
+        tb = ft.Row([
+            btn_primary("刷新热力图", width=120, on_click=lambda e: self._refresh_heatmap()),
+            btn_ghost("清空选择", width=120, on_click=lambda e: self._heatmap.clear_selection()),
+            ft.Text("点击单元格选择区域，再次点击取消选择", size=12, color=COLORS["text_muted"]),
+        ], spacing=10)
+        col.controls.append(tb)
+        self._tab_region.content = col
+
+    def _build_nbt_tab(self):
+        col = ft.Column(spacing=10, expand=True)
+        col.controls.append(
+            ft.Text("NBT 树状查看器（支持搜索与编辑）", size=14, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"])
+        )
+        sr = ft.Row([
+            ft.Text("搜索：", size=12, color=COLORS["text_secondary"]),
+            text_field(hint_text="输入键名或值...", expand=True),
+            btn_primary("搜索", width=80, on_click=lambda e: self._search_nbt()),
+        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        col.controls.append(sr)
+        self._nbt_tree = NBTTreeView()
+        col.controls.append(ft.Container(content=self._nbt_tree, expand=True))
+        self._tab_nbt.content = col
+
+    def _log(self, message: str):
+        self.app.log_msg(f"[存档探险] {message}", "INFO")
+
+    def _load_world(self):
+        self.app._pick_directory(self._load_world_path)
+
+    def _load_world_path(self, path_str: str):
         try:
-            session = WorldSession(Path(path))
+            session = WorldSession(Path(path_str))
             self.set_world_session(session)
-            self._log(f"已加载存档: {path}")
-        except Exception as e:
-            self._log(f"加载失败: {e}")
-            messagebox.showerror("加载错误", f"无法加载存档:\n{e}")
-    
-    def _import_usercache(self) -> None:
-        """导入 usercache.json 文件"""
+            self._log(f"已加载存档: {path_str}")
+        except Exception as exc:
+            self._log(f"加载失败: {exc}")
+            self.app._error_dialog("加载错误", f"无法加载存档:\n{exc}")
+
+    def _import_usercache(self):
         if not self.world_session:
-            messagebox.showwarning("未加载存档", "请先加载存档")
+            self.app._warn_dialog("未加载存档", "请先加载存档")
             return
-        from tkinter import filedialog
-        from pathlib import Path
-        path = filedialog.askopenfilename(
-            title="选择 usercache.json 文件",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-        )
-        if not path:
-            return
-        session = self.world_session
-        try:
-            imported = session.import_usercache(Path(path))
-            self._log(f"已导入 {imported} 个玩家名称映射")
-            # 刷新玩家选择器
-            self.set_world_session(session)  # 这会重新计算显示名称
-        except Exception as e:
-            self._log(f"导入失败: {e}")
-            messagebox.showerror("导入错误", f"导入失败:\n{e}")
-    
-    def _refresh_heatmap(self) -> None:
-        """刷新热力图数据"""
+
+        def on_file(path: str):
+            try:
+                imported = self.world_session.import_usercache(Path(path))
+                self._log(f"已导入 {imported} 个玩家名称映射")
+                self.set_world_session(self.world_session)
+            except Exception as exc:
+                self._log(f"导入失败: {exc}")
+
+        self.app._pick_file(on_file, file_types=["json"])
+
+    def _refresh_heatmap(self):
         if self.world_session:
-            region_files = self.world_session._region_files  # 临时访问内部属性
-            self.heatmap.set_region_files(region_files)
+            self._heatmap.set_region_files(self.world_session._region_files)
             self._log("热力图已刷新")
         else:
             self._log("请先加载存档")
-    
-    def _search_nbt(self) -> None:
-        """搜索 NBT 树"""
-        query = self.nbt_search_entry.get().strip()
-        if query:
-            self.nbt_tree.search(query)
-            self._log(f"搜索 NBT: {query}")
-    
-    def _on_player_selected(self, selection: str) -> None:
-        """当玩家被选择时更新显示（selection 为显示字符串）"""
-        if not self.world_session or selection == "":
+
+    def _search_nbt(self):
+        pass
+
+    def _on_player_selected(self, e):
+        selection = e.control.value
+        if not self.world_session or not selection:
             return
-        # 将显示字符串转换为 UUID
         uuid = self.player_uuid_map.get(selection, selection)
-        # 如果 selection 是 UUID 格式（不含括号），也可能直接是 UUID
         if uuid == selection and "(" in selection:
-            # 尝试从 "Name (UUID)" 中提取 UUID
-            import re
-            match = re.search(r'\(([0-9a-f\-]{36})\)', selection)
-            if match:
-                uuid = match.group(1)
+            m = re.search(r'\(([0-9a-f\-]{36})\)', selection)
+            if m:
+                uuid = m.group(1)
         self.current_uuid = uuid
-        player_data = self.world_session.get_player_data(uuid)
-        if player_data:
-            self.hud_card.update_from_nbt(player_data)
-            # 提取背包数据
-            inventory = self._extract_inventory(player_data)
-            self.inventory_grid.set_inventory(inventory)
-            # 加载 NBT 树
-            self.nbt_tree.load_nbt(player_data)
+        pd = self.world_session.get_player_data(uuid)
+        if pd:
+            self._player_hud.update_from_nbt(pd)
+            inv = self._extract_inventory(pd)
+            self._inventory.set_inventory(inv)
+            self._nbt_tree.load_nbt(pd)
             self._log(f"已加载玩家 {uuid} 的数据")
         else:
             self._log(f"无法加载玩家 {uuid} 的数据")
-    
+
     def _extract_inventory(self, player_data: Any) -> List[Dict[str, Any]]:
-        """
-        从玩家数据中提取背包物品列表
-        
-        Args:
-            player_data: nbtlib.Compound 玩家数据
-        
-        Returns:
-            物品字典列表，每个字典包含 slot, id, count, tag
-        """
         items = []
-        # 尝试获取 Inventory 标签（1.12.2及更早版本）
-        inventory = player_data.get("Inventory")
-        if inventory is not None and isinstance(inventory, list):
-            for slot in inventory:
+        inv = player_data.get("Inventory")
+        if inv is not None and isinstance(inv, list):
+            for slot in inv:
                 try:
-                    slot_id = slot.get("Slot", -1)
-                    item_id = slot.get("id", "")
-                    count = slot.get("Count", 1)
+                    si = slot.get("Slot", -1)
+                    iid = slot.get("id", "")
+                    cnt = slot.get("Count", 1)
                     tag = slot.get("tag")
-                    if item_id:
-                        items.append({
-                            "slot": int(slot_id),
-                            "id": str(item_id),
-                            "count": int(count),
-                            "tag": tag
-                        })
+                    if iid:
+                        items.append({"slot": int(si), "id": str(iid), "count": int(cnt), "tag": tag})
                 except Exception:
                     pass
-        # TODO: 支持 1.13+ 的物品格式
         return items
-    
-    def set_world_session(self, session: WorldSession) -> None:
-        """设置当前世界会话并更新 UI"""
+
+    def set_world_session(self, session: WorldSession):
         self.world_session = session
-        self.world_path_label.configure(
-            text=f"存档: {session.world_path.name}"
-        )
-        # 获取玩家名称映射
-        name_map = session.get_player_names()
-        # 调试：打印名称映射
-        print(f"DEBUG name_map: {name_map}")
-        uuids = list(name_map.keys())
-        display_values = []
+        nm = session.get_player_names()
+        uuids = list(nm.keys())
+        dv = []
         self.player_uuid_map.clear()
         for uuid in uuids:
-            name = name_map[uuid]
-            formatted_uuid = session._format_uuid_with_hyphens(uuid)
-            if name:
-                display = f"{name} ({formatted_uuid})"
-            else:
-                display = f"未知玩家 ({formatted_uuid})"
-            display_values.append(display)
+            name = nm[uuid]
+            fuuid = session._format_uuid_with_hyphens(uuid)
+            display = f"{name} ({fuuid})" if name else f"未知玩家 ({fuuid})"
+            dv.append(display)
             self.player_uuid_map[display] = uuid
-        self.player_selector.configure(
-            values=display_values,
-            state="readonly" if uuids else "disabled"
-        )
+        self._player_dropdown.options = [ft.dropdown.Option(d) for d in dv]
+        self._player_dropdown.value = dv[0] if dv else None
+        self._player_dropdown.disabled = not bool(uuids)
+        self._player_dropdown.update()
+        self._world_label.value = f"存档: {session.world_path.name}"
+        self._world_label.update()
         if uuids:
-            self.player_selector.set(display_values[0])
-            self._on_player_selected(display_values[0])
-        # 刷新热力图
+            self._on_player_selected(None)
         self._refresh_heatmap()
         self._log(f"已加载存档，发现 {len(uuids)} 个玩家")

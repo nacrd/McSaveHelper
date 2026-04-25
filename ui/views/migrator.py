@@ -1,34 +1,225 @@
-"""批量迁移视图 (整合 LeftPanelMixin + RightPanelMixin)"""
-import customtkinter as ctk
-from typing import Any
+"""Migrator view - main conversion interface"""
+import flet as ft
+from typing import TYPE_CHECKING
 from ui.constants import COLORS
+from ui.widgets import card, section_title, label, btn_primary, btn_ghost, text_field, checkbox, LogPanel
+
+if TYPE_CHECKING:
+    from ui.app import App
 
 
-class MigratorView(ctk.CTkFrame):
-    """迁移工具主视图，包含左右两个面板"""
-    
-    def __init__(self, master: Any, controller: Any, **kwargs) -> None:
-        """
-        初始化迁移视图
-        
-        Args:
-            master: 父容器
-            controller: 拥有 LeftPanelMixin 和 RightPanelMixin 的控制器 (通常是 App 实例)
-        """
-        # 从 kwargs 中移除 fg_color，避免重复传递
-        fg_color = kwargs.pop("fg_color", "transparent")
-        super().__init__(master, fg_color=fg_color, **kwargs)
-        self.controller = controller
-        self._build_ui()
-    
-    def _build_ui(self) -> None:
-        """构建左右面板"""
-        # 左右两列容器
-        left_panel = ctk.CTkFrame(self, fg_color="transparent")
-        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 18))
-        right_panel = ctk.CTkFrame(self, fg_color="transparent")
-        right_panel.pack(side="left", fill="both", expand=True)
-        
-        # 调用控制器的 mixin 方法构建面板
-        self.controller._build_left_panel(left_panel)
-        self.controller._build_right_panel(right_panel)
+class MigratorView(ft.Column):
+    def __init__(self, app: "App"):
+        super().__init__(expand=True, spacing=18, scroll=ft.ScrollMode.AUTO)
+        self.app = app
+        self._build()
+
+    def _build(self):
+        self.controls.clear()
+        content = ft.Row([
+            self._build_left(),
+            ft.Container(width=18),
+            self._build_right(),
+        ], expand=True, vertical_alignment=ft.CrossAxisAlignment.START)
+        self.controls.append(content)
+
+    def _build_left(self) -> ft.Column:
+        col = ft.Column(spacing=18, expand=True)
+
+        # Directory config card
+        dir_card = card(ft.Column(spacing=0, expand=True), padding=0)
+        dir_sections = ft.Column(spacing=0)
+        dir_sections.controls.append(section_title("📁 存档目录配置"))
+
+        self._src_field = text_field(label="客户端存档", hint_text="选择世界文件夹 (包含 level.dat)",
+                                      on_change=lambda e: setattr(self.app, 'src_path', e.control.value))
+        btn_row1 = ft.Row([self._src_field, btn_ghost("📂 浏览", width=90, height=38,
+                          on_click=lambda e: self.app.choose_src())], spacing=10)
+        dir_sections.controls.append(ft.Container(content=btn_row1, padding=ft.padding.only(left=20, right=20, bottom=8)))
+
+        self._dest_field = text_field(label="服务端根目录", hint_text="默认为程序当前目录",
+                                       on_change=lambda e: setattr(self.app, 'dest_path', e.control.value))
+        btn_row2 = ft.Row([self._dest_field, btn_ghost("📂 浏览", width=90, height=38,
+                          on_click=lambda e: self.app.choose_dest())], spacing=10)
+        dir_sections.controls.append(ft.Container(content=btn_row2, padding=ft.padding.only(left=20, right=20, bottom=8)))
+
+        self._name_field = text_field(label="世界文件夹名", hint_text="例如: world",
+                                       on_change=lambda e: setattr(self.app, 'world_name', e.control.value))
+        dir_sections.controls.append(ft.Container(content=self._name_field, padding=ft.padding.only(left=20, right=20, bottom=18)))
+        dir_card.content = dir_sections
+        col.controls.append(dir_card)
+
+        # Batch directory
+        self._batch_card = card(ft.Column(spacing=8), padding=0)
+        batch_s = ft.Column(spacing=0)
+        batch_s.controls.append(section_title("批量存档目录"))
+        bf = ft.Column(spacing=8)
+        self._batch_dir_field = text_field(label="", hint_text="选择包含多个世界存档的目录",
+                                            on_change=lambda e: setattr(self.app, 'batch_dir_path', e.control.value))
+        br = ft.Row([self._batch_dir_field, btn_ghost("📂 浏览", width=90, height=38,
+                      on_click=lambda e: self.app.choose_batch_dir()),
+                     btn_primary("🔍 扫描", width=90, height=38, on_click=lambda e: self.app.scan_batch_worlds())], spacing=10)
+        bf.controls.append(br)
+        self._batch_result = ft.Text("", size=11, color=COLORS["text_muted"])
+        bf.controls.append(self._batch_result)
+        batch_s.controls.append(ft.Container(content=bf, padding=ft.padding.only(left=20, right=20, bottom=18)))
+        self._batch_card.content = batch_s
+        self._batch_card.visible = False
+        col.controls.append(self._batch_card)
+
+        # Manual names
+        manual_card = card(ft.Column(spacing=0), padding=0)
+        manual_s = ft.Column(spacing=0)
+        manual_s.controls.append(section_title("👥 手动指定玩家 (选填)"))
+        self._manual_field = text_field(hint_text="多个玩家用英文逗号分隔，例如: Steve, Alex",
+                                         on_change=lambda e: setattr(self.app, 'manual_names', e.control.value))
+        manual_s.controls.append(ft.Container(content=self._manual_field, padding=ft.padding.only(left=20, right=20, bottom=18)))
+        manual_card.content = manual_s
+        col.controls.append(manual_card)
+
+        # Log panel
+        log_header = ft.Row([
+            ft.Text("📋 运行日志", size=15, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"]),
+            btn_ghost("🗑️ 清空", width=80, height=32, on_click=lambda e: self.app.clear_log()),
+        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+        log_card = card(ft.Column([
+            log_header,
+            ft.Container(content=self.app.log_panel, bgcolor=COLORS["log_bg"],
+                         border=ft.border.all(1, COLORS["log_border"]), border_radius=8, padding=8, expand=True),
+        ], spacing=8), padding=15)
+        col.controls.append(log_card)
+
+        return col
+
+    def _build_right(self) -> ft.Column:
+        col = ft.Column(spacing=18, expand=True)
+
+        # Mode selection
+        mode_card = card(ft.Column(spacing=0), padding=0)
+        mode_s = ft.Column(spacing=0)
+        mode_s.controls.append(section_title("模式设置"))
+
+        def mode_changed(e):
+            self.app.mode = e.control.value
+
+        self._mode_fast = ft.Radio(value="fast", label="⚡ 快速模式")
+        self._mode_full = ft.Radio(value="full", label="🧠 完整模式")
+        mode_group = ft.RadioGroup(content=ft.Row([self._mode_fast, self._mode_full], spacing=30),
+                                   value=self.app.mode, on_change=mode_changed)
+        mode_s.controls.append(ft.Container(content=mode_group, padding=ft.padding.only(left=20, right=20, top=12, bottom=8)))
+        mode_s.controls.append(ft.Container(content=ft.Text(
+            "快速模式：仅复制UUID文件；完整模式：深度NBT修补",
+            size=11, color=COLORS["text_muted"]),
+            padding=ft.padding.only(left=20, right=20, bottom=18)))
+        mode_card.content = mode_s
+        col.controls.append(mode_card)
+
+        # UUID query
+        uuid_card = card(ft.Column(spacing=0), padding=0)
+        uuid_s = ft.Column(spacing=0)
+        uuid_s.controls.append(section_title("UUID 查询"))
+
+        def query_click(e):
+            result = self.app.query_uuid()
+            if result:
+                self._query_result.value = result
+                self._query_result.update()
+
+        def name_changed(e):
+            self.app.query_name = e.control.value
+
+        self._query_field = text_field(hint_text="输入玩家名", expand=True,
+                                        on_change=name_changed)
+        qr = ft.Row([self._query_field, btn_primary("查询", width=90, height=38, on_click=query_click)], spacing=10)
+        uuid_s.controls.append(ft.Container(content=qr, padding=ft.padding.only(left=20, right=20, top=12, bottom=8)))
+        self._query_result = ft.Text("在此显示查询结果", size=11, color=COLORS["text_muted"])
+        rb = ft.Container(content=self._query_result, bgcolor=COLORS["log_bg"],
+                          border=ft.border.all(1, COLORS["log_border"]), border_radius=8,
+                          padding=12, height=110)
+        uuid_s.controls.append(ft.Container(content=rb, padding=ft.padding.only(left=20, right=20, bottom=18)))
+        uuid_card.content = uuid_s
+        col.controls.append(uuid_card)
+
+        # Migration options
+        opt_card = card(ft.Column(spacing=0), padding=0)
+        opt_s = ft.Column(spacing=0)
+        opt_s.controls.append(section_title("迁移选项"))
+
+        def offline_changed(e):
+            self.app.offline_mode = e.control.value
+        def clean_changed(e):
+            self.app.clean_mode = e.control.value
+        def pure_changed(e):
+            self.app.pure_clean_mode = e.control.value
+        def batch_changed(e):
+            self.app.batch_mode = e.control.value
+            self._batch_card.visible = e.control.value
+            self.update()
+
+        opts = ft.Column(spacing=6)
+        self._offline_cb = checkbox("仅离线模式", on_change=offline_changed)
+        self._clean_cb = checkbox("清理缓存/日志", value=True, on_change=clean_changed)
+        self._pure_cb = checkbox("纯净清理（移除模组内容）", on_change=pure_changed)
+        self._batch_cb = checkbox("批量处理模式", on_change=batch_changed)
+        opts.controls.extend([self._offline_cb, self._clean_cb, self._pure_cb, self._batch_cb])
+        opt_s.controls.append(ft.Container(content=opts, padding=ft.padding.only(left=20, right=20, top=12, bottom=18)))
+        opt_card.content = opt_s
+        col.controls.append(opt_card)
+
+        # Advanced settings
+        adv_card = card(ft.Column(spacing=0), padding=0)
+        adv_s = ft.Column(spacing=0)
+        adv_s.controls.append(section_title("高级设置"))
+
+        def version_changed(e):
+            self.app.version_detection = e.control.value
+            self.app._save_config()
+
+        def concurrent_changed(e):
+            try:
+                self.app.max_concurrent = int(e.control.value)
+                self.app._save_config()
+            except ValueError:
+                pass
+
+        adv_items = ft.Column(spacing=8)
+        self._version_cb = checkbox("启用版本自动检测", value=self.app.version_detection, on_change=version_changed)
+        adv_items.controls.append(self._version_cb)
+        conc_row = ft.Row([
+            ft.Text("最大并发数 (1-16)", size=12, weight=ft.FontWeight.BOLD, color=COLORS["text_secondary"]),
+            text_field(value=str(self.app.max_concurrent), width=60, expand=False, on_change=concurrent_changed),
+        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        adv_items.controls.append(conc_row)
+        adv_s.controls.append(ft.Container(content=adv_items, padding=ft.padding.only(left=20, right=20, top=12, bottom=18)))
+        adv_card.content = adv_s
+        col.controls.append(adv_card)
+
+        # Custom mapping console
+        map_card = card(ft.Column(spacing=0), padding=0)
+        map_s = ft.Column(spacing=0)
+        map_s.controls.append(section_title("⚙️ 自定义映射规则"))
+
+        def use_map_changed(e):
+            self.app.use_custom_mapping = e.control.value
+            self.app._save_config()
+
+        self._use_map_cb = checkbox("启用自定义映射规则", value=self.app.use_custom_mapping, on_change=use_map_changed)
+        map_items = ft.Column(spacing=8)
+        map_items.controls.append(self._use_map_cb)
+
+        map_items.controls.append(
+            ft.Row([
+                btn_primary("🔍 快速扫描并匹配", height=38,
+                            on_click=lambda e: self.app._switch_to_mappings_view()),
+                ft.TextButton("编辑详细规则...",
+                              style=ft.ButtonStyle(color=COLORS["accent_light"]),
+                              on_click=lambda e: self.app._switch_to_mappings_view()),
+            ], spacing=10)
+        )
+        self._scan_result = ft.Text("", size=11, color=COLORS["text_muted"])
+        map_items.controls.append(self._scan_result)
+        map_s.controls.append(ft.Container(content=map_items, padding=ft.padding.only(left=20, right=20, top=12, bottom=18)))
+        map_card.content = map_s
+        col.controls.append(map_card)
+
+        return col
