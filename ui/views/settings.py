@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 
 class SettingsView(ft.Column):
     def __init__(self, app: "App"):
-        super().__init__(expand=True, spacing=0, scroll=ft.ScrollMode.AUTO)
+        super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
+        self.expand = True
         self.app = app
         self.cfg = config_manager
         self._build()
@@ -178,8 +179,8 @@ class SettingsView(ft.Column):
         c = card(ft.Column(spacing=0), padding=0)
         btn_row = ft.Row([
             btn_success(t("settings.actions.save", "💾 保存设置"), width=140, on_click=lambda e: self._save()),
-            ft.ElevatedButton(
-                t("settings.actions.reset", "↻ 重置为默认"), width=140, height=38,
+            ft.Button(
+                content=t("settings.actions.reset", "↻ 重置为默认"), width=140, height=38,
                 style=ft.ButtonStyle(color=COLORS["text_primary"], bgcolor=COLORS["warning"],
                                      shape=ft.RoundedRectangleBorder(radius=6)),
                 on_click=lambda e: self._reset(),
@@ -205,17 +206,15 @@ class SettingsView(ft.Column):
             text = self._cleanup_field.value.strip()
             self.cfg.config["cleanup_patterns"] = [p.strip() for p in text.splitlines() if p.strip()]
             self.cfg.save_config()
-            d = ft.AlertDialog(title=ft.Text("保存成功"), content=ft.Text("设置已保存"),
-                               actions=[ft.TextButton("确定", style=ft.ButtonStyle(color=COLORS["accent"]))])
-            self.app.page.dialog = d
-            d.open = True
-            self.app.page.update()
+            d = ft.AlertDialog(title=ft.Text(t("common.save", "保存成功")), content=ft.Text(t("messages.settings_saved", "设置已保存")),
+                               actions=[ft.TextButton(content=t("dialogs.ok", "确定"), style=ft.ButtonStyle(color=COLORS["accent"]))],
+                               open=True)
+            self.app.page.open(d)
         except Exception as exc:
-            d = ft.AlertDialog(title=ft.Text("保存失败"), content=ft.Text(str(exc)),
-                               actions=[ft.TextButton("确定", style=ft.ButtonStyle(color=COLORS["error"]))])
-            self.app.page.dialog = d
-            d.open = True
-            self.app.page.update()
+            d = ft.AlertDialog(title=ft.Text(t("dialogs.error", "保存失败")), content=ft.Text(str(exc)),
+                               actions=[ft.TextButton(content=t("dialogs.ok", "确定"), style=ft.ButtonStyle(color=COLORS["error"]))],
+                               open=True)
+            self.app.page.open(d)
 
     def _reset(self):
         from core.config import ConfigSchema
@@ -231,20 +230,18 @@ class SettingsView(ft.Column):
                 default_config[key] = fd["default"]
         self.cfg.config.update(default_config)
         self._rebuild()
-        d = ft.AlertDialog(title=ft.Text("已重置"), content=ft.Text("已重置为默认设置"),
-                           actions=[ft.TextButton("确定", style=ft.ButtonStyle(color=COLORS["accent"]))])
-        self.app.page.dialog = d
-        d.open = True
-        self.app.page.update()
+        d = ft.AlertDialog(title=ft.Text(t("settings.actions.reset", "已重置")), content=ft.Text(t("messages.settings_reset", "已重置为默认设置")),
+                           actions=[ft.TextButton(content=t("dialogs.ok", "确定"), style=ft.ButtonStyle(color=COLORS["accent"]))],
+                           open=True)
+        self.app.page.open(d)
 
     def _cancel(self):
         self.cfg.__init__()
         self._rebuild()
-        d = ft.AlertDialog(title=ft.Text("已取消"), content=ft.Text("更改已丢弃"),
-                           actions=[ft.TextButton("确定", style=ft.ButtonStyle(color=COLORS["accent"]))])
-        self.app.page.dialog = d
-        d.open = True
-        self.app.page.update()
+        d = ft.AlertDialog(title=ft.Text(t("common.cancel", "已取消")), content=ft.Text(t("messages.changes_discarded", "更改已丢弃")),
+                           actions=[ft.TextButton(content=t("dialogs.ok", "确定"), style=ft.ButtonStyle(color=COLORS["accent"]))],
+                           open=True)
+        self.app.page.open(d)
 
     def _rebuild(self):
         self._build()

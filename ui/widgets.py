@@ -3,6 +3,7 @@ import flet as ft
 from typing import Any, Dict, List, Tuple, Optional, Callable, Set
 from pathlib import Path
 from ui.constants import COLORS
+from core.i18n import t
 
 
 def _border_subtle():
@@ -14,7 +15,8 @@ def _border_standard():
 
 class LogPanel(ft.Column):
     def __init__(self):
-        super().__init__(spacing=2, scroll=ft.ScrollMode.ALWAYS, expand=True)
+        super().__init__(spacing=2, scroll=ft.ScrollMode.ALWAYS)
+        self.expand = True
         self._max_lines = 500
 
     def log(self, message: str, level: str = "info"):
@@ -54,7 +56,7 @@ def section_title(text: str) -> ft.Container:
     return ft.Container(
         content=ft.Row([
             ft.Text(text, size=15, weight=ft.FontWeight.BOLD, color=COLORS["text_primary"]),
-            ft.Container(height=1, expand=True, bgcolor=COLORS["border_subtle"]),
+            ft.Container(height=1, bgcolor=COLORS["border_subtle"]),
         ], spacing=15, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         padding=ft.padding.only(left=20, right=20, top=18, bottom=8),
     )
@@ -64,17 +66,17 @@ def label(text: str) -> ft.Text:
     return ft.Text(text, size=12, weight=ft.FontWeight.BOLD, color=COLORS["text_secondary"])
 
 
-def btn_primary(text: str, on_click: Callable = None, width: int = None, height: int = 38, icon: str = None) -> ft.ElevatedButton:
-    return ft.ElevatedButton(
-        text=text, icon=icon, on_click=on_click, width=width, height=height,
+def btn_primary(text: str, on_click: Optional[Callable] = None, width: Optional[int] = None, height: int = 38, icon: Optional[str] = None) -> ft.Button:
+    return ft.Button(
+        content=text, icon=icon, on_click=on_click, width=width, height=height,  # type: ignore[arg-type]
         style=ft.ButtonStyle(color=COLORS["text_primary"], bgcolor=COLORS["accent"],
                              shape=ft.RoundedRectangleBorder(radius=6)),
     )
 
 
-def btn_ghost(text: str, on_click: Callable = None, width: int = None, height: int = 38) -> ft.ElevatedButton:
-    return ft.ElevatedButton(
-        text=text, on_click=on_click, width=width, height=height,
+def btn_ghost(text: str, on_click: Optional[Callable] = None, width: Optional[int] = None, height: int = 38) -> ft.Button:
+    return ft.Button(
+        content=text, on_click=on_click, width=width, height=height,
         style=ft.ButtonStyle(color=COLORS["text_secondary"],
                              bgcolor="rgba(255,255,255,0.02)",
                              side=ft.BorderSide(1, COLORS["border_standard"]),
@@ -82,42 +84,44 @@ def btn_ghost(text: str, on_click: Callable = None, width: int = None, height: i
     )
 
 
-def btn_success(text: str, on_click: Callable = None, width: int = None, height: int = 38) -> ft.ElevatedButton:
-    return ft.ElevatedButton(
-        text=text, on_click=on_click, width=width, height=height,
+def btn_success(text: str, on_click: Optional[Callable] = None, width: Optional[int] = None, height: int = 38) -> ft.Button:
+    return ft.Button(
+        content=text, on_click=on_click, width=width, height=height,
         style=ft.ButtonStyle(color=COLORS["text_primary"], bgcolor=COLORS["success"],
                              shape=ft.RoundedRectangleBorder(radius=6)),
     )
 
 
-def btn_danger(text: str, on_click: Callable = None, width: int = None, height: int = 38) -> ft.ElevatedButton:
-    return ft.ElevatedButton(
-        text=text, on_click=on_click, width=width, height=height,
+def btn_danger(text: str, on_click: Optional[Callable] = None, width: Optional[int] = None, height: int = 38) -> ft.Button:
+    return ft.Button(
+        content=text, on_click=on_click, width=width, height=height,
         style=ft.ButtonStyle(color=COLORS["text_primary"], bgcolor=COLORS["error"],
                              shape=ft.RoundedRectangleBorder(radius=6)),
     )
 
 
-def text_field(value: str = "", label: str = None, hint_text: str = None,
-               expand: bool = True, width: int = None, on_change: Callable = None,
+def text_field(value: str = "", label: Optional[str] = None, hint_text: Optional[str] = None,
+               expand: bool = True, width: Optional[int] = None, on_change: Optional[Callable] = None,
                password: bool = False) -> ft.TextField:
-    return ft.TextField(
-        value=value, label=label, hint_text=hint_text, expand=expand, width=width,
+    tf = ft.TextField(
+        value=value, label=label, hint_text=hint_text, width=width,
         on_change=on_change, password=password,
         border_color=COLORS["border_standard"], focused_border_color=COLORS["accent"],
         text_size=13, color=COLORS["text_primary"],
         bgcolor="rgba(255,255,255,0.02)",
         border_radius=6,
     )
+    tf.expand = expand
+    return tf
 
 
-def checkbox(label: str, value: bool = False, on_change: Callable = None) -> ft.Checkbox:
-    return ft.Checkbox(label=label, value=value, on_change=on_change,
+def checkbox(label: str, value: bool = False, on_change: Optional[Callable] = None) -> ft.Checkbox:
+    return ft.Checkbox(label=label, value=value, on_change=on_change,  # type: ignore[arg-type]
                        check_color=COLORS["accent"], label_style=ft.TextStyle(size=13, color=COLORS["text_secondary"]))
 
 
 class UUIDMappingTable(ft.Column):
-    def __init__(self, mappings: Dict[str, str] = None, on_mappings_change: Callable = None):
+    def __init__(self, mappings: Optional[Dict[str, str]] = None, on_mappings_change: Optional[Callable] = None):
         super().__init__(spacing=4)
         self._mappings = mappings or {}
         self.on_mappings_change = on_mappings_change
@@ -129,8 +133,8 @@ class UUIDMappingTable(ft.Column):
         self._row_data.clear()
         header = ft.Container(
             content=ft.Row([
-                ft.Text("玩家名", weight=ft.FontWeight.BOLD, expand=2, color=COLORS["text_secondary"], size=12),
-                ft.Text("UUID", weight=ft.FontWeight.BOLD, expand=3, color=COLORS["text_secondary"], size=12),
+                ft.Text(t("mappings.column_player", "玩家名"), weight=ft.FontWeight.BOLD, expand=2, color=COLORS["text_secondary"], size=12),
+                ft.Text(t("mappings.column_uuid", "UUID"), weight=ft.FontWeight.BOLD, expand=3, color=COLORS["text_secondary"], size=12),
             ], spacing=8),
             padding=ft.padding.only(bottom=8),
         )
@@ -138,18 +142,20 @@ class UUIDMappingTable(ft.Column):
         for p, u in self._mappings.items():
             self._add_row_with_values(p, u)
         tb = ft.Row([
-            btn_primary("+ 添加一行", on_click=lambda e: self._add_row()),  # fixed click
-            btn_ghost("📁 导入名单", on_click=lambda e: None, height=32),
-            btn_ghost("💾 导出名单", on_click=lambda e: None, height=32),
-            btn_danger("🗑️ 清空", on_click=lambda e: self._clear_all(), height=32),
+            btn_primary(t("mappings.add_row", "+ 添加一行"), on_click=lambda e: self._add_row()),
+            btn_ghost(t("mappings.import_list", "📁 导入名单"), on_click=lambda e: None, height=32),
+            btn_ghost(t("mappings.export_list", "💾 导出名单"), on_click=lambda e: None, height=32),
+            btn_danger(t("mappings.clear_all", "🗑️ 清空"), on_click=lambda e: self._clear_all(), height=32),
         ], spacing=10)
         self.controls.append(tb)
 
     def _add_row_with_values(self, player_name="", uuid=""):
-        nf = ft.TextField(value=player_name, expand=2, border_color=COLORS["border_standard"],
+        nf = ft.TextField(value=player_name, border_color=COLORS["border_standard"],
                           text_size=13, height=40, bgcolor="rgba(255,255,255,0.02)", border_radius=6)
-        uf = ft.TextField(value=uuid, expand=3, border_color=COLORS["border_standard"],
+        nf.expand = 2
+        uf = ft.TextField(value=uuid, border_color=COLORS["border_standard"],
                           text_size=13, height=40, bgcolor="rgba(255,255,255,0.02)", border_radius=6)
+        uf.expand = 3
 
         def on_change(e):
             self._sync()
@@ -160,7 +166,7 @@ class UUIDMappingTable(ft.Column):
         row = ft.Container(
             content=ft.Row([
                 nf, uf,
-                ft.IconButton(ft.icons.DELETE_OUTLINE, icon_size=18,
+                ft.IconButton(icon=ft.Icons.DELETE_OUTLINE, icon_size=18,
                               on_click=lambda e: self._delete_row(row)),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=2,
@@ -220,10 +226,11 @@ class UUIDMappingTable(ft.Column):
 
 class NBTTreeView(ft.Column):
     def __init__(self):
-        super().__init__(expand=True, alignment=ft.MainAxisAlignment.CENTER,
+        super().__init__(alignment=ft.MainAxisAlignment.CENTER,
                          horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+        self.expand = True
         self.controls.append(
-            ft.Text("NBT 树状视图（开发中）", size=14, color=COLORS["text_secondary"])
+            ft.Text(t("explorer.nbt_placeholder", "NBT 树状视图（开发中）"), size=14, color=COLORS["text_secondary"])
         )
 
     def load_nbt(self, nbt_data: Any):

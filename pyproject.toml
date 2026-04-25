@@ -20,16 +20,3 @@ module = [
 ]
 ignore_missing_imports = true
 
-[tool.pyright]
-include = ["core", "ui"]
-exclude = [
-    "**/__pycache__",
-    "**/.pytest_cache",
-    "**/node_modules",
-    "**/.*",
-    ".venv",
-    "venv",
-    "env"
-]
-pythonVersion = "3.9"
-typeCheckingMode = "basic"

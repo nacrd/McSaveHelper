@@ -294,6 +294,39 @@ class WorldSession:
             self._log(f"加载玩家数据 {uuid} 失败: {e}", "ERROR")
             return None
 
+    def get_player_inventory(self, uuid: str) -> List[Dict[str, Any]]:
+        """
+        提取指定玩家的背包物品列表。
+
+        Args:
+            uuid: 玩家 UUID
+
+        Returns:
+            物品字典列表，每项包含 slot, id, count, tag
+        """
+        data = self.get_player_data(uuid)
+        if data is None:
+            return []
+        items: List[Dict[str, Any]] = []
+        inventory = data.get("Inventory")
+        if inventory is not None and isinstance(inventory, list):
+            for slot in inventory:
+                try:
+                    si = slot.get("Slot", -1)
+                    iid = slot.get("id", "")
+                    cnt = slot.get("Count", 1)
+                    tag = slot.get("tag")
+                    if iid:
+                        items.append({
+                            "slot": int(si),
+                            "id": str(iid),
+                            "count": int(cnt),
+                            "tag": tag,
+                        })
+                except Exception:
+                    pass
+        return items
+
     def get_region(self, x: int, z: int) -> Optional[Path]:
         """
         获取指定坐标的区域文件路径（延迟加载仅为缓存路径）。

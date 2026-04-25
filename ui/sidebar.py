@@ -2,6 +2,7 @@
 import flet as ft
 from typing import Callable, List, Dict, Any, Optional
 from ui.constants import COLORS
+from core.i18n import t
 
 
 class Sidebar(ft.Container):
@@ -10,13 +11,14 @@ class Sidebar(ft.Container):
         tabs: List[Dict[str, Any]],
         on_tab_select: Callable[[str], None],
         default_tab: Optional[str] = None,
-    ):
-        self._tabs = tabs
-        self._on_tab_select = on_tab_select
-        self._selected_id = default_tab or (tabs[0]["id"] if tabs else None)
+    ) -> None:
+        self._tabs: List[Dict[str, Any]] = tabs
+        self._on_tab_select: Callable[[str], None] = on_tab_select
+        self._selected_id: Optional[str] = default_tab or (tabs[0]["id"] if tabs else None)
         self._buttons: Dict[str, ft.Container] = {}
 
-        col = ft.Column(spacing=2, expand=True)
+        col = ft.Column(spacing=2)
+        col.expand = True
         col.controls.append(
             ft.Container(
                 content=ft.Text("MCSaveHelper", size=18, weight=ft.FontWeight.BOLD, color=COLORS["accent"]),
@@ -28,7 +30,8 @@ class Sidebar(ft.Container):
             self._buttons[tab["id"]] = btn
             col.controls.append(btn)
 
-        col.controls.append(ft.Container(expand=True))
+        col.controls.append(ft.Container())
+        col.controls[-1].expand = True
         col.controls.append(
             ft.Container(
                 content=ft.Text("v1.0.0", size=10, color=COLORS["text_quaternary"]),
@@ -46,11 +49,13 @@ class Sidebar(ft.Container):
     def _build_tab_button(self, tab: Dict[str, Any]) -> ft.Container:
         selected = tab["id"] == self._selected_id
         icon = tab.get("icon", "")
-        text_str = f"  {icon} {tab['label']}" if icon else f"  {tab['label']}"
+        label_key = f"sidebar.{tab['id']}"
+        label_text = t(label_key, tab["label"])
+        text_str = f"  {icon} {label_text}" if icon else f"  {label_text}"
 
         text_ctrl = ft.Text(
             text_str, size=13, color=COLORS["text_primary"] if selected else COLORS["text_secondary"],
-            weight=ft.FontWeight.W_510 if selected else ft.FontWeight.NORMAL,
+            weight=ft.FontWeight.W_500 if selected else ft.FontWeight.NORMAL,
         )
         indicator = ft.Container(width=4, height=24, bgcolor=COLORS["accent"] if selected else None, border_radius=2)
 
@@ -62,7 +67,7 @@ class Sidebar(ft.Container):
             bgcolor=COLORS["bg_card"] if selected else None,
             ink=True,
         )
-        container.on_click = lambda e: self._select(tab["id"])
+        container.on_click = lambda e, tid=tab["id"]: self._select(tid)
         return container
 
     def _select(self, tab_id: str):
@@ -82,7 +87,7 @@ class Sidebar(ft.Container):
             tc = row.controls[1]
             ind = row.controls[0]
             tc.color = COLORS["text_primary"] if selected else COLORS["text_secondary"]
-            tc.weight = ft.FontWeight.W_510 if selected else ft.FontWeight.NORMAL
+            tc.weight = ft.FontWeight.W_500 if selected else ft.FontWeight.NORMAL
             ind.bgcolor = COLORS["accent"] if selected else None
         container.bgcolor = COLORS["bg_card"] if selected else None
 
