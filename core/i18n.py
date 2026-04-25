@@ -183,8 +183,8 @@ class TranslationManager:
         """创建翻译文件模板"""
         template = {
             "app": {
-                "title": "MC Migrator Pro · 存档迁移工具",
-                "subtitle": "存档迁移工具"
+                "title": "MCSaveHelper · 存档管理工具",
+                "subtitle": "存档管理工具"
             },
             "top_bar": {
                 "ready": "就绪",

@@ -45,7 +45,7 @@ class TopBarMixin:
         
         title_label = ctk.CTkLabel(
             title_frame,
-            text="MC Migrator Pro",
+            text="MCSaveHelper",
             font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
             text_color=COLORS["text_primary"],
         )
@@ -53,7 +53,7 @@ class TopBarMixin:
         
         subtitle_label = ctk.CTkLabel(
             title_frame,
-            text="存档迁移工具",
+            text="存档管理工具",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["text_muted"],
         )

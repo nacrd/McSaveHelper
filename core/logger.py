@@ -321,8 +321,12 @@ class UIHandler(LogHandler):
         # 获取对应的UI标签
         tag = self._tag_map.get(record.level, "info")
         
-        # 格式化消息（UI已经有时间戳，所以不需要包含）
-        message = record.format_text(include_timestamp=False, include_module=True)
+        # 格式化消息（不包含时间戳和级别名称，因为UI回调会添加）
+        parts = []
+        if record.module:
+            parts.append(f"[{record.module}]")
+        parts.append(record.message)
+        message = " ".join(parts)
         
         # 调用UI回调
         try:
@@ -520,7 +524,7 @@ def setup_default_logging(
     Args:
         enable_console: 是否启用控制台输出
         enable_file: 是否启用文件日志
-        file_path: 文件日志路径（默认：~/.mc_migrator/logs/app.log）
+        file_path: 文件日志路径（默认：~/.mcsavehelper/logs/app.log）
         enable_ui: 是否启用UI输出
         ui_callback: UI回调函数
         level: 全局日志级别
@@ -540,7 +544,7 @@ def setup_default_logging(
     # 文件处理器
     if enable_file:
         if file_path is None:
-            log_dir = Path.home() / ".mc_migrator" / "logs"
+            log_dir = Path.home() / ".mcsavehelper" / "logs"
             file_path = log_dir / "app.log"
         
         file_handler = FileHandler(

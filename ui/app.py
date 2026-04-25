@@ -50,7 +50,7 @@ init_translations()
 class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title(t("app.title", "MC Migrator Pro · 存档迁移工具"))
+        self.title(t("app.title", "MCSaveHelper · 存档管理工具"))
         self.geometry("1100x820")
         self.minsize(1000, 720)
 
@@ -86,14 +86,14 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         setup_default_logging(
             enable_console=True,
             enable_file=True,
-            file_path=None,  # 使用默认路径 ~/.mc_migrator/logs/app.log
+            file_path=None,  # 使用默认路径 ~/.mcsavehelper/logs/app.log
             enable_ui=True,
             ui_callback=ui_log_callback,
             level=LogLevel.INFO
         )
         
         # 记录应用启动日志
-        logger.info("MC Migrator Pro 应用启动", module="App")
+        logger.info("MCSaveHelper 应用启动", module="App")
     
     def _initialize_variables(self) -> None:
         """初始化应用变量"""
@@ -165,7 +165,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
         self.view_container.pack(side="left", fill="both", expand=True, padx=32, pady=24)
 
         # 存储视图帧的字典
-        self.views: dict[str, ctk.CTkFrame] = {}
+        self.views: dict[str, Any] = {}
 
         # 初始化各个视图
         self._init_migrator_view()
@@ -649,7 +649,7 @@ class App(CommonUIMixin, TopBarMixin, LeftPanelMixin, RightPanelMixin, ctk.CTk):
     def update_all_ui_texts(self) -> None:
         """更新所有UI文本（语言切换时调用）"""
         # 更新应用程序标题
-        self.title(t("app.title", "Minecraft 存档转换工具"))
+        self.title(t("app.title", "MCSaveHelper · 存档管理工具"))
         
         # 调用各个混入类的UI更新方法
         if hasattr(self, '_update_ui_texts'):

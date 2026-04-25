@@ -40,5 +40,5 @@ jobs:
     - name: Upload executable artifact
       uses: actions/upload-artifact@v4
       with:
-        name: mc_migrator_windows
+        name: mcsavehelper_windows
         path: dist/

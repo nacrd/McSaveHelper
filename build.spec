@@ -12,7 +12,7 @@ datas += [('translations', 'translations')]
 # ---------- 2. 分析主脚本 ----------
 a = Analysis(
     ['main.py'],
-    pathex=[],                     # 可添加额外搜索路径，如 ['E:\\coding\\mc_migrator']
+    pathex=[],                     # 可添加额外搜索路径，如 ['E:\\coding\\mcsavehelper']
     binaries=[],                   # 留空，让 PyInstaller 自动处理 DLL
     datas=datas,                   # 包含 anvil 的数据文件
     hiddenimports=[                # 显式导入可能被遗漏的模块
@@ -40,7 +40,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MC-Migrator',            # 输出的 exe 文件名
+    name='MCSaveHelper',            # 输出的 exe 文件名
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -54,5 +54,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     onefile=True,                  # 单文件模式
-    icon='mc_migrator_icon.ico',   # 应用程序图标文件路径
+    icon='mcsavehelper_icon.ico',   # 应用程序图标文件路径
 )

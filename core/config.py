@@ -89,7 +89,7 @@ class EnhancedConfig:
     """增强的Minecraft配置管理类"""
     
     def __init__(self, config_path: Optional[Path] = None):
-        self.config_path = config_path or Path.home() / ".mc_migrator" / "config.json"
+        self.config_path = config_path or Path.home() / ".mcsavehelper" / "config.json"
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.schema = ConfigSchema.BASE_SCHEMA
         self.config = self._load_with_defaults()

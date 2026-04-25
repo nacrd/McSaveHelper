@@ -49,15 +49,9 @@ class Sidebar(ctk.CTkFrame):
         title_frame.pack(fill="x", padx=20, pady=(30, 20))
         ctk.CTkLabel(
             title_frame,
-            text="MC Migrator",
+            text="MCSaveHelper",
             font=ctk.CTkFont(size=18, weight="bold"),
             text_color=COLORS["accent"]
-        ).pack()
-        ctk.CTkLabel(
-            title_frame,
-            text="Pro",
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["text_secondary"]
         ).pack()
         
         # 选项卡按钮

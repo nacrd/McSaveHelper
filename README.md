@@ -1,10 +1,10 @@
-# MC Migrator Pro · Minecraft 存档迁移工具
+# MCSaveHelper · Minecraft 存档管理工具
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![UI: CustomTkinter](https://img.shields.io/badge/UI-CustomTkinter-0078D7)](https://github.com/TomSchimansky/CustomTkinter)
 
-> 一款现代化的 Minecraft 客户端存档转服务端工具，支持批量处理、自定义 UUID 映射、版本检测与可视化编辑。
+> 一款现代化的 Minecraft 存档管理工具，支持批量处理、自定义 UUID 映射、版本检测与可视化编辑。
 
 ## ✨ 功能特点
 
@@ -43,8 +43,8 @@
 ### 安装步骤
 1. 克隆或下载本仓库
    ```bash
-   git clone https://github.com/yourusername/mc_migrator.git
-   cd mc_migrator
+    git clone https://github.com/yourusername/mcsavehelper.git
+    cd mcsavehelper
    ```
 2. 直接运行 `startup.bat`（Windows）
 
@@ -74,7 +74,7 @@
 
 ## ⚙️ 配置详解
 
-程序配置存储在 `~/.mc_migrator/config.json`（用户目录下），支持以下选项：
+程序配置存储在 `~/.mcsavehelper/config.json`（用户目录下），支持以下选项：
 
 ```json
 {
@@ -107,7 +107,7 @@
 ## 🧩 项目结构
 
 ```
-mc_migrator/
+mcsavehelper/
 ├── core/                    # 核心逻辑
 │   ├── batch_processor.py  # 批量处理器
 │   ├── config.py           # 配置管理
@@ -177,7 +177,7 @@ A: 确保正确配置 UUID 映射。可使用“UUID 查询”功能获取正版
 A: 降低“最大并发数”（高级设置），或检查存档目录权限。
 
 **Q: 如何完全重置配置？**  
-A: 删除 `~/.mc_migrator/config.json` 并重启程序。
+A: 删除 `~/.mcsavehelper/config.json` 并重启程序。
 
 **Q: 支持哪些 Minecraft 版本？**  
 A: 支持 1.0.0 至 1.19+（基于版本检测），具体见 `core/constants.py` 中的版本映射。
