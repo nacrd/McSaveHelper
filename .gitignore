@@ -2,8 +2,6 @@
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -28,3 +26,4 @@ htmlcov/
 world/
 plans/
 build.ps1
+.deepseek
