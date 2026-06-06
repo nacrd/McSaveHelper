@@ -5,6 +5,7 @@ from typing import Callable, List, Dict, Any, Optional
 import flet as ft
 
 from app.ui.theme import THEME
+from core.version import APP_VERSION
 
 
 class Sidebar(ft.Container):
@@ -73,7 +74,7 @@ class Sidebar(ft.Container):
         col.controls.append(
             ft.Container(
                 content=ft.Text(
-                    "v1.0.0  ▣ stone edition",
+                    f"{APP_VERSION}  ▣ stone edition",
                     size=10,
                     color=THEME.text_muted,
                     font_family="monospace",
