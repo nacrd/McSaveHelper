@@ -18,7 +18,6 @@ from typing import Any, Optional, List, Dict, Callable
 import flet as ft
 
 from core.logger import LogLevel, logger, setup_default_logging
-from core.i18n import init_translations
 from core.types import LogCallback, ProgressCallback
 
 from app.models.config import MigrationConfig
@@ -43,18 +42,46 @@ class Application:
         self.page: ft.Page = page
         self._current_dialog: Optional[ft.AlertDialog] = None
 
-        # ─── 初始化服务 ─────────────────────────
-        init_translations()
-        self.i18n: I18nService = I18nService()
-        self.config: ConfigService = ConfigService()
-        self.migration: MigrationService = MigrationService(self.config)
-        self.uuid: UUIDService = UUIDService()
+        # 全局异常兜底
+        page.on_error = self._on_page_error
+
+        # ─── 初始化服务（逐个 try，失败降级） ─────
+        try:
+            self.i18n: I18nService = I18nService()
+        except Exception as e:
+            print(f"[WARN] I18nService 初始化失败: {e}")
+            self.i18n = I18nService.__new__(I18nService)
+            self.i18n._manager = None
+            self.i18n.translate = lambda key, default="", **kw: default  # type: ignore
+
+        try:
+            self.config: ConfigService = ConfigService()
+        except Exception as e:
+            print(f"[WARN] ConfigService 初始化失败: {e}")
+            self.config = ConfigService.__new__(ConfigService)
+            self.config._config = {}  # type: ignore
+            self.config.migration = MigrationConfig()  # type: ignore
+            self.config.save = lambda: None  # type: ignore
+
+        try:
+            self.migration: MigrationService = MigrationService(self.config)
+        except Exception as e:
+            print(f"[WARN] MigrationService 初始化失败: {e}")
+            self.migration = MigrationService.__new__(MigrationService)  # type: ignore
+
+        try:
+            self.uuid: UUIDService = UUIDService()
+        except Exception as e:
+            print(f"[WARN] UUIDService 初始化失败: {e}")
+            self.uuid = UUIDService.__new__(UUIDService)  # type: ignore
 
         # ─── 同步配置到迁移参数 ─────────────────
         self._sync_config_to_migration()
 
         # ─── UI 组件 ────────────────────────────
-        self.log_panel: LogPanel = LogPanel()
+        self.log_panel: LogPanel = LogPanel(
+            title=self._t("log_panel.title", "日志"),
+        )
         self._progress_bar: ft.ProgressBar = ft.ProgressBar(
             value=0, color=THEME.accent,
             bgcolor="rgba(255,255,255,0.05)",
@@ -81,7 +108,7 @@ class Application:
         self._setup_page()
         self._init_logging()
         self._build_ui()
-        self._switch_view("migrator")
+        self._switch_view("explorer")
         page.update()
 
     # ════════════════════════════════════════════
@@ -90,7 +117,25 @@ class Application:
 
     def _t(self, key: str, default: str = "", **kwargs) -> str:
         """翻译快捷方法"""
-        return self.i18n.translate(key, default, **kwargs)
+        try:
+            return self.i18n.translate(key, default, **kwargs)
+        except Exception:
+            return default
+
+    def _on_page_error(self, e: ft.ControlEvent) -> None:
+        """页面级全局异常兜底"""
+        import traceback
+        error_msg = str(e.data) if hasattr(e, 'data') else str(e)
+        print(f"[PAGE ERROR] {error_msg}")
+        traceback.print_exc()
+        try:
+            self.log(f"未捕获的异常: {error_msg}", "ERROR")
+            self.error_dialog(
+                self._t("dialogs.error", "错误"),
+                f"发生意外错误: {error_msg}",
+            )
+        except Exception:
+            pass  # 连对话框都弹不出时只能打日志
 
     def _setup_page(self) -> None:
         page = self.page
@@ -125,25 +170,42 @@ class Application:
     # ════════════════════════════════════════════
 
     def _build_ui(self) -> None:
-        sidebar = Sidebar(
-            tabs=[
-                {"id": "migrator", "label": "批量迁移", "icon": "📦"},
-                {"id": "explorer", "label": "存档探险", "icon": "🗺️"},
-                {"id": "mappings", "label": "映射管理", "icon": "🔗"},
-                {"id": "settings", "label": "设置", "icon": "⚙️"},
-            ],
+        # 标签页定义（存档探险为默认第一项）
+        self._tab_defs = [
+            {"id": "explorer", "label": self._t("sidebar.explorer", "存档探险"), "icon": "🗺️"},
+            {"id": "migrator", "label": self._t("sidebar.migrator", "批量迁移"), "icon": "📦"},
+            {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
+            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙️"},
+        ]
+        self._sidebar = Sidebar(
+            tabs=self._tab_defs,
             on_tab_select=self._switch_view,
-            default_tab="migrator",
+            on_tabs_reorder=self._on_tabs_reorder,
+            default_tab="explorer",
         )
         top_bar = self._build_top_bar()
-        body = ft.Column([top_bar, self._content], spacing=0)
-        body.expand = True
+
+        # 内容区域（上方）+ 日志面板（下方）
+        content_area = ft.Column([top_bar, self._content], spacing=0)
+        content_area.expand = True
+
+        # 右侧：内容区 + 底部日志面板
+        right_panel = ft.Column(
+            [content_area, self.log_panel],
+            spacing=0,
+            expand=True,
+        )
+
         row = ft.Row(
-            [sidebar, body], spacing=0,
+            [self._sidebar, right_panel], spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
         row.expand = True
         self.page.add(row)
+
+    def _on_tabs_reorder(self, tabs: list) -> None:
+        """侧边栏标签页排序变更回调"""
+        self._tab_defs = list(tabs)
 
     def _build_top_bar(self) -> ft.Container:
         progress_row = ft.Row(
@@ -182,10 +244,32 @@ class Application:
     # ════════════════════════════════════════════
 
     def _switch_view(self, view_id: str) -> None:
-        if view_id not in self.views:
-            self.views[view_id] = self._create_view(view_id)
-        self._content.content = self.views[view_id]
-        self.page.update()
+        try:
+            if view_id not in self.views:
+                self.views[view_id] = self._create_view(view_id)
+            self._content.content = self.views[view_id]
+            self.page.update()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.log(f"加载视图 '{view_id}' 失败: {e}", "ERROR")
+            # 显示错误占位页面，不崩溃
+            try:
+                self._content.content = self._build_error_placeholder(view_id, e)
+                self.page.update()
+            except Exception:
+                # 连错误占位页都构建失败，只显示最简单的文本
+                try:
+                    self._content.content = ft.Container(
+                        content=ft.Text(
+                            f"加载页面 '{view_id}' 时出错: {e}",
+                            color=THEME.error, size=14,
+                        ),
+                        padding=40,
+                    )
+                    self.page.update()
+                except Exception:
+                    pass
 
     def _create_view(self, view_id: str) -> ft.Control:
         # 延迟导入视图模块，避免循环依赖
@@ -203,6 +287,137 @@ class Application:
         elif view_id == "settings":
             return SettingsView(self)
         return ft.Container()
+
+    def _build_error_placeholder(self, view_id: str, error: Exception) -> ft.Container:
+        """视图加载失败时的错误占位页面 - 可复制、可关闭"""
+        import traceback
+        tb = traceback.format_exc()
+        
+        # 创建可选择的错误信息文本
+        error_text = ft.SelectableText(
+            str(error),
+            size=13,
+            color=THEME.text_secondary
+        )
+        
+        # 创建可选择的堆栈跟踪文本
+        traceback_text = ft.SelectableText(
+            tb,
+            size=11,
+            color=THEME.text_muted,
+            font_family="monospace"
+        )
+        
+        # 关闭按钮
+        close_btn = ft.IconButton(
+            icon=ft.Icons.CLOSE,
+            icon_color=THEME.text_secondary,
+            on_click=lambda e: self._close_error_view(),
+            tooltip="关闭"
+        )
+        
+        # 重试按钮
+        retry_btn = ft.ElevatedButton(
+            "🔄 重试",
+            on_click=lambda e: self._retry_view(view_id),
+            bgcolor=THEME.accent,
+            color=THEME.text_primary,
+        )
+        
+        # 返回按钮
+        back_btn = ft.OutlinedButton(
+            "← 返回首页",
+            on_click=lambda e: self._switch_view("explorer"),
+        )
+        
+        # 复制按钮
+        copy_btn = ft.OutlinedButton(
+            "📋 复制错误",
+            on_click=lambda e: self._copy_error_to_clipboard(tb),
+        )
+        
+        return ft.Container(
+            content=ft.Column([
+                # 标题行
+                ft.Row([
+                    ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
+                    ft.Column([
+                        ft.Text(
+                            f"加载页面 '{view_id}' 时出错",
+                            size=18, color=THEME.text_primary, weight=ft.FontWeight.BOLD,
+                        ),
+                        ft.Text(
+                            "请检查错误信息，或尝试返回首页",
+                            size=12, color=THEME.text_muted,
+                        ),
+                    ], spacing=4),
+                    close_btn,
+                ], spacing=16, alignment=ft.MainAxisAlignment.START),
+                
+                ft.Divider(height=20, color=THEME.border_subtle),
+                
+                # 错误信息
+                ft.Text("错误信息：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_secondary),
+                ft.Container(
+                    content=error_text,
+                    bgcolor=THEME.bg_secondary,
+                    border_radius=8,
+                    padding=10,
+                    width=700,
+                ),
+                
+                ft.Container(height=12),
+                
+                # 堆栈跟踪
+                ft.Text("详细信息（可复制）：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_secondary),
+                ft.Container(
+                    content=ft.Container(
+                        content=traceback_text,
+                        padding=10,
+                    ),
+                    bgcolor=THEME.bg_secondary,
+                    border_radius=8,
+                    width=700,
+                    height=250,
+                ),
+                
+                ft.Container(height=20),
+                
+                # 操作按钮
+                ft.Row([
+                    retry_btn,
+                    back_btn,
+                    copy_btn,
+                ], spacing=10, alignment=ft.MainAxisAlignment.CENTER),
+            ], spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=40,
+            alignment=ft.alignment.center,
+            expand=True,
+        )
+    
+    def _copy_error_to_clipboard(self, error_text: str) -> None:
+        """复制错误信息到剪贴板"""
+        try:
+            # 使用 Flet 的剪贴板功能
+            import flet as ft
+            self.page.set_clipboard(error_text)
+            self.info_dialog("✅ 成功", "错误信息已复制到剪贴板\n你可以直接粘贴到任何地方")
+        except Exception as e:
+            # 如果 Flet 剪贴板失败，尝试显示提示
+            self.warn_dialog("复制失败", f"无法复制到剪贴板，请手动选择并复制错误信息\n\n错误：{str(e)}")
+    
+    def _close_error_view(self) -> None:
+        """关闭错误页面，返回首页"""
+        self.views.pop("error", None)
+        self._switch_view("explorer")
+
+    def _retry_view(self, view_id: str) -> None:
+        """移除缓存的失败视图，重新尝试加载"""
+        self.views.pop(view_id, None)
+        try:
+            self._switch_view(view_id)
+        except Exception:
+            pass
 
     # ════════════════════════════════════════════
     #  日志
@@ -367,33 +582,41 @@ class Application:
 
     def start(self) -> None:
         """开始转换按钮回调"""
-        mc = self.config.migration
+        try:
+            mc = self.config.migration
 
-        if not mc.src_path and not mc.batch_mode:
-            self.warn_dialog(
-                self._t("dialogs.warning", "提示"),
-                self._t("messages.please_select_source", "请先选择客户端存档目录"),
-            )
-            return
+            if not mc.src_path and not mc.batch_mode:
+                self.warn_dialog(
+                    self._t("dialogs.warning", "提示"),
+                    self._t("messages.please_select_source", "请先选择客户端存档目录"),
+                )
+                return
 
-        self._start_btn.disabled = True
-        self.page.update()
+            self._start_btn.disabled = True
+            self.page.update()
 
-        # 保存配置
-        self._save_config()
+            # 保存配置
+            self._save_config()
 
-        dest_dir = mc.dest_path or os.getcwd()
+            dest_dir = mc.dest_path or os.getcwd()
 
-        if mc.batch_mode and self.migration.batch_worlds:
-            threading.Thread(
-                target=self._run_batch_thread,
-                args=(dest_dir,), daemon=True,
-            ).start()
-        else:
-            threading.Thread(
-                target=self._run_single_thread,
-                args=(dest_dir,), daemon=True,
-            ).start()
+            if mc.batch_mode and self.migration.batch_worlds:
+                threading.Thread(
+                    target=self._run_batch_thread,
+                    args=(dest_dir,), daemon=True,
+                ).start()
+            else:
+                threading.Thread(
+                    target=self._run_single_thread,
+                    args=(dest_dir,), daemon=True,
+                ).start()
+        except Exception as e:
+            self.handle_exception(e, title="启动转换失败")
+            self._start_btn.disabled = False
+            try:
+                self.page.update()
+            except Exception:
+                pass
 
     def _save_config(self) -> None:
         c = self.config
@@ -493,22 +716,46 @@ class Application:
     # ─── 文件选择快捷方法（供视图使用）───────────
 
     def set_src(self) -> None:
-        path = self.pick_directory()
-        if path:
-            self.config.migration.src_path = path
-            self.page.update()
+        try:
+            path = self.pick_directory()
+            if path:
+                self.config.migration.src_path = path
+                self._update_migrator_field("_src_field", path)
+                self.page.update()
+        except Exception as e:
+            self.handle_exception(e, title="选择目录失败")
 
     def set_dest(self) -> None:
-        path = self.pick_directory()
-        if path:
-            self.config.migration.dest_path = path
-            self.page.update()
+        try:
+            path = self.pick_directory()
+            if path:
+                self.config.migration.dest_path = path
+                self._update_migrator_field("_dest_field", path)
+                self.page.update()
+        except Exception as e:
+            self.handle_exception(e, title="选择目录失败")
 
     def set_batch_dir(self) -> None:
-        path = self.pick_directory()
-        if path:
-            self.config.migration.batch_dir_path = path
-            self.page.update()
+        try:
+            path = self.pick_directory()
+            if path:
+                self.config.migration.batch_dir_path = path
+                self._update_migrator_field("_batch_dir_field", path)
+                self.page.update()
+        except Exception as e:
+            self.handle_exception(e, title="选择目录失败")
+
+    def _update_migrator_field(self, field_name: str, value: str) -> None:
+        """更新 MigratorView 中的输入框值"""
+        if "migrator" in self.views:
+            view = self.views["migrator"]
+            field = getattr(view, field_name, None)
+            if field is not None:
+                field.value = value
+                try:
+                    field.update()
+                except RuntimeError:
+                    pass
 
     def _on_uuid_mappings_change(self, mappings: Dict[str, str]) -> None:
         self.config.custom_uuid_mappings = mappings

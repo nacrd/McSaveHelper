@@ -13,7 +13,7 @@ def main() -> None:
         import flet as ft
         from app.application import Application
 
-        ft.app(lambda page: Application(page))
+        ft.run(Application)
 
     except ImportError as e:
         print(f"[FATAL] 缺少依赖: {e}")

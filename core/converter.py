@@ -300,13 +300,49 @@ def convert_world(src_path: Path, dst_path: Path,
                     
                 except Exception as e:
                     # 记录错误但继续处理其他文件
-                    # 在实际应用中应使用日志系统
-                    print(f"警告: 转换文件 {file_path} 时出错: {e}")
-                    # 可以根据需要决定是否抛出异常
-                    # 暂时忽略错误，继续处理
+                    import logging
+                    logging.getLogger(__name__).warning(f"转换文件 {file_path} 时出错: {e}")
     
-    # 4. 区域文件（.mca）的转换更复杂，暂不实现
-    # 未来可以添加对区域文件的字节序转换
+    # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
+    if target_platform != "java" or target_version is not None:
+        try:
+            from .scanner import scan_all_regions
+            import anvil
+
+            mca_files = scan_all_regions(work_path)
+            for mca_path in mca_files:
+                try:
+                    region = anvil.Region.from_file(str(mca_path))
+                    region_modified = False
+                    for x in range(32):
+                        for z in range(32):
+                            chunk = region.get_chunk(x, z)
+                            if chunk is None:
+                                continue
+                            data = chunk.data if hasattr(chunk, 'data') else chunk
+                            if not isinstance(data, nbtlib.tag.Compound):
+                                continue
+
+                            # 跨平台 ID 转换
+                            if target_platform != "java":
+                                to_bedrock = (target_platform == "bedrock")
+                                convert_block_ids_in_nbt(data, to_bedrock)
+                                region_modified = True
+
+                            # 版本降级处理
+                            if target_version is not None:
+                                VersionDowngrader.strip_data_components(data)
+                                VersionDowngrader.replace_unknown_blocks(data, target_version)
+                                region_modified = True
+
+                    if region_modified:
+                        region.save(str(mca_path))  # type: ignore[attr-defined]
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"转换区域文件 {mca_path} 时出错: {e}")
+        except ImportError:
+            import logging
+            logging.getLogger(__name__).warning("anvil-parser 未安装，跳过区域文件转换")
     
     return True
 

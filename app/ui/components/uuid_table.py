@@ -12,6 +12,14 @@ from app.ui.components.fields import text_field
 from app.models.mapping import PlayerMapping
 
 
+def _safe_update(control: ft.Control) -> None:
+    """安全更新控件，若控件未挂载到页面则静默跳过"""
+    try:
+        control.update()
+    except RuntimeError:
+        pass
+
+
 class UUIDMappingTable(ft.Column):
     """可编辑的 UUID 映射表格
 
@@ -182,7 +190,7 @@ class UUIDMappingTable(ft.Column):
         self._row_data.append({"container": row_cont, "name": nf, "uuid": uf})
         # 插入在操作按钮之前
         self.controls.insert(-1, row_cont)
-        self.update()
+        _safe_update(self)
 
     def _add_row(self, e: Optional[ft.ControlEvent] = None) -> None:
         self._add_row_with_values()
@@ -192,7 +200,7 @@ class UUIDMappingTable(ft.Column):
         self._row_data = [r for r in self._row_data if r["container"] is not row_container]
         self.controls.remove(row_container)
         self._sync()
-        self.update()
+        _safe_update(self)
 
     def _sync(self) -> None:
         new_mappings: Dict[str, str] = {}
@@ -212,7 +220,7 @@ class UUIDMappingTable(ft.Column):
         self._mappings.clear()
         if self.on_mappings_change:
             self.on_mappings_change({})
-        self.update()
+        _safe_update(self)
 
     def _import_file(self) -> None:
         """触发导入文件操作"""

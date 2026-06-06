@@ -44,14 +44,17 @@ class SettingsView(ft.Column):
         self._version_var = checkbox(
             self._t("settings.general.version_detection", "启用版本自动检测"),
             value=cfg.version_detection,
+            on_change=lambda e: setattr(self.app.config.migration, 'version_detection', e.control.value),
         )
         s.controls.append(ft.Container(content=self._version_var,
                                        padding=ft.Padding(left=20, right=20, top=10)))
 
+        self._api_timeout_field = text_field(value=str(cfg.api_timeout), width=100, expand=False,
+                                             on_change=lambda e: self._on_api_timeout_change(e))
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.general.api_timeout", "API 超时 (秒)")),
-                text_field(value=str(cfg.api_timeout), width=100, expand=False),
+                self._api_timeout_field,
             ], spacing=4),
             padding=ft.Padding(left=20, right=20, bottom=20, top=10),
         ))
@@ -67,26 +70,30 @@ class SettingsView(ft.Column):
         s = ft.Column(spacing=0)
         s.controls.append(section_title(self._t("settings.ui.title", "界面设置")))
 
+        self._theme_dropdown = ft.Dropdown(
+            options=[ft.dropdown.Option("dark"), ft.dropdown.Option("light")],
+            value=cfg.theme,
+            width=120, border_color=THEME.border_standard, text_size=13,
+        )
+        self._theme_dropdown.on_change = lambda e: self._on_theme_change(e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
-                ft.Dropdown(
-                    options=[ft.dropdown.Option("dark"), ft.dropdown.Option("light")],
-                    value=cfg.theme,
-                    width=120, border_color=THEME.border_standard, text_size=13,
-                ),
+                self._theme_dropdown,
             ], spacing=4),
             padding=ft.Padding(left=20, right=20, bottom=10, top=10),
         ))
 
+        self._lang_dropdown = ft.Dropdown(
+            options=[ft.dropdown.Option("zh_CN"), ft.dropdown.Option("en_US")],
+            value=cfg.language,
+            width=120, border_color=THEME.border_standard, text_size=13,
+        )
+        self._lang_dropdown.on_change = lambda e: self._on_language_change(e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.language", "语言")),
-                ft.Dropdown(
-                    options=[ft.dropdown.Option("zh_CN"), ft.dropdown.Option("en_US")],
-                    value=cfg.language,
-                    width=120, border_color=THEME.border_standard, text_size=13,
-                ),
+                self._lang_dropdown,
             ], spacing=4),
             padding=ft.Padding(left=20, right=20, bottom=10),
         ))
@@ -109,10 +116,11 @@ class SettingsView(ft.Column):
         s = ft.Column(spacing=0)
         s.controls.append(section_title(self._t("settings.batch.title", "批量处理")))
 
+        self._max_concurrent_field = text_field(value=str(cfg.max_concurrent), width=100, expand=False)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.batch.max_concurrent", "最大并发处理数 (1‑16)")),
-                text_field(value=str(cfg.max_concurrent), width=100, expand=False),
+                self._max_concurrent_field,
             ], spacing=4),
             padding=ft.Padding(left=20, right=20, bottom=10, top=10),
         ))
@@ -224,6 +232,32 @@ class SettingsView(ft.Column):
 
     # ─── 回调 ──────────────────────────────────
 
+    def _on_theme_change(self, theme: str) -> None:
+        """切换主题"""
+        self.app.config._config["ui_settings"]["theme"] = theme
+        if theme == "light":
+            self.app.page.theme_mode = ft.ThemeMode.LIGHT
+        else:
+            self.app.page.theme_mode = ft.ThemeMode.DARK
+        self.app.page.update()
+
+    def _on_language_change(self, lang: str) -> None:
+        """切换语言"""
+        self.app.config.language = lang
+        self.app.i18n.set_language(lang)
+        self.app.info_dialog(
+            self._t("dialogs.success", "成功"),
+            self._t("messages.ui_text_updated", "UI文本已更新为: {lang}", lang=lang),
+        )
+
+    def _on_api_timeout_change(self, e: ft.ControlEvent) -> None:
+        """API超时变更"""
+        try:
+            val = int(e.control.value or "10")
+            self.app.config._config["api_timeout"] = max(1, min(60, val))
+        except ValueError:
+            pass
+
     def _on_mappings_change(self, mappings: Dict[str, str]) -> None:
         self.app.config.custom_uuid_mappings = mappings
 
@@ -236,6 +270,13 @@ class SettingsView(ft.Column):
         c._config["version_detection"] = self._version_var.value
         c._config["ui_settings"]["auto_clear_log"] = self._auto_clear_var.value
         c._config["ui_settings"]["preserve_structure"] = self._preserve_var.value
+        c._config["ui_settings"]["theme"] = self._theme_dropdown.value
+        c._config["ui_settings"]["language"] = self._lang_dropdown.value
+        c._config["batch_processing"]["max_concurrent"] = int(self._max_concurrent_field.value or "2")
+        try:
+            c._config["api_timeout"] = int(self._api_timeout_field.value or "10")
+        except ValueError:
+            pass
         c.cleanup_patterns = [x.strip() for x in self._cleanup_field.value.split("\n") if x.strip()]
         c.save()
         self.app.info_dialog(

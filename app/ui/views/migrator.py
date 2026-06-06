@@ -7,7 +7,6 @@ from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, label
 from app.ui.components.cards import card, section_title
-from app.ui.components.log_panel import LogPanel
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -47,8 +46,6 @@ class MigratorView(ft.Column):
         col.controls.append(self._build_batch_card())
         # 手动玩家名
         col.controls.append(self._build_manual_card())
-        # 日志面板
-        col.controls.append(self._build_log_card())
 
         return col
 
@@ -61,6 +58,7 @@ class MigratorView(ft.Column):
         self._src_field = text_field(
             label=self._t("left_panel.client_archive", "客户端存档"),
             hint_text=self._t("left_panel.placeholder_select_world", "选择世界文件夹 (包含 level.dat)"),
+            on_change=lambda e: self._sync_field_to_config(),
         )
         dir_s.controls.append(ft.Container(
             content=ft.Row([
@@ -74,6 +72,7 @@ class MigratorView(ft.Column):
         self._dest_field = text_field(
             label=self._t("left_panel.server_root", "服务端根目录"),
             hint_text=self._t("left_panel.placeholder_default_dir", "默认为程序当前目录"),
+            on_change=lambda e: self._sync_field_to_config(),
         )
         dir_s.controls.append(ft.Container(
             content=ft.Row([
@@ -87,6 +86,7 @@ class MigratorView(ft.Column):
         self._name_field = text_field(
             label=self._t("left_panel.world_folder_name", "世界文件夹名"),
             hint_text=self._t("left_panel.placeholder_world_name", "例如: world"),
+            on_change=lambda e: self._sync_field_to_config(),
         )
         dir_s.controls.append(ft.Container(
             content=self._name_field,
@@ -106,6 +106,7 @@ class MigratorView(ft.Column):
 
         self._batch_dir_field = text_field(
             hint_text=self._t("left_panel.placeholder_batch_dir", "选择包含多个世界存档的目录"),
+            on_change=lambda e: self._sync_field_to_config(),
         )
         bf.controls.append(ft.Row([
             self._batch_dir_field,
@@ -130,6 +131,7 @@ class MigratorView(ft.Column):
         self._manual_field = text_field(
             hint_text=self._t("left_panel.placeholder_manual_names",
                               "多个玩家用英文逗号分隔，例如: Steve, Alex"),
+            on_change=lambda e: self._sync_field_to_config(),
         )
         manual_s.controls.append(ft.Container(
             content=self._manual_field,
@@ -138,22 +140,6 @@ class MigratorView(ft.Column):
         c = card(ft.Column(spacing=0), padding=0)
         c.content = manual_s
         return c
-
-    def _build_log_card(self) -> ft.Container:
-        log_header = ft.Row([
-            ft.Text(self._t("left_panel.run_log", "📋 运行日志"), size=15,
-                    weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            btn_ghost(self._t("left_panel.clear_log", "🗑️ 清空"), width=80, height=32,
-                      on_click=lambda e: self.app.clear_log()),
-        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
-        return card(ft.Column([
-            log_header,
-            ft.Container(
-                content=self.app.log_panel, bgcolor=THEME.log_bg,
-                border=ft.Border(left=ft.BorderSide(1, THEME.log_border), top=ft.BorderSide(1, THEME.log_border), right=ft.BorderSide(1, THEME.log_border), bottom=ft.BorderSide(1, THEME.log_border)),
-                border_radius=8, padding=8, expand=True,
-            ),
-        ], spacing=8), padding=15)
 
     # ─── 右栏 ──────────────────────────────────
 
@@ -276,6 +262,15 @@ class MigratorView(ft.Column):
         return c
 
     # ─── 回调 ──────────────────────────────────
+
+    def _sync_field_to_config(self) -> None:
+        """将输入字段值同步到迁移配置"""
+        mc = self.app.config.migration
+        mc.src_path = self._src_field.value or ""
+        mc.dest_path = self._dest_field.value or ""
+        mc.world_name = self._name_field.value or "world"
+        mc.batch_dir_path = self._batch_dir_field.value or ""
+        mc.manual_names = self._manual_field.value or ""
 
     def _scan_batch(self) -> None:
         mc = self.app.config.migration

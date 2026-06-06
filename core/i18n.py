@@ -22,9 +22,6 @@ except ImportError:
             pass
         StrEnum = _StrEnum
 
-from app.services.config_service import ConfigService
-
-
 class Language(StrEnum):  # type: ignore
     """支持的语言枚举"""
     ZH_CN = "zh_CN"  # 简体中文
@@ -78,9 +75,7 @@ class TranslationManager:
         self._loaded_files: Set[str] = set()
         self._available_languages: List[str] = []
         self._language_display_map: Dict[str, str] = {}
-        
-        # 加载配置中的语言设置
-        self._load_language_from_config()
+        self._config_loaded = False
         
         # 扫描可用的语言文件
         self._available_languages = self._scan_available_languages()
@@ -88,10 +83,14 @@ class TranslationManager:
         # 加载翻译文件
         self._load_translations()
     
-    def _load_language_from_config(self) -> None:
-        """从配置加载语言设置"""
+    def _ensure_config_loaded(self) -> None:
+        """延迟加载配置，确保避免循环依赖"""
+        if self._config_loaded:
+            return
+        self._config_loaded = True
         try:
-            # 尝试从配置中读取语言设置
+            # 延迟导入，避免循环依赖
+            from app.services.config_service import ConfigService
             config_service = ConfigService()
             lang_str = config_service.language
             try:
@@ -280,6 +279,7 @@ class TranslationManager:
     def _save_language_to_config(self) -> None:
         """将当前语言保存到配置"""
         try:
+            from app.services.config_service import ConfigService
             config_service = ConfigService()
             config_service.language = str(self._current_language)
             config_service.save()

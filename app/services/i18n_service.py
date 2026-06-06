@@ -1,7 +1,7 @@
 """国际化服务 —— 封装翻译逻辑，简化 UI 层调用"""
 from typing import Dict, List, Optional
 
-from core.i18n import TranslationManager, t as _t
+from core.i18n import TranslationManager, init_translations, t as _t
 
 
 class I18nService:
@@ -14,7 +14,7 @@ class I18nService:
     """
 
     def __init__(self) -> None:
-        self._manager = TranslationManager()
+        self._manager = init_translations()
 
     @property
     def available_languages(self) -> List[str]:

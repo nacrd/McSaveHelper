@@ -95,6 +95,11 @@ class WorldSession:
                 self._player_files[uuid] = f
         self._log(f"发现 {len(self._player_files)} 个玩家数据文件", "SCAN")
 
+        # 初始化 player_names（先从 usercache 收集后会继续完善）
+        for uuid in self._player_files:
+            if uuid not in self._player_names:
+                self._player_names[uuid] = None
+
         # 扫描 region 文件
         region_files = scan_all_regions(self.world_path)
         for f in region_files:
@@ -115,59 +120,77 @@ class WorldSession:
             self._data_files = list(data_dir.glob("*.dat"))
         self._log(f"发现 {len(self._data_files)} 个数据文件", "SCAN")
         
-        # 扫描 usercache.json（如果存在）
-        # 扫描 usercache.json（如果存在）
-        possible_paths = set()
-        # 1. 存档目录内
-        possible_paths.add(self.world_path / "usercache.json")
+        # 扫描 usercache.json（智能选择最合适的）
+        possible_paths = []
+        # 1. 存档目录内（最高优先级）
+        possible_paths.append(self.world_path / "usercache.json")
         # 2. 服务器根目录（存档的父目录）
-        possible_paths.add(self.world_path.parent / "usercache.json")
+        possible_paths.append(self.world_path.parent / "usercache.json")
         # 3. 向上查找 .minecraft 目录（支持版本隔离）
         current = self.world_path
         while len(current.parts) > 1:  # 避免无限循环
             if current.name == ".minecraft":
-                possible_paths.add(current / "usercache.json")
-                # 版本隔离目录
+                possible_paths.append(current / "usercache.json")
+                # 版本隔离目录（优先级略低）
                 versions_dir = current / "versions"
                 if versions_dir.exists():
                     for version_dir in versions_dir.iterdir():
                         if version_dir.is_dir():
-                            possible_paths.add(version_dir / "usercache.json")
+                            possible_paths.append(version_dir / "usercache.json")
                 break
             parent = current.parent
             if parent == current:
                 break
             current = parent
         
-        # 按顺序尝试所有可能的路径（第一个成功的将被使用）
-        self._log(f"扫描 usercache.json 的可能路径: {possible_paths}", "IMPORT")
+        # 收集所有存在的 usercache.json 文件并评估
+        import json
+        candidate_files = []
         for path in possible_paths:
-            print(f"SCAN usercache: checking {path}")
             if path.exists():
                 try:
-                    import json
                     with open(path, "r", encoding="utf-8") as f:
                         entries = json.load(f)
-                    imported = 0
+                    
+                    # 计算与当前存档 UUID 的匹配度
+                    match_count = 0
+                    cache_map = {}
                     for entry in entries:
                         uuid = entry.get("uuid", "").replace("-", "")
                         name = entry.get("name", "")
                         if uuid and name:
-                            self._usercache[uuid] = name
-                            imported += 1
-                    self._log(f"从 {path.name} 加载了 {imported} 个用户缓存条目", "SCAN")
-                    # 更新 player_names 缓存
-                    updated = 0
-                    for uuid in self._player_files.keys():
-                        if uuid in self._usercache:
-                            old = self._player_names.get(uuid)
-                            self._player_names[uuid] = self._usercache[uuid]
-                            updated += 1
-                            self._log(f"自动更新玩家名称缓存: {uuid} -> {self._usercache[uuid]} (之前: {old})", "SCAN")
-                    self._log(f"自动更新了 {updated} 个玩家名称缓存", "SCAN")
-                    break  # 使用第一个找到的文件
+                            cache_map[uuid] = name
+                            if uuid in self._player_files:
+                                match_count += 1
+                    
+                    candidate_files.append({
+                        "path": path,
+                        "cache_map": cache_map,
+                        "match_count": match_count,
+                        "size": path.stat().st_size,
+                        "mtime": path.stat().st_mtime
+                    })
+                    self._log(f"发现候选 usercache: {path}, 匹配 {match_count}/{len(self._player_files)} 个玩家", "IMPORT")
                 except Exception as e:
-                    self._log(f"解析 usercache.json 失败: {e}", "WARNING")
+                    self._log(f"解析候选 usercache {path} 失败: {e}", "WARNING")
+        
+        if candidate_files:
+            # 选择策略：优先匹配度高的，其次最新的
+            candidate_files.sort(key=lambda x: (-x["match_count"], -x["mtime"]))
+            best = candidate_files[0]
+            
+            self._usercache = best["cache_map"]
+            self._log(f"选择使用 {best['path']} (匹配 {best['match_count']} 个玩家)", "SCAN")
+            
+            # 更新 player_names 缓存
+            updated = 0
+            for uuid in self._player_files.keys():
+                if uuid in self._usercache:
+                    old = self._player_names.get(uuid)
+                    self._player_names[uuid] = self._usercache[uuid]
+                    updated += 1
+                    self._log(f"更新玩家名称: {uuid} -> {self._usercache[uuid]} (之前: {old})", "SCAN")
+            self._log(f"更新了 {updated} 个玩家名称", "SCAN")
 
     def _load_level_info(self) -> None:
         """读取 level.dat 并提取基础信息"""
@@ -213,7 +236,6 @@ class WorldSession:
 
     def get_player_names(self) -> Dict[str, Optional[str]]:
         """返回 UUID 到玩家名称的映射（如未知则返回 None）"""
-        print(f"GET_PLAYER_NAMES: usercache = {self._usercache}, player_files = {list(self._player_files.keys())}")
         for uuid in self._player_files:
             if uuid in self._player_names:
                 continue
@@ -226,7 +248,6 @@ class WorldSession:
             cached_name = self._usercache.get(uuid)
             if cached_name:
                 self._player_names[uuid] = cached_name
-                print(f"DEBUG: Using usercache name '{cached_name}' for {uuid}")
                 continue
             # 尝试从常见标签提取玩家名称
             name = None
@@ -256,17 +277,9 @@ class WorldSession:
                     break
             if name is not None:
                 self._player_names[uuid] = name
-                print(f"DEBUG: Found name '{name}' for {uuid} (from key)")
             else:
                 self._player_names[uuid] = None
-                # 调试：列出所有键以帮助诊断
-                keys = list(data.keys())
-                print(f"DEBUG: No name found for {uuid}, available keys: {keys}")
-                # 尝试打印前几个键的值
-                for key in keys[:5]:
-                    tag = data.get(key)
-                    tag_type = type(tag).__name__
-                    print(f"  {key}: {tag_type}")
+                self._log(f"无法从 NBT 中提取玩家名称: {uuid}", "DEBUG")
         return self._player_names.copy()
 
     def get_player_data(self, uuid: str) -> Optional[Compound]:
@@ -326,6 +339,30 @@ class WorldSession:
                 except Exception:
                     pass
         return items
+
+    def load_player_data(self, uuid: str) -> Optional[Compound]:
+        """
+        加载指定玩家的完整 NBT 数据（供 ExplorerView 使用）。
+
+        Args:
+            uuid: 玩家 UUID
+
+        Returns:
+            玩家 NBT 数据，若加载失败则返回 None
+        """
+        return self.get_player_data(uuid)
+
+    def load_player_nbt(self, uuid: str) -> Optional[Compound]:
+        """
+        加载指定玩家的完整 NBT 数据（供 NBT 查看器使用）。
+
+        Args:
+            uuid: 玩家 UUID
+
+        Returns:
+            玩家 NBT 数据，若加载失败则返回 None
+        """
+        return self.get_player_data(uuid)
 
     def get_region(self, x: int, z: int) -> Optional[Path]:
         """
@@ -604,8 +641,7 @@ class WorldSession:
                     self._usercache[uuid] = name
                     imported += 1
             self._log(f"从 {path.name} 导入了 {imported} 个玩家名称", "IMPORT")
-            self._log(f"导入后 usercache 内容: {self._usercache}", "IMPORT")
-            self._log(f"当前 player_names 键: {list(self._player_names.keys())}", "IMPORT")
+            
             # 为所有在 player_files 中的 UUID 更新 player_names
             updated = 0
             for uuid in self._player_files.keys():
@@ -613,8 +649,8 @@ class WorldSession:
                     old = self._player_names.get(uuid)
                     self._player_names[uuid] = self._usercache[uuid]
                     updated += 1
-                    self._log(f"更新玩家名称缓存: {uuid} -> {self._usercache[uuid]} (之前: {old})", "IMPORT")
-            self._log(f"更新了 {updated} 个玩家名称缓存", "IMPORT")
+                    self._log(f"更新玩家名称: {uuid} -> {self._usercache[uuid]} (之前: {old})", "IMPORT")
+            self._log(f"更新了 {updated} 个玩家名称", "IMPORT")
             return imported
         except Exception as e:
             self._log(f"导入 usercache.json 失败: {e}", "ERROR")

@@ -5,8 +5,15 @@ on:
     branches: [ "main" ]
     tags:
       - 'v*'
+      - 'vauto'
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（留空自动递增）'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -17,6 +24,58 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Generate version
+      id: version
+      shell: pwsh
+      run: |
+        function Get-NextVersion {
+          param([string]$LatestTag)
+          $version = $LatestTag -replace '^v', ''
+          $parts = $version.Split('.')
+          $parts[2] = [int]$parts[2] + 1
+          return "v$($parts -join '.')"
+        }
+
+        $ref = "${{ github.ref }}"
+        $tagName = $ref -replace 'refs/tags/', ''
+
+        # 获取最新版本号
+        $tags = git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Sort-Object { [version]($_ -replace '^v', '') }
+
+        if ($tagName -eq "vauto") {
+          # 自动模式：推送 vauto 时自动生成版本号
+          if ($tags) {
+            $latestTag = $tags[-1]
+            $nextTag = Get-NextVersion $latestTag
+            Write-Host "最新版本: $latestTag -> $nextTag"
+            Write-Output "tag=$nextTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Output "create_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            Write-Host "未找到历史版本，使用 v0.0.1"
+            Write-Output "tag=v0.0.1" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+            Write-Output "create_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+        } elseif ($tagName -match '^v\d+\.\d+\.\d+$') {
+          # 手动指定版本号
+          Write-Output "tag=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          Write-Output "create_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        }
+
+    - name: Create GitHub Release (auto tag)
+      if: steps.version.outputs.create_release == 'true' && github.ref == 'refs/tags/vauto'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        files: |
+          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-Windows-portable.zip
+        generate_release_notes: true
+
+    - name: Delete vauto tag
+      if: github.ref == 'refs/tags/vauto'
+      run: |
+        git push origin --delete vauto || true
 
     - name: Set up Python 3.14.3
       uses: actions/setup-python@v5
@@ -39,20 +98,33 @@ jobs:
     - name: Build with PyInstaller
       run: pyinstaller build.spec --noconfirm
 
-    - name: Upload build artifact
+    - name: Create release packages
+      run: |
+        Compress-Archive -Path dist/MCSaveHelper.exe -DestinationPath MCSaveHelper-Windows-onefile.zip
+        Compress-Archive -Path dist/MCSaveHelper_portable -DestinationPath MCSaveHelper-Windows-portable.zip
+
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: mcsavehelper_windows
         path: dist/
         retention-days: 30
 
-    - name: Create release package
-      run: |
-        Compress-Archive -Path dist/MCSaveHelper -DestinationPath MCSaveHelper-Windows.zip
-
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/v')
+    - name: Create GitHub Release (manual tag)
+      if: startsWith(github.ref, 'refs/tags/v') && github.ref != 'refs/tags/vauto'
       uses: softprops/action-gh-release@v2
       with:
-        files: MCSaveHelper-Windows.zip
+        files: |
+          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-Windows-portable.zip
+        generate_release_notes: true
+
+    - name: Create GitHub Release (workflow dispatch)
+      if: github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        files: |
+          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-Windows-portable.zip
         generate_release_notes: true

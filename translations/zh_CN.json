@@ -21,6 +21,12 @@
     "mappings": "映射管理",
     "settings": "设置"
   },
+  "log_panel": {
+    "title": "日志",
+    "clear": "清除日志",
+    "collapse": "折叠",
+    "expand": "展开"
+  },
   "left_panel": {
     "archive_config": "存档目录配置",
     "client_archive": "客户端存档",
