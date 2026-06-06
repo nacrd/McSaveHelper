@@ -1,5 +1,6 @@
 """Settings View —— 应用配置界面"""
 import flet as ft
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict
 
 from app.ui.theme import THEME
@@ -31,6 +32,7 @@ class SettingsView(ft.Column):
         self._build_ui_card()
         self._build_batch_card()
         self._build_uuid_card()
+        self._build_item_mapping_card()
         self._build_cleanup_card()
         self._build_action_card()
 
@@ -165,6 +167,39 @@ class SettingsView(ft.Column):
         c.content = s
         self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
 
+    def _build_item_mapping_card(self) -> None:
+        s = ft.Column(spacing=0)
+        s.controls.append(section_title("自定义物品 ID 映射"))
+        s.controls.append(ft.Container(
+            content=ft.Text(
+                "支持导入外部 JSON 映射、从模组 JAR 提取语言文件，或手动添加单条物品名称映射。",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=20, right=20, top=10, bottom=10),
+        ))
+
+        self._item_id_field = text_field(label="物品 ID", hint_text="modid:item_name", expand=False, width=220)
+        self._item_name_field = text_field(label="显示名称", hint_text="显示在物品栏中的名称", expand=False, width=220)
+        self._item_mapping_status = ft.Text("", size=11, color=THEME.text_muted)
+        buttons = ft.Row([
+            btn_primary("添加/更新", width=110, height=34, on_click=self._add_item_mapping),
+            btn_ghost("导入 JSON", width=110, height=34, on_click=self._import_item_mapping_json),
+            btn_ghost("导入 JAR", width=110, height=34, on_click=self._import_item_mapping_jar),
+            btn_ghost("导出 JSON", width=110, height=34, on_click=self._export_item_mapping_json),
+        ], spacing=8)
+        s.controls.append(ft.Container(
+            content=ft.Column([
+                ft.Row([self._item_id_field, self._item_name_field], spacing=10),
+                buttons,
+                self._item_mapping_status,
+            ], spacing=8),
+            padding=ft.Padding(left=20, right=20, bottom=18),
+        ))
+        c = card(ft.Column(spacing=0), padding=0)
+        c.content = s
+        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+
     # ─── 清理模式 ───────────────────────────────
 
     def _build_cleanup_card(self) -> None:
@@ -257,6 +292,61 @@ class SettingsView(ft.Column):
             self.app.config._config["api_timeout"] = max(1, min(60, val))
         except ValueError:
             pass
+
+    def _add_item_mapping(self, e: ft.ControlEvent) -> None:
+        try:
+            from app.services.item_service import get_item_service
+            item_id = (self._item_id_field.value or "").strip()
+            name = (self._item_name_field.value or "").strip()
+            if ":" not in item_id or not name:
+                self._item_mapping_status.value = "请输入形如 modid:item_name 的 ID 和显示名称。"
+                self._item_mapping_status.color = THEME.warning
+            else:
+                get_item_service().set_item_mapping(item_id, name)
+                self._item_mapping_status.value = f"已添加映射: {item_id} -> {name}"
+                self._item_mapping_status.color = THEME.mc_grass
+            self._item_mapping_status.update()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="添加物品映射失败")
+
+    def _import_item_mapping_json(self, e: ft.ControlEvent) -> None:
+        try:
+            path = self.app.pick_file(title="导入物品映射 JSON", file_types=[("JSON 文件 (*.json)", "*.json")])
+            if not path:
+                return
+            from app.services.item_service import get_item_service
+            count = get_item_service().load_custom_mapping_file(Path(path))
+            self._item_mapping_status.value = f"已导入 {count} 条映射。"
+            self._item_mapping_status.color = THEME.mc_grass if count else THEME.warning
+            self._item_mapping_status.update()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="导入物品映射失败")
+
+    def _import_item_mapping_jar(self, e: ft.ControlEvent) -> None:
+        try:
+            path = self.app.pick_file(title="选择模组 JAR", file_types=[("JAR 文件 (*.jar)", "*.jar")])
+            if not path:
+                return
+            from app.services.item_service import get_item_service
+            count = get_item_service().extract_language_from_jar(Path(path))
+            self._item_mapping_status.value = f"已从 JAR 提取 {count} 条语言映射。"
+            self._item_mapping_status.color = THEME.mc_grass if count else THEME.warning
+            self._item_mapping_status.update()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="导入 JAR 语言文件失败")
+
+    def _export_item_mapping_json(self, e: ft.ControlEvent) -> None:
+        try:
+            path = self.app.save_file(title="导出物品映射 JSON", default_ext=".json", file_types=[("JSON 文件 (*.json)", "*.json")])
+            if not path:
+                return
+            from app.services.item_service import get_item_service
+            get_item_service().save_custom_mapping_file(Path(path))
+            self._item_mapping_status.value = f"已导出到: {path}"
+            self._item_mapping_status.color = THEME.mc_grass
+            self._item_mapping_status.update()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="导出物品映射失败")
 
     def _on_mappings_change(self, mappings: Dict[str, str]) -> None:
         self.app.config.custom_uuid_mappings = mappings
