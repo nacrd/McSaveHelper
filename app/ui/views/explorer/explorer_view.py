@@ -189,7 +189,7 @@ class ExplorerView(ft.Column):
         self._tab_world_info.content = self._world_info_panel
 
     def _build_player_tab(self) -> None:
-        left = ft.Column(spacing=10, width=300)
+        left = ft.Column(spacing=10, width=300, scroll=ft.ScrollMode.AUTO)
         left.controls.append(
             ft.Text("选择玩家", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary)
         )
@@ -214,7 +214,7 @@ class ExplorerView(ft.Column):
         self._equip_card = card(self._equipment, padding=15)
         left.controls.append(self._equip_card)
 
-        right = ft.Column(spacing=6)
+        right = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
         right.expand = True
         self._inventory = InventoryGrid()
         right.controls.append(self._inventory)
@@ -341,7 +341,7 @@ class ExplorerView(ft.Column):
             legend,
             ft.Container(height=8),
             action_row,
-        ], spacing=0)
+        ], spacing=0, scroll=ft.ScrollMode.AUTO)
         col.expand = True
 
         self._tab_region.content = col
@@ -352,7 +352,7 @@ class ExplorerView(ft.Column):
         self._block_stats_col = ft.Column(spacing=4)
         self._entity_stats_col = ft.Column(spacing=4)
         self._size_stats_col = ft.Column(spacing=4)
-        self._tab_stats.content = ft.Column([
+        stats_col = ft.Column([
             card(ft.Row([
                 btn_primary("开始统计", width=110, on_click=self._analyze_world_stats),
                 self._stats_status,
@@ -362,6 +362,8 @@ class ExplorerView(ft.Column):
             card(ft.Column([ft.Text("实体数量 Top 10", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary), self._entity_stats_col], spacing=8), padding=12),
             card(ft.Column([ft.Text("区域文件大小分布", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary), self._size_stats_col], spacing=8), padding=12),
         ], spacing=12, scroll=ft.ScrollMode.AUTO)
+        stats_col.expand = True
+        self._tab_stats.content = stats_col
     
     def _create_heatmap_legend(self) -> ft.Container:
         """创建颜色图例"""
@@ -480,7 +482,7 @@ class ExplorerView(ft.Column):
             self.app.handle_exception(ex, title="删除区域失败")
 
     def _build_nbt_tab(self) -> None:
-        col = ft.Column(spacing=10)
+        col = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
         col.expand = True
         
         # 搜索栏

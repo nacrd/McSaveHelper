@@ -215,13 +215,13 @@ class Application:
 
     def _build_ui(self) -> None:
         """构建应用主界面"""
-        # 标签页定义（存档探险为默认第一项）
+        # 标签页定义
         self._tab_defs = [
-            {"id": "explorer", "label": self._t("sidebar.explorer", "存档探险"), "icon": "🗺️"},
-            {"id": "migrator", "label": self._t("sidebar.migrator", "批量迁移"), "icon": "📦"},
+            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": "🗺️"},
+            {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": "📦"},
             {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖️"},
-            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "🧾"},
             {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
+            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "🧾"},
             {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙️"},
         ]
         self._sidebar = Sidebar(
@@ -232,16 +232,58 @@ class Application:
         )
         top_bar = self._build_top_bar()
 
+        self._scrollable_content = ft.Container(
+            content=self._content,
+            padding=ft.Padding(left=14, right=14, top=14, bottom=14),
+            expand=True,
+        )
         content_area = ft.Column(
-            [top_bar, ft.Container(content=self._content, padding=ft.Padding(left=14, right=14, top=14, bottom=14))],
+            [top_bar, self._scrollable_content],
             spacing=0,
-            scroll=ft.ScrollMode.AUTO,
         )
         content_area.expand = True
 
-        right_panel = ft.Column(
-            [content_area, self.log_panel],
-            spacing=12,
+        self._log_panel_visible = False
+        self.log_panel.visible = False
+        self.log_panel.width = 400
+        self.log_panel.height = 280
+        self.log_panel.right = 20
+        self.log_panel.bottom = 70
+        self.log_panel.elevation = 8
+
+        self._log_fab = ft.Container(
+            content=ft.Text("📜", size=20),
+            width=48,
+            height=48,
+            bgcolor=THEME.mc_coal,
+            border_radius=24,
+            alignment=ft.Alignment(0, 0),
+            on_click=self._toggle_log_panel,
+            tooltip="日志",
+            shadow=ft.BoxShadow(
+                spread_radius=0,
+                blur_radius=6,
+                color=THEME.shadow,
+                offset=ft.Offset(2, 2),
+            ),
+            border=ft.Border(
+                left=ft.BorderSide(2, THEME.border_tertiary),
+                top=ft.BorderSide(2, THEME.border_tertiary),
+                right=ft.BorderSide(2, THEME.bg_secondary),
+                bottom=ft.BorderSide(2, THEME.bg_secondary),
+            ),
+        )
+
+        right_panel = ft.Stack(
+            [
+                content_area,
+                self.log_panel,
+                ft.Container(
+                    content=self._log_fab,
+                    right=20,
+                    bottom=20,
+                ),
+            ],
             expand=True,
         )
 
@@ -279,6 +321,16 @@ class Application:
         app_frame.expand = True
 
         self.page.add(app_frame)
+
+    def _toggle_log_panel(self, e: Any = None) -> None:
+        """切换日志面板的显示/隐藏"""
+        self._log_panel_visible = not self._log_panel_visible
+        self.log_panel.visible = self._log_panel_visible
+        if self._log_panel_visible:
+            self._log_fab.content = ft.Text("✕", size=18, color=THEME.mc_redstone)
+        else:
+            self._log_fab.content = ft.Text("📜", size=20)
+        self.page.update()
 
     def _on_tabs_reorder(self, tabs: list) -> None:
         """侧边栏标签页排序变更回调

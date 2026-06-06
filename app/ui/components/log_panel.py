@@ -29,7 +29,11 @@ class LogPanel(ft.Container):
         self._title: str = title
 
         # 日志内容区
-        self._log_col = ft.Column(spacing=2, scroll=ft.ScrollMode.ALWAYS)
+        self._log_col = ft.Column(
+            spacing=2,
+            scroll=ft.ScrollMode.AUTO,
+            auto_scroll=True,
+        )
         self._log_col.expand = True
 
         # 标题栏按钮
