@@ -191,8 +191,10 @@ class McaHeatmapView(ft.Container):
             ))
             shapes.extend(self._build_info_overlay())
             self._canvas.shapes = shapes
-            if self.page:
+            try:
                 self._canvas.update()
+            except RuntimeError:
+                pass
             return
         
         # 计算世界坐标范围
@@ -280,9 +282,10 @@ class McaHeatmapView(ft.Container):
         # 更新 Canvas
         self._canvas.shapes = shapes
         
-        # 只有在组件已挂载时才更新
-        if self.page:
+        try:
             self._canvas.update()
+        except RuntimeError:
+            pass
         
         # 标记已完成首次绘制
         self._needs_initial_draw = False

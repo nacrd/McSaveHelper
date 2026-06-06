@@ -254,7 +254,7 @@ class MigratorView(ft.Column):
             width=150,
             border_color=THEME.border_standard,
             text_size=13,
-            on_change=lambda e: setattr(self.app.config.migration, "target_platform", e.control.value),
+            on_select=lambda e: setattr(self.app.config.migration, "target_platform", e.control.value),
         )
         self._target_version = text_field(
             value=mc.target_version,

@@ -77,7 +77,7 @@ class SettingsView(ft.Column):
             value=cfg.theme,
             width=120, border_color=THEME.border_standard, text_size=13,
         )
-        self._theme_dropdown.on_change = lambda e: self._on_theme_change(e.control.value)
+        self._theme_dropdown.on_select = lambda e: self._on_theme_change(e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
@@ -91,7 +91,7 @@ class SettingsView(ft.Column):
             value=cfg.language,
             width=120, border_color=THEME.border_standard, text_size=13,
         )
-        self._lang_dropdown.on_change = lambda e: self._on_language_change(e.control.value)
+        self._lang_dropdown.on_select = lambda e: self._on_language_change(e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.language", "语言")),

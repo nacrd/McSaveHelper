@@ -72,8 +72,10 @@ class ServerPropertiesView(ft.Column):
                 control,
                 ft.Text(desc, size=11, color=THEME.text_muted),
             ], spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER))
-        if self.page:
+        try:
             self.update()
+        except RuntimeError:
+            pass
 
     def _save(self, e: ft.ControlEvent) -> None:
         try:
