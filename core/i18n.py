@@ -8,7 +8,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, Set, List, Tuple
+from typing import Callable, Dict, Any, Optional, Set, List, Tuple
 from enum import Enum
 
 try:
@@ -55,11 +55,18 @@ class TranslationManager:
     负责加载翻译文件、管理当前语言设置、提供翻译功能。
     """
 
-    def __init__(self, translations_dir: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        translations_dir: Optional[Path] = None,
+        language_loader: Optional[Callable[[], str]] = None,
+        language_saver: Optional[Callable[[str], None]] = None,
+    ) -> None:
         """初始化翻译管理器
 
         Args:
             translations_dir: 翻译文件目录
+            language_loader: 当前语言配置读取函数
+            language_saver: 当前语言配置保存函数
         """
         if translations_dir is None:
             if hasattr(sys, '_MEIPASS'):
@@ -79,20 +86,23 @@ class TranslationManager:
         self._available_languages: List[str] = []
         self._language_display_map: Dict[str, str] = {}
         self._config_loaded: bool = False
+        self._language_loader = language_loader
+        self._language_saver = language_saver
 
         self._available_languages = self._scan_available_languages()
 
+        self._ensure_config_loaded()
         self._load_translations()
 
     def _ensure_config_loaded(self) -> None:
-        """延迟加载配置，避免循环依赖"""
+        """延迟加载语言配置"""
         if self._config_loaded:
             return
         self._config_loaded = True
+        if self._language_loader is None:
+            return
         try:
-            from app.services.config_service import ConfigService
-            config_service = ConfigService()
-            lang_str = config_service.language
+            lang_str = self._language_loader()
             try:
                 self._current_language = Language(lang_str)
             except ValueError:
@@ -275,11 +285,10 @@ class TranslationManager:
 
     def _save_language_to_config(self) -> None:
         """将当前语言保存到配置"""
+        if self._language_saver is None:
+            return
         try:
-            from app.services.config_service import ConfigService
-            config_service = ConfigService()
-            config_service.language = str(self._current_language)
-            config_service.save()
+            self._language_saver(str(self._current_language))
         except Exception as e:
             print(f"保存语言配置时出错: {e}")
 
@@ -399,18 +408,29 @@ class TranslationManager:
 _translation_manager: Optional[TranslationManager] = None
 
 
-def init_translations(translations_dir: Optional[Path] = None) -> TranslationManager:
+def init_translations(
+    translations_dir: Optional[Path] = None,
+    language_loader: Optional[Callable[[], str]] = None,
+    language_saver: Optional[Callable[[str], None]] = None,
+) -> TranslationManager:
     """初始化翻译管理器
 
     Args:
         translations_dir: 翻译文件目录
+        language_loader: 当前语言配置读取函数
+        language_saver: 当前语言配置保存函数
 
     Returns:
         翻译管理器实例
     """
     global _translation_manager
     if _translation_manager is None:
-        _translation_manager = TranslationManager(translations_dir)
+        _translation_manager = TranslationManager(translations_dir, language_loader, language_saver)
+    else:
+        if language_loader is not None:
+            _translation_manager._language_loader = language_loader
+        if language_saver is not None:
+            _translation_manager._language_saver = language_saver
     return _translation_manager
 
 

@@ -1,5 +1,5 @@
 """UUID 服务 —— 封装 UUID 生成/查询逻辑"""
-from typing import Optional, Tuple, Callable
+from typing import Dict, Optional, Tuple
 from pathlib import Path
 
 from core.uuid_utils import (
@@ -86,7 +86,8 @@ class UUIDService:
         cache: dict,
         offline_mode: bool,
         manual_names: Optional[list],
-        log: LogCallback
+        log: LogCallback,
+        custom_mappings: Optional[Dict[str, str]] = None,
     ) -> list:
         """构建 UUID 映射列表
         
@@ -98,8 +99,9 @@ class UUIDService:
             offline_mode: 是否为离线模式
             manual_names: 手动指定的玩家名称列表
             log: 日志回调函数
+            custom_mappings: 玩家名称到自定义 UUID 的映射
             
         Returns:
             list: UUID映射列表
         """
-        return build_mappings(world_path, cache, offline_mode, manual_names, log)
+        return build_mappings(world_path, cache, offline_mode, manual_names, log, custom_mappings)

@@ -2,6 +2,7 @@
 from typing import Dict, List, Optional
 
 from core.i18n import TranslationManager, init_translations, t as _t
+from app.services.config_service import ConfigService
 
 
 class I18nService:
@@ -14,7 +15,15 @@ class I18nService:
     """
 
     def __init__(self) -> None:
-        self._manager: TranslationManager = init_translations()
+        self._config = ConfigService()
+        self._manager: TranslationManager = init_translations(
+            language_loader=lambda: self._config.language,
+            language_saver=self._save_language,
+        )
+
+    def _save_language(self, lang_code: str) -> None:
+        self._config.language = lang_code
+        self._config.save()
 
     @property
     def available_languages(self) -> List[str]:
