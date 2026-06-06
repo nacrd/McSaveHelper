@@ -8,7 +8,7 @@
     "**/__pycache__",
     ".pytest_cache", "**/node_modules", "**/.*", ".venv"
   ],
-  "typeCheckingMode": "off",
+  "typeCheckingMode": "basic",
   "reportMissingImports": "none",
   "reportMissingTypeStubs": "none"
 }

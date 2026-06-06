@@ -20,3 +20,5 @@ htmlcov/
 !/.git/
 !/.gitignore
 !/.github/
+*.md
+!readme.md
