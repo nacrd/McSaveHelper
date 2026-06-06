@@ -454,7 +454,6 @@ class Application:
                 ], spacing=10, alignment=ft.MainAxisAlignment.CENTER),
             ], spacing=12, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             padding=40,
-            alignment=ft.alignment.center,
             expand=True,
         )
     

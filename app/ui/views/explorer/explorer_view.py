@@ -17,6 +17,7 @@ from app.services.heatmap_service import get_heatmap_service
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.world_info_panel import WorldInfoPanel
 from app.ui.views.explorer.player_hud import PlayerHUDCard
+from app.ui.views.explorer.equipment_preview import EquipmentPreview
 from app.ui.views.explorer.inventory_grid import InventoryGrid
 from app.ui.views.explorer.nbt_tree import NBTTreeView
 
@@ -140,13 +141,21 @@ class ExplorerView(ft.Column):
             border_color=THEME.border_standard, text_size=13,
         )
         left.controls.append(self._player_dropdown)
-        left.controls.append(
-            btn_ghost("导入 usercache.json", height=30, on_click=self._import_usercache)
-        )
+
+        # 按钮行
+        btn_row = ft.Row([
+            btn_ghost("导入 usercache", height=30, on_click=self._import_usercache),
+            btn_ghost("导入语言文件", height=30, on_click=self._import_language_file),
+        ], spacing=8)
+        left.controls.append(btn_row)
 
         self._player_hud = PlayerHUDCard()
         self._hud_card = card(self._player_hud, padding=15)
         left.controls.append(self._hud_card)
+
+        self._equipment = EquipmentPreview()
+        self._equip_card = card(self._equipment, padding=15)
+        left.controls.append(self._equip_card)
 
         right = ft.Column(spacing=6)
         right.expand = True
@@ -159,10 +168,25 @@ class ExplorerView(ft.Column):
         """构建区域标签页 - 使用热力图"""
         # 获取热力图服务
         self._heatmap_service = get_heatmap_service()
-        
+        self._current_dimension = "overworld"
+        self._dimension_region_dirs: Dict[str, str] = {}
+
+        # 维度切换下拉框（加载存档时动态填充）
+        self._dimension_dropdown = ft.Dropdown(
+            options=[],
+            on_select=self._on_dimension_changed,
+            border_color=THEME.border_standard,
+            text_size=13,
+            width=180,
+        )
+
+        dimension_row = ft.Row([
+            ft.Text("维度：", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            self._dimension_dropdown,
+        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
         # 创建热力图视图（兼容处理）
         if McaHeatmapView is None:
-            # 热力图组件不可用，显示提示信息
             self._heatmap = None
             heatmap_view = ft.Container(
                 content=ft.Column([
@@ -180,12 +204,10 @@ class ExplorerView(ft.Column):
                     ),
                 ], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                 padding=50,
-                alignment=ft.alignment.center,
                 bgcolor=THEME.bg_card,
                 border_radius=8,
             )
         else:
-            # 创建热力图视图
             self._heatmap = McaHeatmapView(
                 heatmap_service=self._heatmap_service,
                 on_selection_changed=self._on_region_selected,
@@ -193,38 +215,33 @@ class ExplorerView(ft.Column):
                 height=450,
             )
             heatmap_view = self._heatmap
-        
-        # 说明文字
+
         help_text = ft.Text(
             "💡 提示：每个方块代表一个 32×32 区块的区域，颜色从蓝到红表示活动程度",
             size=12,
             color=THEME.text_muted,
             italic=True
         )
-        
-        # 统计信息显示
+
         self._region_stats_text = ft.Text(
             "等待加载存档...",
             size=12,
             color=THEME.text_muted
         )
-        
-        # 状态信息显示
+
         self._region_status_text = ft.Text(
             "👆 点击方块查看详情",
             size=13,
             color=THEME.text_secondary
         )
-        
-        # 操作按钮
+
         action_row = ft.Row([
             btn_primary("🔄 刷新", width=100, on_click=lambda e: self._refresh_heatmap()),
             btn_ghost("🔍 放大", width=80, on_click=lambda e: self._heatmap.zoom_in() if hasattr(self._heatmap, 'zoom_in') else None),
             btn_ghost("🔍 缩小", width=80, on_click=lambda e: self._heatmap.zoom_out() if hasattr(self._heatmap, 'zoom_out') else None),
             btn_ghost("🏠 重置", width=80, on_click=lambda e: self._heatmap.reset_view() if hasattr(self._heatmap, 'reset_view') else None),
         ], spacing=8)
-        
-        # 热力图容器
+
         heatmap_card = card(
             ft.Container(
                 content=heatmap_view,
@@ -233,8 +250,7 @@ class ExplorerView(ft.Column):
             ),
             padding=0
         )
-        
-        # 统计卡片
+
         stats_card = card(
             ft.Column([
                 ft.Text("📊 区域统计", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
@@ -242,8 +258,7 @@ class ExplorerView(ft.Column):
             ], spacing=6),
             padding=12
         )
-        
-        # 选中信息卡片
+
         selection_card = card(
             ft.Column([
                 ft.Text("👆 点击详情", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
@@ -251,12 +266,12 @@ class ExplorerView(ft.Column):
             ], spacing=6),
             padding=12
         )
-        
-        # 颜色图例
+
         legend = self._create_heatmap_legend()
-        
-        # 整体布局
+
         col = ft.Column([
+            dimension_row,
+            ft.Container(height=8),
             help_text,
             heatmap_card,
             ft.Container(height=8),
@@ -269,7 +284,7 @@ class ExplorerView(ft.Column):
             action_row,
         ], spacing=0)
         col.expand = True
-        
+
         self._tab_region.content = col
     
     def _create_heatmap_legend(self) -> ft.Container:
@@ -412,7 +427,10 @@ class ExplorerView(ft.Column):
                 self._player_dropdown.value = first_player_uuid
                 safe_update(self._player_dropdown)
                 self._load_player_data(first_player_uuid)
-            
+
+            # 扫描并填充维度列表
+            self._update_dimension_list()
+
             self._refresh_heatmap()
         except Exception as e:
             self.app.handle_exception(e, title="加载存档失败")
@@ -435,6 +453,7 @@ class ExplorerView(ft.Column):
             self._player_hud.update_from_nbt(player_data)
             inv = self.world_session.get_player_inventory(uuid)
             self._inventory.set_inventory(inv)
+            self._equipment.set_equipment(inv)
             nbt = self.world_session.load_player_nbt(uuid)
             self._nbt_tree.load_nbt(nbt)
         except Exception as e:
@@ -446,9 +465,16 @@ class ExplorerView(ft.Column):
             if not self.world_session:
                 return
 
-            region_dir = self.world_session.world_path / "region"
+            region_dir_str = self._dimension_region_dirs.get(self._current_dimension)
+            if not region_dir_str:
+                self._region_stats_text.value = "⚠️ 未找到当前维度的 region 目录"
+                self._region_stats_text.color = THEME.warning
+                safe_update(self._region_stats_text)
+                return
+
+            region_dir = Path(region_dir_str)
             if not region_dir.exists():
-                self._region_stats_text.value = "⚠️ 未找到 region 目录"
+                self._region_stats_text.value = "⚠️ region 目录不存在"
                 self._region_stats_text.color = THEME.warning
                 safe_update(self._region_stats_text)
                 return
@@ -464,6 +490,47 @@ class ExplorerView(ft.Column):
                 self.app.warn_dialog("提示", "当前热力图组件不支持后台扫描")
         except Exception as e:
             self.app.handle_exception(e, title="刷新热力图失败")
+
+    def _update_dimension_list(self) -> None:
+        """扫描存档并更新维度下拉列表"""
+        try:
+            if not self.world_session:
+                return
+
+            dimensions = self.world_session.get_dimensions()
+            self._dimension_region_dirs.clear()
+
+            options = []
+            for dim in dimensions:
+                dim_id = dim["id"]
+                dim_name = dim["name"]
+                region_dir = dim["region_dir"]
+                self._dimension_region_dirs[dim_id] = region_dir
+                options.append(ft.dropdown.Option(dim_id, dim_name))
+
+            self._dimension_dropdown.options = options
+
+            if options:
+                if self._current_dimension not in self._dimension_region_dirs:
+                    self._current_dimension = options[0].key
+                self._dimension_dropdown.value = self._current_dimension
+            else:
+                self._current_dimension = ""
+
+            safe_update(self._dimension_dropdown)
+        except Exception as e:
+            self.app.handle_exception(e, title="扫描维度失败")
+
+    def _on_dimension_changed(self, e: ft.ControlEvent) -> None:
+        """维度切换回调"""
+        try:
+            new_dim = e.control.value
+            if new_dim == self._current_dimension:
+                return
+            self._current_dimension = new_dim
+            self._refresh_heatmap()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="切换维度失败")
     
     def _update_region_stats(self) -> None:
         """更新区域统计信息"""
@@ -499,7 +566,6 @@ class ExplorerView(ft.Column):
             if path and self.world_session:
                 imported = self.world_session.import_usercache(Path(path))
                 if imported > 0:
-                    # 重新获取玩家名称并刷新下拉列表
                     player_names = self.world_session.get_player_names()
                     players = []
                     for uuid, name in player_names.items():
@@ -515,6 +581,27 @@ class ExplorerView(ft.Column):
                     self.app.info_dialog("提示", "未能导入任何玩家名称。")
         except Exception as e:
             self.app.handle_exception(e, title="导入 usercache 失败")
+
+    def _import_language_file(self, e: ft.ControlEvent = None) -> None:
+        """导入 Minecraft 语言文件（支持模组）"""
+        try:
+            path = self.app.pick_file(
+                title="选择语言文件 (zh_cn.json 等)",
+                file_types=[("JSON 文件 (*.json)", "*.json")],
+            )
+            if path:
+                from app.services.item_service import get_item_service
+                item_service = get_item_service()
+                count = item_service.load_language_file(Path(path))
+                if count > 0:
+                    self.app.info_dialog("成功", f"成功导入 {count} 个物品/附魔名称。\n物品栏和装备预览将使用新名称。")
+                    # 刷新当前显示
+                    if self.current_uuid:
+                        self._load_player_data(self.current_uuid)
+                else:
+                    self.app.info_dialog("提示", "未能从文件中解析出有效的物品名称。\n\n支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n- 直接 ID 映射 (minecraft:xxx)")
+        except Exception as e:
+            self.app.handle_exception(e, title="导入语言文件失败")
     
     def _on_nbt_search(self, e: ft.ControlEvent) -> None:
         try:

@@ -732,3 +732,78 @@ class WorldSession:
         """清空操作队列"""
         self._action_queue.clear()
         self._log("操作队列已清空", "QUEUE")
+
+    def get_dimensions(self) -> List[Dict[str, str]]:
+        """
+        扫描存档中所有可用的维度目录。
+
+        Returns:
+            维度信息列表，每项包含 id, name, region_dir
+        """
+        dimensions = []
+        seen = set()
+
+        # 原版维度（固定）
+        vanilla_dims = [
+            ("overworld", "🌍 主世界", self.world_path / "region"),
+            ("nether", "🔥 下界", self.world_path / "DIM-1" / "region"),
+            ("end", "🌌 末地", self.world_path / "DIM1" / "region"),
+        ]
+
+        for dim_id, dim_name, region_dir in vanilla_dims:
+            if region_dir.exists() and any(region_dir.glob("r.*.*.mca")):
+                dimensions.append({"id": dim_id, "name": dim_name, "region_dir": str(region_dir)})
+                seen.add(dim_id)
+
+        # 扫描 DIM{数字} 格式（旧版模组维度）
+        for dim_dir in self.world_path.glob("DIM*"):
+            if not dim_dir.is_dir():
+                continue
+            dir_name = dim_dir.name  # e.g. DIM7, DIM-27
+            if dir_name in ("DIM-1", "DIM1"):
+                continue  # 已处理的原版维度
+
+            region_dir = dim_dir / "region"
+            if region_dir.exists() and any(region_dir.glob("r.*.*.mca")):
+                dim_id = dir_name.lower()
+                if dim_id not in seen:
+                    dimensions.append({
+                        "id": dim_id,
+                        "name": f"📦 {dir_name}",
+                        "region_dir": str(region_dir),
+                    })
+                    seen.add(dim_id)
+
+        # 扫描 dimensions/{namespace}/{name} 格式（1.16+ 模组维度）
+        dimensions_base = self.world_path / "dimensions"
+        if dimensions_base.exists():
+            for namespace_dir in dimensions_base.iterdir():
+                if not namespace_dir.is_dir():
+                    continue
+                for dim_dir in namespace_dir.iterdir():
+                    if not dim_dir.is_dir():
+                        continue
+                    region_dir = dim_dir / "region"
+                    if region_dir.exists() and any(region_dir.glob("r.*.*.mca")):
+                        namespace = namespace_dir.name
+                        dim_name_str = dim_dir.name
+                        dim_id = f"{namespace}:{dim_name_str}"
+                        if dim_id not in seen:
+                            # 美化显示名
+                            display_name = f"📦 {namespace}:{dim_name_str}"
+                            if namespace == "minecraft":
+                                vanilla_map = {
+                                    "overworld": "🌍 主世界",
+                                    "the_nether": "🔥 下界",
+                                    "the_end": "🌌 末地",
+                                }
+                                display_name = vanilla_map.get(dim_name_str, display_name)
+                            dimensions.append({
+                                "id": dim_id,
+                                "name": display_name,
+                                "region_dir": str(region_dir),
+                            })
+                            seen.add(dim_id)
+
+        self._log(f"发现 {len(dimensions)} 个维度", "SCAN")
+        return dimensions
