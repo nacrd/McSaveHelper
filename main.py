@@ -8,8 +8,14 @@
 """
 import sys
 import os
+import builtins
 import traceback
 from pathlib import Path
+
+if not hasattr(builtins, 'exit'):
+    builtins.exit = sys.exit
+if not hasattr(builtins, 'quit'):
+    builtins.quit = sys.exit
 
 
 def _setup_console() -> None:

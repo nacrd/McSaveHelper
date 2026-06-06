@@ -18,10 +18,22 @@ try:
 except Exception:
     pass
 
+try:
+    datas_desktop, binaries_desktop, hidden_desktop = collect_all('flet_desktop')
+    datas += list(datas_desktop)
+    binaries += list(binaries_desktop)
+    hiddenimports += list(hidden_desktop)
+except Exception:
+    pass
+
 # Flet 通过 importlib.metadata 定位 Flutter 客户端，必须保留元数据
 datas += copy_metadata('flet')
 try:
     datas += copy_metadata('flet_core')
+except Exception:
+    pass
+try:
+    datas += copy_metadata('flet_desktop')
 except Exception:
     pass
 
@@ -36,6 +48,7 @@ hiddenimports += collect_submodules('anvil')
 hiddenimports += [
     'flet',
     'flet_core',
+    'flet_desktop',
     'nbtlib',
     'anvil',
     'requests',
