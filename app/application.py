@@ -9,6 +9,7 @@
 import re
 import time
 import traceback
+from pathlib import Path
 from typing import Any, Optional, List, Dict, Callable
 
 import flet as ft
@@ -172,6 +173,24 @@ class Application:
         page.window.height = 820
         page.window.min_width = 1000
         page.window.min_height = 720
+        icon_path = self._resolve_icon_path()
+        if icon_path:
+            page.window.icon = icon_path
+
+    @staticmethod
+    def _resolve_icon_path() -> Optional[str]:
+        """解析应用图标路径，兼容开发环境和 PyInstaller 打包环境"""
+        import sys
+        icon_name = "mcsavehelper_icon.ico"
+        candidates = []
+        if hasattr(sys, '_MEIPASS'):
+            candidates.append(Path(sys._MEIPASS) / icon_name)
+            candidates.append(Path(sys.executable).parent / icon_name)
+        candidates.append(Path(__file__).parent.parent / icon_name)
+        for p in candidates:
+            if p.exists():
+                return str(p)
+        return None
 
     def _init_logging(self) -> None:
         """初始化日志系统"""

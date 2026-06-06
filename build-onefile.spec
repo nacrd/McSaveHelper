@@ -41,6 +41,7 @@ except Exception:
 datas += collect_data_files('anvil')
 datas += collect_data_files('nbtlib')
 datas += [('translations', 'translations')]
+datas += [('mcsavehelper_icon.ico', '.')]
 
 # ---------- 3. 收集隐藏导入 ----------
 hiddenimports += collect_submodules('nbtlib')
