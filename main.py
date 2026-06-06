@@ -2,13 +2,46 @@
 
 启动入口：确保依赖已安装，然后直接运行。
   python main.py
+
+打包后命令行调试：
+  MCSaveHelper.exe --console
 """
 import sys
+import os
 import traceback
+from pathlib import Path
+
+
+def _setup_console() -> None:
+    """为 GUI 子系统的 exe 分配控制台（仅在 --console 参数时）"""
+    if sys.platform != 'win32' or not hasattr(sys, '_MEIPASS'):
+        return
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        if kernel32.AllocConsole():
+            sys.stdout = open('CONOUT$', 'w', encoding='utf-8', errors='replace')
+            sys.stderr = open('CONOUT$', 'w', encoding='utf-8', errors='replace')
+            sys.stdin = open('CONIN$', 'r', encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
+def _get_log_path() -> Path:
+    """获取启动错误日志路径"""
+    if hasattr(sys, '_MEIPASS'):
+        log_dir = Path(sys.executable).parent
+    else:
+        log_dir = Path(__file__).parent
+    return log_dir / "startup_error.log"
 
 
 def main() -> None:
     """应用主入口"""
+    if '--console' in sys.argv:
+        sys.argv.remove('--console')
+        _setup_console()
+
     try:
         import flet as ft
         from app.application import Application
@@ -16,13 +49,26 @@ def main() -> None:
         ft.run(Application)
 
     except ImportError as e:
-        print(f"[FATAL] 缺少依赖: {e}")
-        print("请运行: pip install -r requirements.txt")
+        msg = f"[FATAL] 缺少依赖: {e}\n请运行: pip install -r requirements.txt"
+        print(msg)
+        _write_error_log(msg)
         sys.exit(1)
     except Exception:
-        print("[FATAL] 应用启动失败:")
-        traceback.print_exc()
+        msg = "[FATAL] 应用启动失败:\n" + traceback.format_exc()
+        print(msg)
+        _write_error_log(msg)
         sys.exit(1)
+
+
+def _write_error_log(msg: str) -> None:
+    """将错误写入日志文件，便于排查打包后的问题"""
+    try:
+        log_path = _get_log_path()
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(msg)
+        print(f"错误日志已保存到: {log_path}")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

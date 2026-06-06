@@ -2,16 +2,35 @@
 
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, collect_all, copy_metadata
 
-# ---------- 1. 收集数据文件 ----------
-datas = collect_data_files('anvil')
-datas += collect_data_files('flet')
+# ---------- 1. 收集 Flet 全部组件（关键！） ----------
+datas_flet, binaries_flet, hidden_flet = collect_all('flet')
+datas = list(datas_flet)
+binaries = list(binaries_flet)
+hiddenimports = list(hidden_flet)
+
+try:
+    datas_core, binaries_core, hidden_core = collect_all('flet_core')
+    datas += list(datas_core)
+    binaries += list(binaries_core)
+    hiddenimports += list(hidden_core)
+except Exception:
+    pass
+
+# Flet 通过 importlib.metadata 定位 Flutter 客户端，必须保留元数据
+datas += copy_metadata('flet')
+try:
+    datas += copy_metadata('flet_core')
+except Exception:
+    pass
+
+# ---------- 2. 收集其他依赖的数据文件 ----------
+datas += collect_data_files('anvil')
+datas += collect_data_files('nbtlib')
 datas += [('translations', 'translations')]
 
-# ---------- 2. 收集隐藏导入 ----------
-hiddenimports = []
-hiddenimports += collect_submodules('flet')
+# ---------- 3. 收集隐藏导入 ----------
 hiddenimports += collect_submodules('nbtlib')
 hiddenimports += collect_submodules('anvil')
 hiddenimports += [
@@ -26,13 +45,18 @@ hiddenimports += [
     'packaging.version',
     'packaging.specifiers',
     'packaging.requirements',
+    'importlib.metadata',
+    'importlib.resources',
+    'tkinter',
+    'tkinter.filedialog',
+    '_tkinter',
 ]
 
-# ---------- 3. 分析主脚本 ----------
+# ---------- 4. 分析主脚本 ----------
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
@@ -43,10 +67,10 @@ a = Analysis(
     optimize=0,
 )
 
-# ---------- 4. 创建 PYZ 存档 ----------
+# ---------- 5. 创建 PYZ 存档 ----------
 pyz = PYZ(a.pure)
 
-# ---------- 5. 生成可执行文件（目录模式，更稳定） ----------
+# ---------- 6. 生成可执行文件（目录模式，更稳定） ----------
 exe = EXE(
     pyz,
     a.scripts,
@@ -68,7 +92,7 @@ exe = EXE(
     icon='mcsavehelper_icon.ico',
 )
 
-# ---------- 6. 收集所有文件到目录 ----------
+# ---------- 7. 收集所有文件到目录 ----------
 coll = COLLECT(
     exe,
     a.binaries,
