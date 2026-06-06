@@ -59,13 +59,25 @@ class ExplorerView(ft.Column):
         )
         toolbar = ft.Container(
             content=ft.Row([
-                ft.Text("📂 存档浏览器", size=24, weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary),
-                self._world_label,
+                ft.Row([
+                    ft.Text("🧭", size=26, color=THEME.mc_gold, font_family="monospace"),
+                    ft.Column([
+                        ft.Text("存档浏览器", size=22, weight=ft.FontWeight.BOLD,
+                                color=THEME.text_primary, font_family="monospace"),
+                        self._world_label,
+                    ], spacing=0),
+                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Container(),
                 btn_primary("加载存档", on_click=self._load_world),
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            padding=ft.Padding(bottom=16),
+            padding=ft.Padding(left=16, right=16, top=14, bottom=14),
+            bgcolor=THEME.mc_dirt,
+            border=ft.Border(
+                left=ft.BorderSide(2, THEME.border_tertiary),
+                top=ft.BorderSide(2, THEME.border_tertiary),
+                right=ft.BorderSide(2, THEME.bg_secondary),
+                bottom=ft.BorderSide(2, THEME.bg_secondary),
+            ),
         )
 
         # 标签页容器
@@ -88,21 +100,59 @@ class ExplorerView(ft.Column):
 
         # 标签页按钮
         self._tab_labels_widgets: List[ft.Text] = []
+        self._tab_buttons: List[ft.Container] = []
         tab_label_conts: List[ft.Container] = []
         for idx, name in enumerate(["存档信息", "玩家", "区域", "NBT"]):
-            lbl = ft.Text(name, size=14, weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary if idx == 0 else THEME.text_secondary)
-            self._tab_labels_widgets.append(lbl)
-            tab_label_conts.append(ft.Container(
-                content=lbl,
-                padding=ft.Padding(right=24, bottom=8),
+            icon = ["🌍", "🧍", "🧱", "📜"][idx]
+            lbl = ft.Text(name, size=12, weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary if idx == 0 else THEME.text_secondary,
+                        font_family="monospace")
+            slot = ft.Container(
+                content=ft.Column([
+                    ft.Text(icon, size=20, text_align=ft.TextAlign.CENTER),
+                    lbl,
+                ], spacing=2, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+                width=92,
+                height=64,
+                alignment=ft.Alignment(0, 0),
+                padding=ft.Padding(left=6, right=6, top=6, bottom=6),
+                bgcolor=THEME.mc_stone if idx == 0 else THEME.bg_secondary,
+                border=ft.Border(
+                    left=ft.BorderSide(3, THEME.border_tertiary),
+                    top=ft.BorderSide(3, THEME.border_tertiary),
+                    right=ft.BorderSide(3, THEME.bg_secondary),
+                    bottom=ft.BorderSide(3, THEME.bg_secondary),
+                ),
                 on_click=lambda e, i=idx: self._switch_tab(i),
-            ))
+            )
+            self._tab_labels_widgets.append(lbl)
+            self._tab_buttons.append(slot)
+            tab_label_conts.append(slot)
 
-        tab_labels_row = ft.Row(tab_label_conts, spacing=0)
-        self._tab_indicator = ft.Container(height=2, bgcolor=THEME.accent)
-        self._tab_bar = ft.Column([tab_labels_row, self._tab_indicator], spacing=0)
-        self._content_box = ft.Container(content=self._tabs_content[0])
+        tab_labels_row = ft.Row(tab_label_conts, spacing=10)
+        self._tab_indicator = ft.Container(height=4, bgcolor=THEME.mc_grass)
+        self._tab_bar = ft.Container(
+            content=ft.Column([tab_labels_row, self._tab_indicator], spacing=10),
+            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
+            bgcolor=THEME.mc_coal,
+            border=ft.Border(
+                left=ft.BorderSide(2, THEME.border_tertiary),
+                top=ft.BorderSide(2, THEME.border_tertiary),
+                right=ft.BorderSide(2, THEME.bg_secondary),
+                bottom=ft.BorderSide(2, THEME.bg_secondary),
+            ),
+        )
+        self._content_box = ft.Container(
+            content=self._tabs_content[0],
+            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
+            bgcolor=THEME.bg_secondary,
+            border=ft.Border(
+                left=ft.BorderSide(2, THEME.border_tertiary),
+                top=ft.BorderSide(2, THEME.border_tertiary),
+                right=ft.BorderSide(2, THEME.bg_secondary),
+                bottom=ft.BorderSide(2, THEME.bg_secondary),
+            ),
+        )
         self._content_box.expand = True
 
         self.controls.append(toolbar)
@@ -119,7 +169,10 @@ class ExplorerView(ft.Column):
         try:
             self._tab_index = index
             for i, lbl in enumerate(self._tab_labels_widgets):
-                lbl.color = THEME.text_primary if i == index else THEME.text_secondary
+                selected = i == index
+                lbl.color = THEME.text_primary if selected else THEME.text_secondary
+                if i < len(self._tab_buttons):
+                    self._tab_buttons[i].bgcolor = THEME.mc_stone if selected else THEME.bg_secondary
             self._content_box.content = self._tabs_content[index]
             safe_update(self._content_box)
             safe_update(self._tab_bar)

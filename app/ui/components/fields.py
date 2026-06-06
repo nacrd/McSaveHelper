@@ -1,4 +1,4 @@
-"""输入字段组件工厂"""
+"""Minecraft 风格输入字段组件工厂"""
 from typing import Optional, Callable, Any
 
 import flet as ft
@@ -22,12 +22,15 @@ def text_field(
         width=width,
         on_change=on_change,
         password=password,
-        border_color=THEME.border_standard,
-        focused_border_color=THEME.accent,
+        border_color=THEME.border_tertiary,
+        focused_border_color=THEME.mc_diamond,
         text_size=13,
         color=THEME.text_primary,
-        bgcolor="rgba(255,255,255,0.02)",
-        border_radius=6,
+        bgcolor=THEME.bg_secondary,
+        border_radius=0,
+        cursor_color=THEME.mc_diamond,
+        label_style=ft.TextStyle(color=THEME.text_secondary),
+        hint_style=ft.TextStyle(color=THEME.text_muted),
     )
     tf.expand = expand
     return tf
@@ -42,16 +45,17 @@ def checkbox(
         label=label,
         value=value,
         on_change=on_change,
-        check_color=THEME.accent,
+        check_color=THEME.bg_secondary,
+        fill_color=THEME.mc_grass,
         label_style=ft.TextStyle(size=13, color=THEME.text_secondary),
     )
 
 
 def label(text: str) -> ft.Text:
-    """辅助标签组件"""
     return ft.Text(
         text,
         size=12,
         weight=ft.FontWeight.BOLD,
-        color=THEME.text_secondary,
+        color=THEME.mc_gold,
+        font_family="monospace",
     )

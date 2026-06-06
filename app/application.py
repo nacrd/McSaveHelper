@@ -84,13 +84,14 @@ class Application:
             title=self._t("log_panel.title", "日志"),
         )
         self._progress_bar: ft.ProgressBar = ft.ProgressBar(
-            value=0, color=THEME.accent,
-            bgcolor="rgba(255,255,255,0.05)",
-            height=4, border_radius=2,
+            value=0, color=THEME.mc_grass,
+            bgcolor=THEME.bg_secondary,
+            height=8, border_radius=0,
         )
         self._progress_label: ft.Text = ft.Text(
             self._t("top_bar.ready", "就绪"), size=12,
-            color=THEME.accent_light, weight=ft.FontWeight.BOLD,
+            color=THEME.mc_gold, weight=ft.FontWeight.BOLD,
+            font_family="monospace",
         )
         self._start_btn: ft.Button = btn_primary(
             self._t("top_bar.start_conversion", "开始转换"),
@@ -101,7 +102,14 @@ class Application:
         # ─── 视图容器 ───────────────────────────
         self.views: Dict[str, ft.Control] = {}
         self._content: ft.Container = ft.Container(
-            padding=ft.Padding(left=32, right=32, top=24, bottom=24),
+            padding=ft.Padding(left=18, right=18, top=18, bottom=18),
+            bgcolor=THEME.bg_card,
+            border=ft.Border(
+                left=ft.BorderSide(3, THEME.border_tertiary),
+                top=ft.BorderSide(3, THEME.border_tertiary),
+                right=ft.BorderSide(3, THEME.bg_secondary),
+                bottom=ft.BorderSide(3, THEME.bg_secondary),
+            ),
         )
         self._content.expand = True
 
@@ -156,6 +164,11 @@ class Application:
         page.title = self._t("app.title", "MCSaveHelper · 存档管理工具")
         page.theme_mode = ft.ThemeMode.DARK
         page.bgcolor = THEME.bg_primary
+        page.window.bgcolor = THEME.bg_primary
+        page.window.frameless = False
+        page.window.title_bar_hidden = True
+        page.window.title_bar_buttons_hidden = True
+        page.window.resizable = True
         page.padding = 0
         page.window.width = 1100
         page.window.height = 820
@@ -202,23 +215,53 @@ class Application:
         )
         top_bar = self._build_top_bar()
 
-        # 内容区域（上方）+ 日志面板（下方）
-        content_area = ft.Column([top_bar, self._content], spacing=0)
+        content_area = ft.Column(
+            [top_bar, ft.Container(content=self._content, padding=ft.Padding(left=14, right=14, top=14, bottom=14))],
+            spacing=0,
+            scroll=ft.ScrollMode.AUTO,
+        )
         content_area.expand = True
 
-        # 右侧：内容区 + 底部日志面板
         right_panel = ft.Column(
             [content_area, self.log_panel],
-            spacing=0,
+            spacing=12,
             expand=True,
         )
 
         row = ft.Row(
-            [self._sidebar, right_panel], spacing=0,
+            [self._sidebar, right_panel], spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
         row.expand = True
-        self.page.add(row)
+
+        shell = ft.Container(
+            content=row,
+            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
+            margin=ft.Margin(left=12, right=12, top=0, bottom=12),
+            bgcolor=THEME.bg_primary,
+            border=ft.Border(
+                left=ft.BorderSide(4, THEME.border_tertiary),
+                top=None,
+                right=ft.BorderSide(4, THEME.bg_secondary),
+                bottom=ft.BorderSide(4, THEME.bg_secondary),
+            ),
+            shadow=ft.BoxShadow(
+                spread_radius=0,
+                blur_radius=0,
+                color=THEME.shadow,
+                offset=ft.Offset(6, 6),
+            ),
+        )
+        shell.expand = True
+
+        app_frame = ft.Column(
+            [self._build_window_title_bar(), shell],
+            spacing=0,
+            expand=True,
+        )
+        app_frame.expand = True
+
+        self.page.add(app_frame)
 
     def _on_tabs_reorder(self, tabs: list) -> None:
         """侧边栏标签页排序变更回调
@@ -227,6 +270,104 @@ class Application:
             tabs: 排序后的标签页列表
         """
         self._tab_defs = list(tabs)
+
+    def _build_window_title_bar(self) -> ft.Container:
+        title_content = ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text("⛏", size=18, color=THEME.mc_gold, font_family="monospace"),
+                    width=34,
+                    height=30,
+                    alignment=ft.Alignment(0, 0),
+                    bgcolor=THEME.bg_secondary,
+                    border=ft.Border(
+                        left=ft.BorderSide(2, THEME.border_tertiary),
+                        top=ft.BorderSide(2, THEME.border_tertiary),
+                        right=ft.BorderSide(2, THEME.bg_secondary),
+                        bottom=ft.BorderSide(2, THEME.bg_secondary),
+                    ),
+                ),
+                ft.Text(
+                    "MCSaveHelper  ▣ Minecraft Save Toolkit",
+                    size=13,
+                    color=THEME.text_primary,
+                    weight=ft.FontWeight.BOLD,
+                    font_family="monospace",
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.WindowDragArea(title_content, maximizable=True, expand=True),
+                    self._build_window_controls(),
+                ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            height=46,
+            padding=ft.Padding(left=12, right=12, top=6, bottom=6),
+            bgcolor=THEME.mc_wood,
+            border=ft.Border(
+                left=None,
+                top=None,
+                right=None,
+                bottom=ft.BorderSide(4, THEME.mc_grass),
+            ),
+        )
+
+    def _window_button(
+        self,
+        text: str,
+        bgcolor: str,
+        on_click: Callable[[ft.ControlEvent], None],
+    ) -> ft.Container:
+        return ft.Container(
+            content=ft.Text(
+                text,
+                size=14,
+                color=THEME.text_primary,
+                weight=ft.FontWeight.BOLD,
+                font_family="monospace",
+                text_align=ft.TextAlign.CENTER,
+            ),
+            width=34,
+            height=30,
+            alignment=ft.Alignment(0, 0),
+            bgcolor=bgcolor,
+            border=ft.Border(
+                left=ft.BorderSide(2, THEME.border_tertiary),
+                top=ft.BorderSide(2, THEME.border_tertiary),
+                right=ft.BorderSide(2, THEME.bg_secondary),
+                bottom=ft.BorderSide(2, THEME.bg_secondary),
+            ),
+            on_click=on_click,
+            ink=True,
+        )
+
+    def _build_window_controls(self) -> ft.Row:
+        return ft.Row(
+            [
+                self._window_button("—", THEME.mc_stone, self._minimize_window),
+                self._window_button("□", THEME.mc_stone, self._toggle_maximize_window),
+                self._window_button("×", THEME.mc_redstone, self._close_window),
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _minimize_window(self, e: ft.ControlEvent) -> None:
+        self.page.window.minimized = True
+        self.page.window.update()
+
+    def _toggle_maximize_window(self, e: ft.ControlEvent) -> None:
+        self.page.window.maximized = not self.page.window.maximized
+        self.page.window.update()
+
+    def _close_window(self, e: ft.ControlEvent) -> None:
+        self.page.run_task(self.page.window.close)
 
     def _build_top_bar(self) -> ft.Container:
         """构建顶部栏
@@ -240,29 +381,69 @@ class Application:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
         return ft.Container(
-            content=ft.Row(
+            content=ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Text("🌍", size=28, color=THEME.accent_light),
-                            ft.Text(
-                                "MCSaveHelper", size=22,
-                                weight=ft.FontWeight.BOLD,
-                                color=THEME.text_primary,
-                            ),
-                            ft.Text(
-                                self._t("app.subtitle", "存档管理工具"),
-                                size=11, color=THEME.text_muted,
-                            ),
-                        ],
-                        spacing=10,
+                    ft.Container(height=8, bgcolor=THEME.mc_grass),
+                    ft.Container(
+                        content=ft.Row(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Container(
+                                            content=ft.Text("⛏", size=26, color=THEME.mc_gold, font_family="monospace"),
+                                            width=48,
+                                            height=48,
+                                            alignment=ft.Alignment(0, 0),
+                                            bgcolor=THEME.bg_secondary,
+                                            border=ft.Border(
+                                                left=ft.BorderSide(2, THEME.border_tertiary),
+                                                top=ft.BorderSide(2, THEME.border_tertiary),
+                                                right=ft.BorderSide(2, THEME.bg_secondary),
+                                                bottom=ft.BorderSide(2, THEME.bg_secondary),
+                                            ),
+                                        ),
+                                        ft.Column(
+                                            [
+                                                ft.Text(
+                                                    "MCSaveHelper", size=22,
+                                                    weight=ft.FontWeight.BOLD,
+                                                    color=THEME.text_primary,
+                                                    font_family="monospace",
+                                                ),
+                                                ft.Text(
+                                                    self._t("app.subtitle", "存档管理工具"),
+                                                    size=11, color=THEME.mc_grass,
+                                                    font_family="monospace",
+                                                ),
+                                            ],
+                                            spacing=0,
+                                        ),
+                                    ],
+                                    spacing=12,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                ft.Row(
+                                    [progress_row, self._start_btn],
+                                    spacing=15,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                            ],
+                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        padding=ft.Padding(left=18, right=18, top=12, bottom=12),
+                        bgcolor=THEME.mc_wood,
                     ),
-                    ft.Row([progress_row, self._start_btn], spacing=15),
                 ],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                spacing=0,
             ),
-            padding=ft.Padding(left=25, right=25, top=15, bottom=15),
-            bgcolor=THEME.bg_secondary,
+            bgcolor=THEME.mc_wood,
+            border=ft.Border(
+                left=ft.BorderSide(3, THEME.border_tertiary),
+                top=ft.BorderSide(3, THEME.border_tertiary),
+                right=ft.BorderSide(3, THEME.bg_secondary),
+                bottom=ft.BorderSide(3, THEME.bg_secondary),
+            ),
         )
 
     # ════════════════════════════════════════════

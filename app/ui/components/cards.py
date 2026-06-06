@@ -1,4 +1,4 @@
-"""卡片布局组件"""
+"""Minecraft 风格卡片布局组件"""
 import flet as ft
 
 from app.ui.theme import THEME
@@ -8,7 +8,6 @@ def card(
     content: ft.Control,
     padding: int = 20,
 ) -> ft.Container:
-    """创建深色主题卡片容器"""
     inner = content
     if not isinstance(content, ft.Container):
         inner = ft.Container(content=content, padding=padding)
@@ -16,29 +15,36 @@ def card(
         content=inner,
         bgcolor=THEME.bg_card,
         border=ft.Border(
-            left=ft.BorderSide(1, THEME.border_standard),
-            top=ft.BorderSide(1, THEME.border_standard),
-            right=ft.BorderSide(1, THEME.border_standard),
-            bottom=ft.BorderSide(1, THEME.border_standard),
+            left=ft.BorderSide(2, THEME.border_tertiary),
+            top=ft.BorderSide(2, THEME.border_tertiary),
+            right=ft.BorderSide(2, THEME.bg_secondary),
+            bottom=ft.BorderSide(2, THEME.bg_secondary),
         ),
-        border_radius=8,
+        border_radius=0,
+        shadow=ft.BoxShadow(
+            spread_radius=0,
+            blur_radius=0,
+            color=THEME.shadow,
+            offset=ft.Offset(4, 4),
+        ),
     )
 
 
 def section_title(text: str) -> ft.Container:
-    """创建区块标题"""
     return ft.Container(
         content=ft.Row(
             [
+                ft.Container(width=8, height=18, bgcolor=THEME.mc_grass),
                 ft.Text(
                     text,
                     size=15,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_primary,
+                    font_family="monospace",
                 ),
-                ft.Container(height=1, bgcolor=THEME.border_subtle),
+                ft.Container(height=2, bgcolor=THEME.border_standard),
             ],
-            spacing=15,
+            spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         padding=ft.Padding(left=20, right=20, top=18, bottom=8),

@@ -48,10 +48,11 @@ class LogPanel(ft.Container):
             tooltip="清除日志",
         )
         self._title_text = ft.Text(
-            f"  {title}",
+            f" ▣ {title}",
             size=12,
-            color=THEME.text_secondary,
-            weight=ft.FontWeight.W_500,
+            color=THEME.mc_gold,
+            weight=ft.FontWeight.BOLD,
+            font_family="monospace",
         )
         self._count_text = ft.Text(
             "",
@@ -74,8 +75,14 @@ class LogPanel(ft.Container):
             ),
             height=self.COLLAPSED_HEIGHT,
             padding=ft.Padding(left=8, right=8, top=4, bottom=4),
-            bgcolor=THEME.bg_secondary,
-            border_radius=ft.BorderRadius(top_left=6, top_right=6, bottom_left=0, bottom_right=0),
+            bgcolor=THEME.mc_coal,
+            border_radius=0,
+            border=ft.Border(
+                left=None,
+                top=None,
+                right=None,
+                bottom=ft.BorderSide(2, THEME.border_tertiary),
+            ),
         )
 
         # 日志容器
