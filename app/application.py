@@ -12,6 +12,7 @@ import threading
 import platform
 import subprocess
 import time
+import traceback
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Callable
 
@@ -60,7 +61,7 @@ class Application:
             print(f"[WARN] ConfigService 初始化失败: {e}")
             self.config = ConfigService.__new__(ConfigService)
             self.config._config = {}  # type: ignore
-            self.config.migration = MigrationConfig()  # type: ignore
+            self.config._migration = MigrationConfig()  # type: ignore
             self.config.save = lambda: None  # type: ignore
 
         try:
@@ -116,15 +117,27 @@ class Application:
     # ════════════════════════════════════════════
 
     def _t(self, key: str, default: str = "", **kwargs) -> str:
-        """翻译快捷方法"""
+        """翻译快捷方法
+        
+        Args:
+            key: 翻译键
+            default: 默认文本
+            **kwargs: 格式化参数
+            
+        Returns:
+            str: 翻译后的文本
+        """
         try:
             return self.i18n.translate(key, default, **kwargs)
         except Exception:
             return default
 
     def _on_page_error(self, e: ft.ControlEvent) -> None:
-        """页面级全局异常兜底"""
-        import traceback
+        """页面级全局异常兜底
+        
+        Args:
+            e: 控制事件
+        """
         error_msg = str(e.data) if hasattr(e, 'data') else str(e)
         print(f"[PAGE ERROR] {error_msg}")
         traceback.print_exc()
@@ -138,6 +151,7 @@ class Application:
             pass  # 连对话框都弹不出时只能打日志
 
     def _setup_page(self) -> None:
+        """设置页面基本属性"""
         page = self.page
         page.title = self._t("app.title", "MCSaveHelper · 存档管理工具")
         page.theme_mode = ft.ThemeMode.DARK
@@ -149,6 +163,7 @@ class Application:
         page.window.min_height = 720
 
     def _init_logging(self) -> None:
+        """初始化日志系统"""
         def ui_log_callback(message: str, tag: str) -> None:
             ts = time.strftime("%H:%M:%S")
             self.log_panel.log(f"[{ts}] [{tag.upper()}] {message}", tag.lower())
@@ -161,6 +176,7 @@ class Application:
         logger.info("MCSaveHelper 应用启动", module="App")
 
     def _sync_config_to_migration(self) -> None:
+        """同步配置到迁移参数"""
         mc = self.config.migration
         mc.version_detection = self.config.version_detection
         # 其他字段由视图直接设置
@@ -170,6 +186,7 @@ class Application:
     # ════════════════════════════════════════════
 
     def _build_ui(self) -> None:
+        """构建应用主界面"""
         # 标签页定义（存档探险为默认第一项）
         self._tab_defs = [
             {"id": "explorer", "label": self._t("sidebar.explorer", "存档探险"), "icon": "🗺️"},
@@ -204,10 +221,19 @@ class Application:
         self.page.add(row)
 
     def _on_tabs_reorder(self, tabs: list) -> None:
-        """侧边栏标签页排序变更回调"""
+        """侧边栏标签页排序变更回调
+        
+        Args:
+            tabs: 排序后的标签页列表
+        """
         self._tab_defs = list(tabs)
 
     def _build_top_bar(self) -> ft.Container:
+        """构建顶部栏
+        
+        Returns:
+            ft.Container: 顶部栏容器
+        """
         progress_row = ft.Row(
             [self._progress_label, self._progress_bar],
             spacing=12,
@@ -244,53 +270,90 @@ class Application:
     # ════════════════════════════════════════════
 
     def _switch_view(self, view_id: str) -> None:
+        """切换到指定视图
+        
+        Args:
+            view_id: 视图ID
+        """
         try:
             if view_id not in self.views:
                 self.views[view_id] = self._create_view(view_id)
             self._content.content = self.views[view_id]
             self.page.update()
         except Exception as e:
-            import traceback
             traceback.print_exc()
             self.log(f"加载视图 '{view_id}' 失败: {e}", "ERROR")
-            # 显示错误占位页面，不崩溃
-            try:
-                self._content.content = self._build_error_placeholder(view_id, e)
-                self.page.update()
-            except Exception:
-                # 连错误占位页都构建失败，只显示最简单的文本
-                try:
-                    self._content.content = ft.Container(
-                        content=ft.Text(
-                            f"加载页面 '{view_id}' 时出错: {e}",
-                            color=THEME.error, size=14,
-                        ),
-                        padding=40,
-                    )
-                    self.page.update()
-                except Exception:
-                    pass
+            self._handle_view_error(view_id, e)
+
+    def _handle_view_error(self, view_id: str, error: Exception) -> None:
+        """处理视图加载错误
+        
+        Args:
+            view_id: 视图ID
+            error: 异常对象
+        """
+        try:
+            self._content.content = self._build_error_placeholder(view_id, error)
+            self.page.update()
+        except Exception:
+            self._show_simple_error(view_id, error)
+
+    def _show_simple_error(self, view_id: str, error: Exception) -> None:
+        """显示简单错误信息
+        
+        Args:
+            view_id: 视图ID
+            error: 异常对象
+        """
+        try:
+            self._content.content = ft.Container(
+                content=ft.Text(
+                    f"加载页面 '{view_id}' 时出错: {error}",
+                    color=THEME.error, size=14,
+                ),
+                padding=40,
+            )
+            self.page.update()
+        except Exception:
+            pass
 
     def _create_view(self, view_id: str) -> ft.Control:
+        """创建指定视图
+        
+        Args:
+            view_id: 视图ID
+            
+        Returns:
+            ft.Control: 视图控件
+        """
         # 延迟导入视图模块，避免循环依赖
         from app.ui.views.migrator import MigratorView
         from app.ui.views.explorer import ExplorerView
         from app.ui.views.mappings import MappingsView
         from app.ui.views.settings import SettingsView
 
-        if view_id == "migrator":
-            return MigratorView(self)
-        elif view_id == "explorer":
-            return ExplorerView(self)
-        elif view_id == "mappings":
-            return MappingsView(self)
-        elif view_id == "settings":
-            return SettingsView(self)
+        view_map = {
+            "migrator": MigratorView,
+            "explorer": ExplorerView,
+            "mappings": MappingsView,
+            "settings": SettingsView,
+        }
+        
+        view_class = view_map.get(view_id)
+        if view_class:
+            return view_class(self)
         return ft.Container()
 
     def _build_error_placeholder(self, view_id: str, error: Exception) -> ft.Container:
-        """视图加载失败时的错误占位页面 - 可复制、可关闭"""
-        import traceback
+        """视图加载失败时的错误占位页面 - 可复制、可关闭
+        
+        Args:
+            view_id: 视图ID
+            error: 异常对象
+            
+        Returns:
+            ft.Container: 错误占位页容器
+        """
         tb = traceback.format_exc()
         
         # 创建可选择的错误信息文本
@@ -396,14 +459,15 @@ class Application:
         )
     
     def _copy_error_to_clipboard(self, error_text: str) -> None:
-        """复制错误信息到剪贴板"""
+        """复制错误信息到剪贴板
+        
+        Args:
+            error_text: 要复制的错误文本
+        """
         try:
-            # 使用 Flet 的剪贴板功能
-            import flet as ft
             self.page.set_clipboard(error_text)
             self.info_dialog("✅ 成功", "错误信息已复制到剪贴板\n你可以直接粘贴到任何地方")
         except Exception as e:
-            # 如果 Flet 剪贴板失败，尝试显示提示
             self.warn_dialog("复制失败", f"无法复制到剪贴板，请手动选择并复制错误信息\n\n错误：{str(e)}")
     
     def _close_error_view(self) -> None:
@@ -412,7 +476,11 @@ class Application:
         self._switch_view("explorer")
 
     def _retry_view(self, view_id: str) -> None:
-        """移除缓存的失败视图，重新尝试加载"""
+        """移除缓存的失败视图，重新尝试加载
+        
+        Args:
+            view_id: 视图ID
+        """
         self.views.pop(view_id, None)
         try:
             self._switch_view(view_id)
@@ -424,15 +492,27 @@ class Application:
     # ════════════════════════════════════════════
 
     def log(self, msg: str, level: str = "INFO") -> None:
+        """记录日志
+        
+        Args:
+            msg: 日志消息
+            level: 日志级别
+        """
         log_level = LogLevel.from_string(level)
         logger.log(log_level, msg, module="App")
 
     def log_header(self, msg: str) -> None:
+        """记录标题日志
+        
+        Args:
+            msg: 标题消息
+        """
         self.log_panel.log(f"\n{'=' * 50}", "separator")
         self.log_panel.log(msg, "header")
         self.log_panel.log(f"{'=' * 50}", "separator")
 
     def clear_log(self) -> None:
+        """清空日志面板"""
         self.log_panel.clear()
 
     # ════════════════════════════════════════════
@@ -440,6 +520,11 @@ class Application:
     # ════════════════════════════════════════════
 
     def update_progress(self, value: float) -> None:
+        """更新进度条
+        
+        Args:
+            value: 进度值（0.0 到 1.0）
+        """
         self._progress_bar.value = value
         self._progress_label.value = self._t(
             "top_bar.progress", "进度 {percent}%",
@@ -465,7 +550,15 @@ class Application:
 
     def _show_dialog(self, title: str, message: str, color: str = THEME.accent,
                     include_details: bool = False, exception: Optional[Exception] = None) -> None:
-        """显示对话框"""
+        """显示对话框
+        
+        Args:
+            title: 对话框标题
+            message: 对话框消息
+            color: 按钮颜色
+            include_details: 是否包含异常详情
+            exception: 异常对象
+        """
         # 先关闭现有对话框
         self._close_dialog()
         
@@ -473,7 +566,6 @@ class Application:
         content_list: List[ft.Control] = [ft.Text(message, color=THEME.text_secondary)]
         
         if include_details and exception:
-            import traceback
             error_details = traceback.format_exc()
             content_list.append(
                 ft.Container(
@@ -501,26 +593,51 @@ class Application:
         self.page.update()
 
     def info_dialog(self, title: str, message: str) -> None:
+        """显示信息对话框
+        
+        Args:
+            title: 对话框标题
+            message: 对话框消息
+        """
         self._show_dialog(title, message, THEME.accent)
 
     def warn_dialog(self, title: str, message: str) -> None:
+        """显示警告对话框
+        
+        Args:
+            title: 对话框标题
+            message: 对话框消息
+        """
         self._show_dialog(title, message, THEME.warning)
 
     def error_dialog(self, title: str, message: str, 
                     exception: Optional[Exception] = None, 
                     show_details: bool = False) -> None:
-        """显示错误对话框，可以选择是否显示异常详情"""
+        """显示错误对话框，可以选择是否显示异常详情
+        
+        Args:
+            title: 对话框标题
+            message: 对话框消息
+            exception: 异常对象
+            show_details: 是否显示异常详情
+        """
         self._show_dialog(title, message, THEME.error, include_details=show_details, exception=exception)
         
     def handle_exception(self, exception: Exception, title: Optional[str] = None, 
                         log: bool = True, show_dialog: bool = True) -> None:
-        """统一异常处理方法"""
+        """统一异常处理方法
+        
+        Args:
+            exception: 异常对象
+            title: 对话框标题
+            log: 是否记录日志
+            show_dialog: 是否显示对话框
+        """
         if title is None:
             title = self._t("dialogs.error", "错误")
         
         # 记录日志
         if log:
-            import traceback
             logger.error(f"{title}: {str(exception)}", module="App")
             logger.error(traceback.format_exc(), module="App")
         
@@ -533,6 +650,11 @@ class Application:
     # ════════════════════════════════════════════
 
     def pick_directory(self) -> Optional[str]:
+        """选择目录对话框
+        
+        Returns:
+            Optional[str]: 选择的目录路径，取消则返回None
+        """
         try:
             from tkinter import Tk, filedialog
             root = Tk()
@@ -545,6 +667,15 @@ class Application:
             return None
 
     def pick_file(self, title: str = "", file_types: Optional[List[tuple]] = None) -> Optional[str]:
+        """选择文件对话框
+        
+        Args:
+            title: 对话框标题
+            file_types: 文件类型过滤
+            
+        Returns:
+            Optional[str]: 选择的文件路径，取消则返回None
+        """
         try:
             from tkinter import Tk, filedialog
             root = Tk()
@@ -560,6 +691,16 @@ class Application:
 
     def save_file(self, title: str = "", default_ext: str = ".txt",
                   file_types: Optional[List[tuple]] = None) -> Optional[str]:
+        """保存文件对话框
+        
+        Args:
+            title: 对话框标题
+            default_ext: 默认扩展名
+            file_types: 文件类型过滤
+            
+        Returns:
+            Optional[str]: 选择的文件路径，取消则返回None
+        """
         try:
             from tkinter import Tk, filedialog
             root = Tk()
@@ -613,12 +754,17 @@ class Application:
         except Exception as e:
             self.handle_exception(e, title="启动转换失败")
             self._start_btn.disabled = False
-            try:
-                self.page.update()
-            except Exception:
-                pass
+            self._try_update_page()
+
+    def _try_update_page(self) -> None:
+        """尝试更新页面，忽略错误"""
+        try:
+            self.page.update()
+        except Exception:
+            pass
 
     def _save_config(self) -> None:
+        """保存当前配置"""
         c = self.config
         mc = c.migration
         c._config["version_detection"] = mc.version_detection
@@ -628,6 +774,11 @@ class Application:
         c.save()
 
     def _run_single_thread(self, dest_dir: str) -> None:
+        """执行单存档迁移的线程函数
+        
+        Args:
+            dest_dir: 目标目录
+        """
         mc = self.config.migration
         try:
             self.log_header(self._t("messages.migration_started", "开始迁移任务"))
@@ -669,9 +820,14 @@ class Application:
         finally:
             self._start_btn.disabled = False
             self._progress_bar.value = 0
-            self.page.update()
+            self._try_update_page()
 
     def _run_batch_thread(self, dest_dir: str) -> None:
+        """执行批量迁移的线程函数
+        
+        Args:
+            dest_dir: 目标目录
+        """
         mc = self.config.migration
         try:
             self.log_header(self._t("messages.batch_migration_started", "开始批量处理"))
@@ -704,18 +860,24 @@ class Application:
         finally:
             self._start_btn.disabled = False
             self._progress_bar.value = 0
-            self.page.update()
+            self._try_update_page()
 
     # ════════════════════════════════════════════
     #  快捷操作
     # ════════════════════════════════════════════
 
     def open_folder(self, path: str) -> None:
+        """在系统文件管理器中打开目录
+        
+        Args:
+            path: 目录路径
+        """
         self.migration.open_folder(path)
 
-    # ─── 文件选择快捷方法（供视图使用）───────────
+    # ─── 文件选择快捷方法（供视图使用） ─────────
 
     def set_src(self) -> None:
+        """设置源目录"""
         try:
             path = self.pick_directory()
             if path:
@@ -726,6 +888,7 @@ class Application:
             self.handle_exception(e, title="选择目录失败")
 
     def set_dest(self) -> None:
+        """设置目标目录"""
         try:
             path = self.pick_directory()
             if path:
@@ -736,6 +899,7 @@ class Application:
             self.handle_exception(e, title="选择目录失败")
 
     def set_batch_dir(self) -> None:
+        """设置批量目录"""
         try:
             path = self.pick_directory()
             if path:
@@ -746,7 +910,12 @@ class Application:
             self.handle_exception(e, title="选择目录失败")
 
     def _update_migrator_field(self, field_name: str, value: str) -> None:
-        """更新 MigratorView 中的输入框值"""
+        """更新 MigratorView 中的输入框值
+        
+        Args:
+            field_name: 字段名称
+            value: 字段值
+        """
         if "migrator" in self.views:
             view = self.views["migrator"]
             field = getattr(view, field_name, None)
@@ -758,5 +927,10 @@ class Application:
                     pass
 
     def _on_uuid_mappings_change(self, mappings: Dict[str, str]) -> None:
+        """UUID 映射变更回调
+        
+        Args:
+            mappings: UUID 映射字典
+        """
         self.config.custom_uuid_mappings = mappings
         self._save_config()
