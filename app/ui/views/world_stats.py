@@ -8,19 +8,10 @@ from app.services.world_stats_service import WorldStatistics, get_world_stats_se
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card, section_title
 from app.ui.theme import THEME
+from app.ui.utils import format_size as _format_size
 
 if TYPE_CHECKING:
     from app.application import Application
-
-
-def _format_size(size: int) -> str:
-    kb = size / 1024
-    mb = kb / 1024
-    if mb >= 1:
-        return f"{mb:.1f} MB"
-    if kb >= 1:
-        return f"{kb:.1f} KB"
-    return f"{size} B"
 
 
 class WorldStatsView(ft.Column):

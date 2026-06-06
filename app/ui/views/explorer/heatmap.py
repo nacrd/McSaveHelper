@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.ui.theme import THEME
-from app.ui.views.explorer.utils import safe_update
+from app.ui.views.explorer.utils import safe_update, format_size
 
 
 class MCAHeatmap(ft.Container):
@@ -85,18 +85,7 @@ class MCAHeatmap(ft.Container):
         avg_size = total_size // len(sizes) if sizes else 0
         max_size = max(sizes) if sizes else 0
         min_size = min(sizes) if sizes else 0
-        
-        # 格式化大小
-        def format_size(size):
-            kb = size / 1024
-            mb = kb / 1024
-            if mb >= 1:
-                return f"{mb:.1f} MB"
-            elif kb >= 1:
-                return f"{kb:.1f} KB"
-            else:
-                return f"{size} B"
-        
+
         stats_lines = [
             f"📊 区域文件总数：{len(region_files)} 个",
             f"💾 总大小：{format_size(total_size)}",
@@ -209,16 +198,6 @@ class MCAHeatmap(ft.Container):
 
     def _update_selection_info(self, coord: Tuple[int, int], path: Optional[Path]) -> None:
         """更新选中区域的信息显示"""
-        def format_size(size):
-            kb = size / 1024
-            mb = kb / 1024
-            if mb >= 1:
-                return f"{mb:.2f} MB"
-            elif kb >= 1:
-                return f"{kb:.2f} KB"
-            else:
-                return f"{size} B"
-        
         if path is None:
             self._selection_text.value = f"⚠️ 区域 ({coord[0]}, {coord[1]}) 不存在"
             self._selection_text.color = THEME.warning

@@ -10,14 +10,7 @@ from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
 from app.ui.components.fields import text_field
 from app.models.mapping import PlayerMapping
-
-
-def _safe_update(control: ft.Control) -> None:
-    """安全更新控件，若控件未挂载到页面则静默跳过"""
-    try:
-        control.update()
-    except RuntimeError:
-        pass
+from app.ui.utils import safe_update as _safe_update
 
 
 class UUIDMappingTable(ft.Column):

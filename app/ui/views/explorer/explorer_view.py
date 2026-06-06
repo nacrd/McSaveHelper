@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from core.omni.world_session import WorldSession
 from app.services.heatmap_service import get_heatmap_service
 
-from app.ui.views.explorer.utils import safe_update
+from app.ui.views.explorer.utils import safe_update, format_size
 from app.ui.views.explorer.world_info_panel import WorldInfoPanel
 from app.ui.views.explorer.player_hud import PlayerHUDCard
 from app.ui.views.explorer.equipment_preview import EquipmentPreview
@@ -413,16 +413,6 @@ class ExplorerView(ft.Column):
     
     def _on_region_selected(self, coord: Optional[Tuple[int, int]], size: Optional[int]) -> None:
         """区域选中回调"""
-        def format_size(s):
-            kb = s / 1024
-            mb = kb / 1024
-            if mb >= 1:
-                return f"{mb:.2f} MB"
-            elif kb >= 1:
-                return f"{kb:.2f} KB"
-            else:
-                return f"{s} B"
-
         stats = self._heatmap_service.get_statistics()
         if coord is None or size is None:
             self._selected_region_coord = None
@@ -625,7 +615,7 @@ class ExplorerView(ft.Column):
             self._stats_summary.value = (
                 f"区域: {stats.total_regions}\n"
                 f"已加载区块: {stats.loaded_chunks}，空/未加载槽位: {stats.empty_chunks}，加载比例: {loaded_ratio:.1f}%\n"
-                f"区域文件总大小: {self._format_size(total_size)}\n"
+                f"区域文件总大小: {format_size(total_size)}\n"
                 f"方块调色板条目: {stats.total_blocks}，实体/方块实体: {stats.total_entities}"
             )
             self._fill_rank(self._block_stats_col, stats.block_stats.top_blocks[:10] if stats.block_stats else [])
@@ -648,18 +638,6 @@ class ExplorerView(ft.Column):
                 ft.ProgressBar(value=value / max_value, width=180, color=THEME.mc_grass, bgcolor=THEME.bg_secondary),
                 ft.Text(str(value), size=11, color=THEME.text_muted),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER))
-
-    def _format_size(self, size: int) -> str:
-        kb = size / 1024
-        mb = kb / 1024
-        gb = mb / 1024
-        if gb >= 1:
-            return f"{gb:.2f} GB"
-        if mb >= 1:
-            return f"{mb:.2f} MB"
-        if kb >= 1:
-            return f"{kb:.2f} KB"
-        return f"{size} B"
 
     def _update_dimension_list(self) -> None:
         """扫描存档并更新维度下拉列表"""
@@ -705,17 +683,7 @@ class ExplorerView(ft.Column):
     def _update_region_stats(self) -> None:
         """更新区域统计信息"""
         stats = self._heatmap_service.get_statistics()
-        
-        def format_size(s):
-            kb = s / 1024
-            mb = kb / 1024
-            if mb >= 1:
-                return f"{mb:.1f} MB"
-            elif kb >= 1:
-                return f"{kb:.1f} KB"
-            else:
-                return f"{s} B"
-        
+
         lines = [
             f"📊 区域总数: {stats['total_regions']} 个",
             f"💾 总大小: {format_size(stats['total_size'])}",

@@ -15,6 +15,7 @@ import flet as ft
 import flet.canvas as cv
 
 from app.services.heatmap_service import get_heatmap_service, HeatmapService
+from app.ui.utils import format_size
 
 
 HeatmapSelectionCallback = Callable[[Optional[Tuple[int, int]], Optional[int]], None]
@@ -320,7 +321,7 @@ class McaHeatmapView(ft.Container):
         if self._selected_cell:
             coord = self._selected_cell
             size = self._current_data.get(coord, 0)
-            size_str = self._format_size(size)
+            size_str = format_size(size)
             
             info_text = f"区域 ({coord[0]}, {coord[1]}): {size_str}"
             text_width = len(info_text) * 7 + 20
@@ -409,15 +410,6 @@ class McaHeatmapView(ft.Container):
         
         return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
     
-    def _format_size(self, size: int) -> str:
-        """格式化文件大小"""
-        if size >= 1024 * 1024:
-            return f"{size / (1024 * 1024):.2f} MB"
-        elif size >= 1024:
-            return f"{size / 1024:.2f} KB"
-        else:
-            return f"{size} B"
-    
     async def _monitor_scan_completion(self) -> None:
         """监控扫描结束并刷新宿主视图状态"""
         while self._heatmap_service.is_scanning:
@@ -432,6 +424,8 @@ class McaHeatmapView(ft.Container):
             self._rebuild_canvas()
             await asyncio.sleep(0.2)
         self._rebuild_canvas()
+        if self._on_selection_changed:
+            self._on_selection_changed(None, None)
     
     def did_mount(self) -> None:
         """组件挂载时启动更新循环"""
@@ -453,10 +447,19 @@ class McaHeatmapView(ft.Container):
         self._stop_update_loop()
 
     def _schedule_task(self, coro: Any) -> Optional[asyncio.Task[Any]]:
+        """安全地调度异步任务"""
         try:
             return asyncio.get_running_loop().create_task(coro)
         except RuntimeError:
-            threading.Thread(target=lambda: asyncio.run(coro), daemon=True).start()
+            # 没有运行中的事件循环时，在后台线程中启动新的事件循环
+            def _run_in_thread() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(coro)
+                finally:
+                    loop.close()
+            threading.Thread(target=_run_in_thread, daemon=True).start()
             return None
     
     def _start_update_loop(self) -> None:
@@ -468,10 +471,7 @@ class McaHeatmapView(ft.Container):
         """停止异步更新循环"""
         if self._update_task and not self._update_task.done():
             self._update_task.cancel()
-            try:
-                asyncio.get_event_loop().run_until_complete(self._update_task)
-            except (asyncio.CancelledError, RuntimeError):
-                pass
+            # 不调用 run_until_complete，让任务在下一个 await 自然取消
     
     def start_scan(self, region_dir: str) -> None:
         """启动热力图扫描"""

@@ -45,6 +45,7 @@ class VersionConverterView(ft.Column):
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app = app
+        self._converting = False
         self._build()
 
     def _build(self) -> None:
@@ -150,6 +151,10 @@ class VersionConverterView(ft.Column):
             pass
 
     def _convert(self, e: ft.ControlEvent) -> None:
+        if self._converting:
+            self.app.warn_dialog("提示", "转换正在进行中，请稍候。")
+            return
+
         src = Path(self._src_field.value or "")
         dst = Path(self._dst_field.value or "")
         if not (src / "level.dat").exists():
@@ -165,6 +170,7 @@ class VersionConverterView(ft.Column):
         platform = self._platform_dd.value or "java"
         target_version = int(self._version_dd.value or "0")
 
+        self._converting = True
         self._result_text.value = "正在转换，请稍候..."
         self._result_text.color = THEME.accent
         self._result_text.update()
@@ -187,4 +193,6 @@ class VersionConverterView(ft.Column):
             self._result_text.value = f"❌ 转换出错: {ex}"
             self._result_text.color = THEME.error
             self.app.handle_exception(ex, title="版本转换失败")
+        finally:
+            self._converting = False
         self._result_text.update()
