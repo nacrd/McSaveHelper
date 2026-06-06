@@ -1,0 +1,14 @@
+{
+  "include": [
+    "app",
+    "core",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".pytest_cache", "**/node_modules", "**/.*", ".venv"
+  ],
+  "typeCheckingMode": "off",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none"
+}

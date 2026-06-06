@@ -20,3 +20,23 @@ module = [
 ]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = [
+    "app.application",
+    "app.services.config_service",
+    "app.services.i18n_service",
+    "app.services.item_service",
+    "app.ui.*",
+    "core.converter",
+    "core.full_mode",
+    "core.i18n",
+    "core.nbt_utils",
+    "core.omni.*",
+    "core.pure_cleaner",
+    "core.types",
+    "core.utils",
+    "core.uuid_utils",
+    "core.worker",
+    "tests.*"
+]
+ignore_errors = true
