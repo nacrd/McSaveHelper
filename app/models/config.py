@@ -74,6 +74,12 @@ class MigrationConfig:
     query_name: str = ""
     """查询用的玩家名称"""
 
+    target_platform: str = "java"
+    """目标平台，可选值为 "java" 或 "bedrock"""
+
+    target_version: str = ""
+    """目标 Minecraft 数据版本 ID，留空表示不做版本降级"""
+
 
 @dataclass
 class AppConfig:

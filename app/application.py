@@ -6,14 +6,9 @@
   - 协调视图切换
   - 提供文件选择对话框
 """
-import os
 import re
-import threading
-import platform
-import subprocess
 import time
 import traceback
-from pathlib import Path
 from typing import Any, Optional, List, Dict, Callable
 
 import flet as ft
@@ -26,6 +21,7 @@ from app.services.config_service import ConfigService
 from app.services.uuid_service import UUIDService
 from app.services.migration_service import MigrationService
 from app.services.i18n_service import I18nService
+from app.controllers.migration_controller import MigrationController
 
 from app.ui.theme import THEME
 from app.ui.sidebar import Sidebar
@@ -75,6 +71,8 @@ class Application:
         except Exception as e:
             print(f"[WARN] UUIDService 初始化失败: {e}")
             self.uuid = UUIDService.__new__(UUIDService)  # type: ignore
+
+        self.migration_controller = MigrationController(self)
 
         # ─── 同步配置到迁移参数 ─────────────────
         self._sync_config_to_migration()
@@ -190,9 +188,7 @@ class Application:
 
     def _sync_config_to_migration(self) -> None:
         """同步配置到迁移参数"""
-        mc = self.config.migration
-        mc.version_detection = self.config.version_detection
-        # 其他字段由视图直接设置
+        self.migration_controller.sync_config_to_migration()
 
     # ════════════════════════════════════════════
     #  UI 构建
@@ -204,6 +200,8 @@ class Application:
         self._tab_defs = [
             {"id": "explorer", "label": self._t("sidebar.explorer", "存档探险"), "icon": "🗺️"},
             {"id": "migrator", "label": self._t("sidebar.migrator", "批量迁移"), "icon": "📦"},
+            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖️"},
+            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "🧾"},
             {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
             {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙️"},
         ]
@@ -512,10 +510,14 @@ class Application:
         from app.ui.views.explorer import ExplorerView
         from app.ui.views.mappings import MappingsView
         from app.ui.views.settings import SettingsView
+        from app.ui.views.compare import CompareView
+        from app.ui.views.server_properties import ServerPropertiesView
 
         view_map = {
             "migrator": MigratorView,
             "explorer": ExplorerView,
+            "compare": CompareView,
+            "server_properties": ServerPropertiesView,
             "mappings": MappingsView,
             "settings": SettingsView,
         }
@@ -903,55 +905,15 @@ class Application:
 
     def start(self) -> None:
         """开始转换按钮回调"""
-        try:
-            mc = self.config.migration
-
-            if not mc.src_path and not mc.batch_mode:
-                self.warn_dialog(
-                    self._t("dialogs.warning", "提示"),
-                    self._t("messages.please_select_source", "请先选择客户端存档目录"),
-                )
-                return
-
-            self._start_btn.disabled = True
-            self.page.update()
-
-            # 保存配置
-            self._save_config()
-
-            dest_dir = mc.dest_path or os.getcwd()
-
-            if mc.batch_mode and self.migration.batch_worlds:
-                threading.Thread(
-                    target=self._run_batch_thread,
-                    args=(dest_dir,), daemon=True,
-                ).start()
-            else:
-                threading.Thread(
-                    target=self._run_single_thread,
-                    args=(dest_dir,), daemon=True,
-                ).start()
-        except Exception as e:
-            self.handle_exception(e, title="启动转换失败")
-            self._start_btn.disabled = False
-            self._try_update_page()
+        self.migration_controller.start()
 
     def _try_update_page(self) -> None:
         """尝试更新页面，忽略错误"""
-        try:
-            self.page.update()
-        except Exception:
-            pass
+        self.migration_controller.try_update_page()
 
     def _save_config(self) -> None:
         """保存当前配置"""
-        c = self.config
-        mc = c.migration
-        c._config["version_detection"] = mc.version_detection
-        c._config["batch_processing"]["max_concurrent"] = c.max_concurrent
-        c._config["custom_uuid_mappings"] = c.custom_uuid_mappings
-        c._config["use_custom_mapping"] = c.use_custom_mapping
-        c.save()
+        self.migration_controller.save_config()
 
     def _run_single_thread(self, dest_dir: str) -> None:
         """执行单存档迁移的线程函数
@@ -959,48 +921,7 @@ class Application:
         Args:
             dest_dir: 目标目录
         """
-        mc = self.config.migration
-        try:
-            self.log_header(self._t("messages.migration_started", "开始迁移任务"))
-            output_path = self.migration.run_single(
-                src=mc.src_path,
-                dest=dest_dir,
-                world_name=mc.world_name,
-                mode=mc.mode,
-                offline=mc.offline_mode,
-                clean=mc.clean_mode,
-                pure_clean=mc.pure_clean_mode,
-                manual_names_str=mc.manual_names,
-                log_cb=self.log,
-                progress_cb=self.update_progress,
-            )
-            self.log_header(self._t("messages.migration_complete", "迁移完成"))
-            self.log(self._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
-                             output_path=output_path), "SUCCESS")
-            self._progress_label.value = self._t("top_bar.completed", "已完成")
-            self.info_dialog(
-                self._t("dialogs.success", "成功"),
-                self._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
-                        output_path=output_path),
-            )
-        except Exception as e:
-            self.handle_exception(
-                e,
-                title=self._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
-                log=True,
-                show_dialog=False  # 我们将在下面自定义显示对话框
-            )
-            self._progress_label.value = self._t("top_bar.failed", "失败")
-            self.error_dialog(
-                self._t("dialogs.error", "错误"),
-                self._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
-                exception=e,
-                show_details=True
-            )
-        finally:
-            self._start_btn.disabled = False
-            self._progress_bar.value = 0
-            self._try_update_page()
+        self.migration_controller.run_single_thread(dest_dir)
 
     def _run_batch_thread(self, dest_dir: str) -> None:
         """执行批量迁移的线程函数
@@ -1008,39 +929,7 @@ class Application:
         Args:
             dest_dir: 目标目录
         """
-        mc = self.config.migration
-        try:
-            self.log_header(self._t("messages.batch_migration_started", "开始批量处理"))
-            self._save_config()
-            results = self.migration.run_batch(
-                dest_dir=dest_dir,
-                mode=mc.mode,
-                offline=mc.offline_mode,
-                clean=mc.clean_mode,
-                pure_clean=mc.pure_clean_mode,
-                manual_names_str=mc.manual_names,
-                max_concurrent=self.config.max_concurrent,
-                log_cb=self.log,
-                progress_cb=self.update_progress,
-            )
-            success = sum(1 for r in results.values() if r["success"])
-            self.log_header(self._t("messages.batch_migration_complete_header", "批量处理完成"))
-            self.log(self._t("messages.batch_migration_complete",
-                             "成功: {success}/{total}",
-                             success=success, total=len(results)), "SUCCESS")
-            self._progress_label.value = self._t("top_bar.batch_completed", "批量处理完成")
-        except Exception as e:
-            self.handle_exception(
-                e,
-                title=self._t("messages.save_failed", "批量处理失败: {error}", error=str(e)),
-                log=True,
-                show_dialog=False
-            )
-            self._progress_label.value = self._t("top_bar.batch_failed", "批量处理失败")
-        finally:
-            self._start_btn.disabled = False
-            self._progress_bar.value = 0
-            self._try_update_page()
+        self.migration_controller.run_batch_thread(dest_dir)
 
     # ════════════════════════════════════════════
     #  快捷操作
@@ -1052,7 +941,7 @@ class Application:
         Args:
             path: 目录路径
         """
-        self.migration.open_folder(path)
+        self.migration_controller.open_folder(path)
 
     # ─── 文件选择快捷方法（供视图使用） ─────────
 

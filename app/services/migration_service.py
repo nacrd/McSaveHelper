@@ -89,6 +89,8 @@ class MigrationService:
         offline: bool,
         clean: bool,
         pure_clean: bool,
+        target_platform: str,
+        target_version: str,
         manual_names_str: str,
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
@@ -131,7 +133,9 @@ class MigrationService:
                 custom_mappings,
             )
 
-        return str(dest_path / world_name)
+        output_path = dest_path / world_name
+        self._apply_version_conversion(output_path, target_platform, target_version, log_cb)
+        return str(output_path)
 
     def run_batch(
         self,
@@ -140,6 +144,8 @@ class MigrationService:
         offline: bool,
         clean: bool,
         pure_clean: bool,
+        target_platform: str,
+        target_version: str,
         manual_names_str: str,
         max_concurrent: int,
         log_cb: LogCallback,
@@ -174,7 +180,36 @@ class MigrationService:
             self._batch_worlds, dest_path, world_names, mode,
             offline, clean, pure_clean, manual, log_cb, progress_cb,
         )
+        for result in results.values():
+            if result.get("success"):
+                output_name = result.get("world_name")
+                if output_name:
+                    self._apply_version_conversion(dest_path / output_name, target_platform, target_version, log_cb)
         return results
+
+    def _apply_version_conversion(
+        self,
+        world_path: Path,
+        target_platform: str,
+        target_version: str,
+        log_cb: LogCallback,
+    ) -> None:
+        version_value = None
+        if target_version.strip():
+            try:
+                version_value = int(target_version.strip())
+            except ValueError:
+                log_cb(f"目标版本 ID 无效，已跳过版本降级: {target_version}", "WARNING")
+                return
+
+        if target_platform == "java" and version_value is None:
+            return
+
+        from core.converter import convert_world
+
+        log_cb(f"开始应用版本/平台转换: platform={target_platform}, version={version_value or 'keep'}", "CONVERT")
+        convert_world(world_path, world_path, target_platform=target_platform, target_version=version_value)
+        log_cb("版本/平台转换完成", "CONVERT")
 
     @staticmethod
     def open_folder(path: str) -> None:
