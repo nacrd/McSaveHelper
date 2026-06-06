@@ -47,8 +47,8 @@ jobs:
         # 获取最新版本号
         $tags = git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Sort-Object { [version]($_ -replace '^v', '') }
 
-        if ($tagName -eq "vauto" -or ($tagName -eq "" -and "${{ github.ref }}" -eq "refs/heads/main")) {
-          # 推送到 main 分支或推送 vauto 标签时：自动生成版本号
+        if ($tagName -eq "vauto") {
+          # 自动模式：推送 vauto 时自动生成版本号
           if ($tags) {
             $latestTag = $tags[-1]
             $nextTag = Get-NextVersion $latestTag
@@ -70,14 +70,6 @@ jobs:
       if: github.ref == 'refs/tags/vauto'
       run: |
         git push origin --delete vauto || true
-
-    - name: Create and push version tag
-      if: steps.version.outputs.create_release == 'true'
-      shell: pwsh
-      run: |
-        $tag = "${{ steps.version.outputs.tag }}"
-        git tag -a $tag -m "Release $tag"
-        git push origin $tag
 
     - name: Set up Python 3.14.3
       uses: actions/setup-python@v5
@@ -147,7 +139,7 @@ jobs:
         name: MCSaveHelper-Windows-onefile
 
     - name: Create GitHub Release (auto tag)
-      if: needs.build.outputs.create_release == 'true' && (github.ref == 'refs/tags/vauto' || github.ref == 'refs/heads/main')
+      if: needs.build.outputs.create_release == 'true' && github.ref == 'refs/tags/vauto'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ needs.build.outputs.tag }}
