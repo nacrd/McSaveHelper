@@ -239,7 +239,7 @@ class RegionEditorService:
                 self._log(f"已备份区域文件: {backup_path.name}", "BACKUP")
 
     def _chunk_index(self, cx: int, cz: int) -> int:
-        return cx + cz * 32
+        return (cx & 31) + (cz & 31) * 32
 
     def _resolve_chunk_path(self, world_path: Path, chunk_x: int, chunk_z: int) -> Tuple[Path, Tuple[int, int]]:
         rx = chunk_x // 32

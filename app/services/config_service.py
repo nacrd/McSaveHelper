@@ -1,5 +1,6 @@
 """配置服务 —— 统一管理持久化配置和运行时迁移参数"""
 import json
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -38,6 +39,7 @@ class ConfigService:
         self._config_dir.mkdir(parents=True, exist_ok=True)
         self._config: Dict[str, Any] = {}
         self._migration: MigrationConfig = MigrationConfig()
+        self._lock = threading.Lock()
         self._load()
         self._initialized: bool = True
 
@@ -60,10 +62,11 @@ class ConfigService:
         self._auto_fix()
 
     def save(self) -> None:
-        """保存配置到磁盘"""
+        """保存配置到磁盘（线程安全）"""
         config_path = self._config_dir / self.CONFIG_FILENAME
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(self._config, f, indent=2, ensure_ascii=False)
+        with self._lock:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self._config, f, indent=2, ensure_ascii=False)
 
     @staticmethod
     def _defaults() -> Dict[str, Any]:

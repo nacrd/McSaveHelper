@@ -123,29 +123,19 @@ class HeatmapService:
                 self._scan_progress = 1.0
                 return
             
-            # 分批处理
-            batch: list = []
-            
             for mca_file in mca_files:
                 try:
-                    # 解析坐标
                     coord = self._parse_mca_filename(mca_file.stem)
                     if coord is not None:
-                        # 获取文件大小
                         size = mca_file.stat().st_size
                         self._mca_data[coord] = size
-                    
+
                     self._scanned_count += 1
-                    
-                    # 达到批次大小时更新进度
-                    if len(batch) >= batch_size:
+
+                    if self._scanned_count % batch_size == 0:
                         self._scan_progress = self._scanned_count / self._total_count
-                        batch.clear()
-                        # 让出控制权，允许UI更新
                         await asyncio.sleep(0)
-                        
                 except Exception as e:
-                    # 单个文件错误不影响整体
                     continue
             
             # 最终更新
@@ -183,8 +173,9 @@ class HeatmapService:
         if self._scan_task and not self._scan_task.done():
             self._scan_task.cancel()
             try:
-                await self._scan_task
-            except asyncio.CancelledError:
+                # 使用 shield 防止取消自己导致死锁
+                await asyncio.shield(self._scan_task)
+            except (asyncio.CancelledError, RuntimeError):
                 pass
         
         self._is_scanning = False

@@ -321,7 +321,7 @@ _ENCHANTMENT_NAMES: Dict[str, str] = {
 }
 
 # 常用最大耐久度
-_MAX_DURABILITY: Dict[str, int] = {
+_MAX_DURABILITY: Dict[str, Optional[int]] = {
     "minecraft:wooden_sword": 59,
     "minecraft:wooden_pickaxe": 59,
     "minecraft:wooden_axe": 59,

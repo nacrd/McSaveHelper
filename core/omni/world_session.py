@@ -660,11 +660,10 @@ class WorldSession:
     def _execute_delete_region(self, action: Action, target_world: Path) -> None:
         """删除区域文件"""
         x, z = action.target
-        # 查找目标世界中的区域文件
-        pattern = f"region/r.{x}.{z}.mca"
-        for f in target_world.rglob(pattern):
-            f.unlink(missing_ok=True)
-            break
+        # 只删除标准 region 目录下的文件
+        region_file = target_world / "region" / f"r.{x}.{z}.mca"
+        if region_file.exists():
+            region_file.unlink(missing_ok=True)
         # 同时删除 DIM* 下的区域文件
         for dim in target_world.glob("DIM*"):
             region_file = dim / "region" / f"r.{x}.{z}.mca"
@@ -679,7 +678,9 @@ class WorldSession:
             if not folder_path.exists():
                 continue
             for old_file in folder_path.glob(f"{old_uuid}*"):
-                new_name = old_file.name.replace(old_uuid, new_uuid)
+                # 使用精确匹配替换，避免误替换
+                suffix = old_file.name[len(old_uuid):]
+                new_name = f"{new_uuid}{suffix}"
                 new_path = folder_path / new_name
                 if new_path.exists():
                     self._log(f"跳过玩家文件重命名冲突: {old_file.name} -> {new_name}", "WARN")
