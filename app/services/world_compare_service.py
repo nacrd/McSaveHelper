@@ -36,20 +36,17 @@ class WorldCompareService:
     def compare_worlds(self, left_path: Path, right_path: Path) -> WorldCompareResult:
         left = WorldSession(left_path, log=self.log)
         right = WorldSession(right_path, log=self.log)
-        try:
-            world_info = self._compare_world_info(left, right)
-            players = self._compare_players(left, right)
-            regions = self._compare_regions(left_path, right_path)
-            changed = sum(1 for item in world_info + players + regions if not item.same)
-            return WorldCompareResult(
-                summary={"world_info": len(world_info), "players": len(players), "regions": len(regions), "changed": changed},
-                world_info=world_info,
-                players=players,
-                regions=regions,
-            )
-        finally:
-            left.close()
-            right.close()
+        
+        world_info = self._compare_world_info(left, right)
+        players = self._compare_players(left, right)
+        regions = self._compare_regions(left_path, right_path)
+        changed = sum(1 for item in world_info + players + regions if not item.same)
+        return WorldCompareResult(
+            summary={"world_info": len(world_info), "players": len(players), "regions": len(regions), "changed": changed},
+            world_info=world_info,
+            players=players,
+            regions=regions,
+        )
 
     def _compare_world_info(self, left: WorldSession, right: WorldSession) -> List[CompareItem]:
         li = left.get_world_info()

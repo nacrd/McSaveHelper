@@ -1,17 +1,12 @@
-"""独立日志面板组件 —— 底部可折叠面板，终端风格滚动日志"""
+"""Independent log panel component — collapsible bottom panel with terminal styling"""
 import flet as ft
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, mc_border
 from app.ui.utils import safe_update as _safe_update
 
 
 class LogPanel(ft.Container):
-    """底部可折叠的独立日志面板
-
-    包含：
-      - 标题栏（带折叠/展开按钮和清除按钮）
-      - 滚动日志区域（终端风格，最多 500 行）
-    """
+    """Collapsible independent log panel with terminal styling"""
 
     DEFAULT_HEIGHT = 220
     COLLAPSED_HEIGHT = 36
@@ -21,16 +16,20 @@ class LogPanel(ft.Container):
         self._max_lines: int = 500
         self._title: str = title
 
-        # 日志内容区
+        # Log content area
         self._log_col = ft.Column(
             spacing=2,
             scroll=ft.ScrollMode.AUTO,
             auto_scroll=True,
+            expand=True,
         )
-        self._log_col.expand = True
 
-        # 标题栏按钮
-        self._toggle_icon = ft.Icon(ft.Icons.KEYBOARD_ARROW_DOWN, size=16, color=THEME.text_secondary)
+        # Title bar buttons
+        self._toggle_icon = ft.Icon(
+            ft.Icons.KEYBOARD_ARROW_DOWN,
+            size=16,
+            color=THEME.text_secondary,
+        )
         self._toggle_btn = ft.Container(
             content=self._toggle_icon,
             on_click=self._toggle,
@@ -38,14 +37,14 @@ class LogPanel(ft.Container):
             border_radius=4,
         )
         self._clear_btn = ft.Container(
-            content=ft.Icon(ft.Icons.DELETE_OUTLINE, size=14, color=THEME.text_quaternary),
+            content=ft.Icon(ft.Icons.DELETE_OUTLINE, size=14, color=THEME.text_muted),
             on_click=lambda e: self.clear(),
             padding=4,
             border_radius=4,
             tooltip="清除日志",
         )
         self._title_text = ft.Text(
-            f" ▣ {title}",
+            f"▣ {title}",
             size=12,
             color=THEME.mc_gold,
             weight=ft.FontWeight.BOLD,
@@ -54,10 +53,10 @@ class LogPanel(ft.Container):
         self._count_text = ft.Text(
             "",
             size=10,
-            color=THEME.text_quaternary,
+            color=THEME.text_muted,
         )
 
-        # 标题栏
+        # Title bar
         header = ft.Container(
             content=ft.Row(
                 [
@@ -67,7 +66,7 @@ class LogPanel(ft.Container):
                     ft.Container(expand=True),
                     self._clear_btn,
                 ],
-                spacing=0,
+                spacing=6,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             height=self.COLLAPSED_HEIGHT,
@@ -78,42 +77,39 @@ class LogPanel(ft.Container):
                 left=None,
                 top=None,
                 right=None,
-                bottom=ft.BorderSide(2, THEME.border_tertiary),
+                bottom=ft.BorderSide(2, THEME.border_standard),
             ),
         )
 
-        # 日志容器
+        # Log container
         self._log_container = ft.Container(
             content=self._log_col,
             padding=ft.Padding(left=12, right=12, top=4, bottom=8),
             bgcolor=THEME.bg_primary,
             border=ft.Border(
-                left=None, top=ft.BorderSide(1, THEME.border_tertiary),
-                right=None, bottom=None,
-            ),
-        )
-
-        # 整体布局
-        self._body = ft.Column(
-            [header, self._log_container],
-            spacing=0,
-        )
-        self._body.expand = True
-
-        super().__init__(
-            content=self._body,
-            height=self.DEFAULT_HEIGHT,
-            bgcolor=THEME.bg_primary,
-            border=ft.Border(
                 left=None,
-                top=ft.BorderSide(1, THEME.border_tertiary),
+                top=ft.BorderSide(1, THEME.border_standard),
                 right=None,
                 bottom=None,
             ),
         )
 
+        # Overall layout
+        self._body = ft.Column(
+            [header, self._log_container],
+            spacing=0,
+            expand=True,
+        )
+
+        super().__init__(
+            content=self._body,
+            height=self.DEFAULT_HEIGHT,
+            bgcolor=THEME.bg_primary,
+            border=mc_border(),
+        )
+
     def _toggle(self, e: ft.ControlEvent = None) -> None:
-        """折叠/展开日志面板"""
+        """Toggle collapse/expand log panel"""
         try:
             self._expanded = not self._expanded
             if self._expanded:
@@ -131,6 +127,7 @@ class LogPanel(ft.Container):
             pass
 
     def log(self, message: str, level: str = "info") -> None:
+        """Add a log message with color coding"""
         color_map = {
             "info": THEME.text_primary,
             "success": THEME.terminal_green,
@@ -138,8 +135,8 @@ class LogPanel(ft.Container):
             "error": THEME.terminal_red,
             "api": THEME.terminal_blue,
             "timestamp": THEME.text_muted,
-            "header": THEME.accent_light,
-            "separator": THEME.border_tertiary,
+            "header": THEME.accent,
+            "separator": THEME.border_standard,
         }
         self._log_col.controls.append(
             ft.Text(
@@ -149,14 +146,16 @@ class LogPanel(ft.Container):
                 font_family="monospace",
             )
         )
+        # Limit log lines
         while len(self._log_col.controls) > self._max_lines:
             self._log_col.controls.pop(0)
-        # 更新计数
+        # Update count
         self._count_text.value = f"({len(self._log_col.controls)})"
         _safe_update(self._log_col)
         _safe_update(self._count_text)
 
     def clear(self) -> None:
+        """Clear all log messages"""
         self._log_col.controls.clear()
         self._count_text.value = ""
         _safe_update(self._log_col)

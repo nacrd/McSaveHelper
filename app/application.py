@@ -24,7 +24,7 @@ from app.services.migration_service import MigrationService
 from app.services.i18n_service import I18nService
 from app.controllers.migration_controller import MigrationController
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.sidebar import Sidebar
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_success, btn_danger
 from app.ui.components.fields import text_field, checkbox, label
@@ -83,32 +83,32 @@ class Application:
             title=self._t("log_panel.title", "日志"),
         )
         self._progress_bar: ft.ProgressBar = ft.ProgressBar(
-            value=0, color=THEME.mc_grass,
+            value=0,
+            color=THEME.mc_grass,
             bgcolor=THEME.bg_secondary,
-            height=8, border_radius=0,
+            height=6,
+            border_radius=0,
         )
         self._progress_label: ft.Text = ft.Text(
-            self._t("top_bar.ready", "就绪"), size=12,
-            color=THEME.mc_gold, weight=ft.FontWeight.BOLD,
+            self._t("top_bar.ready", "就绪"),
+            size=12,
+            color=THEME.mc_gold,
+            weight=ft.FontWeight.BOLD,
             font_family="monospace",
         )
-        self._start_btn: ft.Button = btn_primary(
+        self._start_btn = btn_primary(
             self._t("top_bar.start_conversion", "开始转换"),
-            width=140, height=40,
+            on_click=lambda e: self.start(),
+            width=140,
+            height=40,
         )
-        self._start_btn.on_click = lambda e: self.start()
 
         # ─── 视图容器 ───────────────────────────
         self.views: Dict[str, ft.Control] = {}
         self._content: ft.Container = ft.Container(
-            padding=ft.Padding(left=18, right=18, top=18, bottom=18),
+            padding=18,
             bgcolor=THEME.bg_card,
-            border=ft.Border(
-                left=ft.BorderSide(3, THEME.border_tertiary),
-                top=ft.BorderSide(3, THEME.border_tertiary),
-                right=ft.BorderSide(3, THEME.bg_secondary),
-                bottom=ft.BorderSide(3, THEME.bg_secondary),
-            ),
+            border=mc_border(3),
         )
         self._content.expand = True
 
@@ -217,12 +217,15 @@ class Application:
         """构建应用主界面"""
         # 标签页定义
         self._tab_defs = [
-            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": "🗺️"},
+            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": "🗺"},
             {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": "📦"},
-            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖️"},
+            {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": "🔧"},
+            {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": "🗺"},
+            {"id": "entity_block_search", "label": self._t("sidebar.entity_block_search", "实体/方块搜索"), "icon": "🔍"},
+            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖"},
             {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
-            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "🧾"},
-            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙️"},
+            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "📋"},
+            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙"},
         ]
         self._sidebar = Sidebar(
             tabs=self._tab_defs,
@@ -234,15 +237,16 @@ class Application:
 
         self._scrollable_content = ft.Container(
             content=self._content,
-            padding=ft.Padding(left=14, right=14, top=14, bottom=14),
+            padding=14,
             expand=True,
         )
         content_area = ft.Column(
             [top_bar, self._scrollable_content],
             spacing=0,
+            expand=True,
         )
-        content_area.expand = True
 
+        # Log panel setup
         self._log_panel_visible = False
         self.log_panel.visible = False
         self.log_panel.width = 400
@@ -251,74 +255,56 @@ class Application:
         self.log_panel.bottom = 70
         self.log_panel.elevation = 8
 
+        # Log FAB
         self._log_fab = ft.Container(
             content=ft.Text("📜", size=20),
             width=48,
             height=48,
             bgcolor=THEME.mc_coal,
             border_radius=24,
-            alignment=ft.Alignment(0, 0),
+            alignment=ft.alignment.Alignment(0, 0),
             on_click=self._toggle_log_panel,
             tooltip="日志",
-            shadow=ft.BoxShadow(
-                spread_radius=0,
-                blur_radius=6,
-                color=THEME.shadow,
-                offset=ft.Offset(2, 2),
-            ),
-            border=ft.Border(
-                left=ft.BorderSide(2, THEME.border_tertiary),
-                top=ft.BorderSide(2, THEME.border_tertiary),
-                right=ft.BorderSide(2, THEME.bg_secondary),
-                bottom=ft.BorderSide(2, THEME.bg_secondary),
-            ),
+            shadow=mc_shadow(2),
+            border=mc_border(),
         )
 
         right_panel = ft.Stack(
             [
                 content_area,
                 self.log_panel,
-                ft.Container(
-                    content=self._log_fab,
-                    right=20,
-                    bottom=20,
-                ),
+                ft.Container(content=self._log_fab, right=20, bottom=20),
             ],
             expand=True,
         )
 
         row = ft.Row(
-            [self._sidebar, right_panel], spacing=12,
+            [self._sidebar, right_panel],
+            spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.START,
+            expand=True,
         )
-        row.expand = True
 
         shell = ft.Container(
             content=row,
-            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
+            padding=12,
             margin=ft.Margin(left=12, right=12, top=0, bottom=12),
             bgcolor=THEME.bg_primary,
             border=ft.Border(
-                left=ft.BorderSide(4, THEME.border_tertiary),
+                left=ft.BorderSide(4, THEME.border_light),
                 top=None,
-                right=ft.BorderSide(4, THEME.bg_secondary),
-                bottom=ft.BorderSide(4, THEME.bg_secondary),
+                right=ft.BorderSide(4, THEME.border_dark),
+                bottom=ft.BorderSide(4, THEME.border_dark),
             ),
-            shadow=ft.BoxShadow(
-                spread_radius=0,
-                blur_radius=0,
-                color=THEME.shadow,
-                offset=ft.Offset(6, 6),
-            ),
+            shadow=mc_shadow(6),
+            expand=True,
         )
-        shell.expand = True
 
         app_frame = ft.Column(
             [self._build_window_title_bar(), shell],
             spacing=0,
             expand=True,
         )
-        app_frame.expand = True
 
         self.page.add(app_frame)
 
@@ -341,20 +327,16 @@ class Application:
         self._tab_defs = list(tabs)
 
     def _build_window_title_bar(self) -> ft.Container:
+        """构建自定义窗口标题栏"""
         title_content = ft.Row(
             [
                 ft.Container(
-                    content=ft.Text("⛏", size=18, color=THEME.mc_gold, font_family="monospace"),
-                    width=34,
-                    height=30,
-                    alignment=ft.Alignment(0, 0),
+                    content=ft.Text("⛏", size=16, color=THEME.mc_gold),
+                    width=32,
+                    height=28,
+                    alignment=ft.alignment.Alignment(0, 0),
                     bgcolor=THEME.bg_secondary,
-                    border=ft.Border(
-                        left=ft.BorderSide(2, THEME.border_tertiary),
-                        top=ft.BorderSide(2, THEME.border_tertiary),
-                        right=ft.BorderSide(2, THEME.bg_secondary),
-                        bottom=ft.BorderSide(2, THEME.bg_secondary),
-                    ),
+                    border=mc_border(2),
                 ),
                 ft.Text(
                     "MCSaveHelper  ▣ Minecraft Save Toolkit",
@@ -376,14 +358,14 @@ class Application:
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            height=46,
-            padding=ft.Padding(left=12, right=12, top=6, bottom=6),
+            height=44,
+            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
             bgcolor=THEME.mc_wood,
             border=ft.Border(
                 left=None,
                 top=None,
                 right=None,
-                bottom=ft.BorderSide(4, THEME.mc_grass),
+                bottom=ft.BorderSide(3, THEME.mc_grass),
             ),
         )
 
@@ -393,6 +375,7 @@ class Application:
         bgcolor: str,
         on_click: Callable[[ft.ControlEvent], None],
     ) -> ft.Container:
+        """创建窗口控制按钮"""
         return ft.Container(
             content=ft.Text(
                 text,
@@ -402,21 +385,17 @@ class Application:
                 font_family="monospace",
                 text_align=ft.TextAlign.CENTER,
             ),
-            width=34,
-            height=30,
-            alignment=ft.Alignment(0, 0),
+            width=32,
+            height=28,
+            alignment=ft.alignment.Alignment(0, 0),
             bgcolor=bgcolor,
-            border=ft.Border(
-                left=ft.BorderSide(2, THEME.border_tertiary),
-                top=ft.BorderSide(2, THEME.border_tertiary),
-                right=ft.BorderSide(2, THEME.bg_secondary),
-                bottom=ft.BorderSide(2, THEME.bg_secondary),
-            ),
+            border=mc_border(2),
             on_click=on_click,
             ink=True,
         )
 
     def _build_window_controls(self) -> ft.Row:
+        """构建窗口控制按钮组"""
         return ft.Row(
             [
                 self._window_button("—", THEME.mc_stone, self._minimize_window),
@@ -439,11 +418,7 @@ class Application:
         self.page.run_task(self.page.window.close)
 
     def _build_top_bar(self) -> ft.Container:
-        """构建顶部栏
-        
-        Returns:
-            ft.Container: 顶部栏容器
-        """
+        """构建顶部栏"""
         progress_row = ft.Row(
             [self._progress_label, self._progress_bar],
             spacing=12,
@@ -452,40 +427,37 @@ class Application:
         return ft.Container(
             content=ft.Column(
                 [
-                    ft.Container(height=8, bgcolor=THEME.mc_grass),
+                    ft.Container(height=6, bgcolor=THEME.mc_grass),
                     ft.Container(
                         content=ft.Row(
                             [
                                 ft.Row(
                                     [
                                         ft.Container(
-                                            content=ft.Text("⛏", size=26, color=THEME.mc_gold, font_family="monospace"),
+                                            content=ft.Text("⛏", size=24, color=THEME.mc_gold),
                                             width=48,
                                             height=48,
-                                            alignment=ft.Alignment(0, 0),
+                                            alignment=ft.alignment.Alignment(0, 0),
                                             bgcolor=THEME.bg_secondary,
-                                            border=ft.Border(
-                                                left=ft.BorderSide(2, THEME.border_tertiary),
-                                                top=ft.BorderSide(2, THEME.border_tertiary),
-                                                right=ft.BorderSide(2, THEME.bg_secondary),
-                                                bottom=ft.BorderSide(2, THEME.bg_secondary),
-                                            ),
+                                            border=mc_border(),
                                         ),
                                         ft.Column(
                                             [
                                                 ft.Text(
-                                                    "MCSaveHelper", size=22,
+                                                    "MCSaveHelper",
+                                                    size=20,
                                                     weight=ft.FontWeight.BOLD,
                                                     color=THEME.text_primary,
                                                     font_family="monospace",
                                                 ),
                                                 ft.Text(
                                                     self._t("app.subtitle", "存档管理工具"),
-                                                    size=11, color=THEME.mc_grass,
+                                                    size=11,
+                                                    color=THEME.mc_grass,
                                                     font_family="monospace",
                                                 ),
                                             ],
-                                            spacing=0,
+                                            spacing=2,
                                         ),
                                     ],
                                     spacing=12,
@@ -507,12 +479,7 @@ class Application:
                 spacing=0,
             ),
             bgcolor=THEME.mc_wood,
-            border=ft.Border(
-                left=ft.BorderSide(3, THEME.border_tertiary),
-                top=ft.BorderSide(3, THEME.border_tertiary),
-                right=ft.BorderSide(3, THEME.bg_secondary),
-                bottom=ft.BorderSide(3, THEME.bg_secondary),
-            ),
+            border=mc_border(3),
         )
 
     # ════════════════════════════════════════════
@@ -583,10 +550,16 @@ class Application:
         from app.ui.views.settings import SettingsView
         from app.ui.views.compare import CompareView
         from app.ui.views.server_properties import ServerPropertiesView
+        from app.ui.views.save_repair import SaveRepairView
+        from app.ui.views.map_export import MapExportView
+        from app.ui.views.entity_block_search import EntityBlockSearchView
 
         view_map = {
             "migrator": MigratorView,
             "explorer": ExplorerView,
+            "save_repair": SaveRepairView,
+            "map_export": MapExportView,
+            "entity_block_search": EntityBlockSearchView,
             "compare": CompareView,
             "server_properties": ServerPropertiesView,
             "mappings": MappingsView,

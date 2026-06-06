@@ -1,15 +1,15 @@
-"""Minecraft 风格侧边栏导航组件，支持拖拽排序"""
+"""Minecraft-style sidebar navigation component with drag-and-drop support"""
 import traceback
 from typing import Callable, List, Dict, Any, Optional
 
 import flet as ft
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, mc_border
 from core.version import APP_VERSION
 
 
 class Sidebar(ft.Container):
-    """左侧导航栏，支持拖拽排序标签页"""
+    """Left navigation sidebar with drag-and-drop tab reordering"""
 
     def __init__(
         self,
@@ -23,32 +23,32 @@ class Sidebar(ft.Container):
         self._on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]] = on_tabs_reorder
         self._selected_id: Optional[str] = default_tab or (tabs[0]["id"] if tabs else None)
         self._buttons: Dict[str, ft.Container] = {}
-        self._tab_col: ft.Column = ft.Column(spacing=8)
+        self._tab_col: ft.Column = ft.Column(spacing=6)
 
-        col = ft.Column(spacing=4)
-        col.expand = True
+        col = ft.Column(spacing=0, expand=True)
 
+        # Header
         col.controls.append(
             ft.Container(
                 content=ft.Column(
                     [
                         ft.Text(
                             "⛏ MCSaveHelper",
-                            size=17,
+                            size=16,
                             weight=ft.FontWeight.BOLD,
                             color=THEME.mc_gold,
                             font_family="monospace",
                         ),
                         ft.Text(
                             "Minecraft Save Toolkit",
-                            size=10,
+                            size=9,
                             color=THEME.text_muted,
                             font_family="monospace",
                         ),
                     ],
-                    spacing=4,
+                    spacing=2,
                 ),
-                padding=ft.Padding(left=18, right=18, top=28, bottom=22),
+                padding=ft.Padding(left=16, right=16, top=24, bottom=20),
                 bgcolor=THEME.mc_dirt,
                 border=ft.Border(
                     left=None,
@@ -59,27 +59,27 @@ class Sidebar(ft.Container):
             )
         )
 
+        # Tab buttons
         self._tab_col.expand = True
         self._rebuild_tab_buttons()
         col.controls.append(
             ft.Container(
                 content=self._tab_col,
-                padding=ft.Padding(left=10, right=10, top=14, bottom=10),
+                padding=ft.Padding(left=10, right=10, top=12, bottom=10),
+                expand=True,
             )
         )
 
-        col.controls.append(ft.Container())
-        col.controls[-1].expand = True
-
+        # Footer
         col.controls.append(
             ft.Container(
                 content=ft.Text(
                     f"{APP_VERSION}  ▣ stone edition",
-                    size=10,
+                    size=9,
                     color=THEME.text_muted,
                     font_family="monospace",
                 ),
-                padding=ft.Padding(left=18, top=16, right=18, bottom=18),
+                padding=ft.Padding(left=16, top=14, right=16, bottom=16),
                 bgcolor=THEME.bg_secondary,
             )
         )
@@ -89,7 +89,8 @@ class Sidebar(ft.Container):
             width=210,
             bgcolor=THEME.bg_primary,
             border=ft.Border(
-                left=None, top=None,
+                left=None,
+                top=None,
                 right=ft.BorderSide(3, THEME.bg_secondary),
                 bottom=None,
             ),
@@ -105,61 +106,55 @@ class Sidebar(ft.Container):
             self._tab_col.controls.append(btn)
 
     def _build_tab_button(self, tab: Dict[str, Any]) -> ft.Container:
+        """构建单个标签按钮"""
         selected = tab["id"] == self._selected_id
-        icon = tab.get("icon", "")
+        icon = tab.get("icon", "▣")
         label_text = tab.get("label", tab["id"])
 
         icon_slot = ft.Container(
             content=ft.Text(
-                icon or "▣",
-                size=18,
+                icon,
+                size=16,
                 color=THEME.text_primary,
                 text_align=ft.TextAlign.CENTER,
             ),
-            width=42,
-            height=42,
-            alignment=ft.Alignment(0, 0),
+            width=36,
+            height=36,
+            alignment=ft.alignment.Alignment(0, 0),
             bgcolor=THEME.mc_gold if selected else THEME.bg_secondary,
-            border=ft.Border(
-                left=ft.BorderSide(2, THEME.border_tertiary),
-                top=ft.BorderSide(2, THEME.border_tertiary),
-                right=ft.BorderSide(2, THEME.bg_secondary),
-                bottom=ft.BorderSide(2, THEME.bg_secondary),
-            ),
+            border=mc_border(2),
         )
+        
         text_ctrl = ft.Text(
             label_text,
-            size=13,
+            size=12,
             color=THEME.text_primary if selected else THEME.text_secondary,
             weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500,
             font_family="monospace",
         )
+        
         marker = ft.Text(
-            "▶" if selected else " ",
-            size=12,
+            "▶" if selected else "",
+            size=10,
             color=THEME.mc_grass,
-            font_family="monospace",
         )
 
         row = ft.Row(
             [icon_slot, ft.Column([text_ctrl, marker], spacing=0)],
-            spacing=12,
+            spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
+        
         container = ft.Container(
             content=row,
-            padding=ft.Padding(left=8, top=8, right=8, bottom=8),
+            padding=8,
             border_radius=0,
             bgcolor=THEME.mc_stone if selected else THEME.bg_card,
-            border=ft.Border(
-                left=ft.BorderSide(2, THEME.border_tertiary),
-                top=ft.BorderSide(2, THEME.border_tertiary),
-                right=ft.BorderSide(2, THEME.bg_secondary),
-                bottom=ft.BorderSide(2, THEME.bg_secondary),
-            ),
+            border=mc_border(2),
             ink=True,
+            on_click=lambda e, tid=tab["id"]: self._safe_select(tid),
         )
-        container.on_click = lambda e, tid=tab["id"]: self._safe_select(tid)
+        
         return container
 
     def _safe_select(self, tab_id: str) -> None:
@@ -172,6 +167,7 @@ class Sidebar(ft.Container):
             self._selected_id = tab_id
 
     def _select(self, tab_id: str) -> None:
+        """选择标签页"""
         if tab_id == self._selected_id:
             return
         # 更新旧按钮样式
@@ -189,6 +185,7 @@ class Sidebar(ft.Container):
         self._on_tab_select(tab_id)
 
     def _apply_style(self, container: ft.Container, selected: bool) -> None:
+        """应用选中/未选中样式"""
         row = container.content
         if isinstance(row, ft.Row) and len(row.controls) >= 2:
             icon_slot = row.controls[0]
@@ -200,7 +197,7 @@ class Sidebar(ft.Container):
                 marker = text_group.controls[1]
                 tc.color = THEME.text_primary if selected else THEME.text_secondary
                 tc.weight = ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
-                marker.value = "▶" if selected else " "
+                marker.value = "▶" if selected else ""
         container.bgcolor = THEME.mc_stone if selected else THEME.bg_card
 
     @property

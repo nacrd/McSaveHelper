@@ -1,12 +1,50 @@
-"""Minecraft 风格按钮组件工厂"""
+"""Minecraft-style button components"""
 from typing import Optional, Callable, Any
 
 import flet as ft
 
 from app.ui.theme import THEME
 
-MC_BORDER_WIDTH = 2
-MC_INNER_PADDING = 4
+
+def _mc_button(
+    text: str,
+    bgcolor: str,
+    on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
+    width: Optional[int] = None,
+    height: int = 40,
+    icon: Optional[str] = None,
+    text_color: str = None,
+) -> ft.Container:
+    """Create a Minecraft-style button with beveled borders"""
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(icon, size=16, color=text_color or THEME.text_primary) if icon else ft.Container(width=0),
+                ft.Text(
+                    text,
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=text_color or THEME.text_primary,
+                    font_family="monospace",
+                ),
+            ],
+            spacing=6,
+            alignment=ft.MainAxisAlignment.CENTER,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        width=width,
+        height=height,
+        bgcolor=bgcolor,
+        border=ft.Border(
+            left=ft.BorderSide(2, THEME.border_light),
+            top=ft.BorderSide(2, THEME.border_light),
+            right=ft.BorderSide(2, THEME.border_dark),
+            bottom=ft.BorderSide(2, THEME.border_dark),
+        ),
+        alignment=ft.alignment.Alignment(0, 0),
+        on_click=on_click,
+        ink=True,
+    )
 
 
 def btn_primary(
@@ -15,21 +53,9 @@ def btn_primary(
     width: Optional[int] = None,
     height: int = 40,
     icon: Optional[str] = None,
-) -> ft.Button:
-    return ft.Button(
-        content=text,
-        icon=icon,
-        on_click=on_click,
-        width=width,
-        height=height,
-        style=ft.ButtonStyle(
-            color=THEME.text_primary,
-            bgcolor=THEME.mc_grass,
-            shape=ft.RoundedRectangleBorder(radius=0),
-            side=ft.BorderSide(MC_BORDER_WIDTH, "#3A6B1E"),
-            padding=ft.Padding(left=16, right=16, top=MC_INNER_PADDING, bottom=MC_INNER_PADDING),
-        ),
-    )
+) -> ft.Container:
+    """Primary button - grass green"""
+    return _mc_button(text, THEME.mc_grass, on_click, width, height, icon)
 
 
 def btn_ghost(
@@ -37,20 +63,9 @@ def btn_ghost(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 40,
-) -> ft.Button:
-    return ft.Button(
-        content=text,
-        on_click=on_click,
-        width=width,
-        height=height,
-        style=ft.ButtonStyle(
-            color=THEME.text_secondary,
-            bgcolor=THEME.mc_stone,
-            side=ft.BorderSide(MC_BORDER_WIDTH, "#5A5A5A"),
-            shape=ft.RoundedRectangleBorder(radius=0),
-            padding=ft.Padding(left=16, right=16, top=MC_INNER_PADDING, bottom=MC_INNER_PADDING),
-        ),
-    )
+) -> ft.Container:
+    """Secondary button - stone gray"""
+    return _mc_button(text, THEME.mc_stone, on_click, width, height, text_color=THEME.text_primary)
 
 
 def btn_success(
@@ -58,20 +73,9 @@ def btn_success(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 40,
-) -> ft.Button:
-    return ft.Button(
-        content=text,
-        on_click=on_click,
-        width=width,
-        height=height,
-        style=ft.ButtonStyle(
-            color=THEME.text_primary,
-            bgcolor=THEME.mc_emerald,
-            side=ft.BorderSide(MC_BORDER_WIDTH, "#0E8B3E"),
-            shape=ft.RoundedRectangleBorder(radius=0),
-            padding=ft.Padding(left=16, right=16, top=MC_INNER_PADDING, bottom=MC_INNER_PADDING),
-        ),
-    )
+) -> ft.Container:
+    """Success button - emerald green"""
+    return _mc_button(text, THEME.mc_emerald, on_click, width, height)
 
 
 def btn_danger(
@@ -79,17 +83,6 @@ def btn_danger(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 40,
-) -> ft.Button:
-    return ft.Button(
-        content=text,
-        on_click=on_click,
-        width=width,
-        height=height,
-        style=ft.ButtonStyle(
-            color=THEME.text_primary,
-            bgcolor=THEME.mc_redstone,
-            side=ft.BorderSide(MC_BORDER_WIDTH, "#AA0000"),
-            shape=ft.RoundedRectangleBorder(radius=0),
-            padding=ft.Padding(left=16, right=16, top=MC_INNER_PADDING, bottom=MC_INNER_PADDING),
-        ),
-    )
+) -> ft.Container:
+    """Danger button - redstone red"""
+    return _mc_button(text, THEME.mc_redstone, on_click, width, height)
