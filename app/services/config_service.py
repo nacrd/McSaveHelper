@@ -19,10 +19,13 @@ class ConfigService:
       - 提供自定义 UUID 映射管理
     """
 
-    CONFIG_FILENAME = "config.json"
+    CONFIG_FILENAME: str = "config.json"
+    """配置文件名称"""
+    
     _instance: Optional['ConfigService'] = None
+    """单例实例"""
 
-    def __new__(cls, config_dir: Optional[Path] = None):
+    def __new__(cls, config_dir: Optional[Path] = None) -> 'ConfigService':
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -31,16 +34,17 @@ class ConfigService:
     def __init__(self, config_dir: Optional[Path] = None) -> None:
         if getattr(self, '_initialized', False):
             return
-        self._config_dir = config_dir or (Path.home() / ".mcsavehelper")
+        self._config_dir: Path = config_dir or (Path.home() / ".mcsavehelper")
         self._config_dir.mkdir(parents=True, exist_ok=True)
         self._config: Dict[str, Any] = {}
         self._migration: MigrationConfig = MigrationConfig()
         self._load()
-        self._initialized = True
+        self._initialized: bool = True
 
     # ─── 持久化配置 ────────────────────────────────
 
     def _load(self) -> None:
+        """加载配置文件"""
         config_path = self._config_dir / self.CONFIG_FILENAME
         defaults = self._defaults()
         if config_path.exists():
@@ -63,6 +67,11 @@ class ConfigService:
 
     @staticmethod
     def _defaults() -> Dict[str, Any]:
+        """获取默认配置字典
+        
+        Returns:
+            Dict[str, Any]: 默认配置字典
+        """
         return {
             "version": 2,
             "version_detection": True,
@@ -76,6 +85,15 @@ class ConfigService:
 
     @staticmethod
     def _merge(defaults: Dict, user: Dict) -> Dict:
+        """合并默认配置和用户配置
+        
+        Args:
+            defaults: 默认配置字典
+            user: 用户配置字典
+            
+        Returns:
+            Dict: 合并后的配置字典
+        """
         merged = defaults.copy()
         for key, value in user.items():
             if key in merged:
@@ -100,15 +118,29 @@ class ConfigService:
 
     @property
     def config(self) -> Dict[str, Any]:
-        """获取完整配置字典"""
+        """获取完整配置字典
+        
+        Returns:
+            Dict[str, Any]: 完整配置字典
+        """
         return self._config
 
     @property
     def version_detection(self) -> bool:
+        """是否启用版本检测
+        
+        Returns:
+            bool: 是否启用版本检测
+        """
         return self._config.get("version_detection", True)
 
     @property
     def use_custom_mapping(self) -> bool:
+        """是否使用自定义UUID映射
+        
+        Returns:
+            bool: 是否使用自定义UUID映射
+        """
         return self._config.get("use_custom_mapping", False)
 
     @use_custom_mapping.setter
@@ -117,6 +149,11 @@ class ConfigService:
 
     @property
     def custom_uuid_mappings(self) -> Dict[str, str]:
+        """获取自定义UUID映射字典
+        
+        Returns:
+            Dict[str, str]: 自定义UUID映射字典
+        """
         return self._config.get("custom_uuid_mappings", {})
 
     @custom_uuid_mappings.setter
@@ -124,34 +161,70 @@ class ConfigService:
         self._config["custom_uuid_mappings"] = value
 
     def get_custom_uuid_mapping(self, player_name: str) -> Optional[str]:
-        """获取自定义UUID映射"""
+        """获取自定义UUID映射
+        
+        Args:
+            player_name: 玩家名称
+            
+        Returns:
+            Optional[str]: 对应的UUID，如果不存在则返回None
+        """
         return self.custom_uuid_mappings.get(player_name)
 
     def set_custom_uuid_mapping(self, player_name: str, uuid: str) -> None:
-        """设置自定义UUID映射"""
+        """设置自定义UUID映射
+        
+        Args:
+            player_name: 玩家名称
+            uuid: 玩家UUID字符串
+        """
         self.custom_uuid_mappings[player_name] = uuid
         self.save()
 
     def remove_custom_uuid_mapping(self, player_name: str) -> None:
-        """移除自定义UUID映射"""
+        """移除自定义UUID映射
+        
+        Args:
+            player_name: 要移除的玩家名称
+        """
         if player_name in self.custom_uuid_mappings:
             del self.custom_uuid_mappings[player_name]
             self.save()
 
     @property
     def max_concurrent(self) -> int:
+        """最大并发处理数量
+        
+        Returns:
+            int: 最大并发处理数量
+        """
         return self._config.get("batch_processing", {}).get("max_concurrent", 2)
 
     @property
     def api_timeout(self) -> int:
+        """API请求超时时间（秒）
+        
+        Returns:
+            int: 超时时间（秒）
+        """
         return self._config.get("api_timeout", 10)
 
     @property
     def ui_settings(self) -> dict:
+        """界面设置
+        
+        Returns:
+            dict: 界面设置字典
+        """
         return self._config.get("ui_settings", {})
 
     @property
     def language(self) -> str:
+        """当前界面语言
+        
+        Returns:
+            str: 语言代码
+        """
         return self.ui_settings.get("language", "zh_CN")
 
     @language.setter
@@ -160,10 +233,20 @@ class ConfigService:
 
     @property
     def theme(self) -> str:
+        """当前界面主题
+        
+        Returns:
+            str: 主题名称
+        """
         return self.ui_settings.get("theme", "dark")
 
     @property
     def cleanup_patterns(self) -> list:
+        """清理模式下的文件/目录模式列表
+        
+        Returns:
+            list: 模式列表
+        """
         return self._config.get("cleanup_patterns", [])
 
     @cleanup_patterns.setter
@@ -172,16 +255,30 @@ class ConfigService:
 
     @property
     def batch_processing(self) -> dict:
+        """批量处理设置
+        
+        Returns:
+            dict: 批量处理设置字典
+        """
         return self._config.get("batch_processing", {})
 
     def get_config_dict(self) -> Dict[str, Any]:
-        """获取完整配置字典（用于视图展示）"""
+        """获取完整配置字典（用于视图展示）
+        
+        Returns:
+            Dict[str, Any]: 完整配置字典的副本
+        """
         return dict(self._config)
 
     # ─── 运行时迁移配置 ────────────────────────────
 
     @property
     def migration(self) -> MigrationConfig:
+        """运行时迁移配置
+        
+        Returns:
+            MigrationConfig: 迁移配置对象
+        """
         return self._migration
 
     def reset_config(self) -> None:
@@ -192,7 +289,14 @@ class ConfigService:
     # ─── Minecraft 版本检测 ────────────────────────────
 
     def detect_minecraft_version(self, world_path: Path) -> Optional[str]:
-        """检测Minecraft版本"""
+        """检测Minecraft版本
+        
+        Args:
+            world_path: 世界存档目录路径
+            
+        Returns:
+            Optional[str]: 检测到的版本号或名称，如果检测失败则返回None
+        """
         if not self.version_detection:
             return None
 

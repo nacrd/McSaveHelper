@@ -1,6 +1,6 @@
 """国际化翻译模块
 
-提供多语言支持，使用JSON文件存储翻译文本。
+提供多语言支持，使用 JSON 文件存储翻译文本。
 支持动态语言切换和热重载。
 """
 
@@ -10,114 +10,111 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, Set, List, Tuple
 from enum import Enum
+
 try:
-    from enum import StrEnum  # type: ignore
+    from enum import StrEnum
 except ImportError:
     try:
-        from typing_extensions import StrEnum  # type: ignore
+        from typing_extensions import StrEnum
     except ImportError:
-        # 自定义 StrEnum 作为回退
         class _StrEnum(str, Enum):
             """自定义字符串枚举，兼容 Python <3.11"""
             pass
         StrEnum = _StrEnum
 
-class Language(StrEnum):  # type: ignore
-    """支持的语言枚举"""
-    ZH_CN = "zh_CN"  # 简体中文
-    EN_US = "en_US"  # 英文（美国）
+
+class Language(StrEnum):
+    """支持的语言枚举
+
+    包含预定义语言和动态创建的语言。
+    """
+    ZH_CN = "zh_CN"
+    EN_US = "en_US"
 
     @classmethod
-    def _missing_(cls, value):
-        """为未知语言代码动态创建枚举成员"""
-        # 动态创建新成员
+    def _missing_(cls, value: str) -> 'Language':
+        """为未知语言代码动态创建枚举成员
+
+        Args:
+            value: 语言代码
+
+        Returns:
+            动态创建的枚举成员
+        """
         member = str.__new__(cls, value)
         member._value_ = value
-        # 生成一个合法的名称（替换非法字符）
         name = value.upper().replace('-', '_').replace(' ', '_')
         member._name_ = name
-        # 注册到枚举映射中
         cls._value2member_map_[value] = member
         return member
 
 
 class TranslationManager:
     """翻译管理器
-    
+
     负责加载翻译文件、管理当前语言设置、提供翻译功能。
     """
-    
-    def __init__(self, translations_dir: Optional[Path] = None):
+
+    def __init__(self, translations_dir: Optional[Path] = None) -> None:
         """初始化翻译管理器
-        
+
         Args:
-            translations_dir: 翻译文件目录，默认为项目根目录下的 translations 文件夹
+            translations_dir: 翻译文件目录
         """
         if translations_dir is None:
-            # 默认翻译文件目录
             if hasattr(sys, '_MEIPASS'):
-                # 打包后运行时
-                base_dir = Path(sys._MEIPASS)  # type: ignore
+                base_dir = Path(sys._MEIPASS)
             else:
-                # 开发环境
                 base_dir = Path(__file__).parent.parent
-            self.translations_dir = base_dir / "translations"
+            self.translations_dir: Path = base_dir / "translations"
         else:
-            self.translations_dir = Path(translations_dir)
-        
-        # 确保目录存在（打包后目录已存在，无需创建）
+            self.translations_dir: Path = Path(translations_dir)
+
         if not self.translations_dir.exists():
             self.translations_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 当前语言，从配置中读取或使用默认
-        self._current_language = Language.ZH_CN
-        self._translations: Dict[str, Dict[str, str]] = {}
+
+        self._current_language: Language = Language.ZH_CN
+        self._translations: Dict[str, Any] = {}
         self._loaded_files: Set[str] = set()
         self._available_languages: List[str] = []
         self._language_display_map: Dict[str, str] = {}
-        self._config_loaded = False
-        
-        # 扫描可用的语言文件
+        self._config_loaded: bool = False
+
         self._available_languages = self._scan_available_languages()
-        
-        # 加载翻译文件
+
         self._load_translations()
-    
+
     def _ensure_config_loaded(self) -> None:
-        """延迟加载配置，确保避免循环依赖"""
+        """延迟加载配置，避免循环依赖"""
         if self._config_loaded:
             return
         self._config_loaded = True
         try:
-            # 延迟导入，避免循环依赖
             from app.services.config_service import ConfigService
             config_service = ConfigService()
             lang_str = config_service.language
             try:
                 self._current_language = Language(lang_str)
             except ValueError:
-                # 如果配置中的语言无效，使用默认
                 print(f"警告: 配置中的语言 '{lang_str}' 无效，使用默认语言")
         except Exception as e:
             print(f"加载语言配置时出错: {e}")
-    
+
     def _load_translations(self) -> None:
         """加载当前语言的翻译文件"""
         lang_code = self._current_language
         lang_str = str(lang_code)
-        
+
         translation_file = self.translations_dir / f"{lang_str}.json"
-        
-        # 清除已加载的翻译
+
         self._translations.clear()
         self._loaded_files.clear()
-        
+
         if translation_file.exists():
             try:
                 with open(translation_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        # 移除 __meta__ 键（如果有）
                         if "__meta__" in data:
                             data.pop("__meta__")
                         self._translations = data
@@ -129,43 +126,42 @@ class TranslationManager:
                 print(f"加载翻译文件时出错 {translation_file}: {e}")
         else:
             print(f"警告: 翻译文件不存在: {translation_file}")
-            # 创建空的翻译文件模板
             self._create_template_file(translation_file)
-    
+
     def _scan_available_languages(self) -> List[str]:
-        """扫描 translations 目录下的所有可用语言文件，返回语言代码列表"""
-        languages = []
+        """扫描 translations 目录下的所有可用语言文件
+
+        Returns:
+            语言代码列表
+        """
+        languages: List[str] = []
         self._language_display_map.clear()
-        
-        # 扫描 translations 目录
+
         for file in self.translations_dir.glob("*.json"):
             lang_code, display_name = self._parse_language_metadata(file)
             languages.append(lang_code)
             self._language_display_map[lang_code] = display_name
-        
-        # 确保至少包含默认语言
+
         if not languages:
             languages = [Language.ZH_CN, Language.EN_US]
-            # 添加默认显示名称
             self._language_display_map[Language.ZH_CN] = "简体中文"
             self._language_display_map[Language.EN_US] = "English (US)"
         return languages
 
     def _parse_language_metadata(self, file_path: Path) -> Tuple[str, str]:
-        """解析翻译文件的元数据，返回语言代码和显示名称
-        
+        """解析翻译文件的元数据
+
         Args:
             file_path: 翻译文件路径
-            
+
         Returns:
             (语言代码, 显示名称)
         """
         lang_code = file_path.stem
-        display_name = lang_code  # 默认显示名称
+        display_name = lang_code
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # 检查是否有 __meta__ 对象
                 if "__meta__" in data and isinstance(data["__meta__"], dict):
                     meta = data["__meta__"]
                     if "language" in meta:
@@ -173,13 +169,16 @@ class TranslationManager:
                     if "display_name" in meta:
                         display_name = meta["display_name"]
         except Exception:
-            # 如果解析失败，使用默认值
             pass
         return lang_code, display_name
-    
+
     def _create_template_file(self, file_path: Path) -> None:
-        """创建翻译文件模板"""
-        template = {
+        """创建翻译文件模板
+
+        Args:
+            file_path: 模板文件路径
+        """
+        template: Dict[str, Any] = {
             "app": {
                 "title": "MCSaveHelper · 存档管理工具",
                 "subtitle": "存档管理工具"
@@ -255,27 +254,25 @@ class TranslationManager:
                 "API": "API"
             }
         }
-        
+
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(template, f, ensure_ascii=False, indent=2)
             print(f"已创建翻译模板文件: {file_path}")
         except Exception as e:
             print(f"创建翻译模板文件时出错: {e}")
-    
+
     def set_language(self, language: Language) -> None:
         """设置当前语言
-        
+
         Args:
             language: 要设置的语言
         """
         if language != self._current_language:
             self._current_language = language
             self._load_translations()
-            
-            # 保存到配置
             self._save_language_to_config()
-    
+
     def _save_language_to_config(self) -> None:
         """将当前语言保存到配置"""
         try:
@@ -285,106 +282,129 @@ class TranslationManager:
             config_service.save()
         except Exception as e:
             print(f"保存语言配置时出错: {e}")
-    
-    def get(self, key: str, default: Optional[str] = None, **kwargs) -> str:
+
+    def get(self, key: str, default: Optional[str] = None, **kwargs: Any) -> str:
         """获取翻译文本
-        
+
         Args:
             key: 翻译键，格式为 "category.key" 或 "category.subcategory.key"
             default: 如果找不到翻译时返回的默认文本
             **kwargs: 格式化参数
-            
+
         Returns:
-            翻译后的文本，如果找不到则返回默认文本或键本身
+            翻译后的文本
         """
-        # 分割键
         parts = key.split('.')
-        current_dict = self._translations
-        
-        # 遍历嵌套字典
+        current = self._translations
+
         for part in parts:
-            if isinstance(current_dict, dict) and part in current_dict:
-                current_dict = current_dict[part]
+            if isinstance(current, dict) and part in current:
+                current = current[part]
             else:
-                # 找不到翻译
-                if default is not None:
-                    result = default
-                else:
-                    result = key
-                
-                # 应用格式化
+                result = default if default is not None else key
                 if kwargs:
                     try:
                         result = result.format(**kwargs)
                     except (KeyError, ValueError):
                         pass
                 return result
-        
-        # 找到的最终值
-        result = str(current_dict) if current_dict is not None else (default or key)
-        
-        # 应用格式化
+
+        result = str(current) if current is not None else (default or key)
+
         if kwargs:
             try:
                 result = result.format(**kwargs)
             except (KeyError, ValueError):
                 pass
-        
+
         return result
-    
-    def translate(self, key: str, default: Optional[str] = None, **kwargs) -> str:
-        """翻译文本（get的别名）"""
+
+    def translate(self, key: str, default: Optional[str] = None, **kwargs: Any) -> str:
+        """翻译文本（get 的别名
+
+        Args:
+            key: 翻译键
+            default: 默认文本
+            **kwargs: 格式化参数
+
+        Returns:
+            翻译后的文本
+        """
         return self.get(key, default, **kwargs)
-    
-    def t(self, key: str, default: Optional[str] = None, **kwargs) -> str:
-        """翻译文本（简写）"""
+
+    def t(self, key: str, default: Optional[str] = None, **kwargs: Any) -> str:
+        """翻译文本（简写）
+
+        Args:
+            key: 翻译键
+            default: 默认文本
+            **kwargs: 格式化参数
+
+        Returns:
+            翻译后的文本
+        """
         return self.get(key, default, **kwargs)
-    
+
     @property
     def current_language(self) -> Language:
-        """获取当前语言"""
+        """获取当前语言
+
+        Returns:
+            当前语言
+        """
         return self._current_language
-    
+
     @property
     def available_languages(self) -> Dict[Language, str]:
-        """获取可用语言列表（动态扫描）"""
-        # 重新扫描目录以获取最新的语言文件列表
+        """获取可用语言列表（动态扫描）
+
+        Returns:
+            语言枚举到显示名称的映射
+        """
         self._scan_available_languages()
-        result = {}
+        result: Dict[Language, str] = {}
         for lang_code, display_name in self._language_display_map.items():
-            # 将字符串语言代码转换为 Language 枚举成员
             try:
                 lang = Language(lang_code)
+                result[lang] = display_name
             except ValueError:
-                # 如果动态枚举无法处理，跳过
                 continue
-            result[lang] = display_name
         return result
-    
+
     @property
     def available_language_codes(self) -> List[str]:
-        """获取可用语言代码列表（用于 i18n_service）"""
+        """获取可用语言代码列表
+
+        Returns:
+            语言代码列表
+        """
         return self._available_languages.copy()
-    
+
     def get_display_name(self, lang_code: str) -> str:
-        """获取语言的显示名称"""
+        """获取语言的显示名称
+
+        Args:
+            lang_code: 语言代码
+
+        Returns:
+            显示名称
+        """
         return self._language_display_map.get(lang_code, lang_code)
-    
+
     def reload(self) -> None:
         """重新加载翻译文件"""
         self._load_translations()
 
 
-# 全局翻译管理器实例
 _translation_manager: Optional[TranslationManager] = None
 
 
 def init_translations(translations_dir: Optional[Path] = None) -> TranslationManager:
     """初始化翻译管理器
-    
+
     Args:
         translations_dir: 翻译文件目录
-        
+
     Returns:
         翻译管理器实例
     """
@@ -396,7 +416,7 @@ def init_translations(translations_dir: Optional[Path] = None) -> TranslationMan
 
 def get_translator() -> TranslationManager:
     """获取翻译管理器实例
-    
+
     Returns:
         翻译管理器实例
     """
@@ -406,15 +426,14 @@ def get_translator() -> TranslationManager:
     return _translation_manager
 
 
-# 便捷函数
-def t(key: str, default: Optional[str] = None, **kwargs) -> str:
+def t(key: str, default: Optional[str] = None, **kwargs: Any) -> str:
     """翻译文本（便捷函数）
-    
+
     Args:
         key: 翻译键
         default: 默认文本
         **kwargs: 格式化参数
-        
+
     Returns:
         翻译后的文本
     """
@@ -423,7 +442,7 @@ def t(key: str, default: Optional[str] = None, **kwargs) -> str:
 
 def set_language(language: Language) -> None:
     """设置当前语言
-    
+
     Args:
         language: 要设置的语言
     """
@@ -431,10 +450,18 @@ def set_language(language: Language) -> None:
 
 
 def get_current_language() -> Language:
-    """获取当前语言"""
+    """获取当前语言
+
+    Returns:
+        当前语言
+    """
     return get_translator().current_language
 
 
 def get_available_languages() -> Dict[Language, str]:
-    """获取可用语言列表"""
+    """获取可用语言列表
+
+    Returns:
+        可用语言映射
+    """
     return get_translator().available_languages

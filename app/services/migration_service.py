@@ -27,21 +27,38 @@ class MigrationService:
     """
 
     def __init__(self, config: ConfigService) -> None:
-        self._config = config
+        self._config: ConfigService = config
         self._batch_processor: Optional[BatchProcessor] = None
         self._batch_worlds: List[Path] = []
         self._scan_result: str = ""
 
     @property
     def batch_worlds(self) -> List[Path]:
+        """批量处理的世界存档列表
+        
+        Returns:
+            List[Path]: 世界存档路径列表
+        """
         return self._batch_worlds
 
     @property
     def scan_result(self) -> str:
+        """扫描结果信息
+        
+        Returns:
+            str: 扫描结果描述
+        """
         return self._scan_result
 
     def scan_batch_dir(self, directory: str) -> List[Path]:
-        """扫描批量目录，返回世界存档列表"""
+        """扫描批量目录，返回世界存档列表
+        
+        Args:
+            directory: 要扫描的目录路径
+            
+        Returns:
+            List[Path]: 找到的世界存档路径列表
+        """
         bp = Path(directory)
         if not bp.exists():
             return []
@@ -76,7 +93,23 @@ class MigrationService:
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
     ) -> str:
-        """执行单存档迁移，返回输出路径"""
+        """执行单存档迁移，返回输出路径
+        
+        Args:
+            src: 源存档目录路径
+            dest: 目标输出目录路径
+            world_name: 世界存档名称
+            mode: 迁移模式，"fast" 或 "full"
+            offline: 是否启用离线模式
+            clean: 是否启用清理模式
+            pure_clean: 是否启用纯清理模式
+            manual_names_str: 逗号分隔的手动指定玩家名称
+            log_cb: 日志回调函数
+            progress_cb: 进度回调函数
+            
+        Returns:
+            str: 输出目录路径
+        """
         src_path = Path(src)
         dest_path = Path(dest)
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
@@ -100,7 +133,22 @@ class MigrationService:
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
     ) -> Dict[str, Any]:
-        """执行批量迁移，返回处理结果字典"""
+        """执行批量迁移，返回处理结果字典
+        
+        Args:
+            dest_dir: 目标输出目录路径
+            mode: 迁移模式，"fast" 或 "full"
+            offline: 是否启用离线模式
+            clean: 是否启用清理模式
+            pure_clean: 是否启用纯清理模式
+            manual_names_str: 逗号分隔的手动指定玩家名称
+            max_concurrent: 最大并发处理数量
+            log_cb: 日志回调函数
+            progress_cb: 进度回调函数
+            
+        Returns:
+            Dict[str, Any]: 处理结果字典
+        """
         dest_path = Path(dest_dir)
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
         world_names = [f"world_{i+1}" for i in range(len(self._batch_worlds))]
@@ -114,7 +162,11 @@ class MigrationService:
 
     @staticmethod
     def open_folder(path: str) -> None:
-        """在系统文件管理器中打开目录"""
+        """在系统文件管理器中打开目录
+        
+        Args:
+            path: 要打开的目录路径
+        """
         try:
             if platform.system() == "Windows":
                 os.startfile(path)

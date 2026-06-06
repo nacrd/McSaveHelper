@@ -17,7 +17,7 @@ from ..converter import convert_endian, IdMapping, VersionDowngrader
 
 @dataclass
 class WorldInfo:
-    """从 level.dat 提取的基础信息"""
+    """从 level.dat 提取的完整信息"""
     version: int
     version_name: Optional[str] = None
     game_type: Optional[int] = None
@@ -26,6 +26,23 @@ class WorldInfo:
     spawn_y: Optional[int] = None
     spawn_z: Optional[int] = None
     level_name: Optional[str] = None
+    difficulty: Optional[int] = None
+    hardcore: Optional[bool] = None
+    allow_commands: Optional[bool] = None
+    seed: Optional[int] = None
+    day_time: Optional[int] = None
+    time: Optional[int] = None
+    rain_time: Optional[int] = None
+    raining: Optional[bool] = None
+    thunder_time: Optional[int] = None
+    thundering: Optional[bool] = None
+    version_series: Optional[str] = None
+    version_snapshot: Optional[bool] = None
+    data_packs: Optional[Dict[str, List[str]]] = None
+    server_brands: Optional[List[str]] = None
+    was_modded: Optional[bool] = None
+    clear_weather_time: Optional[int] = None
+    initialized: Optional[bool] = None
 
 
 @dataclass
@@ -193,7 +210,7 @@ class WorldSession:
             self._log(f"更新了 {updated} 个玩家名称", "SCAN")
 
     def _load_level_info(self) -> None:
-        """读取 level.dat 并提取基础信息"""
+        """读取 level.dat 并提取完整信息"""
         level_path = self.world_path / "level.dat"
         if not level_path.exists():
             self._log("未找到 level.dat", "WARNING")
@@ -212,6 +229,40 @@ class WorldSession:
             spawn_y = data.get("SpawnY", None) if data else None
             spawn_z = data.get("SpawnZ", None) if data else None
             level_name = data.get("LevelName", None) if data else None
+            difficulty = data.get("Difficulty", None) if data else None
+            hardcore = data.get("hardcore", None) if data else None
+            allow_commands = data.get("allowCommands", None) if data else None
+            day_time = data.get("DayTime", None) if data else None
+            time = data.get("Time", None) if data else None
+            rain_time = data.get("rainTime", None) if data else None
+            raining = data.get("raining", None) if data else None
+            thunder_time = data.get("thunderTime", None) if data else None
+            thundering = data.get("thundering", None) if data else None
+            version_series = data.get("Version", {}).get("Series", None) if data else None
+            version_snapshot = data.get("Version", {}).get("Snapshot", None) if data else None
+            server_brands = data.get("ServerBrands", None) if data else None
+            was_modded = data.get("WasModded", None) if data else None
+            clear_weather_time = data.get("clearWeatherTime", None) if data else None
+            initialized = data.get("initialized", None) if data else None
+
+            seed = None
+            if data:
+                wgs = data.get("WorldGenSettings")
+                if wgs:
+                    seed = wgs.get("seed", None)
+
+            data_packs = None
+            if data:
+                dp = data.get("DataPacks")
+                if dp:
+                    enabled = dp.get("Enabled", [])
+                    disabled = dp.get("Disabled", [])
+                    if enabled or disabled:
+                        data_packs = {
+                            "enabled": [str(e) for e in enabled] if enabled else [],
+                            "disabled": [str(d) for d in disabled] if disabled else [],
+                        }
+
             self._world_info = WorldInfo(
                 version=version,
                 version_name=version_name,
@@ -221,6 +272,23 @@ class WorldSession:
                 spawn_y=spawn_y,
                 spawn_z=spawn_z,
                 level_name=level_name,
+                difficulty=difficulty,
+                hardcore=hardcore,
+                allow_commands=allow_commands,
+                seed=seed,
+                day_time=day_time,
+                time=time,
+                rain_time=rain_time,
+                raining=raining,
+                thunder_time=thunder_time,
+                thundering=thundering,
+                version_series=version_series,
+                version_snapshot=version_snapshot,
+                data_packs=data_packs,
+                server_brands=server_brands,
+                was_modded=was_modded,
+                clear_weather_time=clear_weather_time,
+                initialized=initialized,
             )
             self._log(f"已加载存档信息：版本 {version} ({version_name})", "INFO")
         except Exception as e:
