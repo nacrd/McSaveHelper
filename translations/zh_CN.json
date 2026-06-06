@@ -16,9 +16,11 @@
     "batch_failed": "批量处理失败"
   },
   "sidebar": {
-    "migrator": "批量迁移",
-    "explorer": "存档探险",
+    "migrator": "存档转换",
+    "explorer": "存档浏览器",
+    "compare": "存档对比",
     "mappings": "映射管理",
+    "server_properties": "服务器配置",
     "settings": "设置"
   },
   "log_panel": {
@@ -75,7 +77,7 @@
     "player_name": "玩家名"
   },
   "explorer": {
-    "title": "存档探险家",
+    "title": "存档浏览器",
     "no_world_loaded": "未加载存档",
     "load_world": "加载存档",
     "tab_players": "玩家",
@@ -114,7 +116,7 @@
   },
   "mappings": {
     "title": "UUID映射管理",
-    "description": "在此处管理自定义玩家名与UUID的映射关系。这些映射将用于批量迁移时的UUID替换。",
+    "description": "在此处管理自定义玩家名与UUID的映射关系。这些映射将用于存档转换时的UUID替换。",
     "hint": "提示：您可以通过\"导入名单\"批量导入映射，或手动添加每一行。\n映射数据会实时保存到配置文件，并在迁移时根据首页开关决定是否启用。",
     "column_player": "玩家名",
     "column_uuid": "UUID",

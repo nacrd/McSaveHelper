@@ -11,6 +11,10 @@ from core.scanner import scan_all_regions
 from core.types import LogCallback
 
 
+def _default_log(msg: str, lvl: str = "INFO") -> None:
+    pass
+
+
 @dataclass
 class BlockStats:
     """方块统计信息"""
@@ -45,13 +49,12 @@ class WorldStatsService:
     """存档统计服务"""
 
     def __init__(self, log: Optional[LogCallback] = None) -> None:
-        self.log = log or (lambda msg, lvl="INFO": None)
+        self.log: LogCallback = log or _default_log
 
     def _log(self, message: str, level: str = "INFO") -> None:
-        if self.log:
-            self.log(message, level)
+        self.log(message, level)
 
-    def analyze_world(self, world_path: Path, progress_callback=None) -> WorldStatistics:
+    def analyze_world(self, world_path: Path, progress_callback: Optional[Any] = None) -> WorldStatistics:
         """分析存档并返回统计数据"""
         stats = WorldStatistics()
         
@@ -135,10 +138,10 @@ class WorldStatsService:
         
         return distribution
 
-    def _analyze_chunk(self, chunk) -> Tuple[Counter, Counter]:
+    def _analyze_chunk(self, chunk: Any) -> Tuple[Counter[str], Counter[str]]:
         """分析单个区块的方块和实体"""
-        block_counter = Counter()
-        entity_counter = Counter()
+        block_counter: Counter[str] = Counter()
+        entity_counter: Counter[str] = Counter()
         
         try:
             if hasattr(chunk, 'data') and chunk.data:

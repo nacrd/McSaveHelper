@@ -5,6 +5,10 @@ from typing import Dict, List, Optional, Tuple
 from core.types import LogCallback
 
 
+def _default_log(msg: str, lvl: str = "INFO") -> None:
+    pass
+
+
 DEFAULT_SERVER_PROPERTIES: Dict[str, str] = {
     "level-name": "world",
     "gamemode": "survival",
@@ -56,7 +60,7 @@ ENUM_PROPERTIES: Dict[str, Tuple[str, ...]] = {
 
 class ServerPropertiesService:
     def __init__(self, log: Optional[LogCallback] = None) -> None:
-        self.log = log or (lambda msg, lvl="INFO": None)
+        self.log: LogCallback = log or _default_log
 
     def load(self, path: Path) -> Dict[str, str]:
         props_path = self._resolve_path(path)
@@ -103,11 +107,11 @@ class ServerPropertiesService:
         for key, (min_value, max_value) in INTEGER_RANGES.items():
             raw = props.get(key, "")
             try:
-                value = int(raw)
+                int_value = int(raw)
             except ValueError:
                 errors.append(f"{key} 必须为整数")
                 continue
-            if not min_value <= value <= max_value:
+            if not min_value <= int_value <= max_value:
                 errors.append(f"{key} 范围应为 {min_value}-{max_value}")
         for key, values in ENUM_PROPERTIES.items():
             if props.get(key) not in values:

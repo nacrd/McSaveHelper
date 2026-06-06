@@ -12,6 +12,10 @@ from core.scanner import scan_all_regions
 from core.types import LogCallback
 
 
+def _default_log(msg: str, lvl: str = "INFO") -> None:
+    pass
+
+
 @dataclass
 class RegionInfo:
     """区域文件信息"""
@@ -35,11 +39,10 @@ class RegionEditorService:
     """区块编辑服务"""
 
     def __init__(self, log: Optional[LogCallback] = None) -> None:
-        self.log = log or (lambda msg, lvl="INFO": None)
+        self.log: LogCallback = log or _default_log
 
     def _log(self, message: str, level: str = "INFO") -> None:
-        if self.log:
-            self.log(message, level)
+        self.log(message, level)
 
     def get_region_info(self, region_path: Path) -> Optional[RegionInfo]:
         """获取区域文件信息"""

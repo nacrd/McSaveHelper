@@ -9,6 +9,10 @@ from core.scanner import scan_all_regions
 from core.types import LogCallback
 
 
+def _default_log(msg: str, lvl: str = "INFO") -> None:
+    pass
+
+
 @dataclass
 class CompareItem:
     name: str
@@ -27,7 +31,7 @@ class WorldCompareResult:
 
 class WorldCompareService:
     def __init__(self, log: Optional[LogCallback] = None) -> None:
-        self.log = log or (lambda msg, lvl="INFO": None)
+        self.log: LogCallback = log or _default_log
 
     def compare_worlds(self, left_path: Path, right_path: Path) -> WorldCompareResult:
         left = WorldSession(left_path, log=self.log)
