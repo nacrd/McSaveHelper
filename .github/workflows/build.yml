@@ -95,10 +95,15 @@ jobs:
     - name: Build onefile version
       run: pyinstaller build-onefile.spec --noconfirm
 
-    - name: Create release packages
+    - name: Create portable package
+      run: Compress-Archive -Path dist/MCSaveHelper -DestinationPath MCSaveHelper-Windows-portable.zip
+
+    - name: Rename onefile exe with version
+      shell: pwsh
       run: |
-        Compress-Archive -Path dist/MCSaveHelper -DestinationPath MCSaveHelper-Windows-portable.zip
-        Compress-Archive -Path dist/MCSaveHelper.exe -DestinationPath MCSaveHelper-Windows-onefile.zip
+        $tag = "${{ steps.version.outputs.tag }}"
+        if (-not $tag) { $tag = "dev" }
+        Copy-Item dist/MCSaveHelper.exe "MCSaveHelper-${tag}-Windows.exe"
 
     - name: Upload portable artifact
       uses: actions/upload-artifact@v4
@@ -111,7 +116,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: MCSaveHelper-Windows-onefile
-        path: MCSaveHelper-Windows-onefile.zip
+        path: MCSaveHelper-*-Windows.exe
         retention-days: 30
 
   # 发布作业
@@ -139,7 +144,7 @@ jobs:
       with:
         tag_name: ${{ needs.build.outputs.tag }}
         files: |
-          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-*-Windows.exe
           MCSaveHelper-Windows-portable.zip
         generate_release_notes: true
 
@@ -148,7 +153,7 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-*-Windows.exe
           MCSaveHelper-Windows-portable.zip
         generate_release_notes: true
 
@@ -158,6 +163,6 @@ jobs:
       with:
         tag_name: ${{ needs.build.outputs.tag }}
         files: |
-          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-*-Windows.exe
           MCSaveHelper-Windows-portable.zip
         generate_release_notes: true
