@@ -4,12 +4,15 @@
 实现 Java ↔ Bedrock 桥接、版本软着陆等转换功能。
 """
 import struct
+import os
+import tempfile
 import nbtlib
 from nbtlib import File, Compound, Byte, Short, Int, Long, Float, Double, String, ByteArray, IntArray, List
 from typing import Union, Dict, Any, Optional, Tuple, List as TList
 from pathlib import Path
 
 from .constants import MinecraftConstants
+from .utils import replace_directory_tree
 
 
 class ConversionError(Exception):
@@ -67,7 +70,16 @@ def save_nbt(file_path: Path, nbt_data: File, byteorder: str = 'big') -> None:
     以指定字节序保存 NBT 文件。
     """
     try:
-        nbt_data.save(file_path, byteorder=byteorder)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{file_path.name}.", suffix=".tmp", dir=str(file_path.parent))
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            nbt_data.save(tmp_path, byteorder=byteorder)
+            os.replace(tmp_path, file_path)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
     except Exception as e:
         raise ConversionError(f"保存 NBT 文件失败: {e}")
 
@@ -84,9 +96,9 @@ def convert_endian(src_path: Path, dst_path: Path, target_byteorder: str) -> Non
     # 检测源字节序
     src_endian = detect_endian(src_path)
     if src_endian == target_byteorder:
-        # 字节序相同，直接复制
-        import shutil
-        shutil.copy2(src_path, dst_path)
+        if src_path.resolve() != dst_path.resolve():
+            import shutil
+            shutil.copy2(src_path, dst_path)
         return
     # 加载源文件
     data = load_nbt(src_path, byteorder=src_endian)
@@ -252,15 +264,11 @@ def convert_world(src_path: Path, dst_path: Path,
     Returns:
         成功返回 True，失败返回 False
     """
-    import shutil
-    import os
-    
     # 1. 如果源路径与目标路径不同，则复制世界结构
-    if src_path != dst_path:
+    if src_path.resolve() != dst_path.resolve():
         try:
-            if dst_path.exists():
-                shutil.rmtree(dst_path)
-            shutil.copytree(src_path, dst_path, ignore=shutil.ignore_patterns('*.tmp', '*.bak', '*.old'))
+            import shutil
+            replace_directory_tree(src_path, dst_path, ignore=shutil.ignore_patterns('*.tmp', '*.bak', '*.old'))
         except Exception as e:
             raise ConversionError(f"复制世界目录失败: {e}")
         work_path = dst_path
@@ -295,8 +303,8 @@ def convert_world(src_path: Path, dst_path: Path,
                         # 替换未知方块
                         VersionDowngrader.replace_unknown_blocks(data, target_version)
                     
-                    # 保存修改后的 NBT（字节序已在 convert_endian 中处理，但其他修改需要保存）
-                    data.save()
+                    # 保存修改后的 NBT，显式保留目标字节序并使用原子替换。
+                    save_nbt(file_path, data, byteorder=target_byteorder)
                     
                 except Exception as e:
                     # 记录错误但继续处理其他文件

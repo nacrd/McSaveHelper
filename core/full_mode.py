@@ -1,6 +1,5 @@
-import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import nbtlib
 
@@ -10,7 +9,7 @@ from .nbt_utils import patch_nbt
 from .scanner import scan_all_regions
 from .uuid_utils import build_mappings, load_usercache
 from .worker import process_regions_parallel
-from .utils import update_server_properties
+from .utils import safe_destination_world, update_server_properties, replace_directory_tree
 from .types import LogCallback, ProgressCallback, UUIDMapping
 
 
@@ -23,7 +22,8 @@ def run_full(
     pure_clean: bool,
     manual_names: Optional[List[str]],
     log: LogCallback,
-    progress: ProgressCallback
+    progress: ProgressCallback,
+    custom_mappings: Optional[Dict[str, str]] = None,
 ) -> None:
     """执行完整模式迁移
 
@@ -37,19 +37,18 @@ def run_full(
         manual_names: 手动玩家名列表
         log: 日志回调函数
         progress: 进度回调函数
+        custom_mappings: 玩家名称到自定义 UUID 的映射
     """
-    dest_world = dest_dir / world_name
+    dest_world = safe_destination_world(src_world, dest_dir, world_name)
 
     # 1. 克隆
-    if dest_world.exists():
-        shutil.rmtree(dest_world)
-    shutil.copytree(src_world, dest_world)
+    replace_directory_tree(src_world, dest_world)
     log(f"存档已克隆到 {dest_world}", "FILE")
 
     # 2. 加载缓存与构建映射
     cache = load_usercache(src_world)
     log(f"本地缓存: {len(cache)} 条", "CACHE")
-    mappings = build_mappings(dest_world, cache, offline_mode, manual_names, log)
+    mappings = build_mappings(dest_world, cache, offline_mode, manual_names, log, custom_mappings)
     if not mappings:
         log("未生成任何 UUID 映射，终止", "ERROR")
         return
@@ -76,7 +75,8 @@ def run_full(
                     new_name = old_file.name.replace(old_u, new_u)
                     new_path = f_path / new_name
                     if new_path.exists():
-                        new_path.unlink(missing_ok=True)
+                        log(f"跳过重命名冲突: {old_file.name} -> {new_name}，目标已存在", "WARN")
+                        continue
                     old_file.rename(new_path)
 
     # 5. 处理区域文件

@@ -117,7 +117,19 @@ class MigrationService:
         if mode == "fast":
             run_fast(src_path, dest_path, world_name, offline, clean, pure_clean, manual, log_cb)
         else:
-            run_full(src_path, dest_path, world_name, offline, clean, pure_clean, manual, log_cb, progress_cb)
+            custom_mappings = self._config.custom_uuid_mappings if self._config.use_custom_mapping else None
+            run_full(
+                src_path,
+                dest_path,
+                world_name,
+                offline,
+                clean,
+                pure_clean,
+                manual,
+                log_cb,
+                progress_cb,
+                custom_mappings,
+            )
 
         return str(dest_path / world_name)
 
@@ -153,7 +165,11 @@ class MigrationService:
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
         world_names = [f"world_{i+1}" for i in range(len(self._batch_worlds))]
 
-        self._batch_processor = BatchProcessor(max_concurrent)
+        self._batch_processor = BatchProcessor(
+            max_concurrent,
+            version_detector=self._config.detect_minecraft_version,
+            custom_mappings=self._config.custom_uuid_mappings if self._config.use_custom_mapping else None,
+        )
         results = self._batch_processor.process_batch(
             self._batch_worlds, dest_path, world_names, mode,
             offline, clean, pure_clean, manual, log_cb, progress_cb,

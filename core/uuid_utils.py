@@ -2,12 +2,12 @@ import hashlib
 import json
 import struct
 import time
+import uuid
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
-from app.services.config_service import ConfigService
 from core.types import LogCallback
 from core.constants import MinecraftConstants
 
@@ -21,8 +21,10 @@ def get_offline_uuid_str(name: str) -> str:
     Returns:
         格式化的 UUID 字符串 (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
     """
-    md5 = hashlib.md5(f"OfflinePlayer:{name}".encode('utf-8')).hexdigest()
-    return f"{md5[:8]}-{md5[8:12]}-{md5[12:16]}-{md5[16:20]}-{md5[20:32]}"
+    digest = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode('utf-8')).digest())
+    digest[6] = (digest[6] & 0x0F) | 0x30
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
 
 
 def uuid_to_ints(uuid_str: str) -> List[int]:
@@ -35,7 +37,13 @@ def uuid_to_ints(uuid_str: str) -> List[int]:
         包含 4 个整数的列表
     """
     hex_s = uuid_str.replace("-", "")
-    return [int(hex_s[i:i+8], 16) for i in range(0, 32, 8)]
+    values = []
+    for i in range(0, 32, 8):
+        value = int(hex_s[i:i+8], 16)
+        if value >= 0x80000000:
+            value -= 0x100000000
+        values.append(value)
+    return values
 
 
 def uuid_to_most_least(uuid_str: str) -> Tuple[int, int]:
@@ -151,7 +159,8 @@ def build_mappings(
     cache: dict,
     offline_mode: bool,
     manual_names: Optional[List[str]],
-    log: LogCallback
+    log: LogCallback,
+    custom_mappings: Optional[Dict[str, str]] = None,
 ) -> List[Tuple[List[int], List[int], str, str, Tuple[int, int], Tuple[int, int]]]:
     """构建 UUID 映射列表
 
@@ -161,6 +170,7 @@ def build_mappings(
         offline_mode: 是否离线模式
         manual_names: 手动指定的玩家名列表
         log: 日志回调函数
+        custom_mappings: 玩家名称到自定义 UUID 的映射
 
     Returns:
         UUID 映射列表
@@ -170,11 +180,10 @@ def build_mappings(
         return []
     maps: List[Tuple[List[int], List[int], str, str, Tuple[int, int], Tuple[int, int]]] = []
     new_uuids = set()
+    processed_names = set()
     
     # 处理自定义UUID映射
-    config_service = ConfigService()
-    use_custom = config_service.use_custom_mapping
-    custom_mappings = config_service.custom_uuid_mappings if use_custom else {}
+    custom_mappings = custom_mappings or {}
     if custom_mappings:
         log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
     
@@ -202,6 +211,7 @@ def build_mappings(
                 log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
         
         if name:
+            processed_names.add(name)
             # 优先使用自定义UUID，否则使用离线UUID
             if custom_uuid:
                 new_u = custom_uuid
@@ -224,7 +234,7 @@ def build_mappings(
     # 处理手动输入但不在playerdata中的玩家
     if manual_names:
         for name in manual_names:
-            if name not in [m[2] for m in maps]:  # 检查是否已经处理过
+            if name not in processed_names:  # 检查是否已经处理过
                 custom_uuid = custom_mappings.get(name)
                 if custom_uuid:
                     new_u = custom_uuid

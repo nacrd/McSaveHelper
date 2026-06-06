@@ -67,6 +67,11 @@ def process_regions_parallel(
     done = 0
     total_changes = 0
 
+    if total == 0:
+        progress_callback(1.0)
+        log_callback("区块总计修改: 0 处", "INFO")
+        return
+
     with ThreadPoolExecutor(max_workers=min(8, total)) as executor:
         futures = [executor.submit(process_region_file, f, mappings) for f in files]
         for future in as_completed(futures):

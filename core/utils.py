@@ -4,8 +4,70 @@
 """
 
 from pathlib import Path
+import re
+import shutil
 
 from .types import LogCallback
+
+
+_INVALID_WORLD_NAME_CHARS = re.compile(r"[\\/\r\n]")
+
+
+def validate_world_name(world_name: str) -> str:
+    """Validate a world folder name before it is joined into a path."""
+    name = world_name.strip()
+    if not name:
+        raise ValueError("世界名称不能为空")
+    if name in {".", ".."} or _INVALID_WORLD_NAME_CHARS.search(name):
+        raise ValueError(f"不安全的世界名称: {world_name!r}")
+    if Path(name).is_absolute():
+        raise ValueError(f"世界名称不能是绝对路径: {world_name!r}")
+    return name
+
+
+def safe_destination_world(src_world: Path, dest_dir: Path, world_name: str) -> Path:
+    """Return a validated destination world path under dest_dir."""
+    safe_name = validate_world_name(world_name)
+    base = dest_dir.resolve()
+    dest_world = (base / safe_name).resolve()
+    try:
+        dest_world.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"目标路径越界: {dest_world}") from exc
+    _ensure_distinct_tree(src_world.resolve(), dest_world)
+    return dest_world
+
+
+def _ensure_distinct_tree(src_path: Path, dst_path: Path) -> None:
+    if src_path == dst_path:
+        raise ValueError("源路径和目标路径不能相同")
+    if _is_relative_to(dst_path, src_path):
+        raise ValueError("目标路径不能位于源路径内部")
+    if _is_relative_to(src_path, dst_path):
+        raise ValueError("目标路径不能是源路径的父目录")
+
+
+def _is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
+
+
+def replace_directory_tree(src_path: Path, dst_path: Path, *, ignore=None) -> None:
+    """Safely replace dst_path with a copy of src_path."""
+    src_resolved = src_path.resolve()
+    dst_resolved = dst_path.resolve()
+    _ensure_distinct_tree(src_resolved, dst_resolved)
+    if dst_resolved.exists():
+        if not dst_resolved.is_dir():
+            raise ValueError(f"目标路径不是目录: {dst_resolved}")
+        if any(dst_resolved.iterdir()) and not (dst_resolved / "level.dat").exists():
+            raise ValueError(f"目标目录不是 Minecraft 存档目录，拒绝删除: {dst_resolved}")
+        shutil.rmtree(dst_resolved)
+    dst_resolved.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src_resolved, dst_resolved, ignore=ignore)
 
 
 def update_server_properties(dest_dir: Path, world_name: str, log: LogCallback) -> None:
@@ -20,6 +82,7 @@ def update_server_properties(dest_dir: Path, world_name: str, log: LogCallback) 
         world_name: 新的世界文件夹名称
         log: 日志回调函数，接受 (消息, 级别) 两个参数
     """
+    world_name = validate_world_name(world_name)
     props_file: Path = dest_dir / "server.properties"
 
     if not props_file.exists():
@@ -27,7 +90,10 @@ def update_server_properties(dest_dir: Path, world_name: str, log: LogCallback) 
         return
 
     try:
-        lines: list[str] = props_file.read_text(encoding='utf-8').splitlines()
+        original = props_file.read_text(encoding='utf-8')
+        newline = "\r\n" if "\r\n" in original else "\n"
+        had_trailing_newline = original.endswith(("\n", "\r"))
+        lines: list[str] = original.splitlines()
         new_lines: list[str] = []
         found: bool = False
 
@@ -41,7 +107,10 @@ def update_server_properties(dest_dir: Path, world_name: str, log: LogCallback) 
         if not found:
             new_lines.append(f"level-name={world_name}")
 
-        props_file.write_text("\n".join(new_lines), encoding='utf-8')
+        content = newline.join(new_lines)
+        if had_trailing_newline:
+            content += newline
+        props_file.write_text(content, encoding='utf-8')
         log(f"已更新 server.properties: level-name={world_name}", "CONFIG")
 
     except Exception as e:

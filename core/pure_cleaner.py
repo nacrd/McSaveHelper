@@ -51,6 +51,8 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
                     total_blocks_replaced += blocks_replaced
                     # 处理实体
                     entities_removed = _purge_mod_entities_in_chunk(chunk)
+                    block_entities_removed = _purge_mod_block_entities_in_chunk(chunk)
+                    entities_removed += block_entities_removed
                     total_entities_removed += entities_removed
                     if blocks_replaced > 0 or entities_removed > 0:
                         region_changes += 1
@@ -110,7 +112,8 @@ def _purge_mod_entities_in_chunk(chunk) -> int:
     if not isinstance(data, nbtlib.tag.Compound):
         return 0
 
-    entities = data.get('Entities')
+    entities_key = 'Entities' if 'Entities' in data else 'entities'
+    entities = data.get(entities_key)
     if not entities:
         return 0
 
@@ -127,5 +130,33 @@ def _purge_mod_entities_in_chunk(chunk) -> int:
             removed += 1
     # 替换实体列表
     if removed > 0:
-        data['Entities'] = nbtlib.tag.List(vanilla_entities)
+        data[entities_key] = nbtlib.tag.List(vanilla_entities)
+    return removed
+
+
+def _purge_mod_block_entities_in_chunk(chunk) -> int:
+    """Remove non-vanilla block entities left behind by modded blocks."""
+    data = chunk.data if hasattr(chunk, 'data') else chunk
+    if not isinstance(data, nbtlib.tag.Compound):
+        return 0
+
+    removed = 0
+    for key in ('block_entities', 'BlockEntities', 'TileEntities'):
+        block_entities = data.get(key)
+        if not block_entities:
+            continue
+        key_removed = 0
+        vanilla_block_entities = []
+        for block_entity in block_entities:
+            block_entity_id = block_entity.get('id')
+            if not isinstance(block_entity_id, nbtlib.tag.String):
+                vanilla_block_entities.append(block_entity)
+                continue
+            if is_vanilla_id(str(block_entity_id)):
+                vanilla_block_entities.append(block_entity)
+            else:
+                key_removed += 1
+        if key_removed > 0:
+            data[key] = nbtlib.tag.List(vanilla_block_entities)
+            removed += key_removed
     return removed

@@ -1,11 +1,11 @@
 import shutil
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .cleaner import clean_world
 from .pure_cleaner import purge_mod_blocks_and_entities
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
-from .utils import update_server_properties
+from .utils import safe_destination_world, update_server_properties, replace_directory_tree
 from .types import LogCallback
 
 
@@ -31,14 +31,13 @@ def run_fast(
         manual_names: 手动玩家名列表
         log: 日志回调函数
     """
-    dest_world = dest_dir / world_name
+    dest_world = safe_destination_world(src_world, dest_dir, world_name)
 
     # 1. 准备目标目录
     if dest_world.exists():
-        log("目标文件夹已存在，正在删除...", "WARN")
-        shutil.rmtree(dest_world)
+        log("目标文件夹已存在，正在安全替换...", "WARN")
     log(f"正在复制存档到 {dest_world}", "FILE")
-    shutil.copytree(src_world, dest_world)
+    replace_directory_tree(src_world, dest_world)
 
     # 2. 加载缓存（仅作辅助）
     cache = load_usercache(src_world)
@@ -46,6 +45,7 @@ def run_fast(
 
     # 3. 确定要处理的玩家名列表
     names_to_process = set()
+    templates_by_name: Dict[str, Path] = {}
 
     # 如果用户手动输入了名字，直接使用（优先级最高）
     if manual_names:
@@ -63,6 +63,7 @@ def run_fast(
                 name = get_name_from_uuid(uuid_old, log)
             if name:
                 names_to_process.add(name)
+                templates_by_name.setdefault(name, f)
             else:
                 log(f"无法识别 UUID: {uuid_old}，如果这是您的账号，请在手动输入框中填写玩家名", "WARN")
 
@@ -71,7 +72,11 @@ def run_fast(
     if names_to_process:
         for name in names_to_process:
             offline_uuid = get_offline_uuid_str(name)
-            online_uuid = get_online_uuid(name, log) if not offline_mode else None
+            online_uuid = None
+            if not offline_mode:
+                online_uuid, official_name = get_online_uuid(name, log)
+                if official_name and official_name != name and name in templates_by_name:
+                    templates_by_name.setdefault(official_name, templates_by_name[name])
 
             # 确保 playerdata 目录存在
             pd.mkdir(exist_ok=True)
@@ -79,8 +84,7 @@ def run_fast(
             # 生成离线副本（如果还没有）
             offline_file = pd / f"{offline_uuid}.dat"
             if not offline_file.exists():
-                # 寻找任意一个现有 dat 文件作为模板（通常第一个即可）
-                template_file = next(pd.glob("*.dat"), None)
+                template_file = templates_by_name.get(name)
                 if template_file:
                     shutil.copy2(template_file, offline_file)
                     dual_count += 1
@@ -92,7 +96,7 @@ def run_fast(
             if online_uuid:
                 online_file = pd / f"{online_uuid}.dat"
                 if not online_file.exists():
-                    template_file = next(pd.glob("*.dat"), None)
+                    template_file = templates_by_name.get(name)
                     if template_file:
                         shutil.copy2(template_file, online_file)
                         dual_count += 1

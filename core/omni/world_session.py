@@ -11,7 +11,7 @@ import nbtlib
 from nbtlib import Compound, Long, IntArray, String, File
 from ..scanner import scan_all_regions
 from ..types import LogCallback, ProgressCallback, NBTTag
-from ..utils import update_server_properties
+from ..utils import replace_directory_tree, update_server_properties
 from ..converter import convert_endian, IdMapping, VersionDowngrader
 
 
@@ -585,9 +585,7 @@ class WorldSession:
         # 2. 克隆（如果目标路径与源路径不同）
         if dest_path != self.world_path:
             try:
-                if dest_path.exists():
-                    shutil.rmtree(dest_path)
-                shutil.copytree(self.world_path, dest_path)
+                replace_directory_tree(self.world_path, dest_path)
                 self._log(f"已克隆存档到 {dest_path}", "CLONE")
             except Exception as e:
                 self._log(f"克隆失败: {e}", "ERROR")
@@ -684,7 +682,8 @@ class WorldSession:
                 new_name = old_file.name.replace(old_uuid, new_uuid)
                 new_path = folder_path / new_name
                 if new_path.exists():
-                    new_path.unlink(missing_ok=True)
+                    self._log(f"跳过玩家文件重命名冲突: {old_file.name} -> {new_name}", "WARN")
+                    continue
                 old_file.rename(new_path)
 
     def import_usercache(self, path: Path) -> int:

@@ -1,24 +1,30 @@
 """批量处理模块，支持同时处理多个存档"""
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 import queue
 
-from app.services.config_service import ConfigService
 from core.types import LogCallback, ProgressCallback, BatchResult
+
+
+VersionDetector = Callable[[Path], Optional[str]]
 
 
 class BatchProcessor:
     """批量处理器"""
     
-    def __init__(self, max_workers: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        max_workers: Optional[int] = None,
+        version_detector: Optional[VersionDetector] = None,
+        custom_mappings: Optional[Dict[str, str]] = None,
+    ) -> None:
         if max_workers is None:
-            config_service = ConfigService()
-            max_workers = config_service.max_concurrent
-        self.max_workers = max_workers
-        self.progress_queue = queue.Queue()
+            max_workers = 2
+        self.max_workers = max(1, max_workers)
+        self.version_detector = version_detector
+        self.custom_mappings = custom_mappings
+        self.progress_queue: queue.Queue[Any] = queue.Queue()
         self.results: Dict[str, Dict[str, Any]] = {}
         self.is_running = False
     
@@ -57,14 +63,20 @@ class BatchProcessor:
         self.results = {}
         
         total_tasks = len(world_paths)
+
+        if total_tasks == 0:
+            self.is_running = False
+            if log_callback:
+                log_callback("没有需要处理的存档", "INFO")
+            if progress_callback:
+                progress_callback(1.0)
+            return self.results
         
         if not world_names:
             world_names = [f"world_{i+1}" for i in range(total_tasks)]
         
         if log_callback:
             log_callback(f"开始批量处理 {total_tasks} 个存档...", "INFO")
-        
-        config_service = ConfigService()
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # 提交所有任务
@@ -140,8 +152,7 @@ class BatchProcessor:
         
         try:
             # 检测版本
-            config_service = ConfigService()
-            version = config_service.detect_minecraft_version(world_path)
+            version = self.version_detector(world_path) if self.version_detector else None
             if version:
                 local_log(f"检测到版本: {version}", "INFO")
             
@@ -152,7 +163,18 @@ class BatchProcessor:
             else:
                 from core.full_mode import run_full
                 from core.worker import dummy_progress
-                run_full(world_path, dest_dir, world_name, offline_mode, clean_mode, pure_clean_mode, manual_names, local_log, dummy_progress)
+                run_full(
+                    world_path,
+                    dest_dir,
+                    world_name,
+                    offline_mode,
+                    clean_mode,
+                    pure_clean_mode,
+                    manual_names,
+                    local_log,
+                    dummy_progress,
+                    self.custom_mappings,
+                )
             
             return {
                 "success": True,
