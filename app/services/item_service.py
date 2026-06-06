@@ -1,5 +1,6 @@
 """物品服务 - 处理物品名称映射和属性解析"""
 import json
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -468,6 +469,90 @@ class ItemService:
             return count
         except Exception as e:
             return 0
+
+    def load_custom_mapping_file(self, path: Path) -> int:
+        """加载外部 JSON 物品映射，支持 {"items": {...}, "enchantments": {...}} 或直接 ID 映射。"""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return 0
+        if not isinstance(data, dict):
+            return 0
+
+        items = data.get("items", data)
+        enchantments = data.get("enchantments", {})
+        count = 0
+        if isinstance(items, dict):
+            for key, value in items.items():
+                if isinstance(key, str) and isinstance(value, str) and ":" in key:
+                    self._name_map[key] = value
+                    count += 1
+        if isinstance(enchantments, dict):
+            for key, value in enchantments.items():
+                if isinstance(key, str) and isinstance(value, str):
+                    self._enchantment_names[key] = value
+                    count += 1
+        return count
+
+    def save_custom_mapping_file(self, path: Path) -> None:
+        """导出当前非内置物品/附魔映射。"""
+        items = {k: v for k, v in self._name_map.items() if _VANILLA_ITEM_NAMES.get(k) != v}
+        enchantments = {k: v for k, v in self._enchantment_names.items() if _ENCHANTMENT_NAMES.get(k) != v}
+        path.write_text(
+            json.dumps({"items": items, "enchantments": enchantments}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def set_item_mapping(self, item_id: str, display_name: str) -> None:
+        if item_id and display_name:
+            self._name_map[item_id.strip()] = display_name.strip()
+
+    def get_custom_item_mappings(self) -> Dict[str, str]:
+        return {k: v for k, v in self._name_map.items() if _VANILLA_ITEM_NAMES.get(k) != v}
+
+    def extract_language_from_jar(self, jar_path: Path, locale: str = "zh_cn") -> int:
+        """从模组 JAR 中提取指定语言文件并加载。"""
+        count = 0
+        try:
+            with zipfile.ZipFile(jar_path) as jar:
+                for name in jar.namelist():
+                    lower = name.lower()
+                    if lower.endswith(f"/lang/{locale.lower()}.json") or lower.endswith(f"/lang/{locale.lower()}.lang"):
+                        raw = jar.read(name).decode("utf-8", errors="replace")
+                        if lower.endswith(".json"):
+                            tmp = json.loads(raw)
+                        else:
+                            tmp = {}
+                            for line in raw.splitlines():
+                                line = line.strip()
+                                if not line or line.startswith("#") or "=" not in line:
+                                    continue
+                                key, value = line.split("=", 1)
+                                tmp[key.strip()] = value.strip()
+                        count += self._load_language_dict(tmp)
+        except Exception:
+            return count
+        return count
+
+    def _load_language_dict(self, data: Dict[str, Any], namespace: str = "minecraft") -> int:
+        count = 0
+        for key, value in data.items():
+            if not isinstance(value, str):
+                continue
+            if key.startswith(("item.", "block.")):
+                parts = key.split(".")
+                if len(parts) >= 3:
+                    self._name_map[f"{parts[1]}:{'_'.join(parts[2:])}"] = value
+                    count += 1
+            elif key.startswith("enchantment."):
+                parts = key.split(".")
+                if len(parts) >= 3:
+                    self._enchantment_names[f"{parts[1]}:{'_'.join(parts[2:])}"] = value
+                    count += 1
+            elif ":" in key:
+                self._name_map[key] = value
+                count += 1
+        return count
 
     def get_item_name(self, item_id: str) -> str:
         """

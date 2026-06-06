@@ -1,7 +1,7 @@
 """World Info Panel component"""
 import flet as ft
 import datetime
-from typing import TYPE_CHECKING, Any, Optional, List, Dict
+from typing import Callable, Dict, List, Optional
 
 from app.ui.theme import THEME
 from app.ui.components.cards import card
@@ -13,10 +13,10 @@ from app.ui.views.explorer.utils import safe_update
 class WorldInfoPanel(ft.Column):
     """存档信息展示面板 - 分组卡片式布局"""
 
-    GAME_TYPE_MAP = {0: "生存模式", 1: "创造模式", 2: "冒险模式", 3: "旁观模式"}
-    DIFFICULTY_MAP = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
+    GAME_TYPE_MAP: Dict[int, str] = {0: "生存模式", 1: "创造模式", 2: "冒险模式", 3: "旁观模式"}
+    DIFFICULTY_MAP: Dict[int, str] = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
 
-    def __init__(self, t_cb=None) -> None:
+    def __init__(self, t_cb: Optional[Callable[..., str]] = None) -> None:
         super().__init__(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._t = t_cb or (lambda k, d="", **kw: d)
@@ -28,7 +28,7 @@ class WorldInfoPanel(ft.Column):
         )
         self.controls = [self._placeholder]
 
-    def update_info(self, world_info: Optional[WorldInfo], stats: Optional[Dict] = None) -> None:
+    def update_info(self, world_info: Optional[WorldInfo], stats: Optional[Dict[str, int]] = None) -> None:
         """更新存档信息显示"""
         self.controls.clear()
         if world_info is None:
@@ -52,11 +52,11 @@ class WorldInfoPanel(ft.Column):
         elif world_info.version:
             basic_rows.append(self._row("📦 游戏版本 ID", str(world_info.version)))
 
-        gt = self.GAME_TYPE_MAP.get(world_info.game_type)
+        gt = self.GAME_TYPE_MAP.get(world_info.game_type) if world_info.game_type is not None else None
         if gt:
             basic_rows.append(self._row("🎮 游戏模式", gt))
 
-        diff = self.DIFFICULTY_MAP.get(world_info.difficulty)
+        diff = self.DIFFICULTY_MAP.get(world_info.difficulty) if world_info.difficulty is not None else None
         if diff is not None:
             basic_rows.append(self._row("⚔️ 难度", diff))
 

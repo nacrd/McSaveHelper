@@ -201,7 +201,7 @@ class NBTTreeView(ft.Column):
                         color=THEME.warning if is_highlighted else THEME.text_primary),
                 ft.Text(f"({label})", size=11, color=THEME.text_muted),
                 ft.Text(display_val, size=13, color=val_color,
-                        overflow=ft.TextOverflow.ELLIPSUS, expand=True),
+                        overflow=ft.TextOverflow.ELLIPSIS, expand=True),
             ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
             return ft.Container(
                 content=title_row,

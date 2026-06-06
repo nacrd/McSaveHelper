@@ -8,12 +8,16 @@ MCA 热力图 Canvas 视图组件
 """
 import asyncio
 import math
-from typing import Dict, Tuple, Optional
+import threading
+from typing import Any, Callable, Dict, List, Tuple, Optional
 
 import flet as ft
 import flet.canvas as cv
 
 from app.services.heatmap_service import get_heatmap_service, HeatmapService
+
+
+HeatmapSelectionCallback = Callable[[Optional[Tuple[int, int]], Optional[int]], None]
 
 
 class McaHeatmapView(ft.Container):
@@ -38,11 +42,11 @@ class McaHeatmapView(ft.Container):
     def __init__(
         self,
         heatmap_service: Optional[HeatmapService] = None,
-        on_selection_changed: Optional[callable] = None,
+        on_selection_changed: Optional[HeatmapSelectionCallback] = None,
         width: int = 700,
         height: int = 450,
         **kwargs
-    ):
+    ) -> None:
         super().__init__(**kwargs)
         
         # 依赖注入热力图服务
@@ -93,12 +97,12 @@ class McaHeatmapView(ft.Container):
         self._gesture_detector.expand = True
         
         # 异步更新任务
-        self._update_task: Optional[asyncio.Task] = None
+        self._update_task: Optional[asyncio.Task[Any]] = None
         
         # 标记是否需要首次绘制
         self._needs_initial_draw = True
     
-    def _build_shapes(self) -> list:
+    def _build_shapes(self) -> List[cv.Shape]:
         """构建初始形状列表"""
         return [
             cv.Rect(
@@ -146,18 +150,17 @@ class McaHeatmapView(ft.Container):
     
     def _on_scroll(self, e: ft.ScrollEvent) -> None:
         """滚轮缩放"""
-        # 根据滚轮方向缩放
-        if hasattr(e, 'delta_y') and e.delta_y != 0:
-            # 缩放因子
-            zoom_factor = 1.1 if e.delta_y < 0 else 0.9
-            
-            new_scale = self._scale * zoom_factor
-            new_scale = max(0.1, min(10.0, new_scale))
-            
-            # 以鼠标位置为中心缩放
-            if new_scale != self._scale:
-                self._scale = new_scale
-                self._rebuild_canvas()
+        scroll_delta = getattr(e, "scroll_delta", None)
+        delta_y = getattr(scroll_delta, "y", 0) if scroll_delta is not None else getattr(e, "delta_y", 0)
+        if not delta_y:
+            return
+
+        zoom_factor = 1.1 if delta_y < 0 else 0.9
+        new_scale = max(0.1, min(10.0, self._scale * zoom_factor))
+
+        if new_scale != self._scale:
+            self._scale = new_scale
+            self._rebuild_canvas()
     
     def _rebuild_canvas(self) -> None:
         """重建 Canvas"""
@@ -165,7 +168,7 @@ class McaHeatmapView(ft.Container):
         self._current_data = self._heatmap_service.get_all_data()
         
         # 构建形状列表
-        shapes = []
+        shapes: List[cv.Shape] = []
         
         # 绘制背景
         shapes.append(cv.Rect(
@@ -284,9 +287,9 @@ class McaHeatmapView(ft.Container):
         # 标记已完成首次绘制
         self._needs_initial_draw = False
     
-    def _build_info_overlay(self) -> list:
+    def _build_info_overlay(self) -> List[cv.Shape]:
         """构建信息覆盖层"""
-        shapes = []
+        shapes: List[cv.Shape] = []
         width = self.width or 800
         height = self.height or 600
         
@@ -382,12 +385,17 @@ class McaHeatmapView(ft.Container):
         if s == 0:
             r = g = b = l
         else:
-            def hue2rgb(p, q, t):
-                if t < 0: t += 1
-                if t > 1: t -= 1
-                if t < 1/6: return p + (q - p) * 6 * t
-                if t < 1/2: return q
-                if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+            def hue2rgb(p: float, q: float, t: float) -> float:
+                if t < 0:
+                    t += 1
+                if t > 1:
+                    t -= 1
+                if t < 1 / 6:
+                    return p + (q - p) * 6 * t
+                if t < 1 / 2:
+                    return q
+                if t < 2 / 3:
+                    return p + (q - p) * (2 / 3 - t) * 6
                 return p
             
             q = l * (1 + s) if l < 0.5 else l + s - l * s
@@ -436,13 +444,22 @@ class McaHeatmapView(ft.Container):
     
     def did_unmount(self) -> None:
         """组件卸载时停止更新循环"""
-        super().did_unmount()
+        super_did_unmount = getattr(super(), "did_unmount", None)
+        if super_did_unmount:
+            super_did_unmount()
         self._stop_update_loop()
+
+    def _schedule_task(self, coro: Any) -> Optional[asyncio.Task[Any]]:
+        try:
+            return asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            threading.Thread(target=lambda: asyncio.run(coro), daemon=True).start()
+            return None
     
     def _start_update_loop(self) -> None:
         """启动异步更新循环"""
         if self._update_task is None or self._update_task.done():
-            self._update_task = asyncio.create_task(self._update_loop())
+            self._update_task = self._schedule_task(self._update_loop())
     
     def _stop_update_loop(self) -> None:
         """停止异步更新循环"""
@@ -455,9 +472,7 @@ class McaHeatmapView(ft.Container):
     
     def start_scan(self, region_dir: str) -> None:
         """启动热力图扫描"""
-        asyncio.create_task(
-            self._heatmap_service.start_silent_scan(region_dir)
-        )
+        self._schedule_task(self._heatmap_service.start_silent_scan(region_dir))
         self._start_update_loop()
     
     def refresh(self) -> None:

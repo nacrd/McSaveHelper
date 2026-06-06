@@ -8,7 +8,7 @@ import asyncio
 import re
 import os
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Any, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 
@@ -206,7 +206,7 @@ class HeatmapService:
             self.start_silent_scan(region_dir)
         )
     
-    def get_statistics(self) -> Dict[str, any]:
+    def get_statistics(self) -> Dict[str, Any]:
         """
         获取扫描统计信息
         

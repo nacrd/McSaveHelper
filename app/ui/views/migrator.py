@@ -248,8 +248,39 @@ class MigratorView(ft.Column):
             on_change=lambda e: self._toggle_batch(e.control.value),
         )
 
+        self._target_platform = ft.Dropdown(
+            options=[ft.dropdown.Option("java", "Java"), ft.dropdown.Option("bedrock", "Bedrock")],
+            value=mc.target_platform,
+            width=150,
+            border_color=THEME.border_standard,
+            text_size=13,
+            on_change=lambda e: setattr(self.app.config.migration, "target_platform", e.control.value),
+        )
+        self._target_version = text_field(
+            value=mc.target_version,
+            label="目标数据版本 ID",
+            hint_text="留空不降级，如 3700",
+            expand=False,
+            width=180,
+            on_change=lambda e: setattr(self.app.config.migration, "target_version", e.control.value or ""),
+        )
+
         cb_col = ft.Column(
-            [self._offline_cb, self._clean_cb, self._pure_clean_cb, self._batch_mode_cb],
+            [
+                self._offline_cb,
+                self._clean_cb,
+                self._pure_clean_cb,
+                self._batch_mode_cb,
+                ft.Row([
+                    ft.Column([label("目标平台"), self._target_platform], spacing=4),
+                    ft.Column([label("版本降级"), self._target_version], spacing=4),
+                ], spacing=16),
+                ft.Text(
+                    "兼容性提示：版本降级会剥离 1.20.5+ 物品组件；当前区域文件深度写回受 anvil-parser2 限制，复杂区块内方块转换可能跳过。",
+                    size=11,
+                    color=THEME.warning,
+                ),
+            ],
             spacing=8,
         )
         opt_s.controls.append(ft.Container(
@@ -271,6 +302,8 @@ class MigratorView(ft.Column):
         mc.world_name = self._name_field.value or "world"
         mc.batch_dir_path = self._batch_dir_field.value or ""
         mc.manual_names = self._manual_field.value or ""
+        mc.target_platform = self._target_platform.value or "java"
+        mc.target_version = self._target_version.value or ""
 
     def _scan_batch(self) -> None:
         mc = self.app.config.migration

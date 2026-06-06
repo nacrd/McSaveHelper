@@ -343,8 +343,13 @@ def convert_world(src_path: Path, dst_path: Path,
                                 VersionDowngrader.replace_unknown_blocks(data, target_version)
                                 region_modified = True
 
-                    if region_modified:
+                    if region_modified and hasattr(region, "save"):
                         region.save(str(mca_path))  # type: ignore[attr-defined]
+                    elif region_modified:
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "当前 anvil 库不支持写回区域文件，已跳过区域转换: %s", mca_path
+                        )
                 except Exception as e:
                     import logging
                     logging.getLogger(__name__).warning(f"转换区域文件 {mca_path} 时出错: {e}")
