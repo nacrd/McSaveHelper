@@ -3,7 +3,9 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+import nbtlib
 from app.models.config import AppConfig, BatchSettings, UISettings, MigrationConfig
+from core.constants import MinecraftConstants
 
 
 class ConfigService:
@@ -13,18 +15,30 @@ class ConfigService:
       - 从 ~/.mcsavehelper/config.json 加载/保存持久化配置
       - 提供运行时迁移参数（MigrationConfig）
       - 自动修复无效配置字段
+      - 提供 Minecraft 版本检测功能
+      - 提供自定义 UUID 映射管理
     """
 
     CONFIG_FILENAME = "config.json"
+    _instance: Optional['ConfigService'] = None
+
+    def __new__(cls, config_dir: Optional[Path] = None):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
 
     def __init__(self, config_dir: Optional[Path] = None) -> None:
+        if getattr(self, '_initialized', False):
+            return
         self._config_dir = config_dir or (Path.home() / ".mcsavehelper")
         self._config_dir.mkdir(parents=True, exist_ok=True)
         self._config: Dict[str, Any] = {}
         self._migration: MigrationConfig = MigrationConfig()
         self._load()
+        self._initialized = True
 
-    # ─── 持久化配置 ───────────────────────────────
+    # ─── 持久化配置 ────────────────────────────────
 
     def _load(self) -> None:
         config_path = self._config_dir / self.CONFIG_FILENAME
@@ -85,6 +99,11 @@ class ConfigService:
     # ─── 快捷访问 ──────────────────────────────────
 
     @property
+    def config(self) -> Dict[str, Any]:
+        """获取完整配置字典"""
+        return self._config
+
+    @property
     def version_detection(self) -> bool:
         return self._config.get("version_detection", True)
 
@@ -104,6 +123,21 @@ class ConfigService:
     def custom_uuid_mappings(self, value: Dict[str, str]) -> None:
         self._config["custom_uuid_mappings"] = value
 
+    def get_custom_uuid_mapping(self, player_name: str) -> Optional[str]:
+        """获取自定义UUID映射"""
+        return self.custom_uuid_mappings.get(player_name)
+
+    def set_custom_uuid_mapping(self, player_name: str, uuid: str) -> None:
+        """设置自定义UUID映射"""
+        self.custom_uuid_mappings[player_name] = uuid
+        self.save()
+
+    def remove_custom_uuid_mapping(self, player_name: str) -> None:
+        """移除自定义UUID映射"""
+        if player_name in self.custom_uuid_mappings:
+            del self.custom_uuid_mappings[player_name]
+            self.save()
+
     @property
     def max_concurrent(self) -> int:
         return self._config.get("batch_processing", {}).get("max_concurrent", 2)
@@ -119,6 +153,10 @@ class ConfigService:
     @property
     def language(self) -> str:
         return self.ui_settings.get("language", "zh_CN")
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self._config["ui_settings"]["language"] = value
 
     @property
     def theme(self) -> str:
@@ -140,7 +178,7 @@ class ConfigService:
         """获取完整配置字典（用于视图展示）"""
         return dict(self._config)
 
-    # ─── 运行时迁移配置 ───────────────────────────
+    # ─── 运行时迁移配置 ────────────────────────────
 
     @property
     def migration(self) -> MigrationConfig:
@@ -150,3 +188,45 @@ class ConfigService:
         """重置所有配置为默认值"""
         self._config = self._defaults()
         self.save()
+
+    # ─── Minecraft 版本检测 ────────────────────────────
+
+    def detect_minecraft_version(self, world_path: Path) -> Optional[str]:
+        """检测Minecraft版本"""
+        if not self.version_detection:
+            return None
+
+        try:
+            level_dat = world_path / "level.dat"
+            if not level_dat.exists():
+                return None
+
+            nbt_data = nbtlib.load(str(level_dat))
+            data = nbt_data.get("Data", {})
+
+            # 从level.dat获取版本信息
+            version_data = data.get("Version", {})
+            if version_data:
+                version_id = version_data.get("Id", 0)
+                version_name = version_data.get("Name", "")
+
+                # 将版本ID转换为版本名称
+                if version_id in MinecraftConstants.VERSION_MAP:
+                    return MinecraftConstants.VERSION_MAP[version_id]
+                elif version_name:
+                    return str(version_name)
+                else:
+                    return f"未知版本 ({version_id})"
+
+            # 尝试从其他文件检测版本
+            stats_dir = world_path / "stats"
+            if stats_dir.exists():
+                # 通过统计文件格式推断版本
+                stats_files = list(stats_dir.glob("*.json"))
+                if stats_files:
+                    return "1.12+"  # JSON格式统计文件从1.12开始
+
+            return "未知版本"
+
+        except Exception as e:
+            return f"检测失败: {str(e)}"

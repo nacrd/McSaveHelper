@@ -18,11 +18,11 @@ class I18nService:
 
     @property
     def available_languages(self) -> List[str]:
-        return self._manager._available_languages
+        return self._manager.available_language_codes
 
     @property
     def current_language(self) -> str:
-        return str(self._manager._current_language)
+        return str(self._manager.current_language)
 
     def translate(self, key: str, default: str = "", **kwargs) -> str:
         """翻译指定的键，支持格式化参数"""
@@ -38,7 +38,7 @@ class I18nService:
 
     def get_display_name(self, lang_code: str) -> str:
         """获取语言的显示名称"""
-        return self._manager._language_display_map.get(lang_code, lang_code)
+        return self._manager.get_display_name(lang_code)
 
 
 # 模块级快捷函数（向后兼容）

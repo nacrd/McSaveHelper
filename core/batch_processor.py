@@ -6,33 +6,38 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 import queue
 
-from .config import config_manager
-from .types import LogCallback, ProgressCallback, BatchResult
+from app.services.config_service import ConfigService
+from core.types import LogCallback, ProgressCallback, BatchResult
 
 
 class BatchProcessor:
     """批量处理器"""
     
-    def __init__(self, max_workers: Optional[int] = None):
-        self.max_workers = max_workers or config_manager.config["batch_processing"]["max_concurrent"]
+    def __init__(self, max_workers: Optional[int] = None) -> None:
+        if max_workers is None:
+            config_service = ConfigService()
+            max_workers = config_service.max_concurrent
+        self.max_workers = max_workers
         self.progress_queue = queue.Queue()
         self.results: Dict[str, Dict[str, Any]] = {}
         self.is_running = False
     
-    def process_batch(self,
-                     world_paths: List[Path],
-                     dest_dir: Path,
-                     world_names: Optional[List[str]] = None,
-                     mode: str = "fast",
-                     offline_mode: bool = False,
-                     clean_mode: bool = True,
-                     pure_clean_mode: bool = False,
-                     manual_names: Optional[List[str]] = None,
-                     log_callback: Optional[LogCallback] = None,
-                     progress_callback: Optional[ProgressCallback] = None) -> BatchResult:
+    def process_batch(
+        self,
+        world_paths: List[Path],
+        dest_dir: Path,
+        world_names: Optional[List[str]] = None,
+        mode: str = "fast",
+        offline_mode: bool = False,
+        clean_mode: bool = True,
+        pure_clean_mode: bool = False,
+        manual_names: Optional[List[str]] = None,
+        log_callback: Optional[LogCallback] = None,
+        progress_callback: Optional[ProgressCallback] = None
+    ) -> BatchResult:
         """
         批量处理多个世界存档
-        
+
         Args:
             world_paths: 源世界路径列表
             dest_dir: 目标目录
@@ -44,7 +49,7 @@ class BatchProcessor:
             manual_names: 手动玩家名列表
             log_callback: 日志回调函数
             progress_callback: 进度回调函数
-            
+
         Returns:
             处理结果字典
         """
@@ -58,6 +63,8 @@ class BatchProcessor:
         
         if log_callback:
             log_callback(f"开始批量处理 {total_tasks} 个存档...", "INFO")
+        
+        config_service = ConfigService()
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # 提交所有任务
@@ -110,38 +117,41 @@ class BatchProcessor:
         
         return self.results
     
-    def _process_single_world(self,
-                            world_path: Path,
-                            dest_dir: Path,
-                            world_name: str,
-                            mode: str,
-                            offline_mode: bool,
-                            clean_mode: bool,
-                            pure_clean_mode: bool,
-                            manual_names: Optional[List[str]],
-                            log_callback: Optional[LogCallback],
-                            task_index: int,
-                            total_tasks: int) -> Dict[str, Any]:
+    def _process_single_world(
+        self,
+        world_path: Path,
+        dest_dir: Path,
+        world_name: str,
+        mode: str,
+        offline_mode: bool,
+        clean_mode: bool,
+        pure_clean_mode: bool,
+        manual_names: Optional[List[str]],
+        log_callback: Optional[LogCallback],
+        task_index: int,
+        total_tasks: int
+    ) -> Dict[str, Any]:
         """处理单个世界存档"""
         
-        def local_log(msg: str, level: str = "INFO"):
+        def local_log(msg: str, level: str = "INFO") -> None:
             """本地日志函数"""
             if log_callback:
                 log_callback(f"[{task_index+1}/{total_tasks}] {msg}", level)
         
         try:
             # 检测版本
-            version = config_manager.detect_minecraft_version(world_path)
+            config_service = ConfigService()
+            version = config_service.detect_minecraft_version(world_path)
             if version:
                 local_log(f"检测到版本: {version}", "INFO")
             
             # 导入对应的处理模块
             if mode == "fast":
-                from .fast_mode import run_fast
+                from core.fast_mode import run_fast
                 run_fast(world_path, dest_dir, world_name, offline_mode, clean_mode, pure_clean_mode, manual_names, local_log)
             else:
-                from .full_mode import run_full
-                from .worker import dummy_progress
+                from core.full_mode import run_full
+                from core.worker import dummy_progress
                 run_full(world_path, dest_dir, world_name, offline_mode, clean_mode, pure_clean_mode, manual_names, local_log, dummy_progress)
             
             return {
@@ -157,7 +167,7 @@ class BatchProcessor:
                 "world_name": world_name
             }
     
-    def stop(self):
+    def stop(self) -> None:
         """停止批量处理"""
         self.is_running = False
     

@@ -10,7 +10,6 @@ from typing import Optional, List, Dict, Any, Callable
 from core.fast_mode import run_fast
 from core.full_mode import run_full
 from core.batch_processor import BatchProcessor, scan_worlds_directory
-from core.config import config_manager
 from core.logger import logger, LogLevel
 from core.types import LogCallback, ProgressCallback
 from core.i18n import t

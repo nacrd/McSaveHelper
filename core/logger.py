@@ -22,8 +22,7 @@ from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field, asdict
 from queue import Queue, Empty
 
-from .types import LogCallback
-from .config import config_manager
+from core.types import LogCallback
 
 
 class LogLevel(Enum):
@@ -54,22 +53,22 @@ class LogLevel(Enum):
         }
         return level_map.get(level_str, cls.INFO)
     
-    def __lt__(self, other):
+    def __lt__(self, other: Any) -> bool:
         if isinstance(other, LogLevel):
             return self.value < other.value
         return NotImplemented
     
-    def __le__(self, other):
+    def __le__(self, other: Any) -> bool:
         if isinstance(other, LogLevel):
             return self.value <= other.value
         return NotImplemented
     
-    def __gt__(self, other):
+    def __gt__(self, other: Any) -> bool:
         if isinstance(other, LogLevel):
             return self.value > other.value
         return NotImplemented
     
-    def __ge__(self, other):
+    def __ge__(self, other: Any) -> bool:
         if isinstance(other, LogLevel):
             return self.value >= other.value
         return NotImplemented
@@ -122,7 +121,7 @@ class LogRecord:
 class LogHandler:
     """日志处理器基类"""
     
-    def __init__(self, level: LogLevel = LogLevel.INFO):
+    def __init__(self, level: LogLevel = LogLevel.INFO) -> None:
         self.level = level
         self.formatter = None
     
@@ -150,7 +149,7 @@ class LogHandler:
 class ConsoleHandler(LogHandler):
     """控制台处理器"""
     
-    def __init__(self, level: LogLevel = LogLevel.INFO):
+    def __init__(self, level: LogLevel = LogLevel.INFO) -> None:
         super().__init__(level)
         self._colors = {
             LogLevel.DEBUG: "\033[36m",    # 青色
@@ -199,7 +198,7 @@ class FileHandler(LogHandler):
         mode: str = "a",
         encoding: str = "utf-8",
         use_json: bool = False
-    ):
+    ) -> None:
         super().__init__(level)
         self.filepath = Path(filepath)
         self.max_size = max_size
@@ -298,7 +297,7 @@ class FileHandler(LogHandler):
 class UIHandler(LogHandler):
     """UI处理器（适配现有UI系统）"""
     
-    def __init__(self, log_callback: LogCallback, level: LogLevel = LogLevel.INFO):
+    def __init__(self, log_callback: LogCallback, level: LogLevel = LogLevel.INFO) -> None:
         super().__init__(level)
         self.log_callback = log_callback
         
@@ -339,18 +338,18 @@ class UIHandler(LogHandler):
 class LogManager:
     """中心化日志管理器（单例模式）"""
     
-    _instance = None
+    _instance: Optional['LogManager'] = None
     _lock = threading.Lock()
     
-    def __new__(cls):
+    def __new__(cls) -> 'LogManager':
         with cls._lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
                 cls._instance._initialized = False
             return cls._instance
     
-    def __init__(self):
-        if self._initialized:
+    def __init__(self) -> None:
+        if getattr(self, '_initialized', False):
             return
         
         self.handlers: List[LogHandler] = []
@@ -360,19 +359,10 @@ class LogManager:
         self._running = False
         self._module_levels: Dict[str, LogLevel] = {}
         
-        # 从配置加载设置
-        self._load_config()
-        
         # 启动工作线程
         self._start_worker()
         
         self._initialized = True
-    
-    def _load_config(self) -> None:
-        """从配置加载日志设置"""
-        # TODO: 从config_manager读取日志配置
-        # 暂时使用默认值
-        pass
     
     def _start_worker(self) -> None:
         """启动日志工作线程"""

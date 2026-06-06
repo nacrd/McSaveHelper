@@ -41,6 +41,7 @@ class Application:
 
     def __init__(self, page: ft.Page) -> None:
         self.page: ft.Page = page
+        self._current_dialog: Optional[ft.AlertDialog] = None
 
         # ─── 初始化服务 ─────────────────────────
         init_translations()
@@ -235,18 +236,52 @@ class Application:
     #  对话框
     # ════════════════════════════════════════════
 
-    def _show_dialog(self, title: str, message: str, color: str = THEME.accent) -> None:
+    def _close_dialog(self) -> None:
+        """关闭当前打开的对话框"""
+        if self._current_dialog:
+            self._current_dialog.open = False
+            try:
+                if self._current_dialog in self.page.overlay:
+                    self.page.overlay.remove(self._current_dialog)
+            except ValueError:
+                pass  # 对话框可能已经不在 overlay 中了
+            self.page.update()
+            self._current_dialog = None
+
+    def _show_dialog(self, title: str, message: str, color: str = THEME.accent,
+                    include_details: bool = False, exception: Optional[Exception] = None) -> None:
+        """显示对话框"""
+        # 先关闭现有对话框
+        self._close_dialog()
+        
+        # 构建内容
+        content_list: List[ft.Control] = [ft.Text(message, color=THEME.text_secondary)]
+        
+        if include_details and exception:
+            import traceback
+            error_details = traceback.format_exc()
+            content_list.append(
+                ft.Container(
+                    content=ft.Text(error_details, size=11, color=THEME.text_muted),
+                    padding=ft.Padding(top=10, right=0, bottom=0, left=0),
+                )
+            )
+        
+        content = ft.Column(content_list, tight=True)
+        
         d = ft.AlertDialog(
             title=ft.Text(title, color=THEME.text_primary),
-            content=ft.Text(message, color=THEME.text_secondary),
+            content=content,
             actions=[
                 ft.TextButton(
                     content=self._t("dialogs.ok", "确定"),
                     style=ft.ButtonStyle(color=color),
+                    on_click=lambda e: self._close_dialog(),
                 )
             ],
             open=True,
         )
+        self._current_dialog = d
         self.page.overlay.append(d)
         self.page.update()
 
@@ -256,8 +291,27 @@ class Application:
     def warn_dialog(self, title: str, message: str) -> None:
         self._show_dialog(title, message, THEME.warning)
 
-    def error_dialog(self, title: str, message: str) -> None:
-        self._show_dialog(title, message, THEME.error)
+    def error_dialog(self, title: str, message: str, 
+                    exception: Optional[Exception] = None, 
+                    show_details: bool = False) -> None:
+        """显示错误对话框，可以选择是否显示异常详情"""
+        self._show_dialog(title, message, THEME.error, include_details=show_details, exception=exception)
+        
+    def handle_exception(self, exception: Exception, title: Optional[str] = None, 
+                        log: bool = True, show_dialog: bool = True) -> None:
+        """统一异常处理方法"""
+        if title is None:
+            title = self._t("dialogs.error", "错误")
+        
+        # 记录日志
+        if log:
+            import traceback
+            logger.error(f"{title}: {str(exception)}", module="App")
+            logger.error(traceback.format_exc(), module="App")
+        
+        # 显示对话框
+        if show_dialog:
+            self.error_dialog(title, str(exception), exception=exception, show_details=True)
 
     # ════════════════════════════════════════════
     #  文件选择
@@ -376,13 +430,18 @@ class Application:
                         output_path=output_path),
             )
         except Exception as e:
-            self.log(self._t("messages.migration_exception", "迁移失败: {error}", error=str(e)), "ERROR")
-            import traceback
-            traceback.print_exc()
+            self.handle_exception(
+                e,
+                title=self._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
+                log=True,
+                show_dialog=False  # 我们将在下面自定义显示对话框
+            )
             self._progress_label.value = self._t("top_bar.failed", "失败")
             self.error_dialog(
                 self._t("dialogs.error", "错误"),
                 self._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
+                exception=e,
+                show_details=True
             )
         finally:
             self._start_btn.disabled = False
@@ -412,9 +471,12 @@ class Application:
                              success=success, total=len(results)), "SUCCESS")
             self._progress_label.value = self._t("top_bar.batch_completed", "批量处理完成")
         except Exception as e:
-            self.log(self._t("messages.save_failed", "批量处理失败: {error}", error=str(e)), "ERROR")
-            import traceback
-            traceback.print_exc()
+            self.handle_exception(
+                e,
+                title=self._t("messages.save_failed", "批量处理失败: {error}", error=str(e)),
+                log=True,
+                show_dialog=False
+            )
             self._progress_label.value = self._t("top_bar.batch_failed", "批量处理失败")
         finally:
             self._start_btn.disabled = False

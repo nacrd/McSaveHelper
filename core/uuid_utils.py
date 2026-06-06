@@ -7,9 +7,9 @@ from typing import List, Optional, Tuple
 
 import requests
 
-from .config import config_manager
-from .types import LogCallback, UUIDMapping
-from .constants import MinecraftConstants
+from app.services.config_service import ConfigService
+from core.types import LogCallback
+from core.constants import MinecraftConstants
 
 
 def get_offline_uuid_str(name: str) -> str:
@@ -152,7 +152,7 @@ def build_mappings(
     offline_mode: bool,
     manual_names: Optional[List[str]],
     log: LogCallback
-) -> List[UUIDMapping]:
+) -> List[Tuple[List[int], List[int], str, str, Tuple[int, int], Tuple[int, int]]]:
     """构建 UUID 映射列表
 
     Args:
@@ -168,12 +168,13 @@ def build_mappings(
     pd = world_path / "playerdata"
     if not pd.exists():
         return []
-    maps: List[UUIDMapping] = []
+    maps: List[Tuple[List[int], List[int], str, str, Tuple[int, int], Tuple[int, int]]] = []
     new_uuids = set()
     
     # 处理自定义UUID映射
-    use_custom = config_manager.config.get("use_custom_mapping", False)
-    custom_mappings = config_manager.config["custom_uuid_mappings"] if use_custom else {}
+    config_service = ConfigService()
+    use_custom = config_service.use_custom_mapping
+    custom_mappings = config_service.custom_uuid_mappings if use_custom else {}
     if custom_mappings:
         log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
     
@@ -235,8 +236,8 @@ def build_mappings(
                 # 添加一个虚拟映射（仅用于生成双UUID文件）
                 offline_uuid = get_offline_uuid_str(name)
                 maps.append((
-                    uuid_to_ints(offline_uuid),  # 使用离线UUID作为旧UUID
-                    uuid_to_ints(new_u),         # 新UUID
+                    uuid_to_ints(offline_uuid),
+                    uuid_to_ints(new_u),
                     offline_uuid,
                     new_u,
                     uuid_to_most_least(offline_uuid),

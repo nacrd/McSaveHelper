@@ -22,7 +22,7 @@ except ImportError:
             pass
         StrEnum = _StrEnum
 
-from .config import config_manager
+from app.services.config_service import ConfigService
 
 
 class Language(StrEnum):  # type: ignore
@@ -89,17 +89,16 @@ class TranslationManager:
         self._load_translations()
     
     def _load_language_from_config(self) -> None:
-        """从配置中加载语言设置"""
+        """从配置加载语言设置"""
         try:
-            # 尝试从配置中获取语言设置
-            config = config_manager.config
-            if "ui_settings" in config and "language" in config["ui_settings"]:
-                lang_str = config["ui_settings"]["language"]
-                try:
-                    self._current_language = Language(lang_str)
-                except ValueError:
-                    # 如果配置中的语言无效，使用默认
-                    print(f"警告: 配置中的语言 '{lang_str}' 无效，使用默认语言")
+            # 尝试从配置中读取语言设置
+            config_service = ConfigService()
+            lang_str = config_service.language
+            try:
+                self._current_language = Language(lang_str)
+            except ValueError:
+                # 如果配置中的语言无效，使用默认
+                print(f"警告: 配置中的语言 '{lang_str}' 无效，使用默认语言")
         except Exception as e:
             print(f"加载语言配置时出错: {e}")
     
@@ -198,7 +197,7 @@ class TranslationManager:
                 "batch_archive_dir": "批量存档目录",
                 "browse": "📂 浏览",
                 "scan": "🔍 扫描",
-                "placeholder_select_world": "选择世界文件夹 (包含 level.dat)",
+                "placeholder_select_world": "选择世界文件夹（包含 level.dat）",
                 "placeholder_default_dir": "默认为程序当前目录",
                 "placeholder_world_name": "例如: world",
                 "placeholder_batch_dir": "选择包含多个世界存档的目录"
@@ -217,7 +216,7 @@ class TranslationManager:
                 "uuid": "UUID",
                 "add": "添加",
                 "remove": "移除",
-                "manual_names": "手动指定玩家名 (逗号分隔)",
+                "manual_names": "手动指定玩家名（逗号分隔）",
                 "placeholder_player_name": "输入玩家名",
                 "placeholder_uuid": "输入UUID",
                 "placeholder_manual_names": "player1,player2,player3"
@@ -281,11 +280,9 @@ class TranslationManager:
     def _save_language_to_config(self) -> None:
         """将当前语言保存到配置"""
         try:
-            config = config_manager.config
-            if "ui_settings" not in config:
-                config["ui_settings"] = {}
-            config["ui_settings"]["language"] = self._current_language
-            config_manager.save_config()
+            config_service = ConfigService()
+            config_service.language = str(self._current_language)
+            config_service.save()
         except Exception as e:
             print(f"保存语言配置时出错: {e}")
     
@@ -363,6 +360,15 @@ class TranslationManager:
                 continue
             result[lang] = display_name
         return result
+    
+    @property
+    def available_language_codes(self) -> List[str]:
+        """获取可用语言代码列表（用于 i18n_service）"""
+        return self._available_languages.copy()
+    
+    def get_display_name(self, lang_code: str) -> str:
+        """获取语言的显示名称"""
+        return self._language_display_map.get(lang_code, lang_code)
     
     def reload(self) -> None:
         """重新加载翻译文件"""

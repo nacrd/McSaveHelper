@@ -2,57 +2,79 @@
 
 import sys
 import os
-from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
-# ---------- 1. 收集 anvil 包中的所有数据文件（.json等） ----------
+# ---------- 1. 收集数据文件 ----------
 datas = collect_data_files('anvil')
-# 打包翻译文件
+datas += collect_data_files('flet')
 datas += [('translations', 'translations')]
 
-# ---------- 2. 分析主脚本 ----------
+# ---------- 2. 收集隐藏导入 ----------
+hiddenimports = []
+hiddenimports += collect_submodules('flet')
+hiddenimports += collect_submodules('nbtlib')
+hiddenimports += collect_submodules('anvil')
+hiddenimports += [
+    'flet',
+    'flet_core',
+    'nbtlib',
+    'anvil',
+    'requests',
+    'send2trash',
+    'typing_extensions',
+    'packaging',
+    'packaging.version',
+    'packaging.specifiers',
+    'packaging.requirements',
+]
+
+# ---------- 3. 分析主脚本 ----------
 a = Analysis(
     ['main.py'],
-    pathex=[],                     # 可添加额外搜索路径，如 ['E:\\coding\\mcsavehelper']
-    binaries=[],                   # 留空，让 PyInstaller 自动处理 DLL
-    datas=datas,                   # 包含 anvil 的数据文件
-    hiddenimports=[                # 显式导入可能被遗漏的模块
-        'flet',
-        'nbtlib',
-        'requests',
-        'send2trash',
-        # 如果你的代码中还 import 了其他第三方库，请在此添加
-    ],
+    pathex=[],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['typing_extensions'],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
 
-# ---------- 3. 创建 PYZ 存档 ----------
+# ---------- 4. 创建 PYZ 存档 ----------
 pyz = PYZ(a.pure)
 
-# ---------- 4. 生成单文件可执行文件 ----------
+# ---------- 5. 生成可执行文件（目录模式，更稳定） ----------
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
-    name='MCSaveHelper',            # 输出的 exe 文件名
+    exclude_binaries=True,
+    name='MCSaveHelper',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,                      # 是否使用 UPX 压缩（需安装 upx 并加入 PATH）
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,                  # 显示控制台窗口（调试用，发布时可改为 False）
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    onefile=True,                  # 单文件模式
-    icon='mcsavehelper_icon.ico',   # 应用程序图标文件路径
+    icon='mcsavehelper_icon.ico',
+)
+
+# ---------- 6. 收集所有文件到目录 ----------
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='MCSaveHelper',
 )
