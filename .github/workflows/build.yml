@@ -100,13 +100,18 @@ jobs:
         Compress-Archive -Path dist/MCSaveHelper -DestinationPath MCSaveHelper-Windows-portable.zip
         Compress-Archive -Path dist/MCSaveHelper.exe -DestinationPath MCSaveHelper-Windows-onefile.zip
 
-    - name: Upload build artifacts
+    - name: Upload portable artifact
       uses: actions/upload-artifact@v4
       with:
-        name: mcsavehelper_windows
-        path: |
-          MCSaveHelper-Windows-portable.zip
-          MCSaveHelper-Windows-onefile.zip
+        name: MCSaveHelper-Windows-portable
+        path: MCSaveHelper-Windows-portable.zip
+        retention-days: 30
+
+    - name: Upload onefile artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MCSaveHelper-Windows-onefile
+        path: MCSaveHelper-Windows-onefile.zip
         retention-days: 30
 
   # 发布作业
@@ -118,10 +123,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Download build artifacts
+    - name: Download portable artifact
       uses: actions/download-artifact@v4
       with:
-        name: mcsavehelper_windows
+        name: MCSaveHelper-Windows-portable
+
+    - name: Download onefile artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: MCSaveHelper-Windows-onefile
 
     - name: Create GitHub Release (auto tag)
       if: needs.build.outputs.create_release == 'true' && github.ref == 'refs/tags/vauto'
