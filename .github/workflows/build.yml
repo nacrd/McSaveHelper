@@ -19,8 +19,12 @@ permissions:
   contents: write
 
 jobs:
+  # 构建作业
   build:
     runs-on: windows-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      create_release: ${{ steps.version.outputs.create_release }}
 
     steps:
     - uses: actions/checkout@v4
@@ -62,16 +66,6 @@ jobs:
           Write-Output "create_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         }
 
-    - name: Create GitHub Release (auto tag)
-      if: steps.version.outputs.create_release == 'true' && github.ref == 'refs/tags/vauto'
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ steps.version.outputs.tag }}
-        files: |
-          MCSaveHelper-Windows-onefile.zip
-          MCSaveHelper-Windows-portable.zip
-        generate_release_notes: true
-
     - name: Delete vauto tag
       if: github.ref == 'refs/tags/vauto'
       run: |
@@ -95,20 +89,49 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-    - name: Build with PyInstaller
-      run: pyinstaller build.spec --noconfirm
+    - name: Build portable version (directory mode)
+      run: pyinstaller build-portable.spec --noconfirm
+
+    - name: Build onefile version
+      run: pyinstaller build-onefile.spec --noconfirm
 
     - name: Create release packages
       run: |
+        Compress-Archive -Path dist/MCSaveHelper -DestinationPath MCSaveHelper-Windows-portable.zip
         Compress-Archive -Path dist/MCSaveHelper.exe -DestinationPath MCSaveHelper-Windows-onefile.zip
-        Compress-Archive -Path dist/MCSaveHelper_portable -DestinationPath MCSaveHelper-Windows-portable.zip
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: mcsavehelper_windows
-        path: dist/
+        path: |
+          MCSaveHelper-Windows-portable.zip
+          MCSaveHelper-Windows-onefile.zip
         retention-days: 30
+
+  # 发布作业
+  release:
+    needs: build
+    if: needs.build.outputs.create_release == 'true' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: mcsavehelper_windows
+
+    - name: Create GitHub Release (auto tag)
+      if: needs.build.outputs.create_release == 'true' && github.ref == 'refs/tags/vauto'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ needs.build.outputs.tag }}
+        files: |
+          MCSaveHelper-Windows-onefile.zip
+          MCSaveHelper-Windows-portable.zip
+        generate_release_notes: true
 
     - name: Create GitHub Release (manual tag)
       if: startsWith(github.ref, 'refs/tags/v') && github.ref != 'refs/tags/vauto'
@@ -123,7 +146,7 @@ jobs:
       if: github.event_name == 'workflow_dispatch'
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ steps.version.outputs.tag }}
+        tag_name: ${{ needs.build.outputs.tag }}
         files: |
           MCSaveHelper-Windows-onefile.zip
           MCSaveHelper-Windows-portable.zip

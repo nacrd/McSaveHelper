@@ -46,17 +46,18 @@ a = Analysis(
 # ---------- 4. 创建 PYZ 存档 ----------
 pyz = PYZ(a.pure)
 
-# ---------- 5. 生成可执行文件（目录模式，更稳定） ----------
+# ---------- 5. 生成单文件可执行文件 ----------
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='MCSaveHelper',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -66,15 +67,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='mcsavehelper_icon.ico',
-)
-
-# ---------- 6. 收集所有文件到目录 ----------
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    upx_exclude=[],
-    name='MCSaveHelper',
 )
