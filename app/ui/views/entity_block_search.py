@@ -21,9 +21,10 @@ if TYPE_CHECKING:
 class EntityBlockSearchView(ft.Column):
     """实体/方块搜索视图"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "Application", compact: bool = False) -> None:
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
+        self._compact = compact
         self.service = EntityBlockSearchService()
         self.expand = True
 
@@ -247,7 +248,7 @@ class EntityBlockSearchView(ft.Column):
             )
         )
 
-        self.controls = [
+        self.controls = [config_card, result_card, info_card] if self._compact else [
             header,
             ft.Container(height=8),
             config_card,

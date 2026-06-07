@@ -1,7 +1,7 @@
 """
-MCA 热力图 Canvas 视图组件
+MCA 区域地图 Canvas 视图组件
 
-使用 Flet Canvas 绘制极简几何风格的热力图，
+使用 Flet Canvas 绘制极简几何风格的区域地图，
 支持缩放、平移和渐进式动态加载。
 
 参考: https://flet.dev/docs/controls/canvas/
@@ -23,12 +23,12 @@ from app.services.heatmap_service import get_heatmap_service, HeatmapService
 from app.ui.utils import format_size
 
 
-HeatmapSelectionCallback = Callable[[Optional[Tuple[int, int]], Optional[int]], None]
+HeatmapSelectionCallback = Callable[[Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Any]]], None]
 
 
 class McaHeatmapView(ft.Container):
     """
-    MCA 热力图 Canvas 视图组件
+    MCA 区域地图 Canvas 视图组件
     
     特性：
     - 使用 cv.Canvas 绘制
@@ -38,8 +38,10 @@ class McaHeatmapView(ft.Container):
     """
     
     # 默认颜色主题
-    BACKGROUND_COLOR = "#1E1E1E"
-    GRID_LINE_COLOR = "#333333"
+    BACKGROUND_COLOR = "#162016"
+    GRID_LINE_COLOR = "#3B4A34"
+    EMPTY_REGION_COLOR = "#263426"
+    ORIGIN_COLOR = "#7CB34288"
     
     # 单元格配置
     CELL_SIZE = 32
@@ -55,7 +57,7 @@ class McaHeatmapView(ft.Container):
     ) -> None:
         super().__init__(**kwargs)
         
-        # 依赖注入热力图服务
+        # 依赖注入区域扫描服务
         self._heatmap_service = heatmap_service or get_heatmap_service()
         self._on_selection_changed = on_selection_changed
         
@@ -63,20 +65,25 @@ class McaHeatmapView(ft.Container):
         self._offset_x = 0.0
         self._offset_y = 0.0
         self._scale = 1.0
+        self._show_coordinates = True
+        self._show_empty_regions = False
+        self._display_mode = "activity"
+        self._detail_level = "auto"
         
         # 选中状态
         self._selected_cell: Optional[Tuple[int, int]] = None
+        self._selected_chunk: Optional[Tuple[int, int, int, int]] = None
         
         # 缓存当前数据用于绘制
         self._current_data: Dict[Tuple[int, int], int] = {}
         self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
+        self._chunk_bounds: Dict[Tuple[int, int, int, int], Tuple[float, float, float, float]] = {}
         
         # 布局配置
         self.width = width
         self.height = height
-        self.expand = True
         self.bgcolor = self.BACKGROUND_COLOR
-        self.border_radius = 8
+        self.border_radius = 0
         
         # 创建 Canvas
         self._canvas = cv.Canvas(
@@ -99,8 +106,8 @@ class McaHeatmapView(ft.Container):
             self._gesture_detector,
         ])
         
-        # 填充整个容器
-        self._gesture_detector.expand = True
+        self._gesture_detector.width = width
+        self._gesture_detector.height = height
         
         # 异步更新任务
         self._update_task: Optional[asyncio.Task[Any]] = None
@@ -138,6 +145,21 @@ class McaHeatmapView(ft.Container):
         """点击选择"""
         tap_x = e.local_position.x
         tap_y = e.local_position.y
+
+        if self._effective_detail_level() == "chunk":
+            for key, bounds in self._chunk_bounds.items():
+                bx, by, bw, bh = bounds
+                if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+                    rx, rz, lx, lz = key
+                    coord = (rx, rz)
+                    if coord in self._current_data:
+                        self._selected_cell = coord
+                        self._selected_chunk = key
+                        size = self._current_data[coord]
+                        if self._on_selection_changed:
+                            self._on_selection_changed(coord, size, self._chunk_detail(key))
+                        self._rebuild_canvas()
+                    return
         
         # 检查点击的单元格
         for coord, bounds in self._cell_bounds.items():
@@ -146,10 +168,11 @@ class McaHeatmapView(ft.Container):
                 if coord in self._current_data:
                     self._selected_cell = coord
                     size = self._current_data[coord]
+                    self._selected_chunk = None
                     
                     # 触发回调
                     if self._on_selection_changed:
-                        self._on_selection_changed(coord, size)
+                        self._on_selection_changed(coord, size, {"level": "region"})
                     
                     self._rebuild_canvas()
                 break
@@ -165,7 +188,13 @@ class McaHeatmapView(ft.Container):
         new_scale = max(0.1, min(10.0, self._scale * zoom_factor))
 
         if new_scale != self._scale:
+            pointer_x = getattr(getattr(e, "local_position", None), "x", (self.width or 800) / 2)
+            pointer_y = getattr(getattr(e, "local_position", None), "y", (self.height or 600) / 2)
+            world_x = (pointer_x - self._offset_x) / self._scale
+            world_y = (pointer_y - self._offset_y) / self._scale
             self._scale = new_scale
+            self._offset_x = pointer_x - world_x * self._scale
+            self._offset_y = pointer_y - world_y * self._scale
             self._rebuild_canvas()
     
     def _rebuild_canvas(self) -> None:
@@ -183,7 +212,7 @@ class McaHeatmapView(ft.Container):
         # 绘制背景
         shapes.append(cv.Rect(
             0, 0, self.width or 800, self.height or 600,
-            paint=ft.Paint(color="#1E1E1E")
+            paint=ft.Paint(color=self.BACKGROUND_COLOR)
         ))
         
         if not self._current_data:
@@ -197,7 +226,7 @@ class McaHeatmapView(ft.Container):
             shapes.append(cv.Text(
                 x=(self.width or 800) / 2 - 95,
                 y=(self.height or 600) / 2 + 30,
-                value="设置当前存档后显示热力图",
+                value="设置当前存档后显示区域地图",
                 style=ft.TextStyle(size=16, color="#CCCCCC")
             ))
             shapes.extend(self._build_info_overlay())
@@ -216,7 +245,7 @@ class McaHeatmapView(ft.Container):
         max_z = max(c[1] for c in coords)
         
         # 扩展范围
-        padding = 1
+        padding = 0
         min_x -= padding
         max_x += padding
         min_z -= padding
@@ -228,9 +257,9 @@ class McaHeatmapView(ft.Container):
         
         # 初始自动缩放和居中
         if self._scale == 1.0 and self._offset_x == 0 and self._offset_y == 0:
-            scale_x = (self.width or 800) / world_width * 0.85
-            scale_y = (self.height or 600) / world_height * 0.85
-            self._scale = min(scale_x, scale_y, 1.0)
+            scale_x = (self.width or 800) / world_width * 0.78
+            scale_y = (self.height or 600) / world_height * 0.78
+            self._scale = max(0.35, min(scale_x, scale_y, 3.0))
             
             # 居中偏移
             self._offset_x = ((self.width or 800) - world_width * self._scale) / 2
@@ -238,8 +267,13 @@ class McaHeatmapView(ft.Container):
         
         # 清空单元格边界缓存
         self._cell_bounds.clear()
+        self._chunk_bounds.clear()
         
         # 绘制网格
+        origin_x = 0 * (self.CELL_SIZE + self.CELL_GAP) * self._scale + self._offset_x
+        origin_y = 0 * (self.CELL_SIZE + self.CELL_GAP) * self._scale + self._offset_y
+        shapes.extend(self._build_origin_marker(origin_x, origin_y))
+
         for z in range(min_z, max_z + 1):
             for x in range(min_x, max_x + 1):
                 # 世界坐标
@@ -256,36 +290,22 @@ class McaHeatmapView(ft.Container):
                 self._cell_bounds[coord] = (screen_x, screen_y, cell_size, cell_size)
                 
                 if coord in self._current_data:
-                    # 有数据，使用颜色映射
                     size = self._current_data[coord]
-                    color = self._get_color(size)
-                    
-                    # 绘制填充
-                    shapes.append(cv.Rect(
-                        screen_x, screen_y, cell_size, cell_size,
-                        paint=ft.Paint(color=color)
-                    ))
-                    
-                    # 绘制边框
-                    border_color = "#FFFFFF44" if coord == self._selected_cell else "#FFFFFF11"
+                    color = self._get_color(size, coord)
+                    shapes.extend(self._build_region_cell(screen_x, screen_y, cell_size, color, coord, size))
+                    if self._effective_detail_level() == "chunk":
+                        shapes.extend(self._build_chunk_grid(screen_x, screen_y, cell_size, color, coord, size))
+                elif self._show_empty_regions:
                     shapes.append(cv.Rect(
                         screen_x, screen_y, cell_size, cell_size,
                         paint=ft.Paint(
-                            color=border_color,
-                            style=ft.PaintingStyle.STROKE,
-                            stroke_width=1 if coord != self._selected_cell else 2
-                        )
-                    ))
-                else:
-                    # 无数据，绘制网格线
-                    shapes.append(cv.Rect(
-                        screen_x, screen_y, cell_size, cell_size,
-                        paint=ft.Paint(
-                            color=self.GRID_LINE_COLOR,
+                            color=self.EMPTY_REGION_COLOR,
                             style=ft.PaintingStyle.STROKE,
                             stroke_width=0.5
                         )
                     ))
+                    if self._show_coordinates and self._scale >= 0.75:
+                        shapes.extend(self._build_coordinate_label(screen_x, screen_y, cell_size, coord, muted=True))
         
         # 添加信息覆盖层
         shapes.extend(self._build_info_overlay())
@@ -307,13 +327,19 @@ class McaHeatmapView(ft.Container):
         width = self.width or 800
         height = self.height or 600
         
-        # 缩放级别
-        zoom_text = f"缩放: {self._scale:.1f}x"
-        shapes.append(cv.Rect(10, 10, 100, 24, paint=ft.Paint(color="#00000088")))
+        zoom_text = f"{self._get_mode_title()} · {self._effective_detail_name()} · 缩放 {self._scale:.1f}x"
+        shapes.append(cv.Rect(10, 10, 214, 26, paint=ft.Paint(color="#00000099")))
         shapes.append(cv.Text(
             x=15, y=15,
             value=zoom_text,
-            style=ft.TextStyle(size=12, color="#FFFFFF88")
+            style=ft.TextStyle(size=12, color="#D7CCC8")
+        ))
+
+        shapes.append(cv.Rect(10, 42, 214, 24, paint=ft.Paint(color="#00000066")))
+        shapes.append(cv.Text(
+            x=15, y=47,
+            value="拖拽平移 · 滚轮缩放 · 点击区域",
+            style=ft.TextStyle(size=11, color="#A5D6A7")
         ))
         
         # 扫描进度
@@ -333,7 +359,12 @@ class McaHeatmapView(ft.Container):
             size = self._current_data.get(coord, 0)
             size_str = format_size(size)
             
-            info_text = f"区域 ({coord[0]}, {coord[1]}): {size_str}"
+            if self._selected_chunk:
+                detail = self._chunk_detail(self._selected_chunk)
+                info_text = f"区块 {detail['chunk_coord']} · {detail['block_range']} · {size_str}"
+            else:
+                block_range = self._format_block_range(coord, compact=True)
+                info_text = f"r.{coord[0]}.{coord[1]}.mca · {block_range} · {size_str} · {self._get_region_value_label(coord, size)}"
             text_width = len(info_text) * 7 + 20
             
             shapes.append(cv.Rect(
@@ -347,9 +378,142 @@ class McaHeatmapView(ft.Container):
             ))
         
         return shapes
+
+    def _build_region_cell(self, x: float, y: float, size: float, color: str, coord: Tuple[int, int], file_size: int) -> List[cv.Shape]:
+        shapes: List[cv.Shape] = []
+        selected = coord == self._selected_cell
+        shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
+        if size >= 10:
+            shapes.append(cv.Rect(x, y, size, max(1, size * 0.18), paint=ft.Paint(color="#FFFFFF20")))
+            shapes.append(cv.Rect(x, y + size * 0.78, size, max(1, size * 0.22), paint=ft.Paint(color="#00000024")))
+        shapes.append(cv.Rect(
+            x, y, size, size,
+            paint=ft.Paint(
+                color="#FFD54F" if selected else "#00000055",
+                style=ft.PaintingStyle.STROKE,
+                stroke_width=3 if selected else 1,
+            ),
+        ))
+        if self._show_coordinates and size >= 18:
+            shapes.extend(self._build_coordinate_label(x, y, size, coord, muted=False))
+        if size >= 30:
+            level = self._get_activity_icon(file_size)
+            shapes.append(cv.Text(
+                x=x + 5,
+                y=y + size - 17,
+                value=level,
+                style=ft.TextStyle(size=12, color="#F5F5DC"),
+            ))
+        return shapes
+
+    def _build_chunk_grid(self, x: float, y: float, size: float, color: str, coord: Tuple[int, int], file_size: int) -> List[cv.Shape]:
+        shapes: List[cv.Shape] = []
+        chunk_size = size / 32
+        if chunk_size < 2:
+            return shapes
+        rx, rz = coord
+        line_color = "#00000066" if chunk_size >= 4 else "#00000040"
+        for i in range(1, 32):
+            pos = i * chunk_size
+            shapes.append(cv.Line(x + pos, y, x + pos, y + size, paint=ft.Paint(color=line_color, stroke_width=0.5)))
+            shapes.append(cv.Line(x, y + pos, x + size, y + pos, paint=ft.Paint(color=line_color, stroke_width=0.5)))
+        for local_z in range(32):
+            for local_x in range(32):
+                bx = x + local_x * chunk_size
+                by = y + local_z * chunk_size
+                self._chunk_bounds[(rx, rz, local_x, local_z)] = (bx, by, chunk_size, chunk_size)
+        if self._selected_chunk and self._selected_chunk[:2] == coord:
+            _, _, lx, lz = self._selected_chunk
+            sx = x + lx * chunk_size
+            sy = y + lz * chunk_size
+            shapes.append(cv.Rect(
+                sx, sy, chunk_size, chunk_size,
+                paint=ft.Paint(color="#FFD54F", style=ft.PaintingStyle.STROKE, stroke_width=max(1, min(3, chunk_size / 2))),
+            ))
+        if chunk_size >= 7:
+            shapes.append(cv.Text(
+                x=x + 4,
+                y=y + size - 16,
+                value="32×32 区块",
+                style=ft.TextStyle(size=10, color="#F5F5DC"),
+            ))
+        return shapes
+
+    def _build_coordinate_label(self, x: float, y: float, size: float, coord: Tuple[int, int], muted: bool) -> List[cv.Shape]:
+        color = "#A5D6A7" if not muted else "#5E6D58"
+        block_x0, block_x1, block_z0, block_z1 = self._block_range(coord)
+        label_size = 8 if size < 42 else 9
+        if size >= 52:
+            return [
+                cv.Text(x=x + 4, y=y + 5, value=f"X {block_x0}~{block_x1}", style=ft.TextStyle(size=label_size, color=color)),
+                cv.Text(x=x + 4, y=y + 17, value=f"Z {block_z0}~{block_z1}", style=ft.TextStyle(size=label_size, color=color)),
+            ]
+        return [
+            cv.Text(
+                x=x + 4,
+                y=y + 5,
+                value=self._format_block_range(coord, compact=True),
+                style=ft.TextStyle(size=label_size, color=color),
+            )
+        ]
+
+    def _block_range(self, coord: Tuple[int, int]) -> Tuple[int, int, int, int]:
+        x, z = coord
+        return x * 512, x * 512 + 511, z * 512, z * 512 + 511
+
+    def _format_block_range(self, coord: Tuple[int, int], compact: bool = False) -> str:
+        x0, x1, z0, z1 = self._block_range(coord)
+        if compact:
+            return f"X{x0}~{x1} Z{z0}~{z1}"
+        return f"X {x0} ~ {x1}, Z {z0} ~ {z1}"
+
+    def _effective_detail_level(self) -> str:
+        if self._detail_level == "auto":
+            return "chunk" if self._scale >= 3.6 else "region"
+        return self._detail_level
+
+    def _effective_detail_name(self) -> str:
+        return "区块级" if self._effective_detail_level() == "chunk" else "区域级"
+
+    def _chunk_detail(self, key: Tuple[int, int, int, int]) -> Dict[str, Any]:
+        rx, rz, lx, lz = key
+        chunk_x = rx * 32 + lx
+        chunk_z = rz * 32 + lz
+        block_x0 = chunk_x * 16
+        block_x1 = block_x0 + 15
+        block_z0 = chunk_z * 16
+        block_z1 = block_z0 + 15
+        return {
+            "level": "chunk",
+            "region_coord": (rx, rz),
+            "chunk_local": (lx, lz),
+            "chunk_coord": (chunk_x, chunk_z),
+            "chunk_range": f"X {chunk_x}, Z {chunk_z}",
+            "block_range": f"X {block_x0} ~ {block_x1}, Z {block_z0} ~ {block_z1}",
+        }
+
+    def _build_origin_marker(self, x: float, y: float) -> List[cv.Shape]:
+        width = self.width or 800
+        height = self.height or 600
+        return [
+            cv.Rect(x, 0, 2, height, paint=ft.Paint(color=self.ORIGIN_COLOR)),
+            cv.Rect(0, y, width, 2, paint=ft.Paint(color=self.ORIGIN_COLOR)),
+        ]
     
-    def _get_color(self, size: int) -> str:
-        """根据文件大小获取颜色"""
+    def _get_color(self, size: int, coord: Tuple[int, int]) -> str:
+        if self._display_mode == "size":
+            return self._get_size_color(size)
+        if self._display_mode == "generated":
+            return self._get_generated_color(coord)
+        if self._display_mode == "distance":
+            return self._get_distance_color(coord)
+        if self._display_mode == "biome":
+            return self._get_biome_color(coord)
+        if self._display_mode == "structure":
+            return self._get_structure_color(coord)
+        return self._get_activity_color(size)
+
+    def _get_activity_color(self, size: int) -> str:
         stats = getattr(self, '_cached_stats', None) or self._heatmap_service.get_statistics()
         
         if stats["min_size"] == stats["max_size"]:
@@ -373,22 +537,186 @@ class McaHeatmapView(ft.Container):
         
         ratio = max(0.0, min(1.0, ratio))
         
-        # 颜色渐变：蓝 -> 青 -> 绿 -> 黄 -> 橙 -> 红
-        if ratio < 0.2:
-            hue = 240 - ratio * 200
-            return self._hsl_to_hex(hue, 70, 60)
-        elif ratio < 0.4:
-            hue = 180 - (ratio - 0.2) * 200
-            return self._hsl_to_hex(hue, 70, 50)
-        elif ratio < 0.6:
-            hue = 120 - (ratio - 0.4) * 300
-            return self._hsl_to_hex(hue, 80, 55)
-        elif ratio < 0.8:
-            hue = 45 - (ratio - 0.6) * 100
-            return self._hsl_to_hex(hue, 85, 55)
-        else:
-            hue = 20 - (ratio - 0.8) * 60
-            return self._hsl_to_hex(hue, 80, 50)
+        if ratio < 0.18:
+            return "#2E7D32"
+        if ratio < 0.36:
+            return "#689F38"
+        if ratio < 0.56:
+            return "#C0A44A"
+        if ratio < 0.76:
+            return "#D9822B"
+        if ratio < 0.92:
+            return "#C63D2F"
+        return "#8E24AA"
+
+    def _get_size_color(self, size: int) -> str:
+        if size >= 64 * 1024 * 1024:
+            return "#8E24AA"
+        if size >= 32 * 1024 * 1024:
+            return "#C63D2F"
+        if size >= 16 * 1024 * 1024:
+            return "#D9822B"
+        if size >= 8 * 1024 * 1024:
+            return "#C0A44A"
+        if size >= 2 * 1024 * 1024:
+            return "#689F38"
+        return "#2E7D32"
+
+    def _get_generated_color(self, coord: Tuple[int, int]) -> str:
+        x, z = coord
+        if x == 0 and z == 0:
+            return "#FFD54F"
+        if abs(x) <= 1 and abs(z) <= 1:
+            return "#66BB6A"
+        if abs(x) <= 4 and abs(z) <= 4:
+            return "#42A5F5"
+        if abs(x) <= 12 and abs(z) <= 12:
+            return "#AB47BC"
+        return "#78909C"
+
+    def _get_distance_color(self, coord: Tuple[int, int]) -> str:
+        distance = math.sqrt(coord[0] * coord[0] + coord[1] * coord[1])
+        if distance <= 1:
+            return "#FFD54F"
+        if distance <= 4:
+            return "#66BB6A"
+        if distance <= 10:
+            return "#29B6F6"
+        if distance <= 24:
+            return "#7E57C2"
+        return "#455A64"
+
+    def _get_biome_color(self, coord: Tuple[int, int]) -> str:
+        biome = str(self._heatmap_service.get_region_meta(coord).get("dominant_biome", "unknown")).lower()
+        if "ocean" in biome or "river" in biome:
+            return "#1E88E5"
+        if "desert" in biome or "badlands" in biome:
+            return "#D6B44C"
+        if "snow" in biome or "frozen" in biome or "ice" in biome:
+            return "#B3E5FC"
+        if "jungle" in biome:
+            return "#2E7D32"
+        if "forest" in biome or "taiga" in biome:
+            return "#388E3C"
+        if "swamp" in biome or "mangrove" in biome:
+            return "#607D3B"
+        if "nether" in biome or "basalt" in biome or "crimson" in biome or "warped" in biome:
+            return "#8E2424"
+        if "end" in biome:
+            return "#C5B56D"
+        if biome == "unknown":
+            return "#455A64"
+        return "#7CB342"
+
+    def _get_structure_color(self, coord: Tuple[int, int]) -> str:
+        meta = self._heatmap_service.get_region_meta(coord)
+        count = int(meta.get("structure_count", 0) or 0)
+        name = str(meta.get("dominant_structure", "none")).lower()
+        if count <= 0 or name == "none":
+            return "#455A64"
+        if "village" in name:
+            return "#FFD54F"
+        if "mineshaft" in name:
+            return "#8D6E63"
+        if "stronghold" in name:
+            return "#7E57C2"
+        if "mansion" in name or "monument" in name:
+            return "#26A69A"
+        if "fortress" in name or "bastion" in name:
+            return "#D84315"
+        return "#FFB300" if count < 3 else "#FF7043"
+
+    def _get_mode_title(self) -> str:
+        return {
+            "activity": "活动热力",
+            "size": "文件大小",
+            "generated": "生成分布",
+            "distance": "距原点距离",
+            "biome": "主要群系",
+            "structure": "生成结构",
+        }.get(self._display_mode, "区域视图")
+
+    def _get_region_value_label(self, coord: Tuple[int, int], size: int) -> str:
+        if self._display_mode == "size":
+            return self._get_size_level(size)
+        if self._display_mode == "generated":
+            return self._get_generated_label(coord)
+        if self._display_mode == "distance":
+            return self._get_distance_label(coord)
+        if self._display_mode == "biome":
+            return self._get_biome_label(coord)
+        if self._display_mode == "structure":
+            return self._get_structure_label(coord)
+        return self._get_activity_name(size)
+
+    def _get_size_level(self, size: int) -> str:
+        if size >= 64 * 1024 * 1024:
+            return "超大区域"
+        if size >= 32 * 1024 * 1024:
+            return "大型区域"
+        if size >= 16 * 1024 * 1024:
+            return "中大型区域"
+        if size >= 8 * 1024 * 1024:
+            return "中等区域"
+        if size >= 2 * 1024 * 1024:
+            return "小型区域"
+        return "很小区域"
+
+    def _get_generated_label(self, coord: Tuple[int, int]) -> str:
+        x, z = coord
+        if x == 0 and z == 0:
+            return "原点区域"
+        if abs(x) <= 1 and abs(z) <= 1:
+            return "出生点附近"
+        if abs(x) <= 4 and abs(z) <= 4:
+            return "近距离探索"
+        if abs(x) <= 12 and abs(z) <= 12:
+            return "中距离探索"
+        return "远距离探索"
+
+    def _get_distance_label(self, coord: Tuple[int, int]) -> str:
+        distance = math.sqrt(coord[0] * coord[0] + coord[1] * coord[1])
+        blocks = int(distance * 512)
+        return f"距原点约 {blocks} 方块"
+
+    def _get_biome_label(self, coord: Tuple[int, int]) -> str:
+        biome = self._heatmap_service.get_region_meta(coord).get("dominant_biome", "unknown")
+        return f"主要群系 {biome}"
+
+    def _get_structure_label(self, coord: Tuple[int, int]) -> str:
+        meta = self._heatmap_service.get_region_meta(coord)
+        count = int(meta.get("structure_count", 0) or 0)
+        if count <= 0:
+            return "未发现结构"
+        return f"{meta.get('dominant_structure', 'unknown')} 等 {count} 个结构引用"
+
+    def _get_activity_name(self, size: int) -> str:
+        stats = getattr(self, '_cached_stats', None) or self._heatmap_service.get_statistics()
+        avg = stats.get("avg_size", 0) or 0
+        if avg <= 0:
+            return "未知活动度"
+        ratio = size / avg
+        if ratio >= 2.0:
+            return "极高活动"
+        if ratio >= 1.4:
+            return "高活动"
+        if ratio >= 0.8:
+            return "普通活动"
+        if ratio >= 0.35:
+            return "低活动"
+        return "很少生成"
+
+    def _get_activity_icon(self, size: int) -> str:
+        name = self._get_activity_name(size)
+        if name == "极高活动":
+            return "◆◆"
+        if name == "高活动":
+            return "◆"
+        if name == "普通活动":
+            return "■"
+        if name == "低活动":
+            return "▪"
+        return "·"
     
     def _hsl_to_hex(self, h: float, s: float, l: float) -> str:
         """HSL 颜色转十六进制"""
@@ -426,7 +754,7 @@ class McaHeatmapView(ft.Container):
             await asyncio.sleep(0.2)
         self._rebuild_canvas()
         if self._on_selection_changed:
-            self._on_selection_changed(None, None)
+            self._on_selection_changed(None, None, None)
 
     async def _update_loop(self) -> None:
         """异步更新循环 - 实现渐进式动态加载"""
@@ -435,7 +763,7 @@ class McaHeatmapView(ft.Container):
             await asyncio.sleep(0.2)
         self._rebuild_canvas()
         if self._on_selection_changed:
-            self._on_selection_changed(None, None)
+            self._on_selection_changed(None, None, None)
     
     def did_mount(self) -> None:
         """组件挂载时启动更新循环"""
@@ -484,12 +812,12 @@ class McaHeatmapView(ft.Container):
             # 不调用 run_until_complete，让任务在下一个 await 自然取消
     
     def start_scan(self, region_dir: str) -> None:
-        """启动热力图扫描"""
+        """启动区域地图扫描"""
         self._schedule_task(self._heatmap_service.start_silent_scan(region_dir))
         self._start_update_loop()
     
     def refresh(self) -> None:
-        """手动刷新热力图"""
+        """手动刷新区域地图"""
         self._scale = 1.0
         self._offset_x = 0
         self._offset_y = 0
@@ -501,7 +829,51 @@ class McaHeatmapView(ft.Container):
         self._offset_x = 0
         self._offset_y = 0
         self._selected_cell = None
+        self._selected_chunk = None
         self._rebuild_canvas()
+
+    def resize_map(self, width: int, height: int) -> None:
+        if self.width == width and self.height == height:
+            return
+        self.width = width
+        self.height = height
+        self._canvas.width = width
+        self._canvas.height = height
+        self._gesture_detector.width = width
+        self._gesture_detector.height = height
+        self._scale = 1.0
+        self._offset_x = 0
+        self._offset_y = 0
+        self._rebuild_canvas()
+
+    def toggle_coordinates(self) -> bool:
+        self._show_coordinates = not self._show_coordinates
+        self._rebuild_canvas()
+        return self._show_coordinates
+
+    def toggle_empty_regions(self) -> bool:
+        self._show_empty_regions = not self._show_empty_regions
+        self._rebuild_canvas()
+        return self._show_empty_regions
+
+    def set_display_mode(self, mode: str) -> None:
+        if mode not in {"activity", "size", "generated", "distance", "biome", "structure"}:
+            return
+        self._display_mode = mode
+        self._rebuild_canvas()
+
+    def get_display_mode(self) -> str:
+        return self._display_mode
+
+    def set_detail_level(self, level: str) -> None:
+        if level not in {"auto", "region", "chunk"}:
+            return
+        self._detail_level = level
+        self._selected_chunk = None
+        self._rebuild_canvas()
+
+    def get_detail_level(self) -> str:
+        return self._detail_level
     
     def zoom_in(self) -> None:
         """放大"""

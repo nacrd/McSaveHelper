@@ -1,7 +1,7 @@
 """NBT Tree View component"""
 import flet as ft
 import json
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 from app.ui.theme import THEME
 from app.ui.views.explorer.utils import safe_update
@@ -25,21 +25,32 @@ class NBTTreeView(ft.Column):
         "Double":    ("📐", "Double",    THEME.terminal_purple),
         "IntArray":  ("🧮", "IntArray",  THEME.warning_light),
         "ByteArray": ("🧮", "ByteArray", THEME.warning_light),
+        "str":       ("🔤", "String",    THEME.terminal_green),
+        "int":       ("🔢", "Number",    THEME.terminal_cyan),
+        "float":     ("📐", "Number",    THEME.terminal_purple),
+        "bool":      ("🔘", "Boolean",   THEME.terminal_blue),
+        "NoneType":  ("∅", "Null",      THEME.text_muted),
     }
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        on_stage_change: Optional[Callable[[List[Union[str, int]], Any, Any, str], None]] = None,
+    ) -> None:
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._root_data: Any = None
         self._search_query: str = ""
         self._matched_keys: Set[str] = set()
+        self._on_stage_change = on_stage_change
+        self._editable = True
         self._placeholder = ft.Text(
             "请选择玩家以加载 NBT 数据", size=13, color=THEME.text_muted
         )
         self.controls.append(self._placeholder)
 
-    def load_nbt(self, nbt_data: Any) -> None:
+    def load_nbt(self, nbt_data: Any, editable: bool = True) -> None:
         self._root_data = nbt_data
+        self._editable = editable
         self._search_query = ""
         self._matched_keys.clear()
         self._rebuild_tree()
@@ -155,7 +166,6 @@ class NBTTreeView(ft.Column):
                 ft.Text(icon, size=13),
                 ft.Text(key, size=13, weight=ft.FontWeight.BOLD,
                         color=THEME.warning if is_highlighted else THEME.text_primary),
-                ft.Text(f"({label})", size=11, color=THEME.text_muted),
                 ft.Text(subtitle, size=11, color=THEME.text_secondary),
             ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
             children = self._build_nodes(value, path, depth + 1)
@@ -178,7 +188,6 @@ class NBTTreeView(ft.Column):
                 ft.Text(icon, size=13),
                 ft.Text(key, size=13, weight=ft.FontWeight.BOLD,
                         color=THEME.warning if is_highlighted else THEME.text_primary),
-                ft.Text(f"({label}{type_hint})", size=11, color=THEME.text_muted),
                 ft.Text(subtitle, size=11, color=THEME.text_secondary),
             ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
             children = self._build_nodes(value, path, depth + 1)
@@ -195,18 +204,157 @@ class NBTTreeView(ft.Column):
         else:
             raw = self._format_primitive(value, type_name)
             display_val = raw if len(raw) <= 120 else raw[:117] + "…"
-            title_row = ft.Row([
+            controls: List[ft.Control] = [
                 ft.Text(icon, size=13),
                 ft.Text(key, size=13, weight=ft.FontWeight.BOLD,
                         color=THEME.warning if is_highlighted else THEME.text_primary),
-                ft.Text(f"({label})", size=11, color=THEME.text_muted),
                 ft.Text(display_val, size=13, color=val_color,
                         overflow=ft.TextOverflow.ELLIPSIS, expand=True),
-            ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+            ]
+            if self._editable:
+                controls.append(ft.TextButton("编辑", on_click=lambda e, p=path, v=value, t=type_name: self._open_edit_dialog(p, v, t)))
+            title_row = ft.Row(controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
             return ft.Container(
                 content=title_row,
                 padding=ft.Padding(left=depth * 16 + 28, top=2, bottom=2, right=8),
             )
+
+    def _open_edit_dialog(self, path: str, value: Any, type_name: str) -> None:
+        if not self.page:
+            return
+        raw_value = self._raw_text(value, type_name)
+        value_field = ft.TextField(
+            label="新值",
+            value=raw_value,
+            multiline=type_name in ("IntArray", "ByteArray"),
+            min_lines=1,
+            max_lines=5,
+            border_color=THEME.border_standard,
+            text_size=13,
+        )
+        error_text = ft.Text("", size=12, color=THEME.error)
+        dialog = ft.AlertDialog(
+            title=ft.Text(f"编辑 {path}", color=THEME.text_primary),
+            content=ft.Column([
+                ft.Text(f"类型: {type_name}", size=12, color=THEME.text_secondary),
+                ft.Text(f"原值: {raw_value}", size=12, color=THEME.text_muted),
+                value_field,
+                error_text,
+            ], tight=True, spacing=8),
+            actions=[],
+        )
+
+        def close_dialog(e: Any = None) -> None:
+            dialog.open = False
+            self.page.update()
+
+        def stage_change(e: Any = None) -> None:
+            try:
+                path_parts = self._parse_path(path)
+                new_value = self._coerce_value(value_field.value or "", value, type_name)
+                old_value = self._set_value_at_path(path_parts, new_value)
+                if self._on_stage_change:
+                    self._on_stage_change(path_parts, old_value, new_value, path)
+                dialog.open = False
+                self.page.update()
+                self._rebuild_tree()
+            except Exception as ex:
+                error_text.value = f"无法暂存: {ex}"
+                safe_update(error_text)
+
+        dialog.actions = [
+            ft.TextButton("暂存", on_click=stage_change),
+            ft.TextButton("取消", on_click=close_dialog),
+        ]
+        self.page.overlay.append(dialog)
+        dialog.open = True
+        self.page.update()
+
+    @staticmethod
+    def _raw_text(value: Any, type_name: str) -> str:
+        try:
+            if type_name in ("IntArray", "ByteArray"):
+                return json.dumps([int(x) for x in list(value)], ensure_ascii=False)
+            if type_name in ("dict", "list", "bool", "NoneType"):
+                return json.dumps(value, ensure_ascii=False)
+            return str(getattr(value, "value", value))
+        except Exception:
+            return str(value)
+
+    @staticmethod
+    def _parse_path(path: str) -> List[Union[str, int]]:
+        parts: List[Union[str, int]] = []
+        current = ""
+        i = 0
+        while i < len(path):
+            ch = path[i]
+            if ch == ".":
+                if current:
+                    parts.append(current)
+                    current = ""
+                i += 1
+                continue
+            if ch == "[":
+                if current:
+                    parts.append(current)
+                    current = ""
+                end = path.index("]", i)
+                parts.append(int(path[i + 1:end]))
+                i = end + 1
+                continue
+            current += ch
+            i += 1
+        if current:
+            parts.append(current)
+        return parts
+
+    def _set_value_at_path(self, path_parts: List[Union[str, int]], new_value: Any) -> Any:
+        if self._root_data is None:
+            raise ValueError("未加载 NBT 数据")
+        node = self._root_data
+        for part in path_parts[:-1]:
+            node = node[part]
+        last = path_parts[-1]
+        old_value = node[last]
+        node[last] = new_value
+        return old_value
+
+    @staticmethod
+    def _coerce_value(raw: str, original: Any, type_name: str) -> Any:
+        value_type = type(original)
+        if type_name in ("Byte", "Short", "Int", "Long"):
+            return value_type(int(raw.strip()))
+        if type_name in ("Float", "Double"):
+            return value_type(float(raw.strip()))
+        if type_name == "String":
+            return value_type(raw)
+        if type_name == "str":
+            return raw
+        if type_name == "int":
+            return int(raw.strip())
+        if type_name == "float":
+            return float(raw.strip())
+        if type_name == "bool":
+            normalized = raw.strip().lower()
+            if normalized in ("true", "1", "yes", "y", "是"):
+                return True
+            if normalized in ("false", "0", "no", "n", "否"):
+                return False
+            raise ValueError("布尔值必须是 true/false")
+        if type_name == "NoneType":
+            normalized = raw.strip().lower()
+            if normalized in ("null", "none", ""):
+                return None
+            raise ValueError("空值必须是 null")
+        if type_name in ("IntArray", "ByteArray"):
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list):
+                raise ValueError("数组值必须是 JSON 数组")
+            return value_type([int(item) for item in parsed])
+        try:
+            return value_type(raw)
+        except Exception:
+            return raw
 
     @staticmethod
     def _get_type_name(value: Any) -> str:
