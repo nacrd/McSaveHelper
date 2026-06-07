@@ -56,59 +56,65 @@ class WorldStatsService:
 
     def analyze_world(self, world_path: Path, progress_callback: Optional[Any] = None) -> WorldStatistics:
         """分析存档并返回统计数据"""
-        stats = WorldStatistics()
-        
-        region_files = scan_all_regions(world_path)
-        stats.total_regions = len(region_files)
-        
-        block_counter: Counter = Counter()
-        entity_counter: Counter = Counter()
-        
-        for idx, region_path in enumerate(region_files):
-            try:
-                coords = self._parse_region_coords(region_path)
-                stats.region_sizes[coords] = region_path.stat().st_size
-                
-                region = anvil.Region.from_file(str(region_path))
-                
-                for x in range(32):
-                    for z in range(32):
-                        try:
-                            chunk = region.get_chunk(x, z)
-                            if chunk is not None:
-                                stats.total_chunks += 1
-                                stats.loaded_chunks += 1
-                                
-                                chunk_blocks, chunk_entities = self._analyze_chunk(chunk)
-                                block_counter.update(chunk_blocks)
-                                entity_counter.update(chunk_entities)
-                            else:
-                                stats.empty_chunks += 1
-                        except Exception:
-                            stats.empty_chunks += 1
-                
-                if progress_callback:
-                    progress_callback(idx + 1, len(region_files))
+        from core.performance import get_tracker
+        tracker = get_tracker()
+
+        with tracker.track("存档统计分析", {"world": world_path.name}):
+            stats = WorldStatistics()
+            
+            region_files = scan_all_regions(world_path)
+            stats.total_regions = len(region_files)
+            tracker.increment_files(len(region_files))
+            
+            block_counter: Counter = Counter()
+            entity_counter: Counter = Counter()
+            
+            for idx, region_path in enumerate(region_files):
+                try:
+                    coords = self._parse_region_coords(region_path)
+                    stats.region_sizes[coords] = region_path.stat().st_size
                     
-            except Exception as e:
-                self._log(f"分析区域 {region_path.name} 失败: {e}", "WARNING")
-        
-        stats.block_stats = BlockStats(
-            total_count=sum(block_counter.values()),
-            block_types=dict(block_counter),
-            top_blocks=block_counter.most_common(20)
-        )
-        stats.total_blocks = stats.block_stats.total_count
-        
-        stats.entity_stats = EntityStats(
-            total_count=sum(entity_counter.values()),
-            entity_types=dict(entity_counter),
-            top_entities=entity_counter.most_common(20)
-        )
-        stats.total_entities = stats.entity_stats.total_count
-        
-        self._log(f"存档分析完成: {stats.total_regions} 区域, {stats.total_chunks} 区块, {stats.total_blocks} 方块, {stats.total_entities} 实体", "INFO")
-        
+                    region = anvil.Region.from_file(str(region_path))
+                    
+                    for x in range(32):
+                        for z in range(32):
+                            try:
+                                chunk = region.get_chunk(x, z)
+                                if chunk is not None:
+                                    stats.total_chunks += 1
+                                    stats.loaded_chunks += 1
+                                    
+                                    chunk_blocks, chunk_entities = self._analyze_chunk(chunk)
+                                    block_counter.update(chunk_blocks)
+                                    entity_counter.update(chunk_entities)
+                                else:
+                                    stats.empty_chunks += 1
+                            except Exception:
+                                stats.empty_chunks += 1
+                    
+                    if progress_callback:
+                        progress_callback(idx + 1, len(region_files))
+                        
+                except Exception as e:
+                    self._log(f"分析区域 {region_path.name} 失败: {e}", "WARNING")
+                    tracker.increment_errors(1)
+            
+            stats.block_stats = BlockStats(
+                total_count=sum(block_counter.values()),
+                block_types=dict(block_counter),
+                top_blocks=block_counter.most_common(20)
+            )
+            stats.total_blocks = stats.block_stats.total_count
+            
+            stats.entity_stats = EntityStats(
+                total_count=sum(entity_counter.values()),
+                entity_types=dict(entity_counter),
+                top_entities=entity_counter.most_common(20)
+            )
+            stats.total_entities = stats.entity_stats.total_count
+            
+            self._log(f"存档分析完成: {stats.total_regions} 区域, {stats.total_chunks} 区块, {stats.total_blocks} 方块, {stats.total_entities} 实体", "INFO")
+            
         return stats
 
     def get_region_size_distribution(self, stats: WorldStatistics) -> Dict[str, int]:

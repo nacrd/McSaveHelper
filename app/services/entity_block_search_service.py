@@ -110,46 +110,51 @@ class EntityBlockSearchService:
             if progress_callback:
                 progress_callback(value, msg)
 
+        from core.performance import get_tracker
+        tracker = get_tracker()
+
         try:
             if not world_path.exists():
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
-            if dimensions is None:
-                dimensions = ["overworld", "nether", "end"]
+            with tracker.track("实体方块搜索", {"world": world_path.name, "type": search_type, "target": target}):
+                if dimensions is None:
+                    dimensions = ["overworld", "nether", "end"]
 
-            log(f"开始搜索 {search_type}: {target}")
-            log(f"搜索维度: {', '.join(dimensions)}")
+                log(f"开始搜索 {search_type}: {target}")
+                log(f"搜索维度: {', '.join(dimensions)}")
 
-            total_progress = 0.0
-            step = 1.0 / len(dimensions)
+                total_progress = 0.0
+                step = 1.0 / len(dimensions)
 
-            for dimension in dimensions:
-                progress(total_progress, f"搜索维度: {dimension}")
-                
-                if search_type == "entity":
-                    self._search_entities_in_dimension(
-                        world_path,
-                        dimension,
-                        target,
-                        log,
-                        lambda v, m: progress(total_progress + v * step, m),
-                    )
-                elif search_type == "block":
-                    self._search_blocks_in_dimension(
-                        world_path,
-                        dimension,
-                        target,
-                        log,
-                        lambda v, m: progress(total_progress + v * step, m),
-                    )
-                
-                total_progress += step
+                for dimension in dimensions:
+                    progress(total_progress, f"搜索维度: {dimension}")
+                    
+                    if search_type == "entity":
+                        self._search_entities_in_dimension(
+                            world_path,
+                            dimension,
+                            target,
+                            log,
+                            lambda v, m: progress(total_progress + v * step, m),
+                        )
+                    elif search_type == "block":
+                        self._search_blocks_in_dimension(
+                            world_path,
+                            dimension,
+                            target,
+                            log,
+                            lambda v, m: progress(total_progress + v * step, m),
+                        )
+                    
+                    total_progress += step
 
-            progress(1.0, f"搜索完成，找到 {len(self.results)} 个结果")
-            log(f"搜索完成，共找到 {len(self.results)} 个 {target}")
+                progress(1.0, f"搜索完成，找到 {len(self.results)} 个结果")
+                log(f"搜索完成，共找到 {len(self.results)} 个 {target}")
+                tracker.add_metadata("results", len(self.results))
 
-            if search_type == "entity" and len(self.results) == 0:
-                log("提示: 1.18+ 存档的实体数据可能存储在独立文件中，当前搜索可能不完整", "WARNING")
+                if search_type == "entity" and len(self.results) == 0:
+                    log("提示: 1.18+ 存档的实体数据可能存储在独立文件中，当前搜索可能不完整", "WARNING")
 
         except Exception as e:
             error_msg = f"搜索失败: {e}"

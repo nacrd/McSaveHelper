@@ -3,6 +3,7 @@
 
 实现非破坏性、延迟加载机制，支持任务队列与统一提交。
 """
+import json
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
@@ -78,8 +79,13 @@ class WorldSession:
         self._player_names: Dict[str, Optional[str]] = {}
         self._usercache: Dict[str, str] = {}
 
-        self._scan_files()
-        self._load_level_info()
+        from core.performance import get_tracker
+        tracker = get_tracker()
+        with tracker.track("存档加载", {"world": self.world_path.name}):
+            self._scan_files()
+            self._load_level_info()
+            tracker.add_metadata("players", len(self._player_files))
+            tracker.add_metadata("regions", len(self._region_files))
 
     def _log(self, message: str, level: str = "INFO") -> None:
         """内部日志记录"""
@@ -104,12 +110,16 @@ class WorldSession:
 
     def _scan_files(self) -> None:
         """扫描存档目录结构，缓存文件路径"""
-        # 扫描 playerdata
+        # 扫描 playerdata（iterdir 比 glob 略快）
         playerdata_dir = self.world_path / "playerdata"
-        if playerdata_dir.exists():
-            for f in playerdata_dir.glob("*.dat"):
-                uuid = self._normalize_uuid(f.stem)
-                self._player_files[uuid] = f
+        if playerdata_dir.is_dir():
+            try:
+                for f in playerdata_dir.iterdir():
+                    if f.is_file() and f.suffix == ".dat":
+                        uuid = self._normalize_uuid(f.stem)
+                        self._player_files[uuid] = f
+            except OSError:
+                pass
         self._log(f"发现 {len(self._player_files)} 个玩家数据文件", "SCAN")
 
         # 初始化 player_names（先从 usercache 收集后会继续完善）
@@ -133,81 +143,64 @@ class WorldSession:
 
         # 扫描 data 目录
         data_dir = self.world_path / "data"
-        if data_dir.exists():
-            self._data_files = list(data_dir.glob("*.dat"))
+        if data_dir.is_dir():
+            try:
+                self._data_files = list(data_dir.glob("*.dat"))
+            except OSError:
+                pass
         self._log(f"发现 {len(self._data_files)} 个数据文件", "SCAN")
         
-        # 扫描 usercache.json（智能选择最合适的）
-        possible_paths = []
-        # 1. 存档目录内（最高优先级）
-        possible_paths.append(self.world_path / "usercache.json")
-        # 2. 服务器根目录（存档的父目录）
-        possible_paths.append(self.world_path.parent / "usercache.json")
-        # 3. 向上查找 .minecraft 目录（支持版本隔离）
+        # 扫描 usercache.json（限制搜索深度，避免遍历版本目录）
+        import json
+        player_set = set(self._player_files.keys())
+        best_cache: Dict[str, str] = {}
+        best_match = -1
+
+        # 仅检查有限的候选路径，不遍历 versions/ 子目录
+        candidate_paths: List[Path] = []
+        candidate_paths.append(self.world_path / "usercache.json")
+        candidate_paths.append(self.world_path.parent / "usercache.json")
+        # 向上查找 .minecraft（最多 5 层）
         current = self.world_path
-        while len(current.parts) > 1:  # 避免无限循环
-            if current.name == ".minecraft":
-                possible_paths.append(current / "usercache.json")
-                # 版本隔离目录（优先级略低）
-                versions_dir = current / "versions"
-                if versions_dir.exists():
-                    for version_dir in versions_dir.iterdir():
-                        if version_dir.is_dir():
-                            possible_paths.append(version_dir / "usercache.json")
-                break
+        for _ in range(5):
             parent = current.parent
             if parent == current:
                 break
+            if parent.name == ".minecraft":
+                candidate_paths.append(parent / "usercache.json")
+                break
             current = parent
-        
-        # 收集所有存在的 usercache.json 文件并评估
-        import json
-        candidate_files = []
-        for path in possible_paths:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        entries = json.load(f)
-                    
-                    # 计算与当前存档 UUID 的匹配度
-                    match_count = 0
-                    cache_map = {}
-                    for entry in entries:
-                        uuid = entry.get("uuid", "").replace("-", "")
-                        name = entry.get("name", "")
-                        if uuid and name:
-                            cache_map[uuid] = name
-                            if uuid in self._player_files:
-                                match_count += 1
-                    
-                    candidate_files.append({
-                        "path": path,
-                        "cache_map": cache_map,
-                        "match_count": match_count,
-                        "size": path.stat().st_size,
-                        "mtime": path.stat().st_mtime
-                    })
-                    self._log(f"发现候选 usercache: {path}, 匹配 {match_count}/{len(self._player_files)} 个玩家", "IMPORT")
-                except Exception as e:
-                    self._log(f"解析候选 usercache {path} 失败: {e}", "WARNING")
-        
-        if candidate_files:
-            # 选择策略：优先匹配度高的，其次最新的
-            candidate_files.sort(key=lambda x: (-x["match_count"], -x["mtime"]))
-            best = candidate_files[0]
-            
-            self._usercache = best["cache_map"]
-            self._log(f"选择使用 {best['path']} (匹配 {best['match_count']} 个玩家)", "SCAN")
-            
-            # 更新 player_names 缓存
-            updated = 0
-            for uuid in self._player_files.keys():
+
+        for path in candidate_paths:
+            if not path.is_file():
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    entries = json.load(f)
+                cache_map: Dict[str, str] = {}
+                match_count = 0
+                for entry in entries:
+                    uuid = entry.get("uuid", "").replace("-", "")
+                    name = entry.get("name", "")
+                    if uuid and name:
+                        cache_map[uuid] = name
+                        if uuid in player_set:
+                            match_count += 1
+                self._log(f"候选 usercache: {path}, 匹配 {match_count}/{len(player_set)}", "IMPORT")
+                if match_count > best_match:
+                    best_match = match_count
+                    best_cache = cache_map
+                if match_count == len(player_set):
+                    break  # 完美匹配，提前退出
+            except Exception as e:
+                self._log(f"解析 usercache {path} 失败: {e}", "WARNING")
+
+        if best_cache:
+            self._usercache = best_cache
+            for uuid in self._player_files:
                 if uuid in self._usercache:
-                    old = self._player_names.get(uuid)
                     self._player_names[uuid] = self._usercache[uuid]
-                    updated += 1
-                    self._log(f"更新玩家名称: {uuid} -> {self._usercache[uuid]} (之前: {old})", "SCAN")
-            self._log(f"更新了 {updated} 个玩家名称", "SCAN")
+            self._log(f"已从 usercache 更新 {best_match} 个玩家名称", "SCAN")
 
     def _load_level_info(self) -> None:
         """读取 level.dat 并提取完整信息"""
@@ -303,52 +296,40 @@ class WorldSession:
         return list(self._player_files.keys())
 
     def get_player_names(self) -> Dict[str, Optional[str]]:
-        """返回 UUID 到玩家名称的映射（如未知则返回 None）"""
+        """返回 UUID 到玩家名称的映射。
+
+        仅返回已从 usercache.json 缓存的名称，不加载 NBT 文件。
+        未知名称返回 None，可通过 resolve_player_name() 按需加载。
+        """
+        result: Dict[str, Optional[str]] = {}
         for uuid in self._player_files:
-            if uuid in self._player_names:
-                continue
-            # 尝试加载玩家数据提取名称
-            data = self.get_player_data(uuid)
-            if data is None:
-                self._player_names[uuid] = None
-                continue
-            # 优先使用 usercache（可能更新）
-            cached_name = self._usercache.get(uuid)
-            if cached_name:
-                self._player_names[uuid] = cached_name
-                continue
-            # 尝试从常见标签提取玩家名称
-            name = None
-            # 常见标签列表（按优先级）
-            possible_keys = [
-                "LastKnownName",       # Bukkit/Spigot
-                "Name",                # 原版？
-                "bukkit.lastKnownName", # Bukkit 完整路径
-                "CustomName",          # 自定义名称
-                "display.Name",        # 显示名称
-                "lastKnownName",       # 小写
-                "name",                # 小写通用
-            ]
-            for key in possible_keys:
-                tag = data.get(key)
-                if tag is not None:
-                    # 提取标签值
-                    if hasattr(tag, 'value'):
-                        name = str(tag.value)
-                    else:
-                        name = str(tag)
-                    # 如果名称包含引号或特殊格式，清理
-                    if name.startswith("'") and name.endswith("'"):
-                        name = name[1:-1]
-                    elif name.startswith('"') and name.endswith('"'):
-                        name = name[1:-1]
-                    break
-            if name is not None:
-                self._player_names[uuid] = name
-            else:
-                self._player_names[uuid] = None
-                self._log(f"无法从 NBT 中提取玩家名称: {uuid}", "DEBUG")
-        return self._player_names.copy()
+            result[uuid] = self._player_names.get(uuid)
+        return result
+
+    def resolve_player_name(self, uuid: str) -> Optional[str]:
+        """按需解析单个玩家名称（加载 NBT）。
+
+        Args:
+            uuid: 玩家 UUID
+
+        Returns:
+            玩家名称，若无法解析则返回 None
+        """
+        norm = self._normalize_uuid(uuid)
+        if norm in self._player_names and self._player_names[norm] is not None:
+            return self._player_names[norm]
+        data = self.get_player_data(norm)
+        if data is None:
+            return None
+        for key in ("LastKnownName", "Name", "bukkit.lastKnownName",
+                     "CustomName", "display.Name", "lastKnownName", "name"):
+            tag = data.get(key)
+            if tag is not None:
+                name = str(tag.value) if hasattr(tag, 'value') else str(tag)
+                name = name.strip("'\"")
+                self._player_names[norm] = name
+                return name
+        return None
 
     def get_player_data(self, uuid: str) -> Optional[Compound]:
         """
@@ -451,7 +432,7 @@ class WorldSession:
         self._loaded_regions[(x, z)] = path
         return path
 
-    def queue_modify_nbt(self, target: Union[Path, str], key_path: List[str], value: Any) -> None:
+    def queue_modify_nbt(self, target: Union[Path, str], key_path: List[Union[str, int]], value: Any) -> None:
         """
         队列化一个 NBT 修改操作。
 
@@ -460,13 +441,20 @@ class WorldSession:
             key_path: 键路径列表，例如 ["Data", "Player", "Health"]
             value: 新值（必须是 NBT 兼容类型）
         """
-        if isinstance(target, str):
-            # 假设是玩家 UUID
-            target_path = self._player_files.get(target)
+        if isinstance(target, str) and (target.endswith(".dat") or "/" in target or "\\" in target):
+            target = Path(target)
+        elif isinstance(target, str):
+            norm_target = self._normalize_uuid(target)
+            target_path = self._player_files.get(norm_target)
             if target_path is None:
                 self._log(f"无法找到玩家 {target} 的文件", "ERROR")
                 return
             target = target_path
+        if isinstance(target, Path) and target.is_absolute():
+            try:
+                target = target.relative_to(self.world_path)
+            except ValueError:
+                pass
         action = Action(
             type='modify_nbt',
             target=target,
@@ -474,6 +462,22 @@ class WorldSession:
         )
         self._action_queue.append(action)
         self._log(f"已队列化 NBT 修改: {key_path} -> {value}", "QUEUE")
+
+    def queue_modify_json(self, target: Union[Path, str], key_path: List[Union[str, int]], value: Any) -> None:
+        if isinstance(target, str):
+            target = Path(target)
+        if isinstance(target, Path) and target.is_absolute():
+            try:
+                target = target.relative_to(self.world_path)
+            except ValueError:
+                pass
+        action = Action(
+            type='modify_json',
+            target=target,
+            data={'key_path': key_path, 'value': value},
+        )
+        self._action_queue.append(action)
+        self._log(f"已队列化 JSON 修改: {key_path} -> {value}", "QUEUE")
 
     def queue_delete_region(self, x: int, z: int) -> None:
         """
@@ -616,6 +620,8 @@ class WorldSession:
         """执行单个操作"""
         if action.type == 'modify_nbt':
             self._execute_modify_nbt(action, target_world)
+        elif action.type == 'modify_json':
+            self._execute_modify_json(action, target_world)
         elif action.type == 'delete_region':
             self._execute_delete_region(action, target_world)
         elif action.type == 'rename_player':
@@ -637,6 +643,12 @@ class WorldSession:
                 target_path = target_world / target_path
         else:
             target_path = Path(target_path)
+        target_path = target_path.resolve()
+        target_root = target_world.resolve()
+        try:
+            target_path.relative_to(target_root)
+        except ValueError as exc:
+            raise ValueError(f"拒绝修改存档目录外的 NBT 文件: {target_path}") from exc
         key_path = action.data['key_path']
         value = action.data['value']
 
@@ -645,17 +657,61 @@ class WorldSession:
         # 递归查找目标键
         node = data
         for key in key_path[:-1]:
-            if isinstance(node, dict) and key in node:
+            if isinstance(key, int) and isinstance(node, list):
+                node = node[key]
+            elif isinstance(node, dict) and key in node:
                 node = node[key]
             else:
                 raise KeyError(f"键路径 {key_path} 不存在于 {target_path}")
         last_key = key_path[-1]
-        if isinstance(node, dict) and last_key in node:
+        if isinstance(last_key, int) and isinstance(node, list):
+            node[last_key] = value
+        elif isinstance(node, dict) and last_key in node:
             node[last_key] = value
         else:
             raise KeyError(f"最终键 {last_key} 不存在")
         # 保存
         data.save()
+
+    def _resolve_world_file(self, target: Any, target_world: Path) -> Path:
+        target_path = target
+        if isinstance(target_path, str):
+            target_path = Path(target_path)
+        elif not isinstance(target_path, Path):
+            target_path = Path(target_path)
+        if not target_path.is_absolute():
+            target_path = target_world / target_path
+        target_path = target_path.resolve()
+        target_root = target_world.resolve()
+        try:
+            target_path.relative_to(target_root)
+        except ValueError as exc:
+            raise ValueError(f"拒绝修改存档目录外的文件: {target_path}") from exc
+        return target_path
+
+    def _execute_modify_json(self, action: Action, target_world: Path) -> None:
+        target_path = self._resolve_world_file(action.target, target_world)
+        key_path = action.data['key_path']
+        value = action.data['value']
+        with open(target_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        node = data
+        for key in key_path[:-1]:
+            if isinstance(key, int) and isinstance(node, list):
+                node = node[key]
+            elif isinstance(node, dict) and key in node:
+                node = node[key]
+            else:
+                raise KeyError(f"JSON 路径 {key_path} 不存在于 {target_path}")
+        last_key = key_path[-1]
+        if isinstance(last_key, int) and isinstance(node, list):
+            node[last_key] = value
+        elif isinstance(node, dict) and last_key in node:
+            node[last_key] = value
+        else:
+            raise KeyError(f"JSON 最终键 {last_key} 不存在")
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
     def _execute_delete_region(self, action: Action, target_world: Path) -> None:
         """删除区域文件"""
@@ -737,59 +793,70 @@ class WorldSession:
         """
         扫描存档中所有可用的维度目录。
 
+        利用已缓存的 _region_files 避免重复 glob 扫描。
+
         Returns:
             维度信息列表，每项包含 id, name, region_dir
         """
-        dimensions = []
-        seen = set()
+        dimensions: List[Dict[str, str]] = []
+        seen: set = set()
 
-        # 原版维度（固定）
+        # 构建已有 region 文件的父目录集合，用于快速判断维度是否存在
+        region_parent_dirs: set = set()
+        for p in self._region_files.values():
+            region_parent_dirs.add(p.parent)
+
+        def _has_regions(region_dir: Path) -> bool:
+            return region_dir in region_parent_dirs
+
         vanilla_dims = [
             ("overworld", "🌍 主世界", self.world_path / "region"),
             ("nether", "🔥 下界", self.world_path / "DIM-1" / "region"),
             ("end", "🌌 末地", self.world_path / "DIM1" / "region"),
         ]
-
         for dim_id, dim_name, region_dir in vanilla_dims:
-            if region_dir.exists() and any(region_dir.glob("r.*.*.mca")):
+            if _has_regions(region_dir):
                 dimensions.append({"id": dim_id, "name": dim_name, "region_dir": str(region_dir)})
                 seen.add(dim_id)
 
-        # 扫描 DIM{数字} 格式（旧版模组维度）
-        for dim_dir in self.world_path.glob("DIM*"):
-            if not dim_dir.is_dir():
-                continue
-            dir_name = dim_dir.name  # e.g. DIM7, DIM-27
-            if dir_name in ("DIM-1", "DIM1"):
-                continue  # 已处理的原版维度
-
-            region_dir = dim_dir / "region"
-            if region_dir.exists() and any(region_dir.glob("r.*.*.mca")):
-                dim_id = dir_name.lower()
-                if dim_id not in seen:
+        # DIM* 格式（旧版模组维度）
+        try:
+            for dim_dir in self.world_path.iterdir():
+                if not dim_dir.is_dir() or not dim_dir.name.startswith("DIM"):
+                    continue
+                if dim_dir.name in ("DIM-1", "DIM1"):
+                    continue
+                region_dir = dim_dir / "region"
+                dim_id = dim_dir.name.lower()
+                if dim_id not in seen and _has_regions(region_dir):
                     dimensions.append({
                         "id": dim_id,
-                        "name": f"📦 {dir_name}",
+                        "name": f"📦 {dim_dir.name}",
                         "region_dir": str(region_dir),
                     })
                     seen.add(dim_id)
+        except OSError:
+            pass
 
-        # 扫描 dimensions/{namespace}/{name} 格式（1.16+ 模组维度）
+        # dimensions/{namespace}/{name} 格式（1.16+ 模组维度）
         dimensions_base = self.world_path / "dimensions"
-        if dimensions_base.exists():
-            for namespace_dir in dimensions_base.iterdir():
-                if not namespace_dir.is_dir():
-                    continue
-                for dim_dir in namespace_dir.iterdir():
-                    if not dim_dir.is_dir():
+        if dimensions_base.is_dir():
+            try:
+                for namespace_dir in dimensions_base.iterdir():
+                    if not namespace_dir.is_dir():
                         continue
-                    region_dir = dim_dir / "region"
-                    if region_dir.exists() and any(region_dir.glob("r.*.*.mca")):
-                        namespace = namespace_dir.name
-                        dim_name_str = dim_dir.name
-                        dim_id = f"{namespace}:{dim_name_str}"
-                        if dim_id not in seen:
-                            # 美化显示名
+                    try:
+                        for dim_dir in namespace_dir.iterdir():
+                            if not dim_dir.is_dir():
+                                continue
+                            region_dir = dim_dir / "region"
+                            if not _has_regions(region_dir):
+                                continue
+                            namespace = namespace_dir.name
+                            dim_name_str = dim_dir.name
+                            dim_id = f"{namespace}:{dim_name_str}"
+                            if dim_id in seen:
+                                continue
                             display_name = f"📦 {namespace}:{dim_name_str}"
                             if namespace == "minecraft":
                                 vanilla_map = {
@@ -804,6 +871,10 @@ class WorldSession:
                                 "region_dir": str(region_dir),
                             })
                             seen.add(dim_id)
+                    except OSError:
+                        pass
+            except OSError:
+                pass
 
         self._log(f"发现 {len(dimensions)} 个维度", "SCAN")
         return dimensions

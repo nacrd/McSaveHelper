@@ -116,25 +116,28 @@ class MigrationService:
         dest_path = Path(dest)
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
 
-        if mode == "fast":
-            run_fast(src_path, dest_path, world_name, offline, clean, pure_clean, manual, log_cb)
-        else:
-            custom_mappings = self._config.custom_uuid_mappings if self._config.use_custom_mapping else None
-            run_full(
-                src_path,
-                dest_path,
-                world_name,
-                offline,
-                clean,
-                pure_clean,
-                manual,
-                log_cb,
-                progress_cb,
-                custom_mappings,
-            )
+        from core.performance import get_tracker
+        tracker = get_tracker()
+        with tracker.track("存档迁移", {"name": world_name, "mode": mode}):
+            if mode == "fast":
+                run_fast(src_path, dest_path, world_name, offline, clean, pure_clean, manual, log_cb)
+            else:
+                custom_mappings = self._config.custom_uuid_mappings if self._config.use_custom_mapping else None
+                run_full(
+                    src_path,
+                    dest_path,
+                    world_name,
+                    offline,
+                    clean,
+                    pure_clean,
+                    manual,
+                    log_cb,
+                    progress_cb,
+                    custom_mappings,
+                )
 
-        output_path = dest_path / world_name
-        self._apply_version_conversion(output_path, target_platform, target_version, log_cb)
+            output_path = dest_path / world_name
+            self._apply_version_conversion(output_path, target_platform, target_version, log_cb)
         return str(output_path)
 
     def run_batch(

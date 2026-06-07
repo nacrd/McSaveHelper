@@ -1,4 +1,5 @@
 """纹理服务 - 管理 Minecraft 物品纹理的获取、缓存和提供"""
+import base64
 import logging
 import os
 import platform
@@ -6,41 +7,69 @@ import threading
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, Optional, Set
+from typing import Dict, List, Optional, Tuple
 
 import requests
 
 logger = logging.getLogger(__name__)
-
-_BLOCK_ITEMS: Set[str] = {
-    "minecraft:dirt", "minecraft:grass_block", "minecraft:stone",
-    "minecraft:cobblestone", "minecraft:oak_log", "minecraft:spruce_log",
-    "minecraft:birch_log", "minecraft:jungle_log", "minecraft:acacia_log",
-    "minecraft:dark_oak_log", "minecraft:oak_planks", "minecraft:glass",
-    "minecraft:sand", "minecraft:gravel", "minecraft:obsidian",
-    "minecraft:crying_obsidian", "minecraft:bedrock",
-    "minecraft:crafting_table", "minecraft:furnace", "minecraft:chest",
-    "minecraft:ender_chest", "minecraft:shulker_box", "minecraft:beacon",
-    "minecraft:anvil", "minecraft:enchanting_table",
-    "minecraft:brewing_stand", "minecraft:cauldron",
-    "minecraft:torch", "minecraft:soul_torch", "minecraft:redstone_torch",
-    "minecraft:lantern", "minecraft:soul_lantern",
-    "minecraft:diamond_ore", "minecraft:iron_ore", "minecraft:gold_ore",
-    "minecraft:coal_ore", "minecraft:emerald_ore", "minecraft:lapis_ore",
-    "minecraft:redstone_ore", "minecraft:copper_ore",
-    "minecraft:nether_gold_ore", "minecraft:nether_quartz_ore",
-    "minecraft:ancient_debris",
-    "minecraft:deepslate_diamond_ore", "minecraft:deepslate_iron_ore",
-    "minecraft:deepslate_gold_ore", "minecraft:deepslate_coal_ore",
-    "minecraft:deepslate_emerald_ore", "minecraft:deepslate_lapis_ore",
-    "minecraft:deepslate_redstone_ore", "minecraft:deepslate_copper_ore",
-}
 
 _ASSET_INDEX_URL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 _RESOURCE_BASE_URL = "https://resources.download.minecraft.net"
 _JAR_TEXTURE_PREFIX = "assets/minecraft/textures/"
 _REQUEST_TIMEOUT = 10
 _MAX_MEMORY_CACHE = 500
+
+_BLOCK_SUFFIXES = (
+    "_block", "_ore", "_log", "_wood", "_stem", "_planks", "_stone",
+    "_bricks", "_glass", "_wool", "_carpet", "_bed", "_door", "_fence",
+    "_wall", "_slab", "_stairs", "_pane", "_shulker_box", "_leaves",
+    "_sand", "_concrete", "_terracotta", "_glazed_terracotta",
+    "_copper", "_nylium", "_basalt", "_blackstone", "_deepslate",
+    "_concrete_powder",
+)
+_BLOCK_PREFIXES = (
+    "chest", "barrel", "composter", "lectern", "beehive", "campfire",
+    "torch", "lantern", "anvil", "cauldron", "brewing_stand",
+    "enchanting_table", "end_rod", "observer", "piston", "hopper",
+    "dispenser", "dropper", "furnace", "tnt", "note_block",
+    "jukebox", "respawn_anchor", "lodestone",
+)
+_BLOCK_EXACT = {
+    "dirt", "grass_block", "stone", "cobblestone", "glass", "sand",
+    "gravel", "obsidian", "crying_obsidian", "bedrock", "crafting_table",
+    "chest", "ender_chest", "beacon", "moss_block", "mud", "clay",
+    "snow_block", "ice", "packed_ice", "blue_ice", "sponge", "wet_sponge",
+    "melon", "pumpkin", "hay_block", "bone_block", "dried_kelp_block",
+    "slime_block", "honey_block", "mushroom_stem",
+    "smooth_stone", "sandstone", "red_sandstone", "prismarine",
+    "netherrack", "nether_bricks", "red_nether_bricks", "end_stone",
+    "purpur_block", "quartz_block", "amethyst_block", "calcite",
+    "tuff", "dripstone_block", "pointed_dripstone",
+    "sculk", "sculk_catalyst", "sculk_shrieker", "sculk_sensor",
+    "mangrove_roots", "muddy_mangrove_roots",
+    "ochre_froglight", "verdant_froglight", "pearlescent_froglight",
+    "reinforced_deepslate", "frogspawn",
+    "sea_lantern", "glowstone", "redstone_lamp",
+    "coal_block", "iron_block", "gold_block", "diamond_block",
+    "emerald_block", "lapis_block", "redstone_block", "netherite_block",
+    "copper_block", "raw_iron_block", "raw_gold_block", "raw_copper_block",
+    "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
+    "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
+    "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
+    "brown_wool", "green_wool", "red_wool", "black_wool",
+}
+
+
+def _guess_is_block(local_id: str) -> bool:
+    if local_id in _BLOCK_EXACT:
+        return True
+    for prefix in _BLOCK_PREFIXES:
+        if local_id.startswith(prefix):
+            return True
+    for suffix in _BLOCK_SUFFIXES:
+        if local_id.endswith(suffix):
+            return True
+    return False
 
 
 class TextureService:
@@ -61,10 +90,12 @@ class TextureService:
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._memory_cache: OrderedDict[str, Path] = OrderedDict()
+        self._base64_cache: OrderedDict[str, str] = OrderedDict()
         self._minecraft_jar: Optional[Path] = None
         self._asset_index: Optional[Dict[str, str]] = None
         self._asset_index_loaded = False
         self._lock = threading.Lock()
+        self._tried_paths: Dict[str, str] = {}
 
     def get_texture_path(self, item_id: str) -> Optional[Path]:
         if not item_id or ":" not in item_id:
@@ -79,7 +110,7 @@ class TextureService:
             self._put_memory_cache(item_id, cached)
             return cached
 
-        texture_res = self._item_id_to_texture_resource(item_id)
+        texture_res = self._resolve_texture_resource(item_id)
 
         data = self._try_extract_from_jar(texture_res)
         if data:
@@ -95,6 +126,50 @@ class TextureService:
 
         return None
 
+    def get_texture_base64(self, item_id: str) -> Optional[str]:
+        """获取物品纹理的 base64 data URI，可直接用于 ft.Image.src"""
+        if not item_id or ":" not in item_id:
+            return None
+
+        with self._lock:
+            if item_id in self._base64_cache:
+                self._base64_cache.move_to_end(item_id)
+                return self._base64_cache[item_id]
+
+        path = self.get_texture_path(item_id)
+        if path is None or not path.exists():
+            return None
+
+        try:
+            data = path.read_bytes()
+            if len(data) == 0:
+                return None
+            b64 = base64.b64encode(data).decode("ascii")
+            uri = f"data:image/png;base64,{b64}"
+            with self._lock:
+                self._base64_cache[item_id] = uri
+                while len(self._base64_cache) > _MAX_MEMORY_CACHE:
+                    self._base64_cache.popitem(last=False)
+            return uri
+        except Exception:
+            return None
+
+    def load_textures_async(
+        self,
+        item_ids: List[str],
+        on_loaded: Optional[callable] = None,
+    ) -> None:
+        """在后台线程中批量加载纹理，每完成一个回调 (item_id, base64_uri_or_None)"""
+        def _worker():
+            for item_id in item_ids:
+                uri = self.get_texture_base64(item_id)
+                if on_loaded:
+                    try:
+                        on_loaded(item_id, uri)
+                    except Exception:
+                        pass
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _try_memory_cache(self, item_id: str) -> Optional[Path]:
         with self._lock:
             if item_id in self._memory_cache:
@@ -106,11 +181,56 @@ class TextureService:
         return None
 
     def _try_file_cache(self, item_id: str) -> Optional[Path]:
-        texture_res = self._item_id_to_texture_resource(item_id)
+        texture_res = self._resolve_texture_resource(item_id)
         path = self._cache_dir / texture_res
         if path.exists() and path.stat().st_size > 0:
             return path
         return None
+
+    def _resolve_texture_resource(self, item_id: str) -> str:
+        if item_id in self._tried_paths:
+            return self._tried_paths[item_id]
+
+        if ":" in item_id:
+            _, local_id = item_id.split(":", 1)
+        else:
+            local_id = item_id
+
+        result = self._find_texture_resource(item_id, local_id)
+        self._tried_paths[item_id] = result
+        return result
+
+    def _find_texture_resource(self, item_id: str, local_id: str) -> str:
+        asset_keys = self._get_asset_index_keys()
+
+        if _guess_is_block(local_id):
+            block_key = f"textures/block/{local_id}.png"
+            if self._asset_index_has(asset_keys, block_key):
+                return block_key
+            item_key = f"textures/item/{local_id}.png"
+            if self._asset_index_has(asset_keys, item_key):
+                return item_key
+            return block_key
+
+        item_key = f"textures/item/{local_id}.png"
+        if self._asset_index_has(asset_keys, item_key):
+            return item_key
+        block_key = f"textures/block/{local_id}.png"
+        if self._asset_index_has(asset_keys, block_key):
+            return block_key
+        return item_key
+
+    def _get_asset_index_keys(self) -> Optional[Dict[str, str]]:
+        if not self._asset_index_loaded:
+            self._load_asset_index()
+        return self._asset_index
+
+    @staticmethod
+    def _asset_index_has(asset_keys: Optional[Dict[str, str]], res_path: str) -> bool:
+        if asset_keys is None:
+            return False
+        mc_key = f"minecraft/{res_path}"
+        return mc_key in asset_keys
 
     def _try_extract_from_jar(self, texture_res: str) -> Optional[bytes]:
         jar = self._find_or_get_jar()
@@ -121,6 +241,9 @@ class TextureService:
                 jar_path = f"{_JAR_TEXTURE_PREFIX}{texture_res.split('/', 1)[-1]}"
                 if jar_path in zf.namelist():
                     return zf.read(jar_path)
+                full_path = f"{_JAR_TEXTURE_PREFIX}{texture_res}"
+                if full_path in zf.namelist():
+                    return zf.read(full_path)
         except Exception:
             pass
         return None
@@ -151,16 +274,6 @@ class TextureService:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         return path
-
-    def _item_id_to_texture_resource(self, item_id: str) -> str:
-        if ":" in item_id:
-            _, local_id = item_id.split(":", 1)
-        else:
-            local_id = item_id
-
-        if item_id in _BLOCK_ITEMS:
-            return f"textures/block/{local_id}.png"
-        return f"textures/item/{local_id}.png"
 
     def _put_memory_cache(self, item_id: str, path: Path) -> None:
         with self._lock:
@@ -257,6 +370,8 @@ class TextureService:
     def clear_cache(self) -> None:
         with self._lock:
             self._memory_cache.clear()
+            self._base64_cache.clear()
+            self._tried_paths.clear()
         if self._cache_dir.exists():
             for f in self._cache_dir.rglob("*.png"):
                 try:

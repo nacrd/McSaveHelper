@@ -276,96 +276,92 @@ def convert_world(src_path: Path, dst_path: Path,
     Returns:
         成功返回 True，失败返回 False
     """
-    # 1. 如果源路径与目标路径不同，则复制世界结构
-    if src_path.resolve() != dst_path.resolve():
-        try:
-            import shutil
-            replace_directory_tree(src_path, dst_path, ignore=shutil.ignore_patterns('*.tmp', '*.bak', '*.old'))
-        except Exception as e:
-            raise ConversionError(f"复制世界目录失败: {e}")
-        work_path = dst_path
-    else:
-        work_path = src_path  # 原地转换
-    
-    # 2. 确定目标字节序
-    target_byteorder = "big" if target_platform == "java" else "little"
-    
-    # 3. 遍历所有 NBT 文件进行转换
-    import logging as _logging
-    _logger = _logging.getLogger(__name__)
-    nbt_extensions = {".dat", ".nbt"}
-    for root, dirs, files in os.walk(work_path):
-        for file in files:
-            suffix = os.path.splitext(file)[1]
-            if suffix in nbt_extensions:
-                file_path = Path(root) / file
-                try:
-                    # 检测源字节序并一次性加载
-                    src_byteorder = detect_endian(file_path)
-                    data = load_nbt(file_path, byteorder=src_byteorder)
-                    
-                    # 3.1 转换方块/物品 ID（如果需要跨平台）
-                    if target_platform != "java":
-                        to_bedrock = (target_platform == "bedrock")
-                        convert_block_ids_in_nbt(data, to_bedrock)
-                    
-                    # 3.2 版本降级处理
-                    if target_version is not None:
-                        VersionDowngrader.strip_data_components(data)
-                        VersionDowngrader.replace_unknown_blocks(data, target_version)
-                    
-                    # 保存修改后的 NBT，使用目标字节序
-                    save_nbt(file_path, data, byteorder=target_byteorder)
-                    
-                except Exception as e:
-                    _logger.warning(f"转换文件 {file_path} 时出错: {e}")
-    
-    # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
-    if target_platform != "java" or target_version is not None:
-        try:
-            from .scanner import scan_all_regions
-            import anvil
+    from core.performance import get_tracker
+    from core.logger import logger as _logger
+    tracker = get_tracker()
 
-            mca_files = scan_all_regions(work_path)
-            for mca_path in mca_files:
-                try:
-                    region = anvil.Region.from_file(str(mca_path))
-                    region_modified = False
-                    for x in range(32):
-                        for z in range(32):
-                            chunk = region.get_chunk(x, z)
-                            if chunk is None:
-                                continue
-                            data = chunk.data if hasattr(chunk, 'data') else chunk
-                            if not isinstance(data, nbtlib.tag.Compound):
-                                continue
+    with tracker.track("存档版本转换", {
+        "src": str(src_path), "dst": str(dst_path),
+        "platform": target_platform, "version": str(target_version),
+    }):
+        # 1. 如果源路径与目标路径不同，则复制世界结构
+        if src_path.resolve() != dst_path.resolve():
+            try:
+                import shutil
+                replace_directory_tree(src_path, dst_path, ignore=shutil.ignore_patterns('*.tmp', '*.bak', '*.old'))
+            except Exception as e:
+                raise ConversionError(f"复制世界目录失败: {e}")
+            work_path = dst_path
+        else:
+            work_path = src_path  # 原地转换
+        
+        # 2. 确定目标字节序
+        target_byteorder = "big" if target_platform == "java" else "little"
+        
+        # 3. 遍历所有 NBT 文件进行转换
+        nbt_extensions = {".dat", ".nbt"}
+        for root, dirs, files in os.walk(work_path):
+            for file in files:
+                suffix = os.path.splitext(file)[1]
+                if suffix in nbt_extensions:
+                    file_path = Path(root) / file
+                    try:
+                        src_byteorder = detect_endian(file_path)
+                        data = load_nbt(file_path, byteorder=src_byteorder)
+                        
+                        if target_platform != "java":
+                            to_bedrock = (target_platform == "bedrock")
+                            convert_block_ids_in_nbt(data, to_bedrock)
+                        
+                        if target_version is not None:
+                            VersionDowngrader.strip_data_components(data)
+                            VersionDowngrader.replace_unknown_blocks(data, target_version)
+                        
+                        save_nbt(file_path, data, byteorder=target_byteorder)
+                        tracker.increment_files(1)
+                    except Exception as e:
+                        _logger.warning(f"转换文件 {file_path} 时出错: {e}", module="Converter")
+                        tracker.increment_errors(1)
+        
+        # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
+        if target_platform != "java" or target_version is not None:
+            try:
+                from .scanner import scan_all_regions
+                import anvil
 
-                            # 跨平台 ID 转换
-                            if target_platform != "java":
-                                to_bedrock = (target_platform == "bedrock")
-                                convert_block_ids_in_nbt(data, to_bedrock)
-                                region_modified = True
+                mca_files = scan_all_regions(work_path)
+                for mca_path in mca_files:
+                    try:
+                        region = anvil.Region.from_file(str(mca_path))
+                        region_modified = False
+                        for x in range(32):
+                            for z in range(32):
+                                chunk = region.get_chunk(x, z)
+                                if chunk is None:
+                                    continue
+                                data = chunk.data if hasattr(chunk, 'data') else chunk
+                                if not isinstance(data, nbtlib.tag.Compound):
+                                    continue
 
-                            # 版本降级处理
-                            if target_version is not None:
-                                VersionDowngrader.strip_data_components(data)
-                                VersionDowngrader.replace_unknown_blocks(data, target_version)
-                                region_modified = True
+                                if target_platform != "java":
+                                    to_bedrock = (target_platform == "bedrock")
+                                    convert_block_ids_in_nbt(data, to_bedrock)
+                                    region_modified = True
 
-                    if region_modified and hasattr(region, "save"):
-                        region.save(str(mca_path))  # type: ignore[attr-defined]
-                    elif region_modified:
-                        import logging
-                        logging.getLogger(__name__).warning(
-                            "当前 anvil 库不支持写回区域文件，已跳过区域转换: %s", mca_path
-                        )
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(f"转换区域文件 {mca_path} 时出错: {e}")
-        except ImportError:
-            import logging
-            logging.getLogger(__name__).warning("anvil-parser 未安装，跳过区域文件转换")
-    
+                                if target_version is not None:
+                                    VersionDowngrader.strip_data_components(data)
+                                    VersionDowngrader.replace_unknown_blocks(data, target_version)
+                                    region_modified = True
+
+                        if region_modified and hasattr(region, "save"):
+                            region.save(str(mca_path))
+                            tracker.increment_files(1)
+                    except Exception as e:
+                        _logger.warning(f"转换区域文件 {mca_path} 时出错: {e}", module="Converter")
+                        tracker.increment_errors(1)
+            except ImportError:
+                _logger.warning("anvil-parser 未安装，跳过区域文件转换", module="Converter")
+        
     return True
 
 

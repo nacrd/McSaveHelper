@@ -82,49 +82,59 @@ class BatchProcessor:
         if log_callback:
             log_callback(f"开始批量处理 {total_tasks} 个存档...", "INFO")
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 提交所有任务
-            future_to_world = {}
-            for i, (world_path, world_name) in enumerate(zip(world_paths, world_names)):
-                future = executor.submit(
-                    self._process_single_world,
-                    world_path, dest_dir, world_name, mode, offline_mode, clean_mode,
-                    pure_clean_mode, manual_names, log_callback, i, total_tasks
-                )
-                future_to_world[future] = (world_path.name, world_name, i)
-            
-            # 处理完成的任务
-            completed_count = 0
-            for future in as_completed(future_to_world):
-                world_path_name, world_name, task_index = future_to_world[future]
+        from core.performance import get_tracker
+        tracker = get_tracker()
+        with tracker.track("批量处理", {"count": str(total_tasks), "mode": mode}):
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                # 提交所有任务
+                future_to_world = {}
+                for i, (world_path, world_name) in enumerate(zip(world_paths, world_names)):
+                    future = executor.submit(
+                        self._process_single_world,
+                        world_path, dest_dir, world_name, mode, offline_mode, clean_mode,
+                        pure_clean_mode, manual_names, log_callback, i, total_tasks
+                    )
+                    future_to_world[future] = (world_path.name, world_name, i)
                 
-                try:
-                    result = future.result()
-                    with self._lock:
-                        self.results[world_path_name] = result
-                        completed_count += 1
+                # 处理完成的任务
+                completed_count = 0
+                for future in as_completed(future_to_world):
+                    world_path_name, world_name, task_index = future_to_world[future]
                     
-                    if log_callback:
-                        status = "成功" if result["success"] else "失败"
-                        log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - {status}", 
-                                   "SUCCESS" if result["success"] else "ERROR")
-                    
-                    if progress_callback:
+                    try:
+                        result = future.result()
                         with self._lock:
-                            progress = completed_count / total_tasks
-                        progress_callback(progress)
+                            self.results[world_path_name] = result
+                            completed_count += 1
                         
-                except Exception as e:
-                    error_result = {
-                        "success": False,
-                        "error": str(e),
-                        "world_name": world_name
-                    }
-                    with self._lock:
-                        self.results[world_path_name] = error_result
-                    
-                    if log_callback:
-                        log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - 失败: {e}", "ERROR")
+                        if log_callback:
+                            status = "成功" if result["success"] else "失败"
+                            log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - {status}", 
+                                       "SUCCESS" if result["success"] else "ERROR")
+                        
+                        if progress_callback:
+                            with self._lock:
+                                progress = completed_count / total_tasks
+                            progress_callback(progress)
+                            
+                    except Exception as e:
+                        error_result = {
+                            "success": False,
+                            "error": str(e),
+                            "world_name": world_name
+                        }
+                        with self._lock:
+                            self.results[world_path_name] = error_result
+                        
+                        if log_callback:
+                            log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - 失败: {e}", "ERROR")
+            
+            tracker.increment_files(total_tasks)
+            success = sum(1 for r in self.results.values() if r["success"])
+            tracker.add_metadata("success", success)
+            tracker.add_metadata("failed", total_tasks - success)
+            if success < total_tasks:
+                tracker.increment_errors(total_tasks - success)
         
         with self._lock:
             self.is_running = False

@@ -97,8 +97,11 @@ class MapExportService:
             if not world_path.exists():
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
-            log(f"开始导出地图: {world_path}", "INFO")
-            progress(0.05, "扫描区块文件...")
+            from core.performance import get_tracker
+            tracker = get_tracker()
+            with tracker.track("地图导出", {"world": world_path.name, "type": map_type}):
+                log(f"开始导出地图: {world_path}", "INFO")
+                progress(0.05, "扫描区块文件...")
 
             # 只扫描主世界的区块文件（避免不同维度区块重叠）
             region_dir = world_path / "region"
@@ -146,6 +149,7 @@ class MapExportService:
             results["output_path"] = str(output_path)
             results["dimensions"] = image_size
             results["chunks_processed"] = len(region_files)
+            tracker.increment_files(len(region_files))
 
             progress(1.0, "导出完成")
 

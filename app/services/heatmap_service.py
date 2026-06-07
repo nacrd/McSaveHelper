@@ -1,5 +1,5 @@
 """
-存档热力图后台扫描服务 (HeatmapService)
+存档区域地图后台扫描服务 (HeatmapService)
 
 提供异步、非阻塞的区域文件扫描能力，
 支持进度追踪和数据查询。
@@ -7,6 +7,7 @@
 import asyncio
 import re
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ class ScanProgress:
 
 class HeatmapService:
     """
-    存档热力图后台扫描服务（单例模式）
+    存档区域地图后台扫描服务（单例模式）
     
     职责：
     - 异步扫描 Minecraft region 目录
@@ -44,6 +45,7 @@ class HeatmapService:
     def _init(self) -> None:
         """初始化内部状态"""
         self._mca_data: Dict[Tuple[int, int], int] = {}
+        self._region_meta: Dict[Tuple[int, int], Dict[str, Any]] = {}
         self._is_scanning: bool = False
         self._scan_progress: float = 0.0
         self._scan_task: Optional[asyncio.Task] = None
@@ -80,6 +82,12 @@ class HeatmapService:
             Dict[Tuple[int, int], int]: 坐标到文件大小的映射
         """
         return self._mca_data.copy()
+
+    def get_region_meta(self, coord: Tuple[int, int]) -> Dict[str, Any]:
+        return dict(self._region_meta.get(coord, {}))
+
+    def get_all_region_meta(self) -> Dict[Tuple[int, int], Dict[str, Any]]:
+        return {coord: dict(meta) for coord, meta in self._region_meta.items()}
     
     def get_data_snapshot(self) -> Dict[Tuple[int, int], int]:
         """
@@ -90,6 +98,7 @@ class HeatmapService:
     def clear_data(self) -> None:
         """清空所有缓存数据"""
         self._mca_data.clear()
+        self._region_meta.clear()
         self._scanned_count = 0
         self._total_count = 0
         self._scan_progress = 0.0
@@ -130,6 +139,7 @@ class HeatmapService:
                     if coord is not None:
                         size = mca_file.stat().st_size
                         self._mca_data[coord] = size
+                        self._region_meta[coord] = self._scan_region_meta(mca_file)
 
                     self._scanned_count += 1
 
@@ -166,6 +176,161 @@ class HeatmapService:
             return (x, z)
         
         return None
+
+    def _scan_region_meta(self, region_file: Path) -> Dict[str, Any]:
+        biomes: Counter[str] = Counter()
+        structures: Counter[str] = Counter()
+        structure_positions: list[Dict[str, Any]] = []
+        chunk_count = 0
+        try:
+            import anvil
+            region = anvil.Region.from_file(str(region_file))
+            sample_points = [(0, 0), (0, 16), (16, 0), (16, 16), (8, 8), (8, 24), (24, 8), (24, 24)]
+            for cx, cz in sample_points:
+                try:
+                    chunk = region.get_chunk(cx, cz)
+                    if chunk is None or not hasattr(chunk, "data"):
+                        continue
+                    chunk_count += 1
+                    data = chunk.data
+                    self._collect_biomes(data, biomes)
+                    self._collect_structures(data, structures, structure_positions)
+                except Exception:
+                    continue
+            if not biomes and not structures:
+                for cx in range(0, 32, 4):
+                    for cz in range(0, 32, 4):
+                        if chunk_count >= 16:
+                            break
+                        try:
+                            chunk = region.get_chunk(cx, cz)
+                            if chunk is None or not hasattr(chunk, "data"):
+                                continue
+                            chunk_count += 1
+                            data = chunk.data
+                            self._collect_biomes(data, biomes)
+                            self._collect_structures(data, structures, structure_positions)
+                        except Exception:
+                            continue
+                    if chunk_count >= 16:
+                        break
+        except Exception:
+            pass
+
+        dominant_biome = biomes.most_common(1)[0][0] if biomes else "unknown"
+        dominant_structure = structures.most_common(1)[0][0] if structures else "none"
+        return {
+            "chunk_count": chunk_count,
+            "dominant_biome": dominant_biome,
+            "biomes": dict(biomes.most_common(8)),
+            "structure_count": sum(structures.values()),
+            "dominant_structure": dominant_structure,
+            "structures": dict(structures.most_common(8)),
+            "structure_positions": structure_positions[:12],
+        }
+
+    def _collect_biomes(self, data: Any, counter: Counter[str]) -> None:
+        root = self._chunk_root(data)
+        sections = self._first(root, "sections", "Sections")
+        if isinstance(sections, list):
+            for section in sections:
+                biomes = self._first(section, "biomes", "Biomes")
+                palette = self._first(biomes, "palette", "Palette") if isinstance(biomes, dict) else None
+                if isinstance(palette, list):
+                    for biome in palette[:16]:
+                        name = self._tag_text(biome)
+                        if name:
+                            counter[name] += 1
+        legacy_biomes = self._first(root, "Biomes", "biomes")
+        if isinstance(legacy_biomes, list):
+            for biome in legacy_biomes[:64]:
+                name = self._tag_text(biome)
+                if name:
+                    counter[name] += 1
+
+    def _collect_structures(self, data: Any, counter: Counter[str], positions: list[Dict[str, Any]]) -> None:
+        root = self._chunk_root(data)
+        structures = self._first(root, "structures", "Structures")
+        starts = self._first(structures, "starts", "Starts") if isinstance(structures, dict) else None
+        if isinstance(starts, dict):
+            for name, value in starts.items():
+                if str(name).lower() not in {"references", "starts"} and value is not None:
+                    counter[str(name)] += 1
+                    pos = self._extract_structure_position(str(name), value)
+                    if pos:
+                        positions.append(pos)
+        refs = self._first(structures, "References", "references") if isinstance(structures, dict) else None
+        if isinstance(refs, dict):
+            for name, value in refs.items():
+                try:
+                    if len(value) > 0:
+                        counter[str(name)] += 1
+                except Exception:
+                    counter[str(name)] += 1
+
+    def _extract_structure_position(self, name: str, value: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(value, dict):
+            return None
+        bb = self._first(value, "BB", "bb", "bounding_box")
+        pos = self._position_from_bb(name, bb)
+        if pos:
+            return pos
+        children = self._first(value, "Children", "children")
+        if isinstance(children, list):
+            for child in children:
+                if not isinstance(child, dict):
+                    continue
+                pos = self._position_from_bb(name, self._first(child, "BB", "bb", "bounding_box"))
+                if pos:
+                    return pos
+        chunk_x = self._first(value, "ChunkX", "chunkX", "chunk_x")
+        chunk_z = self._first(value, "ChunkZ", "chunkZ", "chunk_z")
+        if chunk_x is not None and chunk_z is not None:
+            try:
+                bx = int(self._tag_value(chunk_x)) * 16
+                bz = int(self._tag_value(chunk_z)) * 16
+                return {"name": name, "block_x": bx, "block_z": bz, "source": "chunk"}
+            except Exception:
+                return None
+        return None
+
+    def _position_from_bb(self, name: str, bb: Any) -> Optional[Dict[str, Any]]:
+        raw = self._tag_value(bb)
+        if not isinstance(raw, list) or len(raw) < 6:
+            return None
+        try:
+            return {
+                "name": name,
+                "block_x": int(self._tag_value(raw[0])),
+                "block_y": int(self._tag_value(raw[1])),
+                "block_z": int(self._tag_value(raw[2])),
+                "source": "bb",
+            }
+        except Exception:
+            return None
+
+    def _chunk_root(self, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("Level"), dict):
+            return data["Level"]
+        return data
+
+    def _first(self, data: Any, *keys: str) -> Any:
+        if not isinstance(data, dict):
+            return None
+        for key in keys:
+            value = data.get(key)
+            if value is not None:
+                return value
+        return None
+
+    def _tag_text(self, value: Any) -> str:
+        raw = getattr(value, "value", value)
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8", errors="ignore")
+        return str(raw) if raw is not None else ""
+
+    def _tag_value(self, value: Any) -> Any:
+        return getattr(value, "value", value)
     
     async def cancel_scan(self) -> None:
         """取消当前扫描任务"""
@@ -251,7 +416,7 @@ _heatmap_service_lock = threading.Lock()
 
 
 def get_heatmap_service() -> HeatmapService:
-    """获取热力图服务单例（线程安全）"""
+    """获取区域地图服务单例（线程安全）"""
     global _heatmap_service_instance
     with _heatmap_service_lock:
         if _heatmap_service_instance is None:

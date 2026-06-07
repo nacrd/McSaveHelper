@@ -120,12 +120,13 @@ class LogRecord:
         """
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
-    def format_text(self, include_timestamp: bool = True, include_module: bool = True) -> str:
+    def format_text(self, include_timestamp: bool = True, include_module: bool = True, include_level: bool = True) -> str:
         """格式化为文本
 
         Args:
             include_timestamp: 是否包含时间戳
             include_module: 是否包含模块名
+            include_level: 是否包含日志级别
 
         Returns:
             格式化后的文本字符串
@@ -135,7 +136,8 @@ class LogRecord:
         if include_timestamp:
             parts.append(f"[{self.timestamp.strftime('%H:%M:%S')}]")
 
-        parts.append(f"[{self.level.name}]")
+        if include_level:
+            parts.append(f"[{self.level.name}]")
 
         if include_module and self.module:
             parts.append(f"[{self.module}]")
@@ -228,7 +230,7 @@ class ConsoleHandler(LogHandler):
         timestamp = record.timestamp.strftime("%H:%M:%S")
         module_str = f" [{record.module}]" if record.module else ""
 
-        message = record.format_text(include_timestamp=False, include_module=False)
+        message = record.format_text(include_timestamp=False, include_module=False, include_level=False)
 
         output = f"{color}[{timestamp}] [{level_name}]{module_str} {message}{self._reset}"
 
