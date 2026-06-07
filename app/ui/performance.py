@@ -414,8 +414,12 @@ class ResourceUsageMonitor:
     
     def start(self) -> None:
         """开始监控"""
-        if self._running or self._process is None:
+        if self._process is None:
             return
+        
+        # 如果已经在运行，先停止
+        if self._running:
+            self.stop()
         
         self._running = True
         self._last_print_time = time.time()
@@ -427,6 +431,7 @@ class ResourceUsageMonitor:
         self._running = False
         if self._thread:
             self._thread.join(timeout=2.0)
+            self._thread = None
     
     def set_print_interval(self, seconds: float) -> None:
         """设置定时打印间隔（秒）"""

@@ -278,5 +278,197 @@ class TestMigrationControllerPublicMethods:
             f"检测到直接访问私有属性: {private_attr_accesses}"
 
 
+class TestOmniNbtEditing:
+    def test_nbt_tree_parses_paths_and_coerces_values(self):
+        from app.ui.views.explorer.nbt_tree import NBTTreeView
+        from nbtlib import Int, String
+        from nbtlib.tag import IntArray
+
+        assert NBTTreeView._parse_path("Inventory[0].Count") == ["Inventory", 0, "Count"]
+        assert NBTTreeView._coerce_value("64", Int(1), "Int") == Int(64)
+        assert NBTTreeView._coerce_value("diamond", String("stone"), "String") == String("diamond")
+        assert list(NBTTreeView._coerce_value("[1, 2, 3]", IntArray([0]), "IntArray")) == [1, 2, 3]
+
+    def test_world_session_commits_staged_player_nbt_list_path(self, tmp_path: Path):
+        import nbtlib
+        from nbtlib import Compound, File, Int, String
+        from nbtlib.tag import List
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        playerdata = world / "playerdata"
+        playerdata.mkdir(parents=True)
+        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1), "Name": String("test")})})}))
+        level.save(world / "level.dat")
+
+        player_uuid = "11111111-1111-1111-1111-111111111111"
+        player = File(Compound({
+            "Inventory": List[Compound]([Compound({"Count": Int(1), "id": String("minecraft:stone")})]),
+        }))
+        player.save(playerdata / f"{player_uuid}.dat")
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_nbt(player_uuid, ["Inventory", 0, "Count"], Int(64))
+
+        assert session.get_queue_size() == 1
+        assert session.commit(backup=True)
+        assert session.get_queue_size() == 0
+        assert (tmp_path / "world.backup").exists()
+
+        updated = nbtlib.load(playerdata / f"{player_uuid}.dat")
+        assert updated["Inventory"][0]["Count"] == Int(64)
+
+    def test_world_session_commits_level_dat_relative_path(self, tmp_path: Path):
+        import nbtlib
+        from nbtlib import Compound, File, Int, String
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        world.mkdir()
+        level = File(Compound({"Data": Compound({"LevelName": String("old"), "Version": Compound({"Id": Int(1)})})}))
+        level.save(world / "level.dat")
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_nbt(Path("level.dat"), ["Data", "LevelName"], String("new"))
+
+        assert session.get_queue_size() == 1
+        assert session.commit(backup=True)
+
+        updated = nbtlib.load(world / "level.dat")
+        assert updated["Data"]["LevelName"] == String("new")
+
+    def test_world_session_commits_data_dat_string_path(self, tmp_path: Path):
+        import nbtlib
+        from nbtlib import Compound, File, Int, String
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        data_dir = world / "data"
+        data_dir.mkdir(parents=True)
+        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level.save(world / "level.dat")
+        raids = File(Compound({"Data": Compound({"Name": String("old")})}))
+        raids.save(data_dir / "raids.dat")
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_nbt("data/raids.dat", ["Data", "Name"], String("new"))
+
+        assert session.get_queue_size() == 1
+        assert session.commit(backup=True)
+
+        updated = nbtlib.load(data_dir / "raids.dat")
+        assert updated["Data"]["Name"] == String("new")
+
+    def test_world_session_rejects_nbt_target_outside_world(self, tmp_path: Path):
+        from nbtlib import Compound, File, Int, String
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        world.mkdir()
+        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level.save(world / "level.dat")
+        outside = tmp_path / "outside.dat"
+        File(Compound({"Data": Compound({"Name": String("old")})})).save(outside)
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_nbt(outside, ["Data", "Name"], String("new"))
+
+        assert session.get_queue_size() == 1
+        assert not session.commit(backup=False)
+
+    def test_world_session_commits_json_relative_path(self, tmp_path: Path):
+        import json
+        from nbtlib import Compound, File, Int
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        stats_dir = world / "stats"
+        stats_dir.mkdir(parents=True)
+        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level.save(world / "level.dat")
+        stats_path = stats_dir / "player.json"
+        stats_path.write_text(json.dumps({"stats": {"minecraft:mined": {"minecraft:stone": 1}}}), encoding="utf-8")
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_json("stats/player.json", ["stats", "minecraft:mined", "minecraft:stone"], 8)
+
+        assert session.get_queue_size() == 1
+        assert session.commit(backup=True)
+
+        updated = json.loads(stats_path.read_text(encoding="utf-8"))
+        assert updated["stats"]["minecraft:mined"]["minecraft:stone"] == 8
+
+    def test_nbt_tree_coerces_json_values(self):
+        from app.ui.views.explorer.nbt_tree import NBTTreeView
+
+        assert NBTTreeView._coerce_value("42", 1, "int") == 42
+        assert NBTTreeView._coerce_value("3.5", 1.0, "float") == 3.5
+        assert NBTTreeView._coerce_value("false", True, "bool") is False
+        assert NBTTreeView._coerce_value("null", None, "NoneType") is None
+
+    def test_nbt_tree_can_load_readonly_data(self):
+        from app.ui.views.explorer.nbt_tree import NBTTreeView
+
+        tree = NBTTreeView()
+        tree.load_nbt({"Entities": []}, editable=False)
+
+        assert tree.get_modified_data() == {"Entities": []}
+        assert tree._editable is False
+
+    def test_explorer_extracts_chunk_entities_and_block_entities(self):
+        from app.ui.views.explorer.explorer_view import ExplorerView
+
+        chunk_data = {
+            "Entities": [
+                {"id": "minecraft:zombie", "Pos": [1.0, 64.0, 2.0]},
+            ],
+            "block_entities": [
+                {"id": "minecraft:chest", "x": 3, "y": 65, "z": 4},
+            ],
+        }
+
+        objects = ExplorerView._extract_chunk_objects(chunk_data)
+
+        assert len(objects) == 2
+        assert objects[0]["title"] == "实体 #1: minecraft:zombie"
+        assert objects[0]["subtitle"] == "(1.0, 64.0, 2.0)"
+        assert objects[1]["title"] == "方块实体 #1: minecraft:chest"
+        assert objects[1]["subtitle"] == "(3, 65, 4)"
+
+    def test_explorer_converts_world_coords_to_region_and_local_chunk(self):
+        from app.ui.views.explorer.explorer_view import ExplorerView
+
+        assert ExplorerView._world_coords_to_region_chunk(0, 0) == (0, 0, 0, 0)
+        assert ExplorerView._world_coords_to_region_chunk(511, 511) == (0, 0, 31, 31)
+        assert ExplorerView._world_coords_to_region_chunk(512, 512) == (1, 1, 0, 0)
+        assert ExplorerView._world_coords_to_region_chunk(-1, -1) == (-1, -1, 31, 31)
+        assert ExplorerView._world_coords_to_region_chunk(-512, -512) == (-1, -1, 0, 0)
+
+    def test_explorer_formats_change_summary(self):
+        from app.ui.views.explorer.explorer_view import ExplorerView
+
+        summary = ExplorerView._format_change_summary(0, {
+            "target_label": "玩家 NBT: test",
+            "format": "json",
+            "display_path": "stats.minecraft:mined.minecraft:stone",
+            "old_value": 1,
+            "new_value": 8,
+        })
+
+        assert "#1 [JSON] 玩家 NBT: test" in summary
+        assert "stats.minecraft:mined.minecraft:stone" in summary
+        assert "- 1" in summary
+        assert "+ 8" in summary
+
+    def test_explorer_coerces_player_edit_values_like_nbt_tags(self):
+        from app.ui.views.explorer.explorer_view import ExplorerView
+        from nbtlib import Float, Int
+
+        assert ExplorerView._coerce_like_tag("20", Float(1.0)) == Float(20.0)
+        assert ExplorerView._coerce_like_tag("Float(60.0)", Float(1.0)) == Float(60.0)
+        assert ExplorerView._coerce_like_tag("12.0", Int(1)) == Int(12)
+        assert ExplorerView._tag_display_value(Float(60.0)) == "60.0"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
