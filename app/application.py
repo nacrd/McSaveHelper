@@ -27,12 +27,8 @@ from app.controllers.migration_controller import MigrationController
 
 from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.sidebar import Sidebar
-from app.ui.components.buttons import btn_primary, btn_ghost, btn_success, btn_danger
-from app.ui.components.fields import text_field, checkbox, label
-from app.ui.components.cards import card, section_title
-from app.ui.components.log_panel import LogPanel  # kept for backwards compat if needed
+from app.ui.components.buttons import btn_primary
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
-from app.ui.components.uuid_table import UUIDMappingTable
 
 # GUI 优化模块
 from app.ui.keyboard_shortcuts import (
@@ -40,8 +36,8 @@ from app.ui.keyboard_shortcuts import (
     register_default_shortcuts,
     ModifierKey
 )
-from app.ui.performance import perf_monitor, resource_monitor, Timer
-from app.ui.feedback import feedback_collector, ErrorReportDialog
+from app.ui.performance import perf_monitor, resource_monitor, Timer, health_monitor, AlertLevel
+from app.ui.feedback import ErrorReportDialog
 from app.ui.notifications import NotificationManager
 from app.ui.accessibility import validate_theme_accessibility
 
@@ -120,12 +116,11 @@ class Application:
             ),
             visible=False,  # 默认隐藏
         )
-        self._start_btn = btn_primary(
-            self._t("top_bar.start_conversion", "开始转换"),
-            on_click=lambda e: self.start(),
-            width=140,
-            height=40,
+        self._top_actions = ft.Row(
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
+        self._top_actions.visible = False
 
         # ─── 视图容器 ───────────────────────────
         self.views: Dict[str, ft.Control] = {}
@@ -153,9 +148,15 @@ class Application:
             # 1. 初始化通知管理器
             self.notification_manager = NotificationManager(self.page)
             
-            # 2. 启用性能监控（开发模式）
-            perf_monitor.enable()
-            resource_monitor.start()
+            # 2. 根据配置启用性能监控
+            if self.config.ui_settings.get("enable_performance_monitor", False):
+                perf_monitor.enable()
+                resource_monitor.start()
+                interval = float(self.config.ui_settings.get("performance_print_interval", 60))
+                resource_monitor.set_print_interval(max(5.0, interval))
+                # 配置健康监控告警回调
+                health_monitor.set_alert_callback(self._on_health_alert)
+                self._start_heartbeat()
             
             # 3. 注册键盘快捷键
             register_default_shortcuts(
@@ -249,6 +250,33 @@ class Application:
             feedback_dialog.show()
         except Exception as ex:
             logger.error(f"显示反馈对话框失败: {ex}", module="App")
+
+    # ─── 健康监控 ────────────────────────────────
+
+    def _on_health_alert(self, alert) -> None:
+        """健康告警回调 — 通过通知系统提示用户"""
+        if not self.notification_manager:
+            return
+        try:
+            if alert.level == AlertLevel.CRITICAL:
+                self.page.run_task(lambda: self.notification_manager.show_error(alert.message, duration_ms=8000))
+            else:
+                self.page.run_task(lambda: self.notification_manager.show_warning(alert.message, duration_ms=5000))
+        except Exception:
+            pass
+
+    def _start_heartbeat(self) -> None:
+        """启动 UI 心跳线程，用于卡死检测"""
+        import threading as _threading
+
+        def _beat_loop():
+            while getattr(self, '_heartbeat_active', False):
+                health_monitor.heartbeat()
+                _threading.Event().wait(3.0)
+
+        self._heartbeat_active = True
+        t = _threading.Thread(target=_beat_loop, daemon=True)
+        t.start()
 
     # ════════════════════════════════════════════
     #  初始化
@@ -357,13 +385,7 @@ class Application:
             width = self.page.window.width
             height = self.page.window.height
             
-            if hasattr(self, '_sidebar'):
-                if width < 1000:
-                    self._sidebar.set_width(180)
-                elif width < 1300:
-                    self._sidebar.set_width(210)
-                else:
-                    self._sidebar.set_width(230)
+            self._apply_responsive_layout(width, height)
             
             self.page.update()
             
@@ -373,6 +395,33 @@ class Application:
             )
         except Exception as ex:
             logger.error(f"窗口大小变化处理失败: {ex}", module="App")
+
+    def _apply_responsive_layout(self, width: float, height: float) -> None:
+        compact = width < 980
+        roomy = width >= 1300
+        if hasattr(self, '_sidebar'):
+            self._sidebar.set_width(170 if compact else 230 if roomy else 205)
+        if hasattr(self, '_main_row'):
+            self._main_row.spacing = 6 if compact else 12
+        if hasattr(self, '_shell'):
+            shell_pad = 6 if compact else 12
+            shell_margin = 4 if compact else 12
+            self._shell.padding = shell_pad
+            self._shell.margin = ft.Margin(left=shell_margin, right=shell_margin, top=0, bottom=shell_margin)
+        if hasattr(self, '_scrollable_content'):
+            self._scrollable_content.padding = 6 if compact else 14
+        if hasattr(self, '_content'):
+            self._content.padding = 8 if compact else 18
+        if hasattr(self, '_top_actions'):
+            self._top_actions.spacing = 6 if compact else 8
+            for btn in self._top_actions.controls:
+                if hasattr(btn, 'height'):
+                    btn.height = 34 if compact else 38
+                if hasattr(btn, 'width') and compact:
+                    btn.width = min(getattr(btn, 'width', 120) or 120, 104)
+        current_view = self.views.get(self._sidebar.selected_id) if hasattr(self, '_sidebar') else None
+        if current_view and hasattr(current_view, 'set_compact_mode'):
+            current_view.set_compact_mode(compact)
 
     @staticmethod
     def _resolve_icon_path() -> Optional[str]:
@@ -418,7 +467,6 @@ class Application:
             {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": "📦"},
             {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": "🔧"},
             {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": "🗺"},
-            {"id": "entity_block_search", "label": self._t("sidebar.entity_block_search", "实体/方块搜索"), "icon": "🔍"},
             {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖"},
             {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
             {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "📋"},
@@ -477,15 +525,15 @@ class Application:
             expand=True,
         )
 
-        row = ft.Row(
+        self._main_row = ft.Row(
             [self._sidebar, right_panel],
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.START,
             expand=True,
         )
 
-        shell = ft.Container(
-            content=row,
+        self._shell = ft.Container(
+            content=self._main_row,
             padding=12,
             margin=ft.Margin(left=12, right=12, top=0, bottom=12),
             bgcolor=THEME.bg_primary,
@@ -516,7 +564,7 @@ class Application:
         )
 
         app_frame = ft.Column(
-            [self._build_window_title_bar(), shell, bottom_bar],
+            [self._build_window_title_bar(), self._shell, bottom_bar],
             spacing=0,
             expand=True,
         )
@@ -563,9 +611,25 @@ class Application:
         self._current_save_path = context.display_path
         self._sidebar.set_current_save_name(context.name, context.display_path)
         self._remember_recent_save(context)
-        self._notify_current_view_save_selected(context.display_path)
+        self._activate_explorer_with_current_save(context.display_path)
         if hasattr(self, "notification_manager") and self.notification_manager:
             self.notification_manager.show_success(f"当前存档已设置为 {context.name}，相关功能将自动使用该存档")
+
+    def _activate_explorer_with_current_save(self, path: str) -> None:
+        try:
+            if "explorer" not in self.views:
+                self.views["explorer"] = self._create_view("explorer")
+            explorer_view = self.views["explorer"]
+            if hasattr(explorer_view, "on_save_selected"):
+                explorer_view.on_save_selected(path)
+            if self._sidebar.selected_id != "explorer":
+                self._sidebar.select_tab("explorer")
+            else:
+                self._content.content = explorer_view
+                self._update_top_action("explorer", explorer_view)
+                self.page.update()
+        except Exception as ex:
+            self.log(f"激活存档浏览器失败: {ex}", "ERROR")
 
     def _load_recent_saves(self) -> List[Dict[str, str]]:
         try:
@@ -737,7 +801,7 @@ class Application:
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 ft.Row(
-                                    [self._start_btn],
+                                    [self._top_actions],
                                     spacing=15,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
@@ -770,6 +834,7 @@ class Application:
                 self.views[view_id] = self._create_view(view_id)
             current_view = self.views[view_id]
             self._content.content = current_view
+            self._update_top_action(view_id, current_view)
             if self._current_save_path and hasattr(current_view, 'on_save_selected'):
                 try:
                     current_view.on_save_selected(self._current_save_path)
@@ -780,6 +845,35 @@ class Application:
             traceback.print_exc()
             self.log(f"加载视图 '{view_id}' 失败: {e}", "ERROR")
             self._handle_view_error(view_id, e)
+
+    def _update_top_action(self, view_id: str, current_view: ft.Control) -> None:
+        actions = self._get_top_actions(view_id, current_view)
+        self._top_actions.controls.clear()
+        for text, handler in actions:
+            width = max(86, min(140, len(text) * 14 + 28))
+            self._top_actions.controls.append(
+                btn_primary(text, on_click=handler, width=width, height=38)
+            )
+        self._top_actions.visible = bool(actions)
+
+    def _get_top_actions(self, view_id: str, current_view: ft.Control) -> List[tuple[str, Callable[[ft.ControlEvent], None]]]:
+        if view_id == "explorer":
+            return [
+                ("开始统计", lambda e: current_view._analyze_world_stats(e)),
+                ("开始搜索", lambda e: current_view._start_entity_block_search(e)),
+                ("刷新区域图", lambda e: current_view._refresh_heatmap()),
+                ("导出 NBT", lambda e: current_view._export_nbt_json(e)),
+            ]
+        action_map: Dict[str, tuple[str, Callable[[ft.ControlEvent], None]]] = {
+            "migrator": ("开始转换", lambda e: self.start()),
+            "save_repair": ("检测存档", lambda e: current_view._start_detect(e)),
+            "map_export": ("开始导出", lambda e: current_view._start_export(e)),
+            "compare": ("开始对比", lambda e: current_view._compare(e)),
+            "mappings": ("导入语言文件", lambda e: current_view._import_lang(e)),
+            "server_properties": ("读取配置", lambda e: current_view._load(e)),
+        }
+        action = action_map.get(view_id)
+        return [action] if action else []
 
     def _handle_view_error(self, view_id: str, error: Exception) -> None:
         """处理视图加载错误
@@ -831,14 +925,12 @@ class Application:
         from app.ui.views.server_properties import ServerPropertiesView
         from app.ui.views.save_repair import SaveRepairView
         from app.ui.views.map_export import MapExportView
-        from app.ui.views.entity_block_search import EntityBlockSearchView
 
         view_map = {
             "migrator": MigratorView,
             "explorer": ExplorerView,
             "save_repair": SaveRepairView,
             "map_export": MapExportView,
-            "entity_block_search": EntityBlockSearchView,
             "compare": CompareView,
             "server_properties": ServerPropertiesView,
             "mappings": MappingsView,

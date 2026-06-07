@@ -9,7 +9,6 @@ import flet as ft
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
 from app.ui.components.fields import text_field
-from app.models.mapping import PlayerMapping
 from app.ui.utils import safe_update as _safe_update
 
 

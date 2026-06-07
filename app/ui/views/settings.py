@@ -3,7 +3,7 @@ import flet as ft
 from typing import TYPE_CHECKING
 
 from app.ui.theme import THEME
-from app.ui.components.buttons import btn_primary, btn_ghost, btn_success
+from app.ui.components.buttons import btn_ghost
 from app.ui.components.fields import text_field, checkbox, label
 from app.ui.components.cards import card, section_title
 
@@ -42,7 +42,7 @@ class SettingsView(ft.Column):
         self._version_var = checkbox(
             self._t("settings.general.version_detection", "启用版本自动检测"),
             value=cfg.version_detection,
-            on_change=lambda e: setattr(self.app.config.migration, 'version_detection', e.control.value),
+            on_change=lambda e: self._on_version_detection_change(e.control.value),
         )
         s.controls.append(ft.Container(content=self._version_var,
                                        padding=ft.Padding(left=20, right=20, top=10)))
@@ -73,7 +73,7 @@ class SettingsView(ft.Column):
             value=cfg.theme,
             width=120, border_color=THEME.border_standard, text_size=13,
         )
-        self._theme_dropdown.on_select = lambda e: self._on_theme_change(e.control.value)
+        self._theme_dropdown.on_change = lambda e: self._on_theme_change(e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
@@ -87,7 +87,7 @@ class SettingsView(ft.Column):
             value=cfg.language,
             width=120, border_color=THEME.border_standard, text_size=13,
         )
-        self._lang_dropdown.on_select = lambda e: self._on_language_change(e.control.value)
+        self._lang_dropdown.on_change = lambda e: self._on_language_change(e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.language", "语言")),
@@ -99,6 +99,7 @@ class SettingsView(ft.Column):
         self._auto_clear_var = checkbox(
             self._t("settings.ui.auto_clear_log", "自动清除旧日志"),
             value=cfg.ui_settings.get("auto_clear_log", False),
+            on_change=lambda e: self._on_auto_clear_change(e.control.value),
         )
         s.controls.append(ft.Container(content=self._auto_clear_var,
                                        padding=ft.Padding(left=20, right=20, bottom=10)))
@@ -106,9 +107,31 @@ class SettingsView(ft.Column):
         self._show_log_panel_var = checkbox(
             self._t("settings.ui.show_log_panel", "显示悬浮日志面板"),
             value=cfg.ui_settings.get("show_log_panel", True),
+            on_change=lambda e: self._on_show_log_panel_change(e.control.value),
         )
         s.controls.append(ft.Container(content=self._show_log_panel_var,
-                                       padding=ft.Padding(left=20, right=20, bottom=20)))
+                                       padding=ft.Padding(left=20, right=20, bottom=10)))
+
+        self._perf_monitor_var = checkbox(
+            self._t("settings.ui.enable_performance_monitor", "启用性能监控"),
+            value=cfg.ui_settings.get("enable_performance_monitor", False),
+            on_change=lambda e: self._on_perf_monitor_change(e.control.value),
+        )
+        s.controls.append(ft.Container(content=self._perf_monitor_var,
+                                       padding=ft.Padding(left=20, right=20, bottom=10)))
+
+        self._perf_print_interval_field = text_field(
+            value=str(cfg.ui_settings.get("performance_print_interval", 60)),
+            width=100, expand=False,
+            on_change=lambda e: self._on_perf_interval_change(e),
+        )
+        s.controls.append(ft.Container(
+            content=ft.Column([
+                label(self._t("settings.ui.performance_print_interval", "性能日志打印间隔 (秒)")),
+                self._perf_print_interval_field,
+            ], spacing=4),
+            padding=ft.Padding(left=20, right=20, bottom=20, top=0),
+        ))
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
@@ -121,7 +144,8 @@ class SettingsView(ft.Column):
         s = ft.Column(spacing=0)
         s.controls.append(section_title(self._t("settings.batch.title", "批量处理")))
 
-        self._max_concurrent_field = text_field(value=str(cfg.max_concurrent), width=100, expand=False)
+        self._max_concurrent_field = text_field(value=str(cfg.max_concurrent), width=100, expand=False,
+                                                on_change=lambda e: self._on_max_concurrent_change(e))
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.batch.max_concurrent", "最大并发处理数 (1‑16)")),
@@ -133,6 +157,7 @@ class SettingsView(ft.Column):
         self._preserve_var = checkbox(
             self._t("settings.batch.preserve_structure", "保留原始文件结构"),
             value=cfg.batch_processing.get("preserve_structure", True),
+            on_change=lambda e: self._on_preserve_structure_change(e.control.value),
         )
         s.controls.append(ft.Container(content=self._preserve_var,
                                        padding=ft.Padding(left=20, right=20, bottom=20)))
@@ -163,6 +188,7 @@ class SettingsView(ft.Column):
             multiline=True, min_lines=4, max_lines=8,
             border_color=THEME.border_standard, text_size=13,
             bgcolor="rgba(255,255,255,0.02)", border_radius=6,
+            on_blur=lambda e: self._on_cleanup_blur(),
         )
         s.controls.append(ft.Container(content=self._cleanup_field,
                                        padding=ft.Padding(left=20, right=20)))
@@ -184,10 +210,6 @@ class SettingsView(ft.Column):
 
     def _build_action_card(self) -> None:
         btn_row = ft.Row([
-            btn_success(
-                self._t("settings.actions.save", "💾 保存设置"), width=140,
-                on_click=lambda e: self._save(),
-            ),
             ft.Button(
                 content=self._t("settings.actions.reset", "↻ 重置为默认"),
                 width=140, height=38,
@@ -197,52 +219,24 @@ class SettingsView(ft.Column):
                 ),
                 on_click=lambda e: self._reset(),
             ),
-            btn_ghost(
-                self._t("settings.actions.cancel", "取消"), width=100, height=38,
-                on_click=lambda e: self._cancel(),
-            ),
         ], spacing=10)
         c = card(ft.Column(spacing=0), padding=0)
         c.content = ft.Container(content=btn_row, padding=20)
         self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=24)))
 
-    # ─── 回调 ──────────────────────────────────
+    # ─── 回调（即时生效 + 自动保存）──────────────
 
-    def _on_theme_change(self, theme: str) -> None:
-        """切换主题"""
-        self.app.config._config["ui_settings"]["theme"] = theme
-        if theme == "light":
-            self.app.page.theme_mode = ft.ThemeMode.LIGHT
-        else:
-            self.app.page.theme_mode = ft.ThemeMode.DARK
-        self.app.page.update()
-
-    def _on_language_change(self, lang: str) -> None:
-        """切换语言"""
-        self.app.config.language = lang
-        self.app.i18n.set_language(lang)
-        self.app.info_dialog(
-            self._t("dialogs.success", "成功"),
-            self._t("messages.ui_text_updated", "UI文本已更新为: {lang}", lang=lang),
-        )
-
-    def _on_api_timeout_change(self, e: ft.ControlEvent) -> None:
-        """API超时变更"""
-        try:
-            val = int(e.control.value or "10")
-            self.app.config._config["api_timeout"] = max(1, min(60, val))
-        except ValueError:
-            pass
-
-    def _restore_default_cleanup(self) -> None:
-        self._cleanup_field.value = "\n".join(["*.log", "cache/", "logs/"])
-        self._cleanup_field.update()
-
-    def _save(self) -> None:
+    def _persist(self) -> None:
+        """持久化当前配置到磁盘"""
         c = self.app.config
         c._config["version_detection"] = self._version_var.value
         c._config["ui_settings"]["auto_clear_log"] = self._auto_clear_var.value
         c._config["ui_settings"]["show_log_panel"] = self._show_log_panel_var.value
+        c._config["ui_settings"]["enable_performance_monitor"] = self._perf_monitor_var.value
+        try:
+            c._config["ui_settings"]["performance_print_interval"] = max(5, int(self._perf_print_interval_field.value or "60"))
+        except ValueError:
+            c._config["ui_settings"]["performance_print_interval"] = 60
         c._config["ui_settings"]["preserve_structure"] = self._preserve_var.value
         c._config["ui_settings"]["theme"] = self._theme_dropdown.value
         c._config["ui_settings"]["language"] = self._lang_dropdown.value
@@ -253,16 +247,83 @@ class SettingsView(ft.Column):
             pass
         c.cleanup_patterns = [x.strip() for x in self._cleanup_field.value.split("\n") if x.strip()]
         c.save()
-        
-        # 应用日志面板可见性设置
+
+    def _on_version_detection_change(self, value: bool) -> None:
+        self.app.config.migration.version_detection = value
+        self._persist()
+
+    def _on_theme_change(self, theme: str) -> None:
+        self.app.config._config["ui_settings"]["theme"] = theme
+        self.app.page.theme_mode = ft.ThemeMode.LIGHT if theme == "light" else ft.ThemeMode.DARK
+        self._persist()
+        self.app.page.update()
+
+    def _on_language_change(self, lang: str) -> None:
+        self.app.config.language = lang
+        self.app.i18n.set_language(lang)
+        self._persist()
+
+    def _on_api_timeout_change(self, e: ft.ControlEvent) -> None:
+        try:
+            val = int(e.control.value or "10")
+            self.app.config._config["api_timeout"] = max(1, min(60, val))
+        except ValueError:
+            return
+        self._persist()
+
+    def _on_auto_clear_change(self, value: bool) -> None:
+        self._persist()
+
+    def _on_show_log_panel_change(self, value: bool) -> None:
         if hasattr(self.app, 'floating_log_panel') and hasattr(self.app, '_log_fab'):
-            self.app._log_fab.set_visible(self._show_log_panel_var.value)
+            self.app._log_fab.set_visible(value)
             self.app.floating_log_panel.set_visible(False)
-        
-        self.app.info_dialog(
-            self._t("dialogs.success", "成功"),
-            self._t("settings.messages.save_success", "设置已保存"),
-        )
+        self._persist()
+
+    def _on_perf_monitor_change(self, value: bool) -> None:
+        from app.ui.performance import perf_monitor, resource_monitor, health_monitor
+        if value:
+            perf_monitor.enable()
+            resource_monitor.start()
+            try:
+                interval = max(5.0, float(self._perf_print_interval_field.value or "60"))
+            except ValueError:
+                interval = 60.0
+            resource_monitor.set_print_interval(interval)
+            health_monitor.set_alert_callback(self.app._on_health_alert)
+            self.app._start_heartbeat()
+        else:
+            perf_monitor.disable()
+            resource_monitor.stop()
+            self.app._heartbeat_active = False
+        self._persist()
+
+    def _on_perf_interval_change(self, e: ft.ControlEvent) -> None:
+        from app.ui.performance import resource_monitor
+        try:
+            interval = max(5.0, float(e.control.value or "60"))
+        except ValueError:
+            return
+        resource_monitor.set_print_interval(interval)
+        self._persist()
+
+    def _on_max_concurrent_change(self, e: ft.ControlEvent) -> None:
+        try:
+            int(e.control.value or "2")
+        except ValueError:
+            return
+        self._persist()
+
+    def _on_preserve_structure_change(self, value: bool) -> None:
+        self._persist()
+
+    def _on_cleanup_blur(self) -> None:
+        self._persist()
+
+    def _restore_default_cleanup(self) -> None:
+        self._cleanup_field.value = "\n".join(["*.log", "cache/", "logs/"])
+        self._cleanup_field.update()
+        self._persist()
 
     def _reset(self) -> None:
         self.app.config.reset_config()
@@ -270,7 +331,4 @@ class SettingsView(ft.Column):
             self._t("dialogs.success", "成功"),
             self._t("settings.messages.reset_success", "已恢复默认设置"),
         )
-        self._build()
-
-    def _cancel(self) -> None:
         self._build()

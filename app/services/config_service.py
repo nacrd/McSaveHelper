@@ -80,7 +80,7 @@ class ConfigService:
             "use_custom_mapping": False,
             "custom_uuid_mappings": {},
             "batch_processing": {"max_concurrent": 2, "preserve_structure": True},
-            "ui_settings": {"theme": "dark", "auto_clear_log": True, "language": "zh_CN", "show_log_panel": True},
+            "ui_settings": {"theme": "dark", "auto_clear_log": True, "language": "zh_CN", "show_log_panel": True, "enable_performance_monitor": False, "performance_print_interval": 60},
             "api_timeout": 10,
             "recent_saves": [],
             "cleanup_patterns": ["*.log", "cache/", "logs/"],

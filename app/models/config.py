@@ -31,6 +31,9 @@ class UISettings:
     language: str = "zh_CN"
     """界面语言，默认为简体中文"""
 
+    enable_performance_monitor: bool = False
+    """是否启用性能监控，默认为关闭"""
+
 
 @dataclass
 class MigrationConfig:

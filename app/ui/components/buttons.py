@@ -177,6 +177,14 @@ class McButton(ft.Container):
         self.opacity = 0.5 if value else 1.0
         self.content = self._build_content()
 
+    def set_text(self, text: str) -> None:
+        self._text = text
+        self.content = self._build_content()
+
+    def set_on_click(self, on_click: Optional[Callable[[ft.ControlEvent], Any]]) -> None:
+        self._on_click_handler = on_click
+
+
 
 def _mc_button(
     text: str,
