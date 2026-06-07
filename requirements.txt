@@ -6,3 +6,4 @@ requests
 send2trash
 typing_extensions
 Pillow
+psutil  # 用于性能监控（CPU、内存使用）

@@ -274,15 +274,19 @@ def profile_function(operation_name: Optional[str] = None) -> Callable:
     return decorator
 
 
+import threading
+
 # 全局监控器实例（可选）
 _global_monitor: Optional[PerformanceMonitor] = None
+_global_monitor_lock = threading.Lock()
 
 
 def get_global_monitor() -> PerformanceMonitor:
-    """获取全局性能监控器实例"""
+    """获取全局性能监控器实例（线程安全）"""
     global _global_monitor
-    if _global_monitor is None:
-        _global_monitor = PerformanceMonitor()
+    with _global_monitor_lock:
+        if _global_monitor is None:
+            _global_monitor = PerformanceMonitor()
     return _global_monitor
 
 

@@ -12,7 +12,12 @@ import threading
 from typing import Any, Callable, Dict, List, Tuple, Optional
 
 import flet as ft
-import flet.canvas as cv
+
+# 尝试导入 canvas 模块，如果失败则抛出 ImportError 以便兼容性处理
+try:
+    import flet.canvas as cv
+except ImportError:
+    raise ImportError("flet.canvas is not available in this Flet version")
 
 from app.services.heatmap_service import get_heatmap_service, HeatmapService
 from app.ui.utils import format_size
@@ -168,27 +173,32 @@ class McaHeatmapView(ft.Container):
         # 获取当前数据
         self._current_data = self._heatmap_service.get_all_data()
         
+        # 预先计算一次统计信息，避免每个单元格重复计算（O(n²) → O(n)）
+        stats = self._heatmap_service.get_statistics()
+        self._cached_stats = stats
+        
         # 构建形状列表
         shapes: List[cv.Shape] = []
         
         # 绘制背景
         shapes.append(cv.Rect(
             0, 0, self.width or 800, self.height or 600,
-            paint=ft.Paint(color=self.BACKGROUND_COLOR)
+            paint=ft.Paint(color="#1E1E1E")
         ))
         
         if not self._current_data:
-            # 没有数据时显示提示
-            shapes.append(cv.Line(
-                (self.width or 800) / 2 - 100, (self.height or 600) / 2,
-                (self.width or 800) / 2 + 100, (self.height or 600) / 2,
-                paint=ft.Paint(color="#555555", stroke_width=1)
+            # 没有数据时显示友好提示
+            shapes.append(cv.Text(
+                x=(self.width or 800) / 2 - 90,
+                y=(self.height or 600) / 2 - 30,
+                value="🗺️",
+                style=ft.TextStyle(size=48, color="#888888")
             ))
             shapes.append(cv.Text(
-                x=(self.width or 800) / 2 - 80,
-                y=(self.height or 600) / 2 + 20,
-                value="加载存档后显示热力图",
-                style=ft.TextStyle(size=14, color="#888888")
+                x=(self.width or 800) / 2 - 95,
+                y=(self.height or 600) / 2 + 30,
+                value="导入存档后显示热力图",
+                style=ft.TextStyle(size=16, color="#CCCCCC")
             ))
             shapes.extend(self._build_info_overlay())
             self._canvas.shapes = shapes
@@ -340,7 +350,7 @@ class McaHeatmapView(ft.Container):
     
     def _get_color(self, size: int) -> str:
         """根据文件大小获取颜色"""
-        stats = self._heatmap_service.get_statistics()
+        stats = getattr(self, '_cached_stats', None) or self._heatmap_service.get_statistics()
         
         if stats["min_size"] == stats["max_size"]:
             return "#64B5F6"

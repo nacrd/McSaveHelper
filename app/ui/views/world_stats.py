@@ -28,8 +28,8 @@ class WorldStatsView(ft.Column):
         self.controls.append(ft.Text("存档统计", size=22, weight=ft.FontWeight.BOLD, color=THEME.text_primary))
 
         self._path_field = ft.TextField(
-            label="存档目录",
-            hint_text="选择存档目录",
+            label="当前存档",
+            hint_text="请通过侧边栏「导入存档」设置当前存档目录",
             border_color=THEME.border_tertiary,
             focused_border_color=THEME.mc_diamond,
             text_size=13,
@@ -37,19 +37,15 @@ class WorldStatsView(ft.Column):
             bgcolor=THEME.bg_secondary,
             border_radius=0,
             expand=True,
+            read_only=True,
         )
         picker_row = ft.Row([
             self._path_field,
-            btn_ghost("浏览", width=90, on_click=self._pick),
             btn_primary("分析", width=90, on_click=self._analyze),
         ], spacing=10)
         self.controls.append(card(picker_row, padding=16))
 
-        self._progress = ft.ProgressBar(value=0, color=THEME.mc_grass, bgcolor=THEME.bg_secondary, height=6, visible=False)
-        self._progress_label = ft.Text("", size=11, color=THEME.text_muted)
-        self.controls.append(ft.Column([self._progress, self._progress_label], spacing=4))
-
-        self._overview_card = card(ft.Container(ft.Text("请先选择存档并点击「分析」", size=13, color=THEME.text_muted), padding=20))
+        self._overview_card = card(ft.Container(ft.Text("请通过侧边栏导入存档后点击「分析」", size=13, color=THEME.text_muted), padding=20))
         self._blocks_card = card(ft.Container(ft.Text("", size=12, color=THEME.text_muted), padding=20))
         self._entities_card = card(ft.Container(ft.Text("", size=12, color=THEME.text_muted), padding=20))
         self._distribution_card = card(ft.Container(ft.Text("", size=12, color=THEME.text_muted), padding=20))
@@ -61,39 +57,26 @@ class WorldStatsView(ft.Column):
             section_title("区域文件大小分布"), self._distribution_card,
         ], spacing=0))
 
-    def _pick(self, e: ft.ControlEvent) -> None:
-        path = self.app.pick_directory()
-        if path:
-            self._path_field.value = path
-            self._path_field.update()
-
     def _analyze(self, e: ft.ControlEvent) -> None:
         try:
             world_path = Path(self._path_field.value or "")
             if not (world_path / "level.dat").exists():
-                self.app.warn_dialog("提示", "请选择包含 level.dat 的有效存档目录。")
+                self.app.warn_dialog("提示", "请先通过侧边栏导入有效存档目录。")
                 return
-            self._progress.visible = True
-            self._progress.value = 0
-            self._progress_label.value = "正在分析..."
-            self.update()
+            
+            # 使用全局进度条
+            self.app.show_progress("正在分析存档...")
 
             def on_progress(current: int, total: int) -> None:
-                self._progress.value = current / total if total else 0
-                self._progress_label.value = f"正在扫描区域 ({current}/{total})..."
-                try:
-                    self._progress.update()
-                    self._progress_label.update()
-                except RuntimeError:
-                    pass
+                progress_value = current / total if total else 0
+                self.app.update_progress_with_task("分析存档", progress_value)
 
             self._stats = self._service.analyze_world(world_path, progress_callback=on_progress)
-            self._progress.visible = False
-            self._progress_label.value = "分析完成"
             self._render_stats()
-            self.update()
+            self.app.hide_progress()
+            self.app.info_dialog("完成", "存档分析完成！")
         except Exception as ex:
-            self._progress.visible = False
+            self.app.hide_progress()
             self.app.handle_exception(ex, title="分析存档失败")
 
     def _render_stats(self) -> None:
@@ -149,3 +132,11 @@ class WorldStatsView(ft.Column):
             ft.Text(key, size=13, color=THEME.text_secondary, width=120),
             ft.Text(value, size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
         ], spacing=8)
+
+    def on_save_selected(self, path: str) -> None:
+        """统一入口导入存档回调"""
+        try:
+            self._path_field.value = path
+            self._path_field.update()
+        except Exception:
+            pass

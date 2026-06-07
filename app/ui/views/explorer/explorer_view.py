@@ -1,4 +1,5 @@
 """Explorer View - 存档浏览器主视图"""
+import threading
 import flet as ft
 from typing import TYPE_CHECKING, Any, Optional, List, Dict, Tuple
 from pathlib import Path
@@ -6,7 +7,7 @@ from pathlib import Path
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
 from app.ui.components.fields import text_field
-from app.ui.components.cards import card
+from app.ui.components.cards import card, placeholder
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -55,7 +56,7 @@ class ExplorerView(ft.Column):
 
         # 工具栏
         self._world_label = ft.Text(
-            "未加载存档", size=12, color=THEME.text_muted,
+            "未导入存档", size=12, color=THEME.text_muted,
         )
         toolbar = ft.Container(
             content=ft.Row([
@@ -68,7 +69,6 @@ class ExplorerView(ft.Column):
                     ], spacing=0),
                 ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 ft.Container(),
-                btn_primary("加载存档", on_click=self._load_world),
             ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.Padding(left=16, right=16, top=14, bottom=14),
             bgcolor=THEME.mc_dirt,
@@ -214,6 +214,7 @@ class ExplorerView(ft.Column):
         self._equip_card = card(self._equipment, padding=15)
         left.controls.append(self._equip_card)
 
+        # 右侧物品栏初始状态 - 美化占位符
         right = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
         right.expand = True
         self._inventory = InventoryGrid()
@@ -229,7 +230,7 @@ class ExplorerView(ft.Column):
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
 
-        # 维度切换下拉框（加载存档时动态填充）
+        # 维度切换下拉框（导入存档时动态填充）
         self._dimension_dropdown = ft.Dropdown(
             options=[],
             on_select=self._on_dimension_changed,
@@ -282,7 +283,7 @@ class ExplorerView(ft.Column):
         )
 
         self._region_stats_text = ft.Text(
-            "等待加载存档...",
+            "等待导入存档...",
             size=12,
             color=THEME.text_muted
         )
@@ -347,8 +348,8 @@ class ExplorerView(ft.Column):
         self._tab_region.content = col
 
     def _build_stats_tab(self) -> None:
-        self._stats_status = ft.Text("加载存档后可分析统计。", size=12, color=THEME.text_muted)
-        self._stats_summary = ft.Text("", size=12, color=THEME.text_secondary)
+        self._stats_status = ft.Text("导入存档后可分析统计。", size=12, color=THEME.text_muted)
+        self._stats_summary = ft.Text("点击「开始统计」按钮分析世界数据。", size=12, color=THEME.text_muted)
         self._block_stats_col = ft.Column(spacing=4)
         self._entity_stats_col = ft.Column(spacing=4)
         self._size_stats_col = ft.Column(spacing=4)
@@ -496,14 +497,16 @@ class ExplorerView(ft.Column):
         col.controls.append(c)
         self._tab_nbt.content = col
 
-    def _load_world(self, e: Any = None) -> None:
+    def _load_world(self, path: Any = None) -> None:
         try:
-            path = self.app.pick_directory()
+            if path is None or hasattr(path, "control"):
+                path = getattr(self.app, "_current_save_path", None)
             if not path:
+                self.app.warn_dialog("提示", "请先通过侧边栏导入存档。")
                 return
             
             self.world_session = WorldSession(Path(path), log=self.app.log)
-            self._world_label.value = f"已加载: {self.world_session.world_path.name}"
+            self._world_label.value = f"当前存档: {self.world_session.world_path.name}"
             safe_update(self._world_label)
 
             # 更新存档信息面板
@@ -540,7 +543,7 @@ class ExplorerView(ft.Column):
 
             self._refresh_heatmap()
         except Exception as ex:
-            self.app.handle_exception(ex, title="加载存档失败")
+            self.app.handle_exception(ex, title="导入存档失败")
 
     def _on_player_selected(self, e: Any) -> None:
         try:
@@ -603,26 +606,38 @@ class ExplorerView(ft.Column):
     def _analyze_world_stats(self, e: Any) -> None:
         try:
             if not self.world_session:
-                self.app.warn_dialog("提示", "请先加载存档。")
+                self.app.warn_dialog("提示", "请先通过侧边栏导入存档。")
                 return
             from app.services.world_stats_service import get_world_stats_service
             service = get_world_stats_service(log=self.app.log)
             self._stats_status.value = "正在分析，较大存档可能需要较长时间..."
             safe_update(self._stats_status)
-            stats = service.analyze_world(self.world_session.world_path)
-            loaded_ratio = (stats.loaded_chunks / (stats.loaded_chunks + stats.empty_chunks) * 100) if (stats.loaded_chunks + stats.empty_chunks) else 0
-            total_size = sum(stats.region_sizes.values())
-            self._stats_summary.value = (
-                f"区域: {stats.total_regions}\n"
-                f"已加载区块: {stats.loaded_chunks}，空/未加载槽位: {stats.empty_chunks}，加载比例: {loaded_ratio:.1f}%\n"
-                f"区域文件总大小: {format_size(total_size)}\n"
-                f"方块调色板条目: {stats.total_blocks}，实体/方块实体: {stats.total_entities}"
-            )
-            self._fill_rank(self._block_stats_col, stats.block_stats.top_blocks[:10] if stats.block_stats else [])
-            self._fill_rank(self._entity_stats_col, stats.entity_stats.top_entities[:10] if stats.entity_stats else [])
-            self._fill_rank(self._size_stats_col, list(service.get_region_size_distribution(stats).items()))
-            self._stats_status.value = "统计完成。"
-            safe_update(self._tab_stats)
+            
+            def _run():
+                try:
+                    stats = service.analyze_world(self.world_session.world_path)
+                    def _update_ui():
+                        try:
+                            loaded_ratio = (stats.loaded_chunks / (stats.loaded_chunks + stats.empty_chunks) * 100) if (stats.loaded_chunks + stats.empty_chunks) else 0
+                            total_size = sum(stats.region_sizes.values())
+                            self._stats_summary.value = (
+                                f"区域: {stats.total_regions}\n"
+                                f"已加载区块: {stats.loaded_chunks}，空/未加载槽位: {stats.empty_chunks}，加载比例: {loaded_ratio:.1f}%\n"
+                                f"区域文件总大小: {format_size(total_size)}\n"
+                                f"方块调色板条目: {stats.total_blocks}，实体/方块实体: {stats.total_entities}"
+                            )
+                            self._fill_rank(self._block_stats_col, stats.block_stats.top_blocks[:10] if stats.block_stats else [])
+                            self._fill_rank(self._entity_stats_col, stats.entity_stats.top_entities[:10] if stats.entity_stats else [])
+                            self._fill_rank(self._size_stats_col, list(service.get_region_size_distribution(stats).items()))
+                            self._stats_status.value = "统计完成。"
+                            safe_update(self._tab_stats)
+                        except Exception as ex:
+                            self.app.handle_exception(ex, title="统计存档失败")
+                    self.app.page.run_task(_update_ui)
+                except Exception as ex:
+                    self.app.page.run_task(lambda: self.app.handle_exception(ex, title="统计存档失败"))
+            
+            threading.Thread(target=_run, daemon=True).start()
         except Exception as ex:
             self.app.handle_exception(ex, title="统计存档失败")
 

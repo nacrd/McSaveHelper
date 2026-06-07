@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 import queue
+import threading
 
 from core.types import LogCallback, ProgressCallback, BatchResult
 
@@ -27,6 +28,8 @@ class BatchProcessor:
         self.progress_queue: queue.Queue[Any] = queue.Queue()
         self.results: Dict[str, Dict[str, Any]] = {}
         self.is_running = False
+        self._lock = threading.Lock()
+        self._total_tasks = 0
     
     def process_batch(
         self,
@@ -63,6 +66,7 @@ class BatchProcessor:
         self.results = {}
         
         total_tasks = len(world_paths)
+        self._total_tasks = total_tasks
 
         if total_tasks == 0:
             self.is_running = False
@@ -96,8 +100,9 @@ class BatchProcessor:
                 
                 try:
                     result = future.result()
-                    self.results[world_path_name] = result
-                    completed_count += 1
+                    with self._lock:
+                        self.results[world_path_name] = result
+                        completed_count += 1
                     
                     if log_callback:
                         status = "成功" if result["success"] else "失败"
@@ -105,7 +110,8 @@ class BatchProcessor:
                                    "SUCCESS" if result["success"] else "ERROR")
                     
                     if progress_callback:
-                        progress = completed_count / total_tasks
+                        with self._lock:
+                            progress = completed_count / total_tasks
                         progress_callback(progress)
                         
                 except Exception as e:
@@ -114,12 +120,14 @@ class BatchProcessor:
                         "error": str(e),
                         "world_name": world_name
                     }
-                    self.results[world_path_name] = error_result
+                    with self._lock:
+                        self.results[world_path_name] = error_result
                     
                     if log_callback:
                         log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - 失败: {e}", "ERROR")
         
-        self.is_running = False
+        with self._lock:
+            self.is_running = False
         
         # 统计结果
         success_count = sum(1 for r in self.results.values() if r["success"])
@@ -195,11 +203,12 @@ class BatchProcessor:
     
     def get_progress(self) -> float:
         """获取当前进度"""
-        if not self.results:
-            return 0.0
-        total = len(self.results)
-        completed = sum(1 for r in self.results.values() if r.get("completed", False))
-        return completed / total if total > 0 else 0.0
+        with self._lock:
+            total = self._total_tasks
+            if total <= 0:
+                return 0.0
+            completed = len(self.results)
+            return completed / total
 
 
 def scan_worlds_directory(directory: Path) -> List[Path]:

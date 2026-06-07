@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Callable, Dict, Any
 from dataclasses import dataclass
 
-import anvil
-
 from core.scanner import scan_all_regions
 from core.types import LogCallback
 
@@ -59,6 +57,7 @@ class RegionEditorService:
 
     def get_chunks_in_region(self, region_path: Path) -> List[ChunkInfo]:
         """获取区域文件中所有区块信息"""
+        import anvil
         chunks = []
         try:
             region = anvil.Region.from_file(str(region_path))
@@ -216,6 +215,7 @@ class RegionEditorService:
 
     def _count_chunks(self, region_path: Path) -> int:
         """计算区域文件中的区块数量"""
+        import anvil
         try:
             region = anvil.Region.from_file(str(region_path))
             count = 0
@@ -285,14 +285,18 @@ class RegionEditorService:
             f.write(struct.pack(">I", int(time.time())))
 
 
+import threading
+
 _region_editor_service: Optional[RegionEditorService] = None
+_region_editor_service_lock = threading.Lock()
 
 
 def get_region_editor_service(log: Optional[LogCallback] = None) -> RegionEditorService:
-    """获取区块编辑服务单例"""
+    """获取区块编辑服务单例（线程安全）"""
     global _region_editor_service
-    if _region_editor_service is None:
-        _region_editor_service = RegionEditorService(log=log)
-    elif log is not None:
-        _region_editor_service.log = log
+    with _region_editor_service_lock:
+        if _region_editor_service is None:
+            _region_editor_service = RegionEditorService(log=log)
+        elif log is not None:
+            _region_editor_service.log = log
     return _region_editor_service

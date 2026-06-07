@@ -119,13 +119,18 @@ class ServerPropertiesService:
         return errors
 
 
+import threading
+
 _server_properties_service: Optional[ServerPropertiesService] = None
+_server_properties_service_lock = threading.Lock()
 
 
 def get_server_properties_service(log: Optional[LogCallback] = None) -> ServerPropertiesService:
+    """获取服务器属性服务单例（线程安全）"""
     global _server_properties_service
-    if _server_properties_service is None:
-        _server_properties_service = ServerPropertiesService(log=log)
-    elif log is not None:
-        _server_properties_service.log = log
+    with _server_properties_service_lock:
+        if _server_properties_service is None:
+            _server_properties_service = ServerPropertiesService(log=log)
+        elif log is not None:
+            _server_properties_service.log = log
     return _server_properties_service

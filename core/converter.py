@@ -68,20 +68,32 @@ def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:
 def save_nbt(file_path: Path, nbt_data: File, byteorder: str = 'big') -> None:
     """
     以指定字节序保存 NBT 文件。
+    
+    使用原子写入模式避免数据损坏：先写入临时文件，成功后再替换原文件。
     """
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = None
+    fd = None
     try:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(prefix=f".{file_path.name}.", suffix=".tmp", dir=str(file_path.parent))
-        os.close(fd)
         tmp_path = Path(tmp_name)
-        try:
-            nbt_data.save(tmp_path, byteorder=byteorder)
-            os.replace(tmp_path, file_path)
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink(missing_ok=True)
+        # 立即关闭文件描述符，允许 nbtlib 打开文件进行写入
+        os.close(fd)
+        fd = None
+        nbt_data.save(tmp_path, byteorder=byteorder)
+        os.replace(tmp_path, file_path)
+        tmp_path = None  # 标记为已成功处理，避免 finally 中删除
     except Exception as e:
         raise ConversionError(f"保存 NBT 文件失败: {e}")
+    finally:
+        # 清理资源
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def convert_endian(src_path: Path, dst_path: Path, target_byteorder: str) -> None:
@@ -279,37 +291,34 @@ def convert_world(src_path: Path, dst_path: Path,
     target_byteorder = "big" if target_platform == "java" else "little"
     
     # 3. 遍历所有 NBT 文件进行转换
+    import logging as _logging
+    _logger = _logging.getLogger(__name__)
     nbt_extensions = {".dat", ".nbt"}
     for root, dirs, files in os.walk(work_path):
         for file in files:
-            if any(file.endswith(ext) for ext in nbt_extensions):
+            suffix = os.path.splitext(file)[1]
+            if suffix in nbt_extensions:
                 file_path = Path(root) / file
                 try:
-                    # 3.1 字节序转换
-                    convert_endian(file_path, file_path, target_byteorder)
+                    # 检测源字节序并一次性加载
+                    src_byteorder = detect_endian(file_path)
+                    data = load_nbt(file_path, byteorder=src_byteorder)
                     
-                    # 3.2 加载 NBT 进行进一步处理
-                    data = load_nbt(file_path, byteorder=target_byteorder)
-                    
-                    # 3.3 转换方块/物品 ID（如果需要跨平台）
-                    if target_platform != "java":  # 如果目标不是 Java，则可能需要将 Java ID 转换为 Bedrock ID
+                    # 3.1 转换方块/物品 ID（如果需要跨平台）
+                    if target_platform != "java":
                         to_bedrock = (target_platform == "bedrock")
                         convert_block_ids_in_nbt(data, to_bedrock)
                     
-                    # 3.4 版本降级处理
+                    # 3.2 版本降级处理
                     if target_version is not None:
-                        # 应用 Data Components 剥离
                         VersionDowngrader.strip_data_components(data)
-                        # 替换未知方块
                         VersionDowngrader.replace_unknown_blocks(data, target_version)
                     
-                    # 保存修改后的 NBT，显式保留目标字节序并使用原子替换。
+                    # 保存修改后的 NBT，使用目标字节序
                     save_nbt(file_path, data, byteorder=target_byteorder)
                     
                 except Exception as e:
-                    # 记录错误但继续处理其他文件
-                    import logging
-                    logging.getLogger(__name__).warning(f"转换文件 {file_path} 时出错: {e}")
+                    _logger.warning(f"转换文件 {file_path} 时出错: {e}")
     
     # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
     if target_platform != "java" or target_version is not None:

@@ -145,8 +145,8 @@ class UUIDMappingTable(ft.Column):
             value=player_name,
             border_color=THEME.border_standard,
             text_size=13, height=40,
-            bgcolor="rgba(255,255,255,0.02)",
-            border_radius=6,
+            bgcolor=THEME.bg_secondary,
+            border_radius=0,
         )
         nf.expand = 2
 
@@ -154,8 +154,8 @@ class UUIDMappingTable(ft.Column):
             value=uuid,
             border_color=THEME.border_standard,
             text_size=13, height=40,
-            bgcolor="rgba(255,255,255,0.02)",
-            border_radius=6,
+            bgcolor=THEME.bg_secondary,
+            border_radius=0,
         )
         uf.expand = 3
 

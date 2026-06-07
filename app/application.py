@@ -29,8 +29,20 @@ from app.ui.sidebar import Sidebar
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_success, btn_danger
 from app.ui.components.fields import text_field, checkbox, label
 from app.ui.components.cards import card, section_title
-from app.ui.components.log_panel import LogPanel
+from app.ui.components.log_panel import LogPanel  # kept for backwards compat if needed
+from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
 from app.ui.components.uuid_table import UUIDMappingTable
+
+# GUI 优化模块
+from app.ui.keyboard_shortcuts import (
+    shortcut_manager,
+    register_default_shortcuts,
+    ModifierKey
+)
+from app.ui.performance import perf_monitor, resource_monitor, Timer
+from app.ui.feedback import feedback_collector, ErrorReportDialog
+from app.ui.notifications import NotificationManager
+from app.ui.accessibility import validate_theme_accessibility
 
 
 class Application:
@@ -42,6 +54,9 @@ class Application:
 
         # 全局异常兜底
         page.on_error = self._on_page_error
+
+        # ─── 初始化 GUI 优化模块 ─────────────────
+        self._init_gui_optimizations()
 
         # ─── 初始化服务（逐个 try，失败降级） ─────
         try:
@@ -79,15 +94,14 @@ class Application:
         self._sync_config_to_migration()
 
         # ─── UI 组件 ────────────────────────────
-        self.log_panel: LogPanel = LogPanel(
-            title=self._t("log_panel.title", "日志"),
-        )
-        self._progress_bar: ft.ProgressBar = ft.ProgressBar(
-            value=0,
-            color=THEME.mc_grass,
-            bgcolor=THEME.bg_secondary,
-            height=6,
-            border_radius=0,
+        # 使用美化的进度条组件
+        from app.ui.components.progress import McProgressBar
+        self._progress_bar: McProgressBar = McProgressBar(
+            value=0.0,
+            color=THEME.mc_diamond,
+            height=8,
+            show_percentage=False,
+            animated=True,
         )
         self._progress_label: ft.Text = ft.Text(
             self._t("top_bar.ready", "就绪"),
@@ -95,6 +109,15 @@ class Application:
             color=THEME.mc_gold,
             weight=ft.FontWeight.BOLD,
             font_family="monospace",
+        )
+        # 进度条容器（默认隐藏）
+        self._progress_container: ft.Container = ft.Container(
+            content=ft.Row(
+                [self._progress_label, self._progress_bar],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            visible=False,  # 默认隐藏
         )
         self._start_btn = btn_primary(
             self._t("top_bar.start_conversion", "开始转换"),
@@ -118,6 +141,113 @@ class Application:
         self._build_ui()
         self._switch_view("explorer")
         page.update()
+
+    # ════════════════════════════════════════════
+    #  初始化
+    # ════════════════════════════════════════════
+
+    def _init_gui_optimizations(self) -> None:
+        """初始化 GUI 优化功能"""
+        try:
+            # 1. 初始化通知管理器
+            self.notification_manager = NotificationManager(self.page)
+            
+            # 2. 启用性能监控（开发模式）
+            perf_monitor.enable()
+            resource_monitor.start()
+            
+            # 3. 注册键盘快捷键
+            register_default_shortcuts(
+                on_save=self._shortcut_save_config,
+                on_help=self._shortcut_show_help,
+                on_refresh=self._shortcut_refresh
+            )
+            
+            # 注册应用特定快捷键
+            shortcut_manager.register(
+                "show_feedback",
+                "f",
+                self._shortcut_show_feedback,
+                "显示反馈对话框",
+                [ModifierKey.CTRL]
+            )
+            
+            # 设置键盘事件处理
+            self.page.on_keyboard_event = self._on_keyboard_event
+            
+            # 4. 验证可访问性
+            accessibility_results = validate_theme_accessibility()
+            failed_checks = [
+                name for name, result in accessibility_results.items()
+                if not result["passes"]
+            ]
+            if failed_checks:
+                logger.warning(
+                    f"可访问性检查: {len(failed_checks)} 项未通过",
+                    module="accessibility"
+                )
+            else:
+                logger.info("可访问性检查: 全部通过", module="accessibility")
+            
+            logger.info("GUI 优化模块初始化完成", module="App")
+            
+        except Exception as e:
+            logger.error(f"GUI 优化模块初始化失败: {e}", module="App")
+            # 降级：不使用优化功能
+            self.notification_manager = None  # type: ignore
+
+    def _on_keyboard_event(self, e: ft.KeyboardEvent) -> None:
+        """处理键盘事件
+        
+        Args:
+            e: 键盘事件
+        """
+        try:
+            shortcut_manager.handle_event(e)
+        except Exception as ex:
+            logger.error(f"键盘事件处理失败: {ex}", module="App")
+
+    def _shortcut_save_config(self, e) -> None:
+        """快捷键：保存配置 (Ctrl+S)"""
+        try:
+            with Timer("save_config"):
+                self.config.save()
+            logger.info("配置已保存", module="App")
+            if self.notification_manager:
+                self.notification_manager.show_success("配置保存成功")
+        except Exception as ex:
+            logger.error(f"保存配置失败: {ex}", module="App")
+            if self.notification_manager:
+                self.notification_manager.show_error("保存配置失败")
+
+    def _shortcut_show_help(self, e) -> None:
+        """快捷键：显示帮助 (F1)"""
+        try:
+            help_dialog = shortcut_manager.create_help_dialog()
+            self.page.dialog = help_dialog
+            help_dialog.open = True
+            self.page.update()
+        except Exception as ex:
+            logger.error(f"显示帮助失败: {ex}", module="App")
+
+    def _shortcut_refresh(self, e) -> None:
+        """快捷键：刷新页面 (F5)"""
+        try:
+            logger.info("刷新页面", module="App")
+            self.page.update()
+            if self.notification_manager:
+                self.notification_manager.show_info("页面已刷新")
+        except Exception as ex:
+            logger.error(f"刷新页面失败: {ex}", module="App")
+
+    def _shortcut_show_feedback(self, e) -> None:
+        """快捷键：显示反馈对话框 (Ctrl+F)"""
+        try:
+            from app.ui.feedback import FeedbackDialog
+            feedback_dialog = FeedbackDialog(self.page)
+            feedback_dialog.show()
+        except Exception as ex:
+            logger.error(f"显示反馈对话框失败: {ex}", module="App")
 
     # ════════════════════════════════════════════
     #  初始化
@@ -150,10 +280,29 @@ class Application:
         traceback.print_exc()
         try:
             self.log(f"未捕获的异常: {error_msg}", "ERROR")
-            self.error_dialog(
-                self._t("dialogs.error", "错误"),
-                f"发生意外错误: {error_msg}",
-            )
+            
+            # 使用优化的错误报告对话框
+            if hasattr(self, 'notification_manager') and self.notification_manager:
+                try:
+                    # 尝试创建异常对象
+                    exception = Exception(error_msg)
+                    error_dialog = ErrorReportDialog(
+                        self.page,
+                        error=exception,
+                        context="页面错误"
+                    )
+                    error_dialog.show()
+                except Exception:
+                    # 降级到原始错误对话框
+                    self.error_dialog(
+                        self._t("dialogs.error", "错误"),
+                        f"发生意外错误: {error_msg}",
+                    )
+            else:
+                self.error_dialog(
+                    self._t("dialogs.error", "错误"),
+                    f"发生意外错误: {error_msg}",
+                )
         except Exception:
             pass  # 连对话框都弹不出时只能打日志
 
@@ -171,11 +320,58 @@ class Application:
         page.padding = 0
         page.window.width = 1100
         page.window.height = 820
-        page.window.min_width = 1000
-        page.window.min_height = 720
+        page.window.min_width = 800
+        page.window.min_height = 600
+        # 添加窗口大小变化监听（兼容不同版本的Flet）
+        try:
+            page.on_resize = self._on_window_resize
+        except Exception:
+            logger.warning("on_resize 事件不可用，跳过窗口大小监听", module="App")
         icon_path = self._resolve_icon_path()
         if icon_path:
             page.window.icon = icon_path
+
+    def _on_window_resize(self, e) -> None:
+        """窗口大小变化时的响应（带防抖，兼容版）
+        
+        Args:
+            e: 窗口大小变化事件
+        """
+        try:
+            # 防抖：取消上次延迟更新，延迟 150ms 后执行
+            timer = getattr(self, '_resize_timer', None)
+            if timer is not None:
+                timer.cancel()
+            
+            import threading
+            self._resize_timer = threading.Timer(0.15, self._apply_resize)
+            self._resize_timer.daemon = True
+            self._resize_timer.start()
+        except Exception as ex:
+            logger.error(f"窗口大小变化处理失败: {ex}", module="App")
+    
+    def _apply_resize(self) -> None:
+        """实际执行窗口大小调整（在防抖延迟后调用）"""
+        try:
+            width = self.page.window.width
+            height = self.page.window.height
+            
+            if hasattr(self, '_sidebar'):
+                if width < 1000:
+                    self._sidebar.set_width(180)
+                elif width < 1300:
+                    self._sidebar.set_width(210)
+                else:
+                    self._sidebar.set_width(230)
+            
+            self.page.update()
+            
+            logger.debug(
+                f"窗口大小变化: {width}x{height}", 
+                module="App"
+            )
+        except Exception as ex:
+            logger.error(f"窗口大小变化处理失败: {ex}", module="App")
 
     @staticmethod
     def _resolve_icon_path() -> Optional[str]:
@@ -196,7 +392,7 @@ class Application:
         """初始化日志系统"""
         def ui_log_callback(message: str, tag: str) -> None:
             ts = time.strftime("%H:%M:%S")
-            self.log_panel.log(f"[{ts}] [{tag.upper()}] {message}", tag.lower())
+            self.floating_log_panel.log(f"[{ts}] [{tag.upper()}] {message}", tag.lower())
 
         setup_default_logging(
             enable_console=True, enable_file=True, file_path=None,
@@ -227,10 +423,13 @@ class Application:
             {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "📋"},
             {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙"},
         ]
+        # 当前导入的存档路径（统一入口）
+        self._current_save_path: Optional[str] = None
         self._sidebar = Sidebar(
             tabs=self._tab_defs,
             on_tab_select=self._switch_view,
             on_tabs_reorder=self._on_tabs_reorder,
+            on_import_save=self._on_import_save,
             default_tab="explorer",
         )
         top_bar = self._build_top_bar()
@@ -246,34 +445,28 @@ class Application:
             expand=True,
         )
 
-        # Log panel setup
-        self._log_panel_visible = False
-        self.log_panel.visible = False
-        self.log_panel.width = 400
-        self.log_panel.height = 280
-        self.log_panel.right = 20
-        self.log_panel.bottom = 70
-        self.log_panel.elevation = 8
-
-        # Log FAB
-        self._log_fab = ft.Container(
-            content=ft.Text("📜", size=20),
-            width=48,
-            height=48,
-            bgcolor=THEME.mc_coal,
-            border_radius=24,
-            alignment=ft.alignment.Alignment(0, 0),
-            on_click=self._toggle_log_panel,
-            tooltip="日志",
-            shadow=mc_shadow(2),
-            border=mc_border(),
+        # Log panel setup - 使用悬浮球日志面板
+        self.floating_log_panel = FloatingLogPanel(
+            page=self.page,
+            title=self._t("log_panel.title", "日志"),
         )
+        
+        # 日志悬浮球按钮
+        self._log_fab = FloatingLogButton(
+            floating_panel=self.floating_log_panel,
+            page=self.page,
+        )
+        
+        # 初始化时根据配置设置可见性
+        show_log = self.config.ui_settings.get("show_log_panel", True)
+        self._log_fab.set_visible(show_log)
+        self.floating_log_panel.set_visible(False)
 
         right_panel = ft.Stack(
             [
                 content_area,
-                self.log_panel,
-                ft.Container(content=self._log_fab, right=20, bottom=20),
+                self.floating_log_panel,
+                self._log_fab,
             ],
             expand=True,
         )
@@ -300,23 +493,29 @@ class Application:
             expand=True,
         )
 
+        # 底部进度条容器
+        bottom_bar = ft.Container(
+            content=ft.Container(
+                content=self._progress_container,
+                padding=ft.Padding(left=18, right=18, top=8, bottom=8),
+                bgcolor=THEME.mc_wood,
+            ),
+            bgcolor=THEME.mc_wood,
+            border=ft.Border(
+                left=ft.BorderSide(3, THEME.border_light),
+                top=None,
+                right=ft.BorderSide(3, THEME.border_dark),
+                bottom=ft.BorderSide(3, THEME.border_dark),
+            ),
+        )
+
         app_frame = ft.Column(
-            [self._build_window_title_bar(), shell],
+            [self._build_window_title_bar(), shell, bottom_bar],
             spacing=0,
             expand=True,
         )
 
         self.page.add(app_frame)
-
-    def _toggle_log_panel(self, e: Any = None) -> None:
-        """切换日志面板的显示/隐藏"""
-        self._log_panel_visible = not self._log_panel_visible
-        self.log_panel.visible = self._log_panel_visible
-        if self._log_panel_visible:
-            self._log_fab.content = ft.Text("✕", size=18, color=THEME.mc_redstone)
-        else:
-            self._log_fab.content = ft.Text("📜", size=20)
-        self.page.update()
 
     def _on_tabs_reorder(self, tabs: list) -> None:
         """侧边栏标签页排序变更回调
@@ -325,6 +524,35 @@ class Application:
             tabs: 排序后的标签页列表
         """
         self._tab_defs = list(tabs)
+
+    def _on_import_save(self) -> None:
+        """侧边栏导入存档按钮回调"""
+        try:
+            path = self.pick_directory()
+            if not path:
+                return
+            world_path = Path(path)
+            if not (world_path / "level.dat").exists():
+                self.warn_dialog("提示", "这不是有效存档目录，请选择包含 level.dat 的文件夹。")
+                return
+            self._current_save_path = str(world_path)
+            self._sidebar.set_current_save_name(world_path.name)
+            self._notify_current_view_save_selected(str(world_path))
+        except Exception as ex:
+            self.error_dialog("错误", f"导入存档失败: {ex}")
+
+    def _notify_current_view_save_selected(self, path: str) -> None:
+        """通知当前视图存档已选中
+        
+        Args:
+            path: 存档路径
+        """
+        current_view = self.views.get(self._sidebar.selected_id)
+        if current_view and hasattr(current_view, 'on_save_selected'):
+            try:
+                current_view.on_save_selected(path)
+            except Exception as ex:
+                self.log(f"通知视图失败: {ex}", "ERROR")
 
     def _build_window_title_bar(self) -> ft.Container:
         """构建自定义窗口标题栏"""
@@ -419,11 +647,6 @@ class Application:
 
     def _build_top_bar(self) -> ft.Container:
         """构建顶部栏"""
-        progress_row = ft.Row(
-            [self._progress_label, self._progress_bar],
-            spacing=12,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
         return ft.Container(
             content=ft.Column(
                 [
@@ -464,7 +687,7 @@ class Application:
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 ft.Row(
-                                    [progress_row, self._start_btn],
+                                    [self._start_btn],
                                     spacing=15,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
@@ -495,7 +718,13 @@ class Application:
         try:
             if view_id not in self.views:
                 self.views[view_id] = self._create_view(view_id)
-            self._content.content = self.views[view_id]
+            current_view = self.views[view_id]
+            self._content.content = current_view
+            if self._current_save_path and hasattr(current_view, 'on_save_selected'):
+                try:
+                    current_view.on_save_selected(self._current_save_path)
+                except Exception as ex:
+                    self.log(f"同步当前存档失败: {ex}", "ERROR")
             self.page.update()
         except Exception as e:
             traceback.print_exc()
@@ -733,13 +962,13 @@ class Application:
         Args:
             msg: 标题消息
         """
-        self.log_panel.log(f"\n{'=' * 50}", "separator")
-        self.log_panel.log(msg, "header")
-        self.log_panel.log(f"{'=' * 50}", "separator")
+        self.floating_log_panel.log(f"\n{'=' * 50}", "separator")
+        self.floating_log_panel.log(msg, "header")
+        self.floating_log_panel.log(f"{'=' * 50}", "separator")
 
     def clear_log(self) -> None:
         """清空日志面板"""
-        self.log_panel.clear()
+        self.floating_log_panel._clear()
 
     # ════════════════════════════════════════════
     #  进度
@@ -751,12 +980,79 @@ class Application:
         Args:
             value: 进度值（0.0 到 1.0）
         """
-        self._progress_bar.value = value
+        # 确保进度条可见
+        if not self._progress_container.visible:
+            self._progress_container.visible = True
+        
+        # 使用新的进度条组件方法
+        self._progress_bar.set_value(value)
         self._progress_label.value = self._t(
             "top_bar.progress", "进度 {percent}%",
             percent=int(value * 100),
         )
         self.page.update()
+
+    def show_progress(self, task_name: str = "") -> None:
+        """显示进度条
+        
+        Args:
+            task_name: 任务名称（如"转换中"、"扫描中"等）
+        """
+        self._progress_container.visible = True
+        if task_name:
+            self._progress_label.value = task_name
+        else:
+            self._progress_label.value = "处理中..."
+        self._progress_bar.set_value(0.0)
+        self.page.update()
+
+    def hide_progress(self) -> None:
+        """隐藏进度条"""
+        self._progress_container.visible = False
+        self._progress_label.value = self._t("top_bar.ready", "就绪")
+        self._progress_bar.set_value(0.0)
+        self.page.update()
+
+    def update_progress_with_task(self, task_name: str, value: float) -> None:
+        """更新进度条（带任务名称）
+        
+        Args:
+            task_name: 任务名称
+            value: 进度值（0.0 到 1.0）
+        """
+        # 确保进度条可见
+        if not self._progress_container.visible:
+            self._progress_container.visible = True
+        
+        # 设置任务名称和进度
+        if value >= 0 and value <= 1.0:
+            self._progress_label.value = f"{task_name} {int(value * 100)}%"
+        else:
+            self._progress_label.value = task_name
+        
+        self._progress_bar.set_value(value)
+        self.page.update()
+
+    def set_progress_label(self, text: str) -> None:
+        """设置进度标签文本
+        
+        Args:
+            text: 标签文本
+        """
+        # 确保进度条可见
+        if not self._progress_container.visible:
+            self._progress_container.visible = True
+        self._progress_label.value = text
+        self.page.update()
+
+    def set_progress_value(self, value: float) -> None:
+        """设置进度条值
+        
+        Args:
+            value: 进度值 (0.0 - 1.0)
+        """
+        # 使用新的进度条组件方法
+        self._progress_bar.set_value(value)
 
     # ════════════════════════════════════════════
     #  对话框
@@ -766,11 +1062,6 @@ class Application:
         """关闭当前打开的对话框"""
         if self._current_dialog:
             self._current_dialog.open = False
-            try:
-                if self._current_dialog in self.page.overlay:
-                    self.page.overlay.remove(self._current_dialog)
-            except ValueError:
-                pass  # 对话框可能已经不在 overlay 中了
             self.page.update()
             self._current_dialog = None
 
@@ -802,20 +1093,31 @@ class Application:
         
         content = ft.Column(content_list, tight=True)
         
+        # 创建对话框实例
         d = ft.AlertDialog(
             title=ft.Text(title, color=THEME.text_primary),
             content=content,
-            actions=[
-                ft.TextButton(
-                    content=self._t("dialogs.ok", "确定"),
-                    style=ft.ButtonStyle(color=color),
-                    on_click=lambda e: self._close_dialog(),
-                )
-            ],
-            open=True,
+            actions=[],
         )
+        
+        # 定义关闭按钮的处理函数
+        def handle_ok(e):
+            d.open = False
+            self.page.update()
+            self._current_dialog = None
+        
+        # 添加关闭按钮
+        d.actions = [
+            ft.TextButton(
+                self._t("dialogs.ok", "确定"),
+                style=ft.ButtonStyle(color=color),
+                on_click=handle_ok,
+            )
+        ]
+        
         self._current_dialog = d
         self.page.overlay.append(d)
+        d.open = True
         self.page.update()
 
     def info_dialog(self, title: str, message: str) -> None:
@@ -954,6 +1256,32 @@ class Application:
     def _try_update_page(self) -> None:
         """尝试更新页面，忽略错误"""
         self.migration_controller.try_update_page()
+
+    # ─── 公共 UI 控制方法（供控制器使用） ─────────
+    def set_start_button_enabled(self, enabled: bool) -> None:
+        """设置开始按钮的启用状态
+        
+        Args:
+            enabled: 是否启用按钮
+        """
+        self._start_btn.disabled = not enabled
+
+    def set_progress_label(self, text: str) -> None:
+        """设置进度标签文本
+        
+        Args:
+            text: 标签文本
+        """
+        self._progress_label.value = text
+
+    def set_progress_value(self, value: float) -> None:
+        """设置进度条值
+        
+        Args:
+            value: 进度值 (0.0 - 1.0)
+        """
+        # 使用新的进度条组件方法
+        self._progress_bar.set_value(value)
 
     def _save_config(self) -> None:
         """保存当前配置"""

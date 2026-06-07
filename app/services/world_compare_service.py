@@ -85,20 +85,22 @@ class WorldCompareService:
         return result
 
     def _file_signature(self, path: Path) -> Dict[str, Any]:
-        digest = hashlib.sha256()
-        with open(path, "rb") as f:
-            for chunk in iter(lambda: f.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return {"size": path.stat().st_size, "sha256": digest.hexdigest()[:16]}
+        st = path.stat()
+        return {"size": st.st_size, "mtime": int(st.st_mtime)}
 
+
+import threading
 
 _compare_service: Optional[WorldCompareService] = None
+_compare_service_lock = threading.Lock()
 
 
 def get_world_compare_service(log: Optional[LogCallback] = None) -> WorldCompareService:
+    """获取世界比较服务单例（线程安全）"""
     global _compare_service
-    if _compare_service is None:
-        _compare_service = WorldCompareService(log=log)
-    elif log is not None:
-        _compare_service.log = log
+    with _compare_service_lock:
+        if _compare_service is None:
+            _compare_service = WorldCompareService(log=log)
+        elif log is not None:
+            _compare_service.log = log
     return _compare_service

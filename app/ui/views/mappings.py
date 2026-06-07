@@ -172,7 +172,12 @@ class MappingsView(ft.Column):
                 rows=rows,
                 heading_row_color=THEME.bg_secondary,
                 data_row_color=THEME.bg_card,
-                border=ft.border.all(1, THEME.border_subtle),
+                border=ft.Border(
+                    left=ft.BorderSide(1, THEME.border_subtle),
+                    top=ft.BorderSide(1, THEME.border_subtle),
+                    right=ft.BorderSide(1, THEME.border_subtle),
+                    bottom=ft.BorderSide(1, THEME.border_subtle),
+                ),
                 column_spacing=20,
             ),
             height=min(350, 40 + len(rows) * 42),

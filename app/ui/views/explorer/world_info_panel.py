@@ -3,8 +3,8 @@ import flet as ft
 import datetime
 from typing import Callable, Dict, List, Optional
 
-from app.ui.theme import THEME
-from app.ui.components.cards import card
+from app.ui.theme import THEME, mc_border
+from app.ui.components.cards import card, placeholder
 
 from core.omni.world_session import WorldInfo
 from app.ui.views.explorer.utils import safe_update
@@ -20,11 +20,30 @@ class WorldInfoPanel(ft.Column):
         super().__init__(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._t = t_cb or (lambda k, d="", **kw: d)
-        self._placeholder = ft.Text(
-            "请先加载存档以查看信息",
-            size=14,
-            color=THEME.text_muted,
-            text_align=ft.TextAlign.CENTER,
+        
+        # 美化的占位符
+        self._placeholder = ft.Container(
+            content=ft.Column([
+                ft.Text("📦", size=48, text_align=ft.TextAlign.CENTER),
+                ft.Container(height=12),
+                ft.Text(
+                    "请先导入存档以查看信息",
+                    size=16,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_secondary,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=8),
+                ft.Text(
+                    "通过侧边栏「导入存档」选择 Minecraft 世界目录",
+                    size=13,
+                    color=THEME.text_muted,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+            ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding(left=20, right=20, top=40, bottom=40),
+            bgcolor=THEME.bg_card,
+            border=mc_border(2),
         )
         self.controls = [self._placeholder]
 
@@ -33,7 +52,12 @@ class WorldInfoPanel(ft.Column):
         self.controls.clear()
         if world_info is None:
             self.controls.append(
-                ft.Text("未找到存档信息", size=14, color=THEME.text_muted, text_align=ft.TextAlign.CENTER)
+                placeholder(
+                    icon="⚠️",
+                    title="未找到存档信息",
+                    subtitle="该目录可能不是有效的 Minecraft 世界存档",
+                    height=200,
+                )
             )
             safe_update(self)
             return

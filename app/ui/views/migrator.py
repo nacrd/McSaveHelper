@@ -3,7 +3,7 @@ import flet as ft
 from typing import TYPE_CHECKING, Optional, Any
 from pathlib import Path
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, label
 from app.ui.components.cards import card, section_title
@@ -71,16 +71,13 @@ class MigratorView(ft.Column):
             self._t("left_panel.archive_config", "📁 存档配置")))
 
         self._src_field = text_field(
-            label=self._t("left_panel.client_archive", "源存档"),
-            hint_text=self._t("left_panel.placeholder_select_world", "选择世界文件夹 (包含 level.dat)"),
+            label="当前源存档",
+            hint_text="请通过侧边栏「导入存档」设置世界文件夹 (包含 level.dat)",
             on_change=lambda e: self._sync_field_to_config(),
         )
+        self._src_field.read_only = True
         s.controls.append(ft.Container(
-            content=ft.Row([
-                self._src_field,
-                btn_ghost(self._t("left_panel.browse", "📂 浏览"), width=90, height=38,
-                          on_click=lambda e: self.app.set_src()),
-            ], spacing=10),
+            content=self._src_field,
             padding=ft.Padding(left=20, right=20, bottom=8),
         ))
 
@@ -211,13 +208,8 @@ class MigratorView(ft.Column):
         s.controls.append(ft.Container(
             content=ft.Container(
                 content=self._query_result, bgcolor=THEME.log_bg,
-                border=ft.Border(
-                    left=ft.BorderSide(1, THEME.log_border),
-                    top=ft.BorderSide(1, THEME.log_border),
-                    right=ft.BorderSide(1, THEME.log_border),
-                    bottom=ft.BorderSide(1, THEME.log_border),
-                ),
-                border_radius=8,
+                border=mc_border(2),
+                border_radius=0,
                 padding=12, height=100,
             ),
             padding=ft.Padding(left=20, right=20, bottom=18),
@@ -321,7 +313,7 @@ class MigratorView(ft.Column):
 
         self._batch_dir_field = text_field(
             label="批量存档目录",
-            hint_text="选择包含多个世界存档的目录",
+            hint_text="包含多个世界存档的目录",
             on_change=lambda e: self._sync_field_to_config(),
         )
         self._batch_scan_btn = btn_primary("🔍 扫描", width=90, height=38,
@@ -437,3 +429,11 @@ class MigratorView(ft.Column):
 
         self._query_result.value = "\n".join(lines)
         self._query_result.update()
+
+    def on_save_selected(self, path: str) -> None:
+        try:
+            self._src_field.value = path
+            self._sync_field_to_config()
+            self._src_field.update()
+        except Exception:
+            pass

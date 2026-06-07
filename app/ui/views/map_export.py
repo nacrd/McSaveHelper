@@ -19,7 +19,7 @@ class MapExportView(ft.Column):
     """地图导出视图"""
 
     def __init__(self, app: "Application") -> None:
-        super().__init__()
+        super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
         
         # 检查依赖
@@ -28,7 +28,6 @@ class MapExportView(ft.Column):
             return
             
         self.service = MapExportService()
-        self.spacing = 20
         self.expand = True
 
         # 状态
@@ -36,8 +35,8 @@ class MapExportView(ft.Column):
 
         # 配置选项
         self._world_path_field = text_field(
-            label="存档路径",
-            hint_text="选择要导出的存档目录",
+            label="当前存档",
+            hint_text="请通过侧边栏「导入存档」设置要导出的当前存档目录",
         )
         self._world_path_field.read_only = True
         
@@ -81,24 +80,7 @@ class MapExportView(ft.Column):
             selectable=True,
         )
 
-        # 进度条
-        self._progress_bar = ft.ProgressBar(
-            value=0,
-            color=THEME.mc_grass,
-            bgcolor=THEME.bg_secondary,
-            height=8,
-        )
-        self._progress_bar.visible = False
-
-        self._progress_label = ft.Text(
-            "",
-            size=12,
-            color=THEME.text_muted,
-        )
-        self._progress_label.visible = False
-
         # 按钮
-        self._select_world_btn = btn_ghost("📁 选择存档", on_click=self._select_world)
         self._select_output_btn = btn_ghost("💾 选择输出", on_click=self._select_output)
         self._export_btn = btn_primary("🗺️ 开始导出", on_click=self._start_export)
 
@@ -203,12 +185,8 @@ class MapExportView(ft.Column):
         config_card = card(
             ft.Column(
                 [
-                    section_title("🗂️ 存档选择"),
-                    ft.Row(
-                        [self._world_path_field, self._select_world_btn],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.END,
-                    ),
+                    section_title("🗂️ 当前存档"),
+                    self._world_path_field,
                     ft.Container(height=12),
                     section_title("💾 输出设置"),
                     ft.Row(
@@ -227,18 +205,6 @@ class MapExportView(ft.Column):
                         [self._export_btn],
                         spacing=12,
                     ),
-                ],
-                spacing=12,
-            )
-        )
-
-        # 进度卡片
-        progress_card = card(
-            ft.Column(
-                [
-                    section_title("📊 导出进度"),
-                    self._progress_bar,
-                    self._progress_label,
                 ],
                 spacing=12,
             )
@@ -282,7 +248,6 @@ class MapExportView(ft.Column):
             header,
             ft.Container(height=8),
             config_card,
-            progress_card,
             result_card,
             info_card,
         ]
@@ -291,23 +256,6 @@ class MapExportView(ft.Column):
         self._output_path_field.expand = True
         self._map_type_dropdown.expand = True
         self._scale_dropdown.expand = True
-
-    def _select_world(self, e: ft.ControlEvent) -> None:
-        """选择存档目录"""
-        try:
-            path = self.app.pick_directory()
-            if path:
-                self._world_path_field.value = path
-                self._world_path_field.update()
-                
-                # 自动设置输出路径
-                if not self._output_path_field.value:
-                    world_name = Path(path).name
-                    output_path = str(Path(path).parent / f"{world_name}_map.png")
-                    self._output_path_field.value = output_path
-                    self._output_path_field.update()
-        except Exception as ex:
-            self.app.error_dialog("错误", f"选择目录失败: {ex}")
 
     def _select_output(self, e: ft.ControlEvent) -> None:
         """选择输出文件"""
@@ -331,7 +279,7 @@ class MapExportView(ft.Column):
 
         world_path = self._world_path_field.value
         if not world_path:
-            self.app.warn_dialog("提示", "请先选择存档目录")
+            self.app.warn_dialog("提示", "请先通过侧边栏导入存档目录")
             return
 
         output_path = self._output_path_field.value
@@ -356,25 +304,16 @@ class MapExportView(ft.Column):
     def _export_thread(self, world_path: Path, output_path: Path) -> None:
         """导出线程"""
         try:
-            # 显示进度条
-            self._progress_bar.visible = True
-            self._progress_label.visible = True
-            self._progress_bar.update()
-            self._progress_label.update()
+            def _start():
+                self.app.show_progress("正在导出地图...")
+            self.app.page.run_task(_start)
 
             def progress_callback(value: float, msg: str) -> None:
-                self._progress_bar.value = value
-                self._progress_label.value = msg
-                try:
-                    self._progress_bar.update()
-                    self._progress_label.update()
-                except Exception:
-                    pass
+                self.app.page.run_task(lambda: self.app.update_progress_with_task("导出地图", value))
 
             def log_callback(msg: str, level: str) -> None:
-                pass  # 日志已通过 logger 处理
+                pass
 
-            # 执行导出
             results = self.service.export_map(
                 world_path=world_path,
                 output_path=output_path,
@@ -384,35 +323,45 @@ class MapExportView(ft.Column):
                 log_callback=log_callback,
             )
 
-            # 显示结果
-            if results['success']:
-                result_text = "导出完成！\n\n"
-                result_text += f"✓ 输出文件: {results['output_path']}\n"
-                result_text += f"✓ 图像尺寸: {results['dimensions'][0]} x {results['dimensions'][1]}\n"
-                result_text += f"✓ 处理区块: {results['chunks_processed']}"
-
-                self._result_text.value = result_text
-                self._result_text.update()
-
-                self.app.info_dialog("完成", "地图导出完成！")
-            else:
-                self._result_text.value = "导出失败，请查看日志"
-                self._result_text.update()
-                self.app.error_dialog("错误", "地图导出失败")
+            def _finish():
+                if results['success']:
+                    result_text = "导出完成！\n\n"
+                    result_text += f"✓ 输出文件: {results['output_path']}\n"
+                    result_text += f"✓ 图像尺寸: {results['dimensions'][0]} x {results['dimensions'][1]}\n"
+                    result_text += f"✓ 处理区块: {results['chunks_processed']}"
+                    self._result_text.value = result_text
+                    self._result_text.update()
+                    self.app.hide_progress()
+                    self.app.info_dialog("完成", "地图导出完成！")
+                else:
+                    self._result_text.value = "导出失败，请查看日志"
+                    self._result_text.update()
+                    self.app.hide_progress()
+                    self.app.error_dialog("错误", "地图导出失败")
+                self._exporting = False
+                self._export_btn.disabled = False
+                self._export_btn.update()
+            self.app.page.run_task(_finish)
 
         except Exception as ex:
-            self._result_text.value = f"导出失败: {ex}"
-            self._result_text.update()
-            self.app.error_dialog("错误", f"导出失败: {ex}")
+            def _error():
+                self._result_text.value = f"导出失败: {ex}"
+                self._result_text.update()
+                self.app.hide_progress()
+                self.app.error_dialog("错误", f"导出失败: {ex}")
+                self._exporting = False
+                self._export_btn.disabled = False
+                self._export_btn.update()
+            self.app.page.run_task(_error)
 
-        finally:
-            # 隐藏进度条
-            self._progress_bar.visible = False
-            self._progress_label.visible = False
-            self._progress_bar.update()
-            self._progress_label.update()
-
-            # 恢复按钮
-            self._exporting = False
-            self._export_btn.disabled = False
-            self._export_btn.update()
+    def on_save_selected(self, path: str) -> None:
+        """统一入口导入存档回调"""
+        try:
+            self._world_path_field.value = path
+            self._world_path_field.update()
+            if not self._output_path_field.value:
+                world_path = Path(path)
+                self._output_path_field.value = str(world_path.parent / f"{world_path.name}_map.png")
+                self._output_path_field.update()
+        except Exception:
+            pass

@@ -188,14 +188,18 @@ class WorldStatsService:
         raise ValueError(f"无效的区域文件名: {region_path.name}")
 
 
+import threading
+
 _world_stats_service: Optional[WorldStatsService] = None
+_world_stats_service_lock = threading.Lock()
 
 
 def get_world_stats_service(log: Optional[LogCallback] = None) -> WorldStatsService:
-    """获取存档统计服务单例"""
+    """获取存档统计服务单例（线程安全）"""
     global _world_stats_service
-    if _world_stats_service is None:
-        _world_stats_service = WorldStatsService(log=log)
-    elif log is not None:
-        _world_stats_service.log = log
+    with _world_stats_service_lock:
+        if _world_stats_service is None:
+            _world_stats_service = WorldStatsService(log=log)
+        elif log is not None:
+            _world_stats_service.log = log
     return _world_stats_service

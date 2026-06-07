@@ -47,3 +47,50 @@ def section_title(text: str, icon: str = "▣") -> ft.Container:
         ),
         padding=ft.Padding(left=20, right=20, top=16, bottom=12),
     )
+
+
+def placeholder(
+    icon: str = "📭",
+    title: str = "暂无内容",
+    subtitle: str = "请加载数据后查看",
+    height: int = 150,
+) -> ft.Container:
+    """创建美化的空状态占位符
+    
+    Args:
+        icon: 显示的图标（emoji）
+        title: 主标题
+        subtitle: 副标题说明
+        height: 容器高度
+    
+    Returns:
+        ft.Container: 美化的占位符容器
+    """
+    return ft.Container(
+        content=ft.Column(
+            controls=[
+                ft.Text(icon, size=48, text_align=ft.TextAlign.CENTER),
+                ft.Container(height=8),
+                ft.Text(
+                    title,
+                    size=16,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_secondary,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=4),
+                ft.Text(
+                    subtitle,
+                    size=13,
+                    color=THEME.text_muted,
+                    text_align=ft.TextAlign.CENTER,
+                ),
+            ],
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=0,
+        ),
+        padding=ft.Padding(left=20, right=20, top=30, bottom=30),
+        bgcolor=THEME.bg_card,
+        border=mc_border(1),
+        height=height,
+    )

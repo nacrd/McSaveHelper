@@ -33,6 +33,7 @@ class HeatmapService:
     """
     
     _instance: Optional['HeatmapService'] = None
+    _MCA_PATTERN = re.compile(r'^r\.(-?\d+)\.(-?\d+)$')
     
     def __new__(cls) -> 'HeatmapService':
         if cls._instance is None:
@@ -157,9 +158,7 @@ class HeatmapService:
         Returns:
             (x, z) 坐标元组，或 None 如果解析失败
         """
-        # 匹配 r.x.z 格式
-        pattern = r'^r\.(-?\d+)\.(-?\d+)$'
-        match = re.match(pattern, filename)
+        match = self._MCA_PATTERN.match(filename)
         
         if match:
             x = int(match.group(1))
@@ -199,7 +198,7 @@ class HeatmapService:
     
     def get_statistics(self) -> Dict[str, Any]:
         """
-        获取扫描统计信息
+        获取扫描统计信息（单次遍历，避免多次迭代）
         
         Returns:
             包含统计数据的字典
@@ -215,27 +214,46 @@ class HeatmapService:
                 "max_coord": None
             }
         
-        sizes = list(self._mca_data.values())
-        coords = list(self._mca_data.keys())
+        total_size = 0
+        min_size = float('inf')
+        max_size = 0
+        min_coord = None
+        max_coord = None
         
+        for coord, size in self._mca_data.items():
+            total_size += size
+            if size < min_size:
+                min_size = size
+            if size > max_size:
+                max_size = size
+            if min_coord is None or coord < min_coord:
+                min_coord = coord
+            if max_coord is None or coord > max_coord:
+                max_coord = coord
+        
+        count = len(self._mca_data)
         return {
-            "total_regions": len(self._mca_data),
-            "total_size": sum(sizes),
-            "avg_size": sum(sizes) // len(sizes) if sizes else 0,
-            "min_size": min(sizes) if sizes else 0,
-            "max_size": max(sizes) if sizes else 0,
-            "min_coord": min(coords, key=lambda c: (c[0], c[1])) if coords else None,
-            "max_coord": max(coords, key=lambda c: (c[0], c[1])) if coords else None,
+            "total_regions": count,
+            "total_size": total_size,
+            "avg_size": total_size // count if count else 0,
+            "min_size": min_size,
+            "max_size": max_size,
+            "min_coord": min_coord,
+            "max_coord": max_coord,
         }
 
 
+import threading
+
 # 全局单例实例
 _heatmap_service_instance: Optional[HeatmapService] = None
+_heatmap_service_lock = threading.Lock()
 
 
 def get_heatmap_service() -> HeatmapService:
-    """获取热力图服务单例"""
+    """获取热力图服务单例（线程安全）"""
     global _heatmap_service_instance
-    if _heatmap_service_instance is None:
-        _heatmap_service_instance = HeatmapService()
+    with _heatmap_service_lock:
+        if _heatmap_service_instance is None:
+            _heatmap_service_instance = HeatmapService()
     return _heatmap_service_instance

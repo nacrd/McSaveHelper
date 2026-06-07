@@ -46,13 +46,9 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
                     if chunk is None:
                         continue
                     total_chunks += 1
-                    # 处理方块
-                    blocks_replaced = _purge_mod_blocks_in_chunk(chunk)
+                    # 一次遍历处理方块、实体和方块实体
+                    blocks_replaced, entities_removed = _purge_mod_data_in_chunk(chunk)
                     total_blocks_replaced += blocks_replaced
-                    # 处理实体
-                    entities_removed = _purge_mod_entities_in_chunk(chunk)
-                    block_entities_removed = _purge_mod_block_entities_in_chunk(chunk)
-                    entities_removed += block_entities_removed
                     total_entities_removed += entities_removed
                     if blocks_replaced > 0 or entities_removed > 0:
                         region_changes += 1
@@ -66,6 +62,72 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
     log(f"总计扫描 {total_chunks} 个区块", "INFO")
     log(f"替换了 {total_blocks_replaced} 个模组方块", "INFO")
     log(f"移除了 {total_entities_removed} 个模组实体", "INFO")
+
+
+def _purge_mod_data_in_chunk(chunk) -> Tuple[int, int]:
+    """单次遍历移除模组方块、实体和方块实体，返回 (替换方块数, 移除实体数)"""
+    data = chunk.data if hasattr(chunk, 'data') else chunk
+    if not isinstance(data, nbtlib.tag.Compound):
+        return 0, 0
+
+    blocks_replaced = 0
+    entities_removed = 0
+
+    # 1. 处理方块 palette
+    sections = data.get('sections')
+    if sections:
+        for section in sections:
+            palette = section.get('palette')
+            if not palette:
+                continue
+            for block_state in palette:
+                block_id = block_state.get('Name')
+                if not isinstance(block_id, nbtlib.tag.String):
+                    continue
+                if not is_vanilla_id(str(block_id)):
+                    block_state['Name'] = nbtlib.tag.String('minecraft:air')
+                    if 'Properties' in block_state:
+                        del block_state['Properties']
+                    blocks_replaced += 1
+
+    # 2. 处理实体
+    entities_key = 'Entities' if 'Entities' in data else 'entities'
+    entities = data.get(entities_key)
+    if entities:
+        vanilla_entities = []
+        for entity in entities:
+            entity_id = entity.get('id')
+            if not isinstance(entity_id, nbtlib.tag.String):
+                vanilla_entities.append(entity)
+                continue
+            if is_vanilla_id(str(entity_id)):
+                vanilla_entities.append(entity)
+            else:
+                entities_removed += 1
+        if entities_removed > 0:
+            data[entities_key] = nbtlib.tag.List(vanilla_entities)
+
+    # 3. 处理方块实体
+    for key in ('block_entities', 'BlockEntities', 'TileEntities'):
+        block_entities = data.get(key)
+        if not block_entities:
+            continue
+        key_removed = 0
+        vanilla_block_entities = []
+        for block_entity in block_entities:
+            block_entity_id = block_entity.get('id')
+            if not isinstance(block_entity_id, nbtlib.tag.String):
+                vanilla_block_entities.append(block_entity)
+                continue
+            if is_vanilla_id(str(block_entity_id)):
+                vanilla_block_entities.append(block_entity)
+            else:
+                key_removed += 1
+        if key_removed > 0:
+            data[key] = nbtlib.tag.List(vanilla_block_entities)
+            entities_removed += key_removed
+
+    return blocks_replaced, entities_removed
 
 
 def _purge_mod_blocks_in_chunk(chunk) -> int:

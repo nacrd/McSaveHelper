@@ -22,12 +22,10 @@ class EntityBlockSearchView(ft.Column):
     """实体/方块搜索视图"""
 
     def __init__(self, app: "Application") -> None:
-        super().__init__()
+        super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
         self.service = EntityBlockSearchService()
-        self.spacing = 20
         self.expand = True
-        self.scroll = ft.ScrollMode.AUTO
 
         # 状态
         self._searching = False
@@ -35,8 +33,8 @@ class EntityBlockSearchView(ft.Column):
 
         # 配置选项
         self._world_path_field = text_field(
-            label="存档路径",
-            hint_text="选择要搜索的存档目录",
+            label="当前存档",
+            hint_text="请通过侧边栏「导入存档」设置要搜索的当前存档目录",
         )
         self._world_path_field.read_only = True
 
@@ -82,13 +80,18 @@ class EntityBlockSearchView(ft.Column):
                 ft.DataColumn(ft.Text("额外信息", weight=ft.FontWeight.BOLD, size=12)),
             ],
             rows=[],
-            border=ft.border.all(1, THEME.border_subtle),
+            border=ft.Border(
+                left=ft.BorderSide(1, THEME.border_subtle),
+                top=ft.BorderSide(1, THEME.border_subtle),
+                right=ft.BorderSide(1, THEME.border_subtle),
+                bottom=ft.BorderSide(1, THEME.border_subtle),
+            ),
             border_radius=8,
-            vertical_lines=ft.border.BorderSide(1, THEME.border_subtle),
-            horizontal_lines=ft.border.BorderSide(1, THEME.border_subtle),
+            vertical_lines=ft.BorderSide(1, THEME.border_subtle),
+            horizontal_lines=ft.BorderSide(1, THEME.border_subtle),
             heading_row_color=THEME.bg_secondary,
             heading_row_height=40,
-            data_row_height=36,
+            data_row_min_height=36,
         )
 
         self._result_count_text = ft.Text(
@@ -98,24 +101,7 @@ class EntityBlockSearchView(ft.Column):
             color=THEME.text_primary,
         )
 
-        # 进度条
-        self._progress_bar = ft.ProgressBar(
-            value=0,
-            color=THEME.mc_grass,
-            bgcolor=THEME.bg_secondary,
-            height=8,
-        )
-        self._progress_bar.visible = False
-
-        self._progress_label = ft.Text(
-            "",
-            size=12,
-            color=THEME.text_muted,
-        )
-        self._progress_label.visible = False
-
         # 按钮
-        self._select_btn = btn_ghost("📁 选择存档", on_click=self._select_world)
         self._search_btn = btn_primary("🔍 开始搜索", on_click=self._start_search)
         self._export_btn = btn_ghost("💾 导出结果", on_click=self._export_results)
         self._export_btn.disabled = True
@@ -193,12 +179,8 @@ class EntityBlockSearchView(ft.Column):
         config_card = card(
             ft.Column(
                 [
-                    section_title("🗂️ 存档选择"),
-                    ft.Row(
-                        [self._world_path_field, self._select_btn],
-                        spacing=12,
-                        vertical_alignment=ft.CrossAxisAlignment.END,
-                    ),
+                    section_title("🗂️ 当前存档"),
+                    self._world_path_field,
                     ft.Container(height=12),
                     section_title("🎯 搜索目标"),
                     ft.Row(
@@ -217,18 +199,6 @@ class EntityBlockSearchView(ft.Column):
                         [self._search_btn, self._export_btn],
                         spacing=12,
                     ),
-                ],
-                spacing=12,
-            )
-        )
-
-        # 进度卡片
-        progress_card = card(
-            ft.Column(
-                [
-                    section_title("📊 搜索进度"),
-                    self._progress_bar,
-                    self._progress_label,
                 ],
                 spacing=12,
             )
@@ -283,7 +253,6 @@ class EntityBlockSearchView(ft.Column):
             header,
             ft.Container(height=8),
             config_card,
-            progress_card,
             result_card,
             info_card,
         ]
@@ -293,16 +262,6 @@ class EntityBlockSearchView(ft.Column):
         self._target_dropdown.expand = True
         self._custom_target_field.expand = True
 
-    def _select_world(self, e: ft.ControlEvent) -> None:
-        """选择存档目录"""
-        try:
-            path = self.app.pick_directory()
-            if path:
-                self._world_path_field.value = path
-                self._world_path_field.update()
-        except Exception as ex:
-            self.app.error_dialog("错误", f"选择目录失败: {ex}")
-
     def _start_search(self, e: ft.ControlEvent) -> None:
         """开始搜索"""
         if self._searching:
@@ -311,7 +270,7 @@ class EntityBlockSearchView(ft.Column):
 
         world_path = self._world_path_field.value
         if not world_path:
-            self.app.warn_dialog("提示", "请先选择存档目录")
+            self.app.warn_dialog("提示", "请先通过侧边栏导入存档目录")
             return
 
         # 获取目标
@@ -353,25 +312,16 @@ class EntityBlockSearchView(ft.Column):
     ) -> None:
         """搜索线程"""
         try:
-            # 显示进度条
-            self._progress_bar.visible = True
-            self._progress_label.visible = True
-            self._progress_bar.update()
-            self._progress_label.update()
+            def _start():
+                self.app.show_progress("正在搜索实体/方块...")
+            self.app.page.run_task(_start)
 
             def progress_callback(value: float, msg: str) -> None:
-                self._progress_bar.value = value
-                self._progress_label.value = msg
-                try:
-                    self._progress_bar.update()
-                    self._progress_label.update()
-                except Exception:
-                    pass
+                self.app.page.run_task(lambda: self.app.update_progress_with_task("搜索中", value))
 
             def log_callback(msg: str, level: str) -> None:
-                pass  # 日志已通过 logger 处理
+                pass
 
-            # 执行搜索
             results = self.service.search(
                 world_path=world_path,
                 search_type=self._search_type_dropdown.value,
@@ -381,33 +331,30 @@ class EntityBlockSearchView(ft.Column):
                 log_callback=log_callback,
             )
 
-            # 更新结果显示
             self._search_results = results
-            self._update_results_table()
 
-            if results:
-                self.app.info_dialog("完成", f"搜索完成，找到 {len(results)} 个结果！")
-            else:
-                self.app.info_dialog("完成", "搜索完成，未找到匹配的结果")
+            def _finish():
+                self._update_results_table()
+                self.app.hide_progress()
+                if results:
+                    self.app.info_dialog("完成", f"搜索完成，找到 {len(results)} 个结果！")
+                else:
+                    self.app.info_dialog("完成", "搜索完成，未找到匹配的结果")
+                self._searching = False
+                self._search_btn.disabled = False
+                self._search_btn.update()
+                self._export_btn.disabled = len(self._search_results) == 0
+                self._export_btn.update()
+            self.app.page.run_task(_finish)
 
         except Exception as ex:
-            self.app.error_dialog("错误", f"搜索失败: {ex}")
-
-        finally:
-            # 隐藏进度条
-            self._progress_bar.visible = False
-            self._progress_label.visible = False
-            self._progress_bar.update()
-            self._progress_label.update()
-
-            # 恢复按钮
-            self._searching = False
-            self._search_btn.disabled = False
-            self._search_btn.update()
-            
-            # 启用导出按钮
-            self._export_btn.disabled = len(self._search_results) == 0
-            self._export_btn.update()
+            def _error():
+                self.app.hide_progress()
+                self.app.error_dialog("错误", f"搜索失败: {ex}")
+                self._searching = False
+                self._search_btn.disabled = False
+                self._search_btn.update()
+            self.app.page.run_task(_error)
 
     def _update_results_table(self) -> None:
         """更新结果表格"""
@@ -463,3 +410,11 @@ class EntityBlockSearchView(ft.Column):
                 self.app.info_dialog("完成", f"结果已导出到: {path}")
         except Exception as ex:
             self.app.error_dialog("错误", f"导出失败: {ex}")
+
+    def on_save_selected(self, path: str) -> None:
+        """统一入口导入存档回调"""
+        try:
+            self._world_path_field.value = path
+            self._world_path_field.update()
+        except Exception:
+            pass

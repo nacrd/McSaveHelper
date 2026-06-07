@@ -15,10 +15,9 @@ def scan_all_regions(world_path: Path) -> List[Path]:
     Returns:
         区域文件路径列表
     """
-    patterns = ["region/*.mca", "DIM*/region/*.mca", "dimensions/**/region/*.mca", "*/region/*.mca"]
+    # 使用单一 glob 递归模式覆盖所有 region 子目录，避免重复扫描
     files: List[Path] = []
-    for pat in patterns:
-        for file in world_path.rglob(pat):
-            if file.is_file() and _REGION_FILE_RE.match(file.name):
-                files.append(file)
+    for file in world_path.rglob("*.mca"):
+        if file.is_file() and file.parent.name == "region" and _REGION_FILE_RE.match(file.name):
+            files.append(file)
     return sorted(set(files))

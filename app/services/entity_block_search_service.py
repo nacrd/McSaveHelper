@@ -72,6 +72,8 @@ class EntityBlockSearchService:
         "minecraft:dragon_egg",
     ]
 
+    MAX_RESULTS = 10000
+
     def __init__(self) -> None:
         self.results: List[SearchResult] = []
 
@@ -145,6 +147,9 @@ class EntityBlockSearchService:
 
             progress(1.0, f"搜索完成，找到 {len(self.results)} 个结果")
             log(f"搜索完成，共找到 {len(self.results)} 个 {target}")
+
+            if search_type == "entity" and len(self.results) == 0:
+                log("提示: 1.18+ 存档的实体数据可能存储在独立文件中，当前搜索可能不完整", "WARNING")
 
         except Exception as e:
             error_msg = f"搜索失败: {e}"
@@ -233,10 +238,13 @@ class EntityBlockSearchService:
         """
         try:
             # 获取区块数据
-            if not hasattr(chunk, 'data') or 'Entities' not in chunk.data:
+            if not hasattr(chunk, 'data'):
                 return
 
             entities = chunk.data.get('Entities', [])
+            
+            if not entities:
+                return
             
             for entity in entities:
                 try:
@@ -281,6 +289,8 @@ class EntityBlockSearchService:
                                 extra_info=extra_info,
                             )
                             self.results.append(result)
+                            if len(self.results) >= self.MAX_RESULTS:
+                                return
                             
                 except Exception:
                     pass  # 跳过无效实体
@@ -367,35 +377,77 @@ class EntityBlockSearchService:
             dimension: 维度
         """
         try:
-            # 搜索区块中的所有方块
-            for x in range(16):
-                for z in range(16):
-                    for y in range(-64, 320):  # 1.18+ 世界高度
-                        try:
-                            block = chunk.get_block(x, y, z)
-                            if block:
-                                block_id = str(block.id)
-                                
-                                # 检查是否匹配
-                                if block_id == target or block_id.endswith(f":{target}"):
-                                    # 计算世界坐标
+            from anvil import Block
+
+            target_block = None
+            if ":" in target:
+                try:
+                    target_block = Block.from_name(target)
+                except Exception:
+                    pass
+
+            section_range = self._get_section_range(chunk)
+            matching_sections = []
+
+            for section_y in section_range:
+                try:
+                    palette = chunk.get_palette(section_y)
+                    if palette is None:
+                        continue
+                    for block in palette:
+                        if block is None:
+                            continue
+                        if target_block and block == target_block:
+                            matching_sections.append(section_y)
+                            break
+                        block_name = block.name()
+                        if block_name == target or block.id == target:
+                            matching_sections.append(section_y)
+                            break
+                except Exception:
+                    continue
+
+            if not matching_sections:
+                return
+
+            for section_y in matching_sections:
+                y_start = section_y * 16
+                y_end = y_start + 16
+                for x in range(16):
+                    for z in range(16):
+                        for y in range(y_start, y_end):
+                            try:
+                                block = chunk.get_block(x, y, z)
+                                if block is None:
+                                    continue
+                                block_name = block.name()
+                                if block_name == target or block.id == target:
                                     world_x = chunk.x * 16 + x
                                     world_z = chunk.z * 16 + z
-                                    
-                                    # 添加结果
                                     result = SearchResult(
                                         result_type="block",
-                                        name=block_id,
+                                        name=block_name,
                                         position=(world_x, y, world_z),
                                         dimension=dimension,
                                     )
                                     self.results.append(result)
-                                    
-                        except Exception:
-                            pass  # 跳过无效方块
+                                    if len(self.results) >= self.MAX_RESULTS:
+                                        return
+                            except Exception:
+                                pass
                             
         except Exception:
-            pass  # 跳过损坏的区块数据
+            pass
+
+    def _get_section_range(self, chunk: Any) -> range:
+        try:
+            from anvil.chunk import _section_height_range
+            result = _section_height_range(chunk.version)
+            if isinstance(result, range):
+                return result
+            return range(-4, 20)
+        except Exception:
+            return range(-4, 20)
 
     def _get_dimension_path(self, world_path: Path, dimension: str) -> Optional[Path]:
         """获取维度路径

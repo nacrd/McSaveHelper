@@ -2,19 +2,22 @@
 
 将存档地图导出为 PNG 图片（俯视图/地形图）
 """
+import hashlib
 import io
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Tuple, List
 import traceback
 
 from core.logger import logger
-from core.scanner import scan_all_regions
 
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+_REGION_PATTERN = re.compile(r"r\.(-?\d+)\.(-?\d+)\.mca")
 
 
 class MapExportService:
@@ -97,8 +100,15 @@ class MapExportService:
             log(f"开始导出地图: {world_path}", "INFO")
             progress(0.05, "扫描区块文件...")
 
-            # 扫描区块文件
-            region_files = scan_all_regions(world_path)
+            # 只扫描主世界的区块文件（避免不同维度区块重叠）
+            region_dir = world_path / "region"
+            if not region_dir.exists():
+                raise ValueError("未找到主世界 region 目录")
+
+            region_files = list(region_dir.glob("*.mca"))
+            region_files = [f for f in region_files if f.is_file() and _REGION_PATTERN.match(f.name)]
+            region_files = sorted(region_files)
+
             if not region_files:
                 raise ValueError("未找到区块文件")
 
@@ -123,12 +133,18 @@ class MapExportService:
 
             # 保存图像
             progress(0.95, "保存图像...")
-            image.save(output_path, "PNG")
-            log(f"地图已保存: {output_path}", "INFO")
+            # 在关闭前获取图像尺寸，避免访问已关闭的图像对象
+            image_size = image.size
+            try:
+                image.save(output_path, "PNG")
+                log(f"地图已保存: {output_path}", "INFO")
+            finally:
+                # 确保关闭图像对象，释放文件句柄
+                image.close()
 
             results["success"] = True
             results["output_path"] = str(output_path)
-            results["dimensions"] = image.size
+            results["dimensions"] = image_size
             results["chunks_processed"] = len(region_files)
 
             progress(1.0, "导出完成")
@@ -154,17 +170,13 @@ class MapExportService:
         Returns:
             范围字典
         """
-        import re
-        
         min_x = float('inf')
         max_x = float('-inf')
         min_z = float('inf')
         max_z = float('-inf')
-
-        pattern = re.compile(r"r\.(-?\d+)\.(-?\d+)\.mca")
         
         for region_file in region_files:
-            match = pattern.match(region_file.name)
+            match = _REGION_PATTERN.match(region_file.name)
             if match:
                 rx = int(match.group(1))
                 rz = int(match.group(2))
@@ -212,13 +224,35 @@ class MapExportService:
         width = width // scale
         height = height // scale
 
-        log(f"创建 {width}x{height} 的图像", "INFO")
+        MAX_DIMENSION = 32768
+        if width > MAX_DIMENSION or height > MAX_DIMENSION:
+            needed_scale = max(
+                ((bounds["max_x"] - bounds["min_x"] + 1) * 32 * 16) // MAX_DIMENSION + 1,
+                ((bounds["max_z"] - bounds["min_z"] + 1) * 32 * 16) // MAX_DIMENSION + 1,
+            )
+            raise ValueError(
+                f"图像尺寸过大 ({width}x{height})，超出限制 ({MAX_DIMENSION}px)。"
+                f"请将缩放比例调整为至少 1:{needed_scale}"
+            )
+
+        pixel_count = width * height
+        estimated_mb = pixel_count * 3 / (1024 * 1024)
+        if estimated_mb > 2048:
+            raise ValueError(
+                f"预计图像内存占用约 {estimated_mb:.0f} MB，超出安全限制 (2048 MB)。"
+                f"请增大缩放比例以减小图像尺寸"
+            )
+
+        log(f"创建 {width}x{height} 的图像 (预计 {estimated_mb:.0f} MB)", "INFO")
         
         # 创建图像
         image = Image.new("RGB", (width, height), color=(135, 206, 235))  # 天蓝色背景
 
         try:
             from anvil import Region
+            
+            # 使用像素访问对象，比逐个 putpixel 调用快得多
+            pixels = image.load()
             
             total = len(region_files)
             for idx, region_file in enumerate(region_files):
@@ -227,9 +261,7 @@ class MapExportService:
                 
                 try:
                     # 解析区块坐标
-                    import re
-                    pattern = re.compile(r"r\.(-?\d+)\.(-?\d+)\.mca")
-                    match = pattern.match(region_file.name)
+                    match = _REGION_PATTERN.match(region_file.name)
                     if not match:
                         continue
                     
@@ -255,6 +287,7 @@ class MapExportService:
                                         bounds,
                                         map_type,
                                         scale,
+                                        pixels,
                                     )
                             except Exception:
                                 pass  # 跳过损坏的区块
@@ -284,6 +317,7 @@ class MapExportService:
         bounds: Dict[str, int],
         map_type: str,
         scale: int,
+        pixels: Any = None,
     ) -> None:
         """渲染单个区块
         
@@ -297,8 +331,12 @@ class MapExportService:
             bounds: 区块范围
             map_type: 地图类型
             scale: 缩放比例
+            pixels: 像素访问对象（可选，用于批量写入优化）
         """
         try:
+            if pixels is None:
+                pixels = image.load()
+            
             # 计算区块在图像中的位置
             chunk_x = (rx - bounds["min_x"]) * 32 + cx
             chunk_z = (rz - bounds["min_z"]) * 32 + cz
@@ -318,9 +356,9 @@ class MapExportService:
                             px = (chunk_x * 16 + bx) // scale
                             py = (chunk_z * 16 + bz) // scale
                             
-                            # 绘制像素
+                            # 绘制像素（使用像素访问对象，比 putpixel 快 5-10 倍）
                             if 0 <= px < image.width and 0 <= py < image.height:
-                                image.putpixel((px, py), color)
+                                pixels[px, py] = color
                     except Exception:
                         pass  # 跳过无效方块
                         
@@ -328,25 +366,35 @@ class MapExportService:
             pass  # 跳过损坏的区块数据
 
     def _get_highest_block_y(self, chunk: Any, x: int, z: int) -> Optional[int]:
-        """获取最高非空气方块的 Y 坐标
-        
-        Args:
-            chunk: 区块对象
-            x: 方块 X 坐标
-            z: 方块 Z 坐标
-            
-        Returns:
-            Y 坐标或 None
-        """
         try:
-            # 从高到低搜索
-            for y in range(319, -64, -1):  # 1.18+ 世界高度
+            try:
+                from anvil.chunk import _section_height_range
+                section_range = _section_height_range(chunk.version)
+            except Exception:
+                section_range = range(-4, 20)
+
+            for section_y in reversed(section_range):
                 try:
-                    block = chunk.get_block(x, y, z)
-                    if block and not block.id.endswith("air"):
-                        return y
+                    palette = chunk.get_palette(section_y)
+                    if palette is None:
+                        continue
+                    has_non_air = any(
+                        p is not None and not p.id.endswith("air")
+                        for p in palette
+                    )
+                    if not has_non_air:
+                        continue
                 except Exception:
                     continue
+
+                y_start = section_y * 16
+                for y in range(y_start + 15, y_start - 1, -1):
+                    try:
+                        block = chunk.get_block(x, y, z)
+                        if block and not block.id.endswith("air"):
+                            return y
+                    except Exception:
+                        continue
             return None
         except Exception:
             return None
@@ -363,14 +411,12 @@ class MapExportService:
             RGB 颜色元组
         """
         try:
-            block_id = str(block.id)
+            block_name = block.name()
             
-            # 从颜色映射中获取
-            if block_id in self.BLOCK_COLORS:
-                color = self.BLOCK_COLORS[block_id]
+            if block_name in self.BLOCK_COLORS:
+                color = self.BLOCK_COLORS[block_name]
             else:
-                # 默认颜色：根据方块名称生成
-                color = self._generate_color_from_name(block_id)
+                color = self._generate_color_from_name(block_name)
             
             # 地形图：根据高度调整亮度
             if map_type == "terrain":
@@ -382,18 +428,6 @@ class MapExportService:
         except Exception:
             return (128, 128, 128)  # 默认灰色
 
-    def _generate_color_from_name(self, block_id: str) -> Tuple[int, int, int]:
-        """根据方块 ID 生成颜色
-        
-        Args:
-            block_id: 方块 ID
-            
-        Returns:
-            RGB 颜色元组
-        """
-        # 使用哈希生成稳定的颜色
-        h = hash(block_id)
-        r = (h & 0xFF0000) >> 16
-        g = (h & 0x00FF00) >> 8
-        b = h & 0x0000FF
-        return (r, g, b)
+    def _generate_color_from_name(self, block_name: str) -> Tuple[int, int, int]:
+        h = hashlib.md5(block_name.encode("utf-8")).digest()
+        return (h[0], h[1], h[2])

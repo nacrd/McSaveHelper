@@ -1,4 +1,4 @@
-"""Minecraft-style sidebar navigation component with drag-and-drop support"""
+"""Minecraft-style sidebar navigation component with drag-and-drop support and hover effects"""
 import traceback
 from typing import Callable, List, Dict, Any, Optional
 
@@ -9,21 +9,39 @@ from core.version import APP_VERSION
 
 
 class Sidebar(ft.Container):
-    """Left navigation sidebar with drag-and-drop tab reordering"""
+    """Left navigation sidebar with drag-and-drop tab reordering and hover effects"""
 
     def __init__(
         self,
         tabs: List[Dict[str, Any]],
         on_tab_select: Callable[[str], None],
         on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        on_import_save: Optional[Callable[[], None]] = None,
         default_tab: Optional[str] = None,
+        width: int = 210,
     ) -> None:
         self._tabs: List[Dict[str, Any]] = list(tabs)
         self._on_tab_select: Callable[[str], None] = on_tab_select
         self._on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]] = on_tabs_reorder
+        self._on_import_save: Optional[Callable[[], None]] = on_import_save
         self._selected_id: Optional[str] = default_tab or (tabs[0]["id"] if tabs else None)
         self._buttons: Dict[str, ft.Container] = {}
-        self._tab_col: ft.Column = ft.Column(spacing=6)
+        self._sidebar_width = width
+        # 使用 ListView 替代 Column 实现滚动功能
+        self._tab_col: ft.ListView = ft.ListView(
+            spacing=6,
+            padding=0,
+            expand=True,
+            auto_scroll=False,
+        )
+        self._current_save_name = ft.Text(
+            "未设置当前存档",
+            size=10,
+            color=THEME.text_muted,
+            font_family="monospace",
+            no_wrap=True,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
 
         col = ft.Column(spacing=0, expand=True)
 
@@ -45,10 +63,39 @@ class Sidebar(ft.Container):
                             color=THEME.text_muted,
                             font_family="monospace",
                         ),
+                        # 统一导入存档按钮
+                        ft.Container(
+                            content=ft.Container(
+                                content=ft.Row(
+                                    [
+                                        ft.Text("📂", size=14),
+                                        ft.Text(
+                                            "导入存档",
+                                            size=11,
+                                            weight=ft.FontWeight.W_500,
+                                        ),
+                                    ],
+                                    spacing=6,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                alignment=ft.Alignment(0, 0),
+                                padding=ft.Padding(left=8, right=8, top=6, bottom=6),
+                                border_radius=4,
+                                bgcolor=THEME.mc_grass,
+                                border=mc_border(1),
+                                ink=True,
+                                on_click=self._handle_import_save,
+                            ),
+                            padding=ft.Padding(left=0, right=0, top=8, bottom=0),
+                        ),
+                        ft.Container(
+                            content=self._current_save_name,
+                            padding=ft.Padding(left=2, right=2, top=6, bottom=0),
+                        ),
                     ],
                     spacing=2,
                 ),
-                padding=ft.Padding(left=16, right=16, top=24, bottom=20),
+                padding=ft.Padding(left=16, right=16, top=16, bottom=16),
                 bgcolor=THEME.mc_dirt,
                 border=ft.Border(
                     left=None,
@@ -59,8 +106,7 @@ class Sidebar(ft.Container):
             )
         )
 
-        # Tab buttons
-        self._tab_col.expand = True
+        # Tab buttons - 使用滚动区域
         self._rebuild_tab_buttons()
         col.controls.append(
             ft.Container(
@@ -86,7 +132,7 @@ class Sidebar(ft.Container):
 
         super().__init__(
             content=col,
-            width=210,
+            width=width,
             bgcolor=THEME.bg_primary,
             border=ft.Border(
                 left=None,
@@ -106,7 +152,7 @@ class Sidebar(ft.Container):
             self._tab_col.controls.append(btn)
 
     def _build_tab_button(self, tab: Dict[str, Any]) -> ft.Container:
-        """构建单个标签按钮"""
+        """构建单个标签按钮 with hover effects"""
         selected = tab["id"] == self._selected_id
         icon = tab.get("icon", "▣")
         label_text = tab.get("label", tab["id"])
@@ -153,9 +199,56 @@ class Sidebar(ft.Container):
             border=mc_border(2),
             ink=True,
             on_click=lambda e, tid=tab["id"]: self._safe_select(tid),
+            on_hover=lambda e, tid=tab["id"]: self._handle_hover(e, tid),
         )
         
         return container
+    
+    def _handle_hover(self, e: ft.ControlEvent, tab_id: str) -> None:
+        """Handle hover event for tab buttons
+        
+        Args:
+            e: Control event
+            tab_id: Tab ID
+        """
+        try:
+            if tab_id not in self._buttons:
+                return
+            
+            container = self._buttons[tab_id]
+            is_selected = tab_id == self._selected_id
+            
+            if e.data == "true":
+                # Hover state - brighter background and enhanced shadow
+                if not is_selected:
+                    container.bgcolor = THEME.bg_card_hover
+                    container.shadow = ft.BoxShadow(
+                        spread_radius=0,
+                        blur_radius=4,
+                        color=THEME.shadow,
+                        offset=ft.Offset(2, 2),
+                    )
+                    # Brighten icon slot
+                    row = container.content
+                    if isinstance(row, ft.Row) and len(row.controls) >= 1:
+                        icon_slot = row.controls[0]
+                        if isinstance(icon_slot, ft.Container):
+                            icon_slot.bgcolor = THEME.mc_iron  # Brighter gray
+            else:
+                # Normal state - reset to original
+                if not is_selected:
+                    container.bgcolor = THEME.bg_card
+                    container.shadow = None
+                    # Reset icon slot
+                    row = container.content
+                    if isinstance(row, ft.Row) and len(row.controls) >= 1:
+                        icon_slot = row.controls[0]
+                        if isinstance(icon_slot, ft.Container):
+                            icon_slot.bgcolor = THEME.bg_secondary
+            
+            container.update()
+        except Exception:
+            pass
 
     def _safe_select(self, tab_id: str) -> None:
         """安全的选择回调，捕获所有异常防止 UI 冻结"""
@@ -165,6 +258,26 @@ class Sidebar(ft.Container):
             traceback.print_exc()
             # 至少更新选中状态
             self._selected_id = tab_id
+
+    def _handle_import_save(self, e: ft.ControlEvent) -> None:
+        """处理导入存档按钮点击"""
+        try:
+            if self._on_import_save:
+                self._on_import_save()
+        except Exception:
+            pass
+
+    def set_current_save_name(self, name: Optional[str]) -> None:
+        try:
+            if name:
+                self._current_save_name.value = f"当前存档: {name}"
+                self._current_save_name.color = THEME.mc_gold
+            else:
+                self._current_save_name.value = "未设置当前存档"
+                self._current_save_name.color = THEME.text_muted
+            self._current_save_name.update()
+        except Exception:
+            pass
 
     def _select(self, tab_id: str) -> None:
         """选择标签页"""
@@ -232,3 +345,22 @@ class Sidebar(ft.Container):
     def get_tab_order(self) -> List[str]:
         """返回当前标签页 ID 的顺序"""
         return [t["id"] for t in self._tabs]
+    
+    def set_width(self, width: int) -> None:
+        """动态设置侧边栏宽度
+        
+        Args:
+            width: 新的侧边栏宽度
+        """
+        try:
+            # 限制最小和最大宽度
+            self._sidebar_width = max(160, min(300, width))
+            self.width = self._sidebar_width
+            self.update()
+        except Exception:
+            pass
+    
+    @property
+    def sidebar_width(self) -> int:
+        """获取当前侧边栏宽度"""
+        return self._sidebar_width

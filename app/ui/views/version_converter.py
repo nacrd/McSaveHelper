@@ -57,10 +57,11 @@ class VersionConverterView(ft.Column):
         ))
 
         self._src_field = ft.TextField(
-            label="源存档目录", hint_text="选择存档目录",
+            label="当前源存档", hint_text="请通过侧边栏「导入存档」设置源存档目录",
             border_color=THEME.border_tertiary, focused_border_color=THEME.mc_diamond,
             text_size=13, color=THEME.text_primary, bgcolor=THEME.bg_secondary,
             border_radius=0, expand=True,
+            read_only=True,
         )
         self._dst_field = ft.TextField(
             label="输出目录", hint_text="转换后的存档将保存到此处",
@@ -69,8 +70,8 @@ class VersionConverterView(ft.Column):
             border_radius=0, expand=True,
         )
         self.controls.append(card(ft.Column([
-            ft.Row([self._src_field, btn_ghost("浏览", width=90, on_click=lambda e: self._pick(self._src_field))], spacing=10),
-            ft.Row([self._dst_field, btn_ghost("浏览", width=90, on_click=lambda e: self._pick(self._dst_field))], spacing=10),
+            self._src_field,
+            ft.Row([self._dst_field, btn_ghost("浏览输出", width=100, on_click=lambda e: self._pick(self._dst_field))], spacing=10),
         ], spacing=10), padding=16))
 
         self._platform_dd = ft.Dropdown(
@@ -158,7 +159,7 @@ class VersionConverterView(ft.Column):
         src = Path(self._src_field.value or "")
         dst = Path(self._dst_field.value or "")
         if not (src / "level.dat").exists():
-            self.app.warn_dialog("提示", "请选择包含 level.dat 的有效源存档目录。")
+            self.app.warn_dialog("提示", "请先通过侧边栏导入有效源存档目录。")
             return
         if not dst or str(dst) == ".":
             self.app.warn_dialog("提示", "请选择输出目录。")
@@ -196,3 +197,11 @@ class VersionConverterView(ft.Column):
         finally:
             self._converting = False
         self._result_text.update()
+
+    def on_save_selected(self, path: str) -> None:
+        """统一入口导入存档回调"""
+        try:
+            self._src_field.value = path
+            self._src_field.update()
+        except Exception:
+            pass

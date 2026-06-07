@@ -3,6 +3,9 @@ import os
 import threading
 from typing import Any
 
+# 导入性能监控和反馈工具
+from app.ui.performance import Timer, async_tracker
+
 
 class MigrationController:
     """Coordinates single and batch migration jobs for the UI application."""
@@ -24,16 +27,20 @@ class MigrationController:
             if not mc.src_path and not mc.batch_mode:
                 app.warn_dialog(
                     app._t("dialogs.warning", "提示"),
-                    app._t("messages.please_select_source", "请先选择客户端存档目录"),
+                    app._t("messages.please_select_source", "请先通过侧边栏导入客户端存档目录"),
                 )
                 return
 
-            app._start_btn.disabled = True
+            app.set_start_button_enabled(False)
             app.page.update()
 
             self.save_config()
 
             dest_dir = mc.dest_path or os.getcwd()
+            
+            # 开始跟踪异步操作
+            operation_id = "migration_batch" if mc.batch_mode else "migration_single"
+            async_tracker.start(operation_id)
 
             if mc.batch_mode and app.migration.batch_worlds:
                 threading.Thread(
@@ -47,7 +54,7 @@ class MigrationController:
                 ).start()
         except Exception as e:
             app.handle_exception(e, title="启动转换失败")
-            app._start_btn.disabled = False
+            app.set_start_button_enabled(True)
             self.try_update_page()
 
     def try_update_page(self) -> None:
@@ -61,49 +68,63 @@ class MigrationController:
         """Save current migration-related configuration."""
         c = self.app.config
         mc = c.migration
-        c._config["version_detection"] = mc.version_detection
-        c._config.setdefault("batch_processing", {})["max_concurrent"] = c.max_concurrent
-        c._config["custom_uuid_mappings"] = c.custom_uuid_mappings
-        c._config["use_custom_mapping"] = c.use_custom_mapping
-        c.save()
+        # 使用线程安全的批量更新方法
+        c.update_batch_config(
+            version_detection=mc.version_detection,
+            max_concurrent=c.max_concurrent,
+            custom_uuid_mappings=c.custom_uuid_mappings,
+            use_custom_mapping=c.use_custom_mapping,
+        )
 
     def run_single_thread(self, dest_dir: str) -> None:
         """Run a single-world migration in the current worker thread."""
         app = self.app
         mc = app.config.migration
+
         try:
-            app.log_header(app._t("messages.migration_started", "开始迁移任务"))
-            output_path = app.migration.run_single(
-                src=mc.src_path,
-                dest=dest_dir,
-                world_name=mc.world_name,
-                mode=mc.mode,
-                offline=mc.offline_mode,
-                clean=mc.clean_mode,
-                pure_clean=mc.pure_clean_mode,
-                target_platform=mc.target_platform,
-                target_version=mc.target_version,
-                manual_names_str=mc.manual_names,
-                log_cb=app.log,
-                progress_cb=app.update_progress,
-            )
+            with Timer("single_migration"):
+                app.log_header(app._t("messages.migration_started", "开始迁移任务"))
+                output_path = app.migration.run_single(
+                    src=mc.src_path,
+                    dest=dest_dir,
+                    world_name=mc.world_name,
+                    mode=mc.mode,
+                    offline=mc.offline_mode,
+                    clean=mc.clean_mode,
+                    pure_clean=mc.pure_clean_mode,
+                    target_platform=mc.target_platform,
+                    target_version=mc.target_version,
+                    manual_names_str=mc.manual_names,
+                    log_cb=app.log,
+                    progress_cb=app.update_progress,
+                )
+
+            elapsed = async_tracker.complete("migration_single")
+            if elapsed:
+                app.log(f"迁移耗时: {elapsed:.2f}秒", "INFO")
+
             app.log_header(app._t("messages.migration_complete", "迁移完成"))
             app.log(app._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
                            output_path=output_path), "SUCCESS")
-            app._progress_label.value = app._t("top_bar.completed", "已完成")
-            app.info_dialog(
-                app._t("dialogs.success", "成功"),
-                app._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
-                       output_path=output_path),
-            )
+            app.set_progress_label(app._t("top_bar.completed", "已完成"))
+
+            if hasattr(app, "notification_manager") and app.notification_manager:
+                app.notification_manager.show_success(f"迁移完成！输出目录: {output_path}")
+            else:
+                app.info_dialog(
+                    app._t("dialogs.success", "成功"),
+                    app._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
+                           output_path=output_path),
+                )
         except Exception as e:
+            async_tracker.complete("migration_single")
             app.handle_exception(
                 e,
                 title=app._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
                 log=True,
                 show_dialog=False,
             )
-            app._progress_label.value = app._t("top_bar.failed", "失败")
+            app.set_progress_label(app._t("top_bar.failed", "失败"))
             app.error_dialog(
                 app._t("dialogs.error", "错误"),
                 app._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
@@ -111,8 +132,8 @@ class MigrationController:
                 show_details=True,
             )
         finally:
-            app._start_btn.disabled = False
-            app._progress_bar.value = 0
+            app.set_start_button_enabled(True)
+            app.set_progress_value(0)
             self.try_update_page()
 
     def run_batch_thread(self, dest_dir: str) -> None:
@@ -140,7 +161,7 @@ class MigrationController:
             app.log(app._t("messages.batch_migration_complete",
                            "成功: {success}/{total}",
                            success=success, total=len(results)), "SUCCESS")
-            app._progress_label.value = app._t("top_bar.batch_completed", "批量处理完成")
+            app.set_progress_label(app._t("top_bar.batch_completed", "批量处理完成"))
         except Exception as e:
             app.handle_exception(
                 e,
@@ -148,10 +169,10 @@ class MigrationController:
                 log=True,
                 show_dialog=False,
             )
-            app._progress_label.value = app._t("top_bar.batch_failed", "批量处理失败")
+            app.set_progress_label(app._t("top_bar.batch_failed", "批量处理失败"))
         finally:
-            app._start_btn.disabled = False
-            app._progress_bar.value = 0
+            app.set_start_button_enabled(True)
+            app.set_progress_value(0)
             self.try_update_page()
 
     def open_folder(self, path: str) -> None:

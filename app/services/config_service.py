@@ -4,7 +4,6 @@ import threading
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-import nbtlib
 from app.models.config import AppConfig, BatchSettings, UISettings, MigrationConfig
 from core.constants import MinecraftConstants
 
@@ -81,7 +80,7 @@ class ConfigService:
             "use_custom_mapping": False,
             "custom_uuid_mappings": {},
             "batch_processing": {"max_concurrent": 2, "preserve_structure": True},
-            "ui_settings": {"theme": "dark", "auto_clear_log": True, "language": "zh_CN"},
+            "ui_settings": {"theme": "dark", "auto_clear_log": True, "language": "zh_CN", "show_log_panel": True},
             "api_timeout": 10,
             "cleanup_patterns": ["*.log", "cache/", "logs/"],
         }
@@ -148,7 +147,8 @@ class ConfigService:
 
     @use_custom_mapping.setter
     def use_custom_mapping(self, value: bool) -> None:
-        self._config["use_custom_mapping"] = value
+        with self._lock:
+            self._config["use_custom_mapping"] = value
 
     @property
     def custom_uuid_mappings(self) -> Dict[str, str]:
@@ -157,11 +157,13 @@ class ConfigService:
         Returns:
             Dict[str, str]: 自定义UUID映射字典
         """
-        return self._config.get("custom_uuid_mappings", {})
+        with self._lock:
+            return dict(self._config.get("custom_uuid_mappings", {}))
 
     @custom_uuid_mappings.setter
     def custom_uuid_mappings(self, value: Dict[str, str]) -> None:
-        self._config["custom_uuid_mappings"] = value
+        with self._lock:
+            self._config["custom_uuid_mappings"] = value
 
     def get_custom_uuid_mapping(self, player_name: str) -> Optional[str]:
         """获取自定义UUID映射
@@ -181,7 +183,10 @@ class ConfigService:
             player_name: 玩家名称
             uuid: 玩家UUID字符串
         """
-        self.custom_uuid_mappings[player_name] = uuid
+        with self._lock:
+            mappings = self._config.get("custom_uuid_mappings", {})
+            mappings[player_name] = uuid
+            self._config["custom_uuid_mappings"] = mappings
         self.save()
 
     def remove_custom_uuid_mapping(self, player_name: str) -> None:
@@ -190,9 +195,12 @@ class ConfigService:
         Args:
             player_name: 要移除的玩家名称
         """
-        if player_name in self.custom_uuid_mappings:
-            del self.custom_uuid_mappings[player_name]
-            self.save()
+        with self._lock:
+            mappings = self._config.get("custom_uuid_mappings", {})
+            if player_name in mappings:
+                del mappings[player_name]
+                self._config["custom_uuid_mappings"] = mappings
+        self.save()
 
     @property
     def max_concurrent(self) -> int:
@@ -232,7 +240,10 @@ class ConfigService:
 
     @language.setter
     def language(self, value: str) -> None:
-        self._config["ui_settings"]["language"] = value
+        with self._lock:
+            ui_settings = self._config.get("ui_settings", {})
+            ui_settings["language"] = value
+            self._config["ui_settings"] = ui_settings
 
     @property
     def theme(self) -> str:
@@ -254,7 +265,8 @@ class ConfigService:
 
     @cleanup_patterns.setter
     def cleanup_patterns(self, value: list) -> None:
-        self._config["cleanup_patterns"] = value
+        with self._lock:
+            self._config["cleanup_patterns"] = value
 
     @property
     def batch_processing(self) -> dict:
@@ -271,7 +283,8 @@ class ConfigService:
         Returns:
             Dict[str, Any]: 完整配置字典的副本
         """
-        return dict(self._config)
+        with self._lock:
+            return dict(self._config)
 
     # ─── 运行时迁移配置 ────────────────────────────
 
@@ -286,7 +299,36 @@ class ConfigService:
 
     def reset_config(self) -> None:
         """重置所有配置为默认值"""
-        self._config = self._defaults()
+        with self._lock:
+            self._config = self._defaults()
+        self.save()
+
+    def update_batch_config(
+        self,
+        version_detection: Optional[bool] = None,
+        max_concurrent: Optional[int] = None,
+        custom_uuid_mappings: Optional[Dict[str, str]] = None,
+        use_custom_mapping: Optional[bool] = None,
+    ) -> None:
+        """批量更新配置（线程安全）
+        
+        Args:
+            version_detection: 版本检测开关
+            max_concurrent: 最大并发数
+            custom_uuid_mappings: 自定义UUID映射
+            use_custom_mapping: 是否使用自定义映射
+        """
+        with self._lock:
+            if version_detection is not None:
+                self._config["version_detection"] = version_detection
+            if max_concurrent is not None:
+                batch_processing = self._config.get("batch_processing", {})
+                batch_processing["max_concurrent"] = max_concurrent
+                self._config["batch_processing"] = batch_processing
+            if custom_uuid_mappings is not None:
+                self._config["custom_uuid_mappings"] = custom_uuid_mappings
+            if use_custom_mapping is not None:
+                self._config["use_custom_mapping"] = use_custom_mapping
         self.save()
 
     # ─── Minecraft 版本检测 ────────────────────────────
@@ -304,6 +346,7 @@ class ConfigService:
             return None
 
         try:
+            import nbtlib
             level_dat = world_path / "level.dat"
             if not level_dat.exists():
                 return None

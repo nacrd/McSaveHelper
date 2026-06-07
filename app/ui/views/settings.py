@@ -101,6 +101,13 @@ class SettingsView(ft.Column):
             value=cfg.ui_settings.get("auto_clear_log", False),
         )
         s.controls.append(ft.Container(content=self._auto_clear_var,
+                                       padding=ft.Padding(left=20, right=20, bottom=10)))
+
+        self._show_log_panel_var = checkbox(
+            self._t("settings.ui.show_log_panel", "显示悬浮日志面板"),
+            value=cfg.ui_settings.get("show_log_panel", True),
+        )
+        s.controls.append(ft.Container(content=self._show_log_panel_var,
                                        padding=ft.Padding(left=20, right=20, bottom=20)))
 
         c = card(ft.Column(spacing=0), padding=0)
@@ -235,6 +242,7 @@ class SettingsView(ft.Column):
         c = self.app.config
         c._config["version_detection"] = self._version_var.value
         c._config["ui_settings"]["auto_clear_log"] = self._auto_clear_var.value
+        c._config["ui_settings"]["show_log_panel"] = self._show_log_panel_var.value
         c._config["ui_settings"]["preserve_structure"] = self._preserve_var.value
         c._config["ui_settings"]["theme"] = self._theme_dropdown.value
         c._config["ui_settings"]["language"] = self._lang_dropdown.value
@@ -245,6 +253,12 @@ class SettingsView(ft.Column):
             pass
         c.cleanup_patterns = [x.strip() for x in self._cleanup_field.value.split("\n") if x.strip()]
         c.save()
+        
+        # 应用日志面板可见性设置
+        if hasattr(self.app, 'floating_log_panel') and hasattr(self.app, '_log_fab'):
+            self.app._log_fab.set_visible(self._show_log_panel_var.value)
+            self.app.floating_log_panel.set_visible(False)
+        
         self.app.info_dialog(
             self._t("dialogs.success", "成功"),
             self._t("settings.messages.save_success", "设置已保存"),
