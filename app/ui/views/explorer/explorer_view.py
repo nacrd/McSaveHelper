@@ -56,7 +56,7 @@ class ExplorerView(ft.Column):
 
         # 工具栏
         self._world_label = ft.Text(
-            "未导入存档", size=12, color=THEME.text_muted,
+            "未设置当前存档", size=12, color=THEME.text_muted,
         )
         toolbar = ft.Container(
             content=ft.Row([
@@ -230,7 +230,7 @@ class ExplorerView(ft.Column):
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
 
-        # 维度切换下拉框（导入存档时动态填充）
+        # 维度切换下拉框（设置当前存档时动态填充）
         self._dimension_dropdown = ft.Dropdown(
             options=[],
             on_select=self._on_dimension_changed,
@@ -283,7 +283,7 @@ class ExplorerView(ft.Column):
         )
 
         self._region_stats_text = ft.Text(
-            "等待导入存档...",
+            "等待设置当前存档...",
             size=12,
             color=THEME.text_muted
         )
@@ -348,7 +348,7 @@ class ExplorerView(ft.Column):
         self._tab_region.content = col
 
     def _build_stats_tab(self) -> None:
-        self._stats_status = ft.Text("导入存档后可分析统计。", size=12, color=THEME.text_muted)
+        self._stats_status = ft.Text("设置当前存档后可分析统计。", size=12, color=THEME.text_muted)
         self._stats_summary = ft.Text("点击「开始统计」按钮分析世界数据。", size=12, color=THEME.text_muted)
         self._block_stats_col = ft.Column(spacing=4)
         self._entity_stats_col = ft.Column(spacing=4)
@@ -502,7 +502,7 @@ class ExplorerView(ft.Column):
             if path is None or hasattr(path, "control"):
                 path = getattr(self.app, "_current_save_path", None)
             if not path:
-                self.app.warn_dialog("提示", "请先通过侧边栏导入存档。")
+                self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
             
             self.world_session = WorldSession(Path(path), log=self.app.log)
@@ -543,7 +543,7 @@ class ExplorerView(ft.Column):
 
             self._refresh_heatmap()
         except Exception as ex:
-            self.app.handle_exception(ex, title="导入存档失败")
+            self.app.handle_exception(ex, title="设置当前存档失败")
 
     def _on_player_selected(self, e: Any) -> None:
         try:
@@ -606,7 +606,7 @@ class ExplorerView(ft.Column):
     def _analyze_world_stats(self, e: Any) -> None:
         try:
             if not self.world_session:
-                self.app.warn_dialog("提示", "请先通过侧边栏导入存档。")
+                self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
             from app.services.world_stats_service import get_world_stats_service
             service = get_world_stats_service(log=self.app.log)

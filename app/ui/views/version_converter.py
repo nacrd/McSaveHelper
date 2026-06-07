@@ -6,6 +6,7 @@ import flet as ft
 
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success, btn_danger
 from app.ui.components.cards import card, section_title
+from app.ui.components.fields import current_save_field
 from app.ui.theme import THEME
 
 if TYPE_CHECKING:
@@ -56,12 +57,9 @@ class VersionConverterView(ft.Column):
             size=12, color=THEME.text_muted,
         ))
 
-        self._src_field = ft.TextField(
-            label="当前源存档", hint_text="请通过侧边栏「导入存档」设置源存档目录",
-            border_color=THEME.border_tertiary, focused_border_color=THEME.mc_diamond,
-            text_size=13, color=THEME.text_primary, bgcolor=THEME.bg_secondary,
-            border_radius=0, expand=True,
-            read_only=True,
+        self._src_field = current_save_field(
+            label="当前源存档",
+            hint_text="请通过侧边栏「设置当前存档」设置源存档目录",
         )
         self._dst_field = ft.TextField(
             label="输出目录", hint_text="转换后的存档将保存到此处",
@@ -159,7 +157,7 @@ class VersionConverterView(ft.Column):
         src = Path(self._src_field.value or "")
         dst = Path(self._dst_field.value or "")
         if not (src / "level.dat").exists():
-            self.app.warn_dialog("提示", "请先通过侧边栏导入有效源存档目录。")
+            self.app.warn_dialog("提示", "请先通过侧边栏设置有效源存档目录。")
             return
         if not dst or str(dst) == ".":
             self.app.warn_dialog("提示", "请选择输出目录。")
@@ -199,7 +197,7 @@ class VersionConverterView(ft.Column):
         self._result_text.update()
 
     def on_save_selected(self, path: str) -> None:
-        """统一入口导入存档回调"""
+        """统一入口设置当前存档回调"""
         try:
             self._src_field.value = path
             self._src_field.update()

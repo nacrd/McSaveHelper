@@ -197,7 +197,7 @@ class McaHeatmapView(ft.Container):
             shapes.append(cv.Text(
                 x=(self.width or 800) / 2 - 95,
                 y=(self.height or 600) / 2 + 30,
-                value="导入存档后显示热力图",
+                value="设置当前存档后显示热力图",
                 style=ft.TextStyle(size=16, color="#CCCCCC")
             ))
             shapes.extend(self._build_info_overlay())

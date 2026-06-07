@@ -10,7 +10,7 @@ import flet as ft
 
 from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox
+from app.ui.components.fields import text_field, checkbox, current_save_field
 from app.ui.components.cards import card, section_title
 from app.services.save_repair_service import (
     SaveRepairService,
@@ -43,11 +43,9 @@ class SaveRepairView(ft.Column):
         self._busy = False
 
         # 配置选项
-        self._world_path_field = text_field(
-            label="当前存档",
-            hint_text="请通过侧边栏「导入存档」设置要修复的当前存档目录",
+        self._world_path_field = current_save_field(
+            hint_text="请通过侧边栏「设置当前存档」设置要修复的当前存档目录",
         )
-        self._world_path_field.read_only = True
         self._fix_chunks_checkbox = checkbox("修复区块", value=True)
         self._fix_players_checkbox = checkbox("修复玩家数据", value=True)
         self._fix_level_dat_checkbox = checkbox("修复 level.dat", value=True)
@@ -263,7 +261,7 @@ class SaveRepairView(ft.Column):
     def _validate_path(self) -> Path:
         world_path = self._world_path_field.value
         if not world_path:
-            raise ValueError("请先通过侧边栏导入存档目录")
+            raise ValueError("请先通过侧边栏设置当前存档目录")
         return Path(world_path)
 
     def _set_busy(self, busy: bool) -> None:
@@ -528,7 +526,7 @@ class SaveRepairView(ft.Column):
             pass
 
     def on_save_selected(self, path: str) -> None:
-        """统一入口导入存档回调"""
+        """统一入口设置当前存档回调"""
         try:
             self._world_path_field.value = path
             self._world_path_field.update()

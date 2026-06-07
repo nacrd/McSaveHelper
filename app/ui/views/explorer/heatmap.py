@@ -20,7 +20,7 @@ class MCAHeatmap(ft.Container):
         
         # 统计信息
         self._stats_text = ft.Text(
-            "导入存档后显示统计",
+            "设置当前存档后显示统计",
             size=12,
             color=THEME.text_muted
         )

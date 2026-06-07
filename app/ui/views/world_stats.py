@@ -8,7 +8,7 @@ from app.services.world_stats_service import WorldStatistics, get_world_stats_se
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card, section_title
 from app.ui.theme import THEME
-from app.ui.utils import format_size as _format_size
+from app.ui.components.fields import current_save_field
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -27,17 +27,8 @@ class WorldStatsView(ft.Column):
         self.controls.clear()
         self.controls.append(ft.Text("存档统计", size=22, weight=ft.FontWeight.BOLD, color=THEME.text_primary))
 
-        self._path_field = ft.TextField(
-            label="当前存档",
-            hint_text="请通过侧边栏「导入存档」设置当前存档目录",
-            border_color=THEME.border_tertiary,
-            focused_border_color=THEME.mc_diamond,
-            text_size=13,
-            color=THEME.text_primary,
-            bgcolor=THEME.bg_secondary,
-            border_radius=0,
-            expand=True,
-            read_only=True,
+        self._path_field = current_save_field(
+            hint_text="请通过侧边栏「设置当前存档」设置当前存档目录",
         )
         picker_row = ft.Row([
             self._path_field,
@@ -45,7 +36,7 @@ class WorldStatsView(ft.Column):
         ], spacing=10)
         self.controls.append(card(picker_row, padding=16))
 
-        self._overview_card = card(ft.Container(ft.Text("请通过侧边栏导入存档后点击「分析」", size=13, color=THEME.text_muted), padding=20))
+        self._overview_card = card(ft.Container(ft.Text("请通过侧边栏设置当前存档后点击「分析」", size=13, color=THEME.text_muted), padding=20))
         self._blocks_card = card(ft.Container(ft.Text("", size=12, color=THEME.text_muted), padding=20))
         self._entities_card = card(ft.Container(ft.Text("", size=12, color=THEME.text_muted), padding=20))
         self._distribution_card = card(ft.Container(ft.Text("", size=12, color=THEME.text_muted), padding=20))
@@ -61,7 +52,7 @@ class WorldStatsView(ft.Column):
         try:
             world_path = Path(self._path_field.value or "")
             if not (world_path / "level.dat").exists():
-                self.app.warn_dialog("提示", "请先通过侧边栏导入有效存档目录。")
+                self.app.warn_dialog("提示", "请先通过侧边栏设置有效存档目录。")
                 return
             
             # 使用全局进度条
@@ -134,7 +125,7 @@ class WorldStatsView(ft.Column):
         ], spacing=8)
 
     def on_save_selected(self, path: str) -> None:
-        """统一入口导入存档回调"""
+        """统一入口设置当前存档回调"""
         try:
             self._path_field.value = path
             self._path_field.update()

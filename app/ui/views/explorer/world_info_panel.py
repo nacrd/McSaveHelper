@@ -27,7 +27,7 @@ class WorldInfoPanel(ft.Column):
                 ft.Text("📦", size=48, text_align=ft.TextAlign.CENTER),
                 ft.Container(height=12),
                 ft.Text(
-                    "请先导入存档以查看信息",
+                    "请先设置当前存档以查看信息",
                     size=16,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_secondary,
@@ -35,7 +35,7 @@ class WorldInfoPanel(ft.Column):
                 ),
                 ft.Container(height=8),
                 ft.Text(
-                    "通过侧边栏「导入存档」选择 Minecraft 世界目录",
+                    "通过侧边栏「设置当前存档」选择 Minecraft 世界目录",
                     size=13,
                     color=THEME.text_muted,
                     text_align=ft.TextAlign.CENTER,
@@ -149,7 +149,10 @@ class WorldInfoPanel(ft.Column):
         # ── 4. 统计信息 ──
         stat_rows = []
         if stats:
+            if stats.get("world_path"):
+                stat_rows.append(self._row("📂 存档路径", str(stats.get("world_path"))))
             stat_rows.append(self._row("👥 玩家数", str(stats.get("player_count", 0))))
+            stat_rows.append(self._row("🧭 维度数", str(stats.get("dimension_count", 0))))
             stat_rows.append(self._row("🗺️ 区域文件数", str(stats.get("region_count", 0))))
         if stat_rows:
             self.controls.append(self._section_card("📊 统计信息", stat_rows))

@@ -27,7 +27,7 @@ class MigrationController:
             if not mc.src_path and not mc.batch_mode:
                 app.warn_dialog(
                     app._t("dialogs.warning", "提示"),
-                    app._t("messages.please_select_source", "请先通过侧边栏导入客户端存档目录"),
+                    app._t("messages.please_select_source", "请先通过侧边栏设置客户端存档目录"),
                 )
                 return
 

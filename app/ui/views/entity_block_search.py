@@ -7,7 +7,7 @@ import flet as ft
 
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox
+from app.ui.components.fields import text_field, checkbox, current_save_field
 from app.ui.components.cards import card, section_title
 from app.services.entity_block_search_service import (
     EntityBlockSearchService,
@@ -32,11 +32,9 @@ class EntityBlockSearchView(ft.Column):
         self._search_results: List[SearchResult] = []
 
         # 配置选项
-        self._world_path_field = text_field(
-            label="当前存档",
-            hint_text="请通过侧边栏「导入存档」设置要搜索的当前存档目录",
+        self._world_path_field = current_save_field(
+            hint_text="请通过侧边栏「设置当前存档」设置要搜索的当前存档目录",
         )
-        self._world_path_field.read_only = True
 
         self._search_type_dropdown = ft.Dropdown(
             label="搜索类型",
@@ -270,7 +268,7 @@ class EntityBlockSearchView(ft.Column):
 
         world_path = self._world_path_field.value
         if not world_path:
-            self.app.warn_dialog("提示", "请先通过侧边栏导入存档目录")
+            self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档目录")
             return
 
         # 获取目标
@@ -412,7 +410,7 @@ class EntityBlockSearchView(ft.Column):
             self.app.error_dialog("错误", f"导出失败: {ex}")
 
     def on_save_selected(self, path: str) -> None:
-        """统一入口导入存档回调"""
+        """统一入口设置当前存档回调"""
         try:
             self._world_path_field.value = path
             self._world_path_field.update()

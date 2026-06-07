@@ -8,7 +8,7 @@ import flet as ft
 from app.services.world_compare_service import CompareItem, get_world_compare_service
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card, section_title
-from app.ui.components.fields import text_field
+from app.ui.components.fields import text_field, current_save_field
 from app.ui.theme import THEME
 
 if TYPE_CHECKING:
@@ -27,9 +27,8 @@ class CompareView(ft.Column):
         self.controls.clear()
         self.controls.append(ft.Text("存档对比", size=22, weight=ft.FontWeight.BOLD, color=THEME.text_primary))
 
-        self._left_field = text_field(label="当前存档", hint_text="请通过侧边栏「导入存档」设置当前存档")
-        self._left_field.read_only = True
-        self._right_field = text_field(label="对比目标存档", hint_text="指定要对比的另一个存档目录")
+        self._left_field = current_save_field(label="基准存档", hint_text="请通过侧边栏「设置当前存档」设置基准存档")
+        self._right_field = text_field(label="目标存档", hint_text="指定要对比的目标存档目录")
         picker = ft.Column([
             self._left_field,
             ft.Row([self._right_field, btn_ghost("浏览对比目标", width=120, on_click=lambda e: self._pick(self._right_field))], spacing=10),
@@ -37,7 +36,7 @@ class CompareView(ft.Column):
         ], spacing=10)
         self.controls.append(card(picker, padding=16))
 
-        self._summary = ft.Text("通过侧边栏导入当前存档，再选择对比目标后开始对比。", size=12, color=THEME.text_muted)
+        self._summary = ft.Text("通过侧边栏设置基准存档，再指定目标存档后开始对比。", size=12, color=THEME.text_muted)
         self._result = ft.Column(spacing=12)
         self.controls.append(card(ft.Column([section_title("结果"), self._summary, self._result], spacing=8), padding=0))
 
@@ -52,10 +51,10 @@ class CompareView(ft.Column):
             left = Path(self._left_field.value or "")
             right = Path(self._right_field.value or "")
             if not (left / "level.dat").exists():
-                self.app.warn_dialog("提示", "请先通过侧边栏导入有效当前存档目录。")
+                self.app.warn_dialog("提示", "请先通过侧边栏设置有效基准存档目录。")
                 return
             if not (right / "level.dat").exists():
-                self.app.warn_dialog("提示", "请指定包含 level.dat 的有效对比目标存档目录。")
+                self.app.warn_dialog("提示", "请指定包含 level.dat 的有效目标存档目录。")
                 return
             self._summary.value = "正在对比，请稍候..."
             self._result.controls.clear()
@@ -88,8 +87,8 @@ class CompareView(ft.Column):
             rows.append(ft.Container(
                 content=ft.Column([
                     ft.Text(item.name, size=12, weight=ft.FontWeight.BOLD, color=THEME.mc_gold),
-                    ft.Text(f"左: {item.left}", size=11, color=THEME.text_secondary),
-                    ft.Text(f"右: {item.right}", size=11, color=THEME.text_secondary),
+                    ft.Text(f"基准: {item.left}", size=11, color=THEME.text_secondary),
+                    ft.Text(f"目标: {item.right}", size=11, color=THEME.text_secondary),
                 ], spacing=2),
                 padding=8,
                 bgcolor=THEME.bg_secondary,
@@ -99,9 +98,8 @@ class CompareView(ft.Column):
         return card(ft.Column([ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary), *rows], spacing=8), padding=12)
 
     def on_save_selected(self, path: str) -> None:
-        """统一入口导入存档回调"""
+        """统一入口设置当前存档回调"""
         try:
-            # 默认填充左侧存档
             self._left_field.value = path
             self._left_field.update()
         except Exception:

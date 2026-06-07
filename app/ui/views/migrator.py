@@ -5,7 +5,7 @@ from pathlib import Path
 
 from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox, label
+from app.ui.components.fields import text_field, checkbox, label, current_save_field
 from app.ui.components.cards import card, section_title
 
 if TYPE_CHECKING:
@@ -70,12 +70,11 @@ class MigratorView(ft.Column):
         s.controls.append(section_title(
             self._t("left_panel.archive_config", "📁 存档配置")))
 
-        self._src_field = text_field(
+        self._src_field = current_save_field(
             label="当前源存档",
-            hint_text="请通过侧边栏「导入存档」设置世界文件夹 (包含 level.dat)",
-            on_change=lambda e: self._sync_field_to_config(),
+            hint_text="请通过侧边栏「设置当前存档」设置世界文件夹 (包含 level.dat)",
         )
-        self._src_field.read_only = True
+        self._src_field.on_change = lambda e: self._sync_field_to_config()
         s.controls.append(ft.Container(
             content=self._src_field,
             padding=ft.Padding(left=20, right=20, bottom=8),
