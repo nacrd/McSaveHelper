@@ -18,6 +18,7 @@ from core.logger import LogLevel, logger, setup_default_logging
 from core.types import LogCallback, ProgressCallback
 
 from app.models.config import MigrationConfig
+from app.models.save_context import CurrentSaveContext
 from app.services.config_service import ConfigService
 from app.services.uuid_service import UUIDService
 from app.services.migration_service import MigrationService
@@ -423,13 +424,18 @@ class Application:
             {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "📋"},
             {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙"},
         ]
-        # 当前导入的存档路径（统一入口）
+        # 当前设置的存档上下文（统一入口）
+        self._current_save_context: Optional[CurrentSaveContext] = None
         self._current_save_path: Optional[str] = None
+        self._recent_saves: List[Dict[str, str]] = self._load_recent_saves()
         self._sidebar = Sidebar(
             tabs=self._tab_defs,
             on_tab_select=self._switch_view,
             on_tabs_reorder=self._on_tabs_reorder,
             on_import_save=self._on_import_save,
+            on_set_current_save=self._on_import_save,
+            on_recent_save_select=self._on_recent_save_select,
+            recent_saves=self._recent_saves,
             default_tab="explorer",
         )
         top_bar = self._build_top_bar()
@@ -526,20 +532,64 @@ class Application:
         self._tab_defs = list(tabs)
 
     def _on_import_save(self) -> None:
-        """侧边栏导入存档按钮回调"""
+        """侧边栏设置当前存档按钮回调"""
         try:
             path = self.pick_directory()
             if not path:
                 return
-            world_path = Path(path)
-            if not (world_path / "level.dat").exists():
+            context = CurrentSaveContext.from_path(path)
+            if not context.is_valid:
                 self.warn_dialog("提示", "这不是有效存档目录，请选择包含 level.dat 的文件夹。")
                 return
-            self._current_save_path = str(world_path)
-            self._sidebar.set_current_save_name(world_path.name)
-            self._notify_current_view_save_selected(str(world_path))
+            self._set_current_save_context(context)
         except Exception as ex:
-            self.error_dialog("错误", f"导入存档失败: {ex}")
+            self.error_dialog("错误", f"设置当前存档失败: {ex}")
+
+    def _on_recent_save_select(self, path: str) -> None:
+        try:
+            context = CurrentSaveContext.from_path(path)
+            if not context.is_valid:
+                self.warn_dialog("提示", "该最近存档已失效，目录中未找到 level.dat。")
+                self._recent_saves = [s for s in self._recent_saves if s.get("path") != path]
+                self._sidebar.set_recent_saves(self._recent_saves)
+                self._save_recent_saves()
+                return
+            self._set_current_save_context(context)
+        except Exception as ex:
+            self.error_dialog("错误", f"设置当前存档失败: {ex}")
+
+    def _set_current_save_context(self, context: CurrentSaveContext) -> None:
+        self._current_save_context = context
+        self._current_save_path = context.display_path
+        self._sidebar.set_current_save_name(context.name, context.display_path)
+        self._remember_recent_save(context)
+        self._notify_current_view_save_selected(context.display_path)
+        if hasattr(self, "notification_manager") and self.notification_manager:
+            self.notification_manager.show_success(f"当前存档已设置为 {context.name}，相关功能将自动使用该存档")
+
+    def _load_recent_saves(self) -> List[Dict[str, str]]:
+        try:
+            saves = self.config.config.get("recent_saves", [])
+            if isinstance(saves, list):
+                return [s for s in saves if isinstance(s, dict) and s.get("path")][:5]
+        except Exception:
+            pass
+        return []
+
+    def _save_recent_saves(self) -> None:
+        try:
+            self.config.config["recent_saves"] = self._recent_saves[:5]
+            self.config.save()
+        except Exception as ex:
+            self.log(f"保存最近存档失败: {ex}", "ERROR")
+
+    def _remember_recent_save(self, context: CurrentSaveContext) -> None:
+        save = {"path": context.display_path, "name": context.name}
+        self._recent_saves = [s for s in self._recent_saves if s.get("path") != context.display_path]
+        self._recent_saves.insert(0, save)
+        self._recent_saves = self._recent_saves[:5]
+        self._sidebar.set_recent_saves(self._recent_saves)
+        self._save_recent_saves()
 
     def _notify_current_view_save_selected(self, path: str) -> None:
         """通知当前视图存档已选中

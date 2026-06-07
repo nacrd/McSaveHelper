@@ -40,6 +40,19 @@ def text_field(
     return tf
 
 
+def current_save_field(
+    label: str = "当前存档",
+    hint_text: str = "请通过侧边栏「设置当前存档」设置存档目录",
+    value: str = "",
+) -> ft.TextField:
+    return text_field(
+        value=value,
+        label=label,
+        hint_text=hint_text,
+        read_only=True,
+    )
+
+
 def checkbox(
     label: str,
     value: bool = False,

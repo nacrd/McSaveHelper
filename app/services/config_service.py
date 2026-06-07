@@ -82,6 +82,7 @@ class ConfigService:
             "batch_processing": {"max_concurrent": 2, "preserve_structure": True},
             "ui_settings": {"theme": "dark", "auto_clear_log": True, "language": "zh_CN", "show_log_panel": True},
             "api_timeout": 10,
+            "recent_saves": [],
             "cleanup_patterns": ["*.log", "cache/", "logs/"],
         }
 

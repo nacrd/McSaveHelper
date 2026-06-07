@@ -17,15 +17,23 @@ class Sidebar(ft.Container):
         on_tab_select: Callable[[str], None],
         on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
         on_import_save: Optional[Callable[[], None]] = None,
+        on_set_current_save: Optional[Callable[[], None]] = None,
+        on_recent_save_select: Optional[Callable[[str], None]] = None,
+        recent_saves: Optional[List[Dict[str, Any]]] = None,
         default_tab: Optional[str] = None,
         width: int = 210,
     ) -> None:
         self._tabs: List[Dict[str, Any]] = list(tabs)
         self._on_tab_select: Callable[[str], None] = on_tab_select
         self._on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]] = on_tabs_reorder
+        # 保留 on_import_save 作为兼容回调；新 UI 语义为“设置当前存档”
         self._on_import_save: Optional[Callable[[], None]] = on_import_save
+        self._on_set_current_save: Optional[Callable[[], None]] = on_set_current_save
+        self._on_recent_save_select: Optional[Callable[[str], None]] = on_recent_save_select
+        self._recent_saves: List[Dict[str, Any]] = list(recent_saves or [])
         self._selected_id: Optional[str] = default_tab or (tabs[0]["id"] if tabs else None)
         self._buttons: Dict[str, ft.Container] = {}
+        self._recent_save_col: ft.Column = ft.Column(spacing=4)
         self._sidebar_width = width
         # 使用 ListView 替代 Column 实现滚动功能
         self._tab_col: ft.ListView = ft.ListView(
@@ -42,6 +50,7 @@ class Sidebar(ft.Container):
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
+        self._rebuild_recent_saves()
 
         col = ft.Column(spacing=0, expand=True)
 
@@ -63,14 +72,14 @@ class Sidebar(ft.Container):
                             color=THEME.text_muted,
                             font_family="monospace",
                         ),
-                        # 统一导入存档按钮
+                        # 设置当前存档按钮
                         ft.Container(
                             content=ft.Container(
                                 content=ft.Row(
                                     [
-                                        ft.Text("📂", size=14),
+                                        ft.Text("💾", size=14),
                                         ft.Text(
-                                            "导入存档",
+                                            "设置当前存档",
                                             size=11,
                                             weight=ft.FontWeight.W_500,
                                         ),
@@ -84,13 +93,29 @@ class Sidebar(ft.Container):
                                 bgcolor=THEME.mc_grass,
                                 border=mc_border(1),
                                 ink=True,
-                                on_click=self._handle_import_save,
+                                on_click=self._handle_set_current_save,
                             ),
                             padding=ft.Padding(left=0, right=0, top=8, bottom=0),
                         ),
                         ft.Container(
                             content=self._current_save_name,
                             padding=ft.Padding(left=2, right=2, top=6, bottom=0),
+                        ),
+                        ft.Container(
+                            content=ft.Column(
+                                [
+                                    ft.Text(
+                                        "最近存档",
+                                        size=10,
+                                        weight=ft.FontWeight.BOLD,
+                                        color=THEME.text_secondary,
+                                        font_family="monospace",
+                                    ),
+                                    self._recent_save_col,
+                                ],
+                                spacing=5,
+                            ),
+                            padding=ft.Padding(left=0, right=0, top=10, bottom=0),
                         ),
                     ],
                     spacing=2,
@@ -259,22 +284,98 @@ class Sidebar(ft.Container):
             # 至少更新选中状态
             self._selected_id = tab_id
 
-    def _handle_import_save(self, e: ft.ControlEvent) -> None:
-        """处理导入存档按钮点击"""
+    def _handle_set_current_save(self, e: ft.ControlEvent) -> None:
+        """处理设置当前存档按钮点击"""
         try:
-            if self._on_import_save:
+            if self._on_set_current_save:
+                self._on_set_current_save()
+            elif self._on_import_save:
                 self._on_import_save()
         except Exception:
             pass
 
-    def set_current_save_name(self, name: Optional[str]) -> None:
+    def _handle_import_save(self, e: ft.ControlEvent) -> None:
+        """兼容旧入口：处理设置当前存档按钮点击"""
+        self._handle_set_current_save(e)
+
+    def _rebuild_recent_saves(self) -> None:
+        """重建最近存档列表"""
+        self._recent_save_col.controls.clear()
+        if not self._recent_saves:
+            self._recent_save_col.controls.append(
+                ft.Text(
+                    "暂无最近存档",
+                    size=9,
+                    color=THEME.text_muted,
+                    font_family="monospace",
+                )
+            )
+            return
+
+        for save in self._recent_saves[:5]:
+            self._recent_save_col.controls.append(self._build_recent_save_item(save))
+
+    def _build_recent_save_item(self, save: Dict[str, Any]) -> ft.Container:
+        """构建最近存档列表项"""
+        save_id = str(save.get("id") or save.get("path") or save.get("name") or "")
+        save_name = str(save.get("name") or save.get("label") or save_id or "未命名存档")
+        save_path = str(save.get("path") or save_id)
+
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text("▣", size=9, color=THEME.mc_grass),
+                    ft.Text(
+                        save_name,
+                        size=9,
+                        color=THEME.text_secondary,
+                        font_family="monospace",
+                        no_wrap=True,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                        expand=True,
+                    ),
+                ],
+                spacing=5,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding(left=6, right=6, top=4, bottom=4),
+            border_radius=3,
+            bgcolor=THEME.bg_secondary,
+            border=mc_border(1),
+            ink=True,
+            tooltip=save_path,
+            on_click=lambda e, sid=save_id: self._safe_select_recent_save(sid),
+        )
+
+    def _safe_select_recent_save(self, save_id: str) -> None:
+        """安全触发最近存档点击回调"""
+        if not save_id:
+            return
+        try:
+            if self._on_recent_save_select:
+                self._on_recent_save_select(save_id)
+        except Exception:
+            traceback.print_exc()
+
+    def set_recent_saves(self, saves: Optional[List[Dict[str, Any]]]) -> None:
+        """更新最近存档列表"""
+        self._recent_saves = list(saves or [])
+        self._rebuild_recent_saves()
+        try:
+            self._recent_save_col.update()
+        except Exception:
+            pass
+
+    def set_current_save_name(self, name: Optional[str], path: Optional[str] = None) -> None:
         try:
             if name:
                 self._current_save_name.value = f"当前存档: {name}"
                 self._current_save_name.color = THEME.mc_gold
+                self._current_save_name.tooltip = path or name
             else:
                 self._current_save_name.value = "未设置当前存档"
                 self._current_save_name.color = THEME.text_muted
+                self._current_save_name.tooltip = None
             self._current_save_name.update()
         except Exception:
             pass
