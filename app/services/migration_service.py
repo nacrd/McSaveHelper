@@ -2,15 +2,13 @@
 import os
 import platform
 import subprocess
-import threading
-import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any
 
 from core.fast_mode import run_fast
 from core.full_mode import run_full
 from core.batch_processor import BatchProcessor, scan_worlds_directory
-from core.logger import logger, LogLevel
+from core.logger import logger
 from core.types import LogCallback, ProgressCallback
 from core.i18n import t
 from app.services.config_service import ConfigService

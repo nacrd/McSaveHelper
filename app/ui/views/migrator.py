@@ -1,7 +1,6 @@
 """Migrator View —— 存档转换主界面"""
 import flet as ft
-from typing import TYPE_CHECKING, Optional, Any
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost

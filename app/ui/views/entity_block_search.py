@@ -8,8 +8,8 @@ import flet as ft
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, current_save_field
-from app.ui.components.cards import card, placeholder
-from app.ui.components.layout import page_header, section_header
+from app.ui.components.cards import placeholder
+from app.ui.components.layout import page_header
 from app.services.entity_block_search_service import (
     EntityBlockSearchService,
     SearchResult,
@@ -438,7 +438,7 @@ class EntityBlockSearchView(ft.Column):
                 # 更新 UI
                 def _update_ui():
                     self._render_results()
-                    self._status_title_text.value = f"✅ 搜索完成"
+                    self._status_title_text.value = "✅ 搜索完成"
                     self._status_title_text.color = THEME.mc_grass
                     self._status_summary_text.value = f"找到 {len(results)} 个结果"
                     self._status_progress.visible = False
@@ -455,10 +455,13 @@ class EntityBlockSearchView(ft.Column):
                     _update_ui()
 
             except Exception as ex:
+                error_msg = str(ex)
+                exception = ex
+
                 def _show_error():
                     self._status_title_text.value = "❌ 搜索失败"
                     self._status_title_text.color = THEME.error
-                    self._status_summary_text.value = str(ex)
+                    self._status_summary_text.value = error_msg
                     self._status_progress.visible = False
                     self._searching = False
                     self._search_btn.disabled = False
@@ -466,7 +469,7 @@ class EntityBlockSearchView(ft.Column):
                     self._status_summary_text.update()
                     self._status_progress.update()
                     self._search_btn.update()
-                    self.app.handle_exception(ex, title="搜索失败")
+                    self.app.handle_exception(exception, title="搜索失败")
 
                 if hasattr(self.app.page, 'run_task'):
                     self.app.page.run_task(_show_error)

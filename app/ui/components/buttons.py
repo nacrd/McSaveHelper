@@ -1,6 +1,6 @@
 """Minecraft-style button components"""
 import asyncio
-from typing import Optional, Callable, Any, Union
+from typing import Optional, Callable, Any
 
 import flet as ft
 

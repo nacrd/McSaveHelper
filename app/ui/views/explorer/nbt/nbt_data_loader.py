@@ -1,7 +1,7 @@
 """NBT Data Loader - 负责加载各种 NBT 数据源"""
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Tuple
 
 import flet as ft
 import nbtlib

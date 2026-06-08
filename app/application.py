@@ -6,7 +6,6 @@
   - 协调视图切换
   - 提供文件选择对话框
 """
-import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -16,7 +15,6 @@ from typing import Any, Optional, List, Dict, Callable
 import flet as ft
 
 from core.logger import LogLevel, logger, setup_default_logging
-from core.types import LogCallback, ProgressCallback
 
 from app.models.config import MigrationConfig
 from app.models.save_context import CurrentSaveContext
@@ -1721,23 +1719,6 @@ class Application:
             enabled: 是否启用按钮
         """
         self._start_btn.disabled = not enabled
-
-    def set_progress_label(self, text: str) -> None:
-        """设置进度标签文本
-
-        Args:
-            text: 标签文本
-        """
-        self._progress_label.value = text
-
-    def set_progress_value(self, value: float) -> None:
-        """设置进度条值
-
-        Args:
-            value: 进度值 (0.0 - 1.0)
-        """
-        # 使用新的进度条组件方法
-        self._progress_bar.set_value(value)
 
     def _save_config(self) -> None:
         """保存当前配置"""

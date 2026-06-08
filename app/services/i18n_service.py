@@ -1,5 +1,5 @@
 """国际化服务 —— 封装翻译逻辑，简化 UI 层调用"""
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from core.i18n import TranslationManager, init_translations, t as _t
 from app.services.config_service import ConfigService

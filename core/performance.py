@@ -5,7 +5,7 @@
 """
 import time
 import threading
-from typing import Optional, Dict, Any, Callable, List
+from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 

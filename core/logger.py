@@ -9,16 +9,14 @@
 6. 可选的文件持久化
 """
 
-import os
 import sys
-import time
 import threading
 import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable, Union
-from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass, field
 from queue import Queue, Empty
 
 from core.types import LogCallback
@@ -193,11 +191,9 @@ class LogHandler:
 
     def flush(self) -> None:
         """刷新缓冲区"""
-        pass
 
     def close(self) -> None:
         """关闭处理器"""
-        pass
 
 
 class ConsoleHandler(LogHandler):

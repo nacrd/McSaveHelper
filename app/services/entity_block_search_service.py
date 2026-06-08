@@ -801,7 +801,7 @@ class EntityBlockSearchService:
                     f.write(f"   维度: {result.dimension}\n")
 
                     if result.extra_info:
-                        f.write(f"   额外信息:\n")
+                        f.write("   额外信息:\n")
                         for key, value in result.extra_info.items():
                             f.write(f"      {key}: {value}\n")
 

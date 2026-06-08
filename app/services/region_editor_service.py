@@ -4,10 +4,9 @@ import shutil
 import struct
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Callable, Dict, Any
+from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
-from core.scanner import scan_all_regions
 from core.region_utils import parse_region_coords
 from core.types import LogCallback
 

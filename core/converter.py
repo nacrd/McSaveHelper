@@ -8,17 +8,15 @@ import os
 import tempfile
 import nbtlib
 from dataclasses import dataclass, field
-from nbtlib import File, Compound, Byte, Short, Int, Long, Float, Double, String, ByteArray, IntArray, List
-from typing import Union, Dict, Any, Optional, Tuple, List as TList
+from nbtlib import File, Compound, String, List
+from typing import Dict, Any, Optional, List as TList
 from pathlib import Path
 
-from .constants import MinecraftConstants
 from .utils import replace_directory_tree
 
 
 class ConversionError(Exception):
     """转换过程中发生的错误"""
-    pass
 
 
 @dataclass

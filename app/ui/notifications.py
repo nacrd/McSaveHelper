@@ -311,25 +311,8 @@ class Toast:
         icon = icon_map.get(notification_type, ft.Icons.INFO)
         color = color_map.get(notification_type, THEME.info)
 
-        # 创建 Toast 内容
-        toast_content = ft.Container(
-            content=ft.Row([
-                ft.Icon(icon, color=color, size=20),
-                ft.Text(message, color="white", size=14),
-            ], spacing=10, tight=True),
-            bgcolor="rgba(0, 0, 0, 0.85)",
-            padding=ft.padding.all(15),
-            border_radius=8,
-            shadow=ft.BoxShadow(
-                spread_radius=1,
-                blur_radius=10,
-                color="rgba(0, 0, 0, 0.3)",
-            ),
-        )
-
         # 添加到页面
-        # 注意：Flet 可能需要使用 SnackBar 或 Overlay 实现
-        # 这里展示概念性实现
+        # 注意：Flet 使用 SnackBar 实现 Toast 通知
         try:
             self.page.snack_bar = ft.SnackBar(
                 content=ft.Row([

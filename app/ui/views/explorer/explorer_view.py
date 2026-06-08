@@ -5,10 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional, List, Dict, Tuple, Union
 from pathlib import Path
 
 from app.ui.theme import THEME
-from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field
-from app.ui.components.cards import card, placeholder
-from app.ui.components.layout import TabSpec, page_header, panel, section_header, segmented_tab_bar
+from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_bar
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -16,7 +13,7 @@ if TYPE_CHECKING:
 from core.omni.world_session import WorldSession
 from app.services.heatmap_service import get_heatmap_service
 
-from app.ui.views.explorer.utils import safe_update, format_size
+from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
 from app.ui.views.explorer.player_tab import PlayerTabMixin
 from app.ui.views.explorer.region_tab import RegionTabMixin
@@ -225,7 +222,7 @@ class ExplorerView(
                 return
 
             # 显示加载状态
-            self._world_label.value = f"⏳ 正在加载存档..."
+            self._world_label.value = "⏳ 正在加载存档..."
             self._world_label.color = THEME.mc_gold
             safe_update(self._world_label)
 

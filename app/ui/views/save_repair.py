@@ -10,7 +10,7 @@ import flet as ft
 
 from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox, current_save_field
+from app.ui.components.fields import checkbox, current_save_field
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
 from app.ui.utils import run_on_ui

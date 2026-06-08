@@ -287,7 +287,7 @@ class Sidebar(ft.Container):
         """安全的选择回调，捕获所有异常防止 UI 冻结"""
         try:
             self._select(tab_id)
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             # 至少更新选中状态
             self._selected_id = tab_id

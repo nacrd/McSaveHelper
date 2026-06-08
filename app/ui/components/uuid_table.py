@@ -1,14 +1,12 @@
 """UUID 映射表组件 —— 可视化编辑玩家名-UUID 映射"""
-import json
 import csv
 from pathlib import Path
-from typing import Dict, List, Optional, Callable, Any
+from typing import Dict, List, Optional, Callable
 
 import flet as ft
 
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
-from app.ui.components.fields import text_field
 from app.ui.utils import safe_update as _safe_update
 
 
@@ -167,6 +165,7 @@ class UUIDMappingTable(ft.Column):
         nf.on_change = on_change
         uf.on_change = on_change
 
+        # Create container first, then reference it in lambda
         row_cont = ft.Container(
             content=ft.Row(
                 [
@@ -174,7 +173,7 @@ class UUIDMappingTable(ft.Column):
                     ft.IconButton(
                         icon=ft.Icons.DELETE_OUTLINE,
                         icon_size=18,
-                        on_click=lambda e, rc=row_cont: self._delete_row(rc),
+                        on_click=lambda e: self._delete_row_by_fields(nf, uf),
                     ),
                 ],
                 spacing=8,
@@ -195,6 +194,16 @@ class UUIDMappingTable(ft.Column):
         self._row_data = [
             r for r in self._row_data if r["container"] is not row_container]
         self.controls.remove(row_container)
+        self._sync()
+        _safe_update(self)
+
+    def _delete_row_by_fields(self, name_field, uuid_field) -> None:
+        """Delete row by matching name and uuid fields"""
+        for r in list(self._row_data):
+            if r["name"] is name_field and r["uuid"] is uuid_field:
+                self.controls.remove(r["container"])
+                self._row_data.remove(r)
+                break
         self._sync()
         _safe_update(self)
 

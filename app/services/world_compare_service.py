@@ -1,7 +1,6 @@
 """存档对比服务"""
 import threading
 from pathlib import Path
-import hashlib
 from typing import Any, Dict, List, Optional
 from dataclasses import asdict, dataclass
 

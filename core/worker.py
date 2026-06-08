@@ -6,7 +6,7 @@ import nbtlib
 import anvil
 
 from .nbt_utils import patch_nbt
-from .types import UUIDMapping, LogCallback, ProgressCallback
+from .types import UUIDMapping, LogCallback
 
 
 def process_region_file(
@@ -47,7 +47,6 @@ def dummy_progress(value: float) -> None:
     Args:
         value: 进度值 (0.0 - 1.0)
     """
-    pass
 
 
 def process_regions_parallel(

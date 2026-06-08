@@ -5,7 +5,7 @@
 import nbtlib
 import anvil
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Tuple
 
 from .scanner import scan_all_regions
 from .types import LogCallback
@@ -39,7 +39,6 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
         try:
             region = anvil.Region.from_file(str(region_file))
             region_changes = 0
-            region_entities = 0
             for x in range(32):
                 for z in range(32):
                     chunk = region.get_chunk(x, z)

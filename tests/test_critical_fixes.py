@@ -3,10 +3,7 @@
 """
 import tempfile
 import threading
-import time
 from pathlib import Path
-import os
-import shutil
 
 import pytest
 
@@ -152,7 +149,6 @@ class TestSaveNbtResourceManagement:
     def test_temp_file_cleanup_on_failure(self):
         """测试保存失败时临时文件被正确清理"""
         from core.converter import save_nbt
-        import nbtlib
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)

@@ -5,7 +5,6 @@ import flet as ft
 
 from app.services.item_icons import get_item_emoji
 from app.services.item_service import ItemInfo
-from app.ui.theme import THEME
 from app.ui.views.explorer.utils import safe_update
 
 

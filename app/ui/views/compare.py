@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, List
 import flet as ft
 
 from app.services.world_compare_service import CompareItem, get_world_compare_service
-from app.ui.components.buttons import btn_ghost, btn_primary
+from app.ui.components.buttons import btn_ghost
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
 from app.ui.components.layout import page_header

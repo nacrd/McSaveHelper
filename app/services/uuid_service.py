@@ -9,7 +9,7 @@ from core.uuid_utils import (
     load_usercache,
     build_mappings,
 )
-from core.types import LogCallback, UUIDMapping
+from core.types import LogCallback
 
 
 class UUIDService:

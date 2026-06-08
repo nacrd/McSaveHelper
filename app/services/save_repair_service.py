@@ -3,7 +3,6 @@
 修复损坏的区块、玩家数据、level.dat 错误。
 支持并发处理、主动修复、取消操作、存档检测。
 """
-import os
 import shutil
 import time
 import threading

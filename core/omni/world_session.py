@@ -7,13 +7,12 @@ import json
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import nbtlib
-from nbtlib import Compound, Long, IntArray, String, File
+from nbtlib import Compound, File
 from ..scanner import scan_all_regions
-from ..types import LogCallback, ProgressCallback, NBTTag
-from ..utils import replace_directory_tree, update_server_properties
-from ..converter import convert_endian, IdMapping, VersionDowngrader
+from ..types import LogCallback
+from ..utils import replace_directory_tree
 
 
 @dataclass

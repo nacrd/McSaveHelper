@@ -11,7 +11,7 @@ from app.services.server_properties_service import (
     PROPERTY_DESCRIPTIONS,
     get_server_properties_service,
 )
-from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
+from app.ui.components.buttons import btn_ghost, btn_success
 from app.ui.components.cards import card, section_title
 from app.ui.components.fields import text_field
 from app.ui.components.layout import page_header

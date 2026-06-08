@@ -2,11 +2,10 @@
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 
 import anvil
-import nbtlib
 
 from core.scanner import scan_all_regions
 from core.region_utils import parse_region_coords

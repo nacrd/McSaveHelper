@@ -5,7 +5,6 @@
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Callable, Dict, Any, Optional, Set, List, Tuple
@@ -19,7 +18,6 @@ except ImportError:
     except ImportError:
         class _StrEnum(str, Enum):
             """自定义字符串枚举，兼容 Python <3.11"""
-            pass
         StrEnum = _StrEnum
 
 

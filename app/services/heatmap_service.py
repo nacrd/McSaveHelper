@@ -150,7 +150,7 @@ class HeatmapService:
                     if self._scanned_count % batch_size == 0:
                         self._scan_progress = self._scanned_count / self._total_count
                         await asyncio.sleep(0)
-                except Exception as e:
+                except Exception:
                     continue
 
             # 最终更新

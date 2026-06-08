@@ -297,7 +297,7 @@ class AsyncOperationTracker:
 
             # 记录到性能监控器
             perf_monitor.record(
-                f"async_operation",
+                "async_operation",
                 elapsed * 1000,  # 转换为毫秒
                 "ms",
                 operation_id=operation_id
@@ -882,7 +882,6 @@ class HealthMonitor:
     def _fire_alert(self, alert: HealthAlert) -> None:
         try:
             from core.logger import logger as _logger
-            lvl = "WARNING" if alert.level == AlertLevel.WARNING else "ERROR"
             _logger.warning(
                 f"[健康告警] [{alert.category.upper()}] {alert.message}",
                 module="HealthMonitor",

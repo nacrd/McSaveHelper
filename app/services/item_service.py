@@ -2,7 +2,7 @@
 import json
 import zipfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 
@@ -470,7 +470,7 @@ class ItemService:
                         count += 1
 
             return count
-        except Exception as e:
+        except Exception:
             return 0
 
     def load_custom_mapping_file(self, path: Path) -> int:

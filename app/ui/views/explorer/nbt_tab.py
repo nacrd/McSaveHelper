@@ -1,14 +1,11 @@
 ﻿"""NBT tab mixin for ExplorerView - 三栏布局版本"""
 from typing import Any, Union, List
-from pathlib import Path
 
 import flet as ft
 
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field
-from app.ui.components.cards import card
-from app.ui.components.layout import section_header
 from app.ui.views.explorer.nbt_tree import NBTTreeView
 from app.ui.views.explorer.nbt import (
     NbtDataLoader,

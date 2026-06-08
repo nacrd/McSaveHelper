@@ -783,14 +783,14 @@ class McaHeatmapView(ft.Container):
             return "▪"
         return "·"
 
-    def _hsl_to_hex(self, h: float, s: float, l: float) -> str:
+    def _hsl_to_hex(self, h: float, s: float, lightness: float) -> str:
         """HSL 颜色转十六进制"""
         h = h / 360
         s = s / 100
-        l = l / 100
+        lightness = lightness / 100
 
         if s == 0:
-            r = g = b = l
+            r = g = b = lightness
         else:
             def hue2rgb(p: float, q: float, t: float) -> float:
                 if t < 0:
@@ -805,8 +805,9 @@ class McaHeatmapView(ft.Container):
                     return p + (q - p) * (2 / 3 - t) * 6
                 return p
 
-            q = l * (1 + s) if l < 0.5 else l + s - l * s
-            p = 2 * l - q
+            q = (lightness * (1 + s) if lightness < 0.5
+                 else lightness + s - lightness * s)
+            p = 2 * lightness - q
             r = hue2rgb(p, q, h + 1 / 3)
             g = hue2rgb(p, q, h)
             b = hue2rgb(p, q, h - 1 / 3)

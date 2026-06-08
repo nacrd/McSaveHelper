@@ -7,7 +7,6 @@
   MCSaveHelper.exe --console
 """
 import sys
-import os
 import builtins
 import traceback
 from pathlib import Path

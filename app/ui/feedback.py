@@ -6,8 +6,8 @@
 - 用户满意度调查
 - 使用分析（本地匿名）
 """
-from typing import Optional, Dict, Any, Callable, List
-from dataclasses import dataclass, asdict
+from typing import Optional, Dict, Any, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import json
@@ -29,7 +29,7 @@ class FeedbackItem:
         """转换为字典"""
         return {
             "timestamp": self.timestamp.isoformat(),
-            "type": feedback_type,
+            "type": self.feedback_type,
             "title": self.title,
             "description": self.description,
             "user_email": self.user_email,

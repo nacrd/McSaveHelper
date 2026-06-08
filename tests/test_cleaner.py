@@ -4,7 +4,6 @@
 import tempfile
 from pathlib import Path
 from core.cleaner import should_clean, clean_world
-from core.constants import MinecraftConstants
 
 
 def test_should_clean():

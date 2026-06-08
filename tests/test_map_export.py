@@ -85,7 +85,7 @@ def test_map_export_service_raises_on_missing_region_dir():
             if not PIL_AVAILABLE:
                 pytest.skip("PIL not available")
 
-            service = MapExportService()
+            MapExportService()
             # The service would fail when trying to scan
         except ImportError:
             pytest.skip("PIL not available")

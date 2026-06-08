@@ -3,7 +3,6 @@
 将存档地图导出为 PNG 图片（俯视图/地形图）
 """
 import hashlib
-import io
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Tuple, List
 import traceback
@@ -12,7 +11,7 @@ from core.logger import logger
 from core.region_utils import parse_region_coords, scan_region_dir
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
