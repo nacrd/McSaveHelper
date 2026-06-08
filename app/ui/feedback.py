@@ -24,7 +24,7 @@ class FeedbackItem:
     description: str
     user_email: Optional[str] = None
     metadata: Dict[str, Any] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -45,7 +45,7 @@ class UsageEvent:
     event_name: str
     duration_ms: Optional[float] = None
     metadata: Dict[str, Any] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -59,28 +59,28 @@ class UsageEvent:
 
 class FeedbackCollector:
     """反馈收集器（单例）"""
-    
+
     _instance: Optional['FeedbackCollector'] = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if getattr(self, '_initialized', False):
             return
-        
+
         self.enabled: bool = True
         self.feedback_dir: Path = Path.home() / ".mcsavehelper" / "feedback"
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.feedback_file: Path = self.feedback_dir / "feedback.jsonl"
         self.usage_file: Path = self.feedback_dir / "usage.jsonl"
-        
+
         self._initialized = True
-    
+
     def collect_feedback(
         self,
         feedback_type: str,
@@ -90,7 +90,7 @@ class FeedbackCollector:
         **metadata
     ) -> None:
         """收集用户反馈
-        
+
         Args:
             feedback_type: 反馈类型
             title: 标题
@@ -100,7 +100,7 @@ class FeedbackCollector:
         """
         if not self.enabled:
             return
-        
+
         feedback = FeedbackItem(
             timestamp=datetime.now(),
             feedback_type=feedback_type,
@@ -109,13 +109,17 @@ class FeedbackCollector:
             user_email=user_email,
             metadata=metadata
         )
-        
+
         try:
             with open(self.feedback_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(feedback.to_dict(), ensure_ascii=False) + "\n")
+                f.write(
+                    json.dumps(
+                        feedback.to_dict(),
+                        ensure_ascii=False) +
+                    "\n")
         except Exception as e:
             print(f"[ERROR] 保存反馈失败: {e}")
-    
+
     def track_usage(
         self,
         event_type: str,
@@ -124,7 +128,7 @@ class FeedbackCollector:
         **metadata
     ) -> None:
         """跟踪使用事件（本地匿名）
-        
+
         Args:
             event_type: 事件类型
             event_name: 事件名称
@@ -133,7 +137,7 @@ class FeedbackCollector:
         """
         if not self.enabled:
             return
-        
+
         event = UsageEvent(
             timestamp=datetime.now(),
             event_type=event_type,
@@ -141,25 +145,25 @@ class FeedbackCollector:
             duration_ms=duration_ms,
             metadata=metadata
         )
-        
+
         try:
             with open(self.usage_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
         except Exception as e:
             print(f"[ERROR] 保存使用事件失败: {e}")
-    
+
     def get_feedback_stats(self) -> Dict[str, int]:
         """获取反馈统计
-        
+
         Returns:
             各类反馈的数量
         """
         stats: Dict[str, int] = {}
-        
+
         try:
             if not self.feedback_file.exists():
                 return stats
-            
+
             with open(self.feedback_file, "r", encoding="utf-8") as f:
                 for line in f:
                     feedback = json.loads(line)
@@ -167,21 +171,21 @@ class FeedbackCollector:
                     stats[feedback_type] = stats.get(feedback_type, 0) + 1
         except Exception as e:
             print(f"[ERROR] 读取反馈统计失败: {e}")
-        
+
         return stats
-    
+
     def get_feature_usage_stats(self) -> Dict[str, int]:
         """获取功能使用统计
-        
+
         Returns:
             各功能的使用次数
         """
         stats: Dict[str, int] = {}
-        
+
         try:
             if not self.usage_file.exists():
                 return stats
-            
+
             with open(self.usage_file, "r", encoding="utf-8") as f:
                 for line in f:
                     event = json.loads(line)
@@ -190,7 +194,7 @@ class FeedbackCollector:
                         stats[feature] = stats.get(feature, 0) + 1
         except Exception as e:
             print(f"[ERROR] 读取使用统计失败: {e}")
-        
+
         return stats
 
 
@@ -200,14 +204,14 @@ feedback_collector = FeedbackCollector()
 
 class FeedbackDialog:
     """反馈对话框
-    
+
     提供友好的UI供用户提交反馈
     """
-    
+
     def __init__(self, page: ft.Page, on_submit: Optional[Callable] = None):
         self.page = page
         self.on_submit_callback = on_submit
-        
+
         # 反馈类型选择
         self.feedback_type = ft.Dropdown(
             label="反馈类型",
@@ -220,14 +224,14 @@ class FeedbackDialog:
             value="bug",
             width=200,
         )
-        
+
         # 标题输入
         self.title_field = ft.TextField(
             label="标题",
             hint_text="简要描述您的反馈",
             max_length=100,
         )
-        
+
         # 详细描述
         self.description_field = ft.TextField(
             label="详细描述",
@@ -236,13 +240,13 @@ class FeedbackDialog:
             min_lines=5,
             max_lines=10,
         )
-        
+
         # 邮箱（可选）
         self.email_field = ft.TextField(
             label="您的邮箱（可选）",
             hint_text="如需回复，请留下邮箱",
         )
-        
+
         # 对话框
         self.dialog = ft.AlertDialog(
             title=ft.Text("提交反馈", size=20, weight=ft.FontWeight.BOLD),
@@ -267,18 +271,18 @@ class FeedbackDialog:
                 ft.ElevatedButton("提交", on_click=self._on_submit),
             ],
         )
-    
+
     def show(self) -> None:
         """显示对话框"""
         self.page.dialog = self.dialog
         self.dialog.open = True
         self.page.update()
-    
+
     def _on_cancel(self, e) -> None:
         """取消按钮回调"""
         self.dialog.open = False
         self.page.update()
-    
+
     def _on_submit(self, e) -> None:
         """提交按钮回调"""
         # 验证输入
@@ -290,7 +294,7 @@ class FeedbackDialog:
             self.page.snack_bar.open = True
             self.page.update()
             return
-        
+
         # 收集反馈
         feedback_collector.collect_feedback(
             feedback_type=self.feedback_type.value,
@@ -298,10 +302,10 @@ class FeedbackDialog:
             description=self.description_field.value,
             user_email=self.email_field.value or None,
         )
-        
+
         # 关闭对话框
         self.dialog.open = False
-        
+
         # 显示成功消息
         self.page.snack_bar = ft.SnackBar(
             content=ft.Text("感谢您的反馈！"),
@@ -309,11 +313,11 @@ class FeedbackDialog:
         )
         self.page.snack_bar.open = True
         self.page.update()
-        
+
         # 调用回调
         if self.on_submit_callback:
             self.on_submit_callback()
-        
+
         # 重置表单
         self.title_field.value = ""
         self.description_field.value = ""
@@ -322,10 +326,10 @@ class FeedbackDialog:
 
 class ErrorReportDialog:
     """错误报告对话框
-    
+
     自动捕获错误信息并提供报告选项
     """
-    
+
     def __init__(
         self,
         page: ft.Page,
@@ -335,13 +339,13 @@ class ErrorReportDialog:
         self.page = page
         self.error = error
         self.context = context
-        
+
         # 生成错误信息
         import traceback
         self.error_details = "".join(traceback.format_exception(
             type(error), error, error.__traceback__
         ))
-        
+
         # 对话框内容
         self.dialog = ft.AlertDialog(
             title=ft.Row([
@@ -385,7 +389,7 @@ class ErrorReportDialog:
                 ),
             ],
         )
-    
+
     def show(self) -> None:
         """显示错误对话框"""
         # 自动收集错误报告
@@ -395,16 +399,16 @@ class ErrorReportDialog:
             description=self.error_details,
             context=self.context,
         )
-        
+
         self.page.dialog = self.dialog
         self.dialog.open = True
         self.page.update()
-    
+
     def _on_close(self, e) -> None:
         """关闭对话框"""
         self.dialog.open = False
         self.page.update()
-    
+
     def _on_copy(self, e) -> None:
         """复制错误信息到剪贴板"""
         self.page.set_clipboard(self.error_details)
@@ -418,12 +422,12 @@ class ErrorReportDialog:
 
 def track_feature_usage(feature_name: str) -> Callable:
     """功能使用跟踪装饰器
-    
+
     自动跟踪函数调用
-    
+
     Args:
         feature_name: 功能名称
-        
+
     Returns:
         装饰器函数
     """
@@ -431,22 +435,22 @@ def track_feature_usage(feature_name: str) -> Callable:
         def wrapper(*args, **kwargs):
             import time
             start = time.perf_counter()
-            
+
             try:
                 result = func(*args, **kwargs)
                 duration = (time.perf_counter() - start) * 1000
-                
+
                 feedback_collector.track_usage(
                     event_type="feature_used",
                     event_name=feature_name,
                     duration_ms=duration,
                     success=True
                 )
-                
+
                 return result
             except Exception as e:
                 duration = (time.perf_counter() - start) * 1000
-                
+
                 feedback_collector.track_usage(
                     event_type="feature_used",
                     event_name=feature_name,
@@ -454,8 +458,8 @@ def track_feature_usage(feature_name: str) -> Callable:
                     success=False,
                     error=str(e)
                 )
-                
+
                 raise
-        
+
         return wrapper
     return decorator

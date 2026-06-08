@@ -31,10 +31,10 @@ class NotificationType(Enum):
 
 class NotificationManager:
     """通知管理器"""
-    
+
     def __init__(self, page: ft.Page):
         self.page = page
-    
+
     def show_snackbar(
         self,
         message: str,
@@ -44,7 +44,7 @@ class NotificationManager:
         on_action: Optional[Callable] = None
     ) -> None:
         """显示 SnackBar 通知
-        
+
         Args:
             message: 消息内容
             notification_type: 通知类型
@@ -55,7 +55,7 @@ class NotificationManager:
         # 关闭时跳过通知
         if _is_closing():
             return
-        
+
         # 根据类型选择颜色
         color_map = {
             NotificationType.SUCCESS: THEME.success,
@@ -63,9 +63,9 @@ class NotificationManager:
             NotificationType.WARNING: THEME.warning,
             NotificationType.INFO: THEME.info,
         }
-        
+
         bgcolor = color_map.get(notification_type, THEME.info)
-        
+
         # 创建操作按钮
         action = None
         if action_label and on_action:
@@ -73,7 +73,7 @@ class NotificationManager:
                 action_label,
                 on_click=on_action
             )
-        
+
         # 显示 SnackBar
         try:
             self.page.snack_bar = ft.SnackBar(
@@ -86,23 +86,23 @@ class NotificationManager:
             self.page.update()
         except Exception:
             pass
-    
+
     def show_success(self, message: str, duration_ms: int = 3000) -> None:
         """显示成功消息"""
         self.show_snackbar(message, NotificationType.SUCCESS, duration_ms)
-    
+
     def show_error(self, message: str, duration_ms: int = 5000) -> None:
         """显示错误消息"""
         self.show_snackbar(message, NotificationType.ERROR, duration_ms)
-    
+
     def show_warning(self, message: str, duration_ms: int = 4000) -> None:
         """显示警告消息"""
         self.show_snackbar(message, NotificationType.WARNING, duration_ms)
-    
+
     def show_info(self, message: str, duration_ms: int = 3000) -> None:
         """显示信息消息"""
         self.show_snackbar(message, NotificationType.INFO, duration_ms)
-    
+
     def show_confirmation(
         self,
         title: str,
@@ -114,7 +114,7 @@ class NotificationManager:
         destructive: bool = False
     ) -> None:
         """显示确认对话框
-        
+
         Args:
             title: 对话框标题
             message: 确认消息
@@ -128,13 +128,13 @@ class NotificationManager:
             dialog.open = False
             self.page.update()
             on_confirm(e)
-        
+
         def handle_cancel(e):
             dialog.open = False
             self.page.update()
             if on_cancel:
                 on_cancel(e)
-        
+
         # 确认按钮样式
         confirm_button = ft.ElevatedButton(
             confirm_text,
@@ -142,7 +142,7 @@ class NotificationManager:
             bgcolor=THEME.error if destructive else THEME.accent,
             color="white",
         )
-        
+
         dialog = ft.AlertDialog(
             title=ft.Text(title, size=18, weight=ft.FontWeight.BOLD),
             content=ft.Text(message, size=14),
@@ -152,32 +152,36 @@ class NotificationManager:
             ],
             actions_alignment=ft.MainAxisAlignment.END,
         )
-        
+
         self.page.dialog = dialog
         dialog.open = True
         self.page.update()
-    
+
     def show_loading(
         self,
         title: str = "处理中...",
         message: Optional[str] = None
     ) -> ft.AlertDialog:
         """显示加载对话框
-        
+
         Args:
             title: 标题
             message: 消息（可选）
-            
+
         Returns:
             对话框对象（用于后续关闭）
         """
         content_items = [
             ft.ProgressRing(width=50, height=50, color=THEME.accent),
         ]
-        
+
         if message:
-            content_items.append(ft.Text(message, size=14, text_align=ft.TextAlign.CENTER))
-        
+            content_items.append(
+                ft.Text(
+                    message,
+                    size=14,
+                    text_align=ft.TextAlign.CENTER))
+
         dialog = ft.AlertDialog(
             title=ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
             content=ft.Container(
@@ -190,22 +194,22 @@ class NotificationManager:
             ),
             modal=True,
         )
-        
+
         self.page.dialog = dialog
         dialog.open = True
         self.page.update()
-        
+
         return dialog
-    
+
     def hide_loading(self, dialog: ft.AlertDialog) -> None:
         """隐藏加载对话框
-        
+
         Args:
             dialog: show_loading 返回的对话框对象
         """
         dialog.open = False
         self.page.update()
-    
+
     def show_custom_dialog(
         self,
         title: str,
@@ -215,14 +219,14 @@ class NotificationManager:
         height: Optional[int] = None
     ) -> ft.AlertDialog:
         """显示自定义对话框
-        
+
         Args:
             title: 标题
             content: 内容控件
             actions: 操作按钮列表
             width: 宽度
             height: 高度
-            
+
         Returns:
             对话框对象
         """
@@ -233,22 +237,22 @@ class NotificationManager:
                 width=width,
                 height=height,
             )
-        
+
         dialog = ft.AlertDialog(
             title=ft.Text(title, size=18, weight=ft.FontWeight.BOLD),
             content=dialog_content,
             actions=actions or [],
         )
-        
+
         self.page.dialog = dialog
         dialog.open = True
         self.page.update()
-        
+
         return dialog
-    
+
     def close_dialog(self, dialog: Optional[ft.AlertDialog] = None) -> None:
         """关闭对话框
-        
+
         Args:
             dialog: 对话框对象，如果为 None 则关闭当前对话框
         """
@@ -261,14 +265,14 @@ class NotificationManager:
 
 class Toast:
     """Toast 通知组件
-    
+
     轻量级通知，不会打断用户操作
     """
-    
+
     def __init__(self, page: ft.Page):
         self.page = page
         self.overlay_container: Optional[ft.Container] = None
-    
+
     def show(
         self,
         message: str,
@@ -277,7 +281,7 @@ class Toast:
         position: str = "bottom"  # "top", "bottom", "center"
     ) -> None:
         """显示 Toast 通知
-        
+
         Args:
             message: 消息内容
             notification_type: 通知类型
@@ -287,7 +291,7 @@ class Toast:
         # 关闭时跳过通知
         if _is_closing():
             return
-        
+
         # 图标映射
         icon_map = {
             NotificationType.SUCCESS: ft.Icons.CHECK_CIRCLE,
@@ -295,7 +299,7 @@ class Toast:
             NotificationType.WARNING: ft.Icons.WARNING,
             NotificationType.INFO: ft.Icons.INFO,
         }
-        
+
         # 颜色映射
         color_map = {
             NotificationType.SUCCESS: THEME.success,
@@ -303,10 +307,10 @@ class Toast:
             NotificationType.WARNING: THEME.warning,
             NotificationType.INFO: THEME.info,
         }
-        
+
         icon = icon_map.get(notification_type, ft.Icons.INFO)
         color = color_map.get(notification_type, THEME.info)
-        
+
         # 创建 Toast 内容
         toast_content = ft.Container(
             content=ft.Row([
@@ -322,7 +326,7 @@ class Toast:
                 color="rgba(0, 0, 0, 0.3)",
             ),
         )
-        
+
         # 添加到页面
         # 注意：Flet 可能需要使用 SnackBar 或 Overlay 实现
         # 这里展示概念性实现
@@ -343,34 +347,34 @@ class Toast:
 
 class ProgressDialog:
     """进度对话框
-    
+
     显示长时间操作的进度
     """
-    
+
     def __init__(self, page: ft.Page, title: str = "处理中..."):
         self.page = page
         self.title = title
-        
+
         self.progress_bar = ft.ProgressBar(
             value=0,
             color=THEME.accent,
             bgcolor=THEME.bg_secondary,
             width=400,
         )
-        
+
         self.progress_text = ft.Text(
             "0%",
             size=14,
             text_align=ft.TextAlign.CENTER,
         )
-        
+
         self.status_text = ft.Text(
             "",
             size=12,
             color=THEME.text_secondary,
             text_align=ft.TextAlign.CENTER,
         )
-        
+
         self.dialog = ft.AlertDialog(
             title=ft.Text(title, size=16, weight=ft.FontWeight.BOLD),
             content=ft.Container(
@@ -384,28 +388,28 @@ class ProgressDialog:
             ),
             modal=True,
         )
-    
+
     def show(self) -> None:
         """显示进度对话框"""
         self.page.dialog = self.dialog
         self.dialog.open = True
         self.page.update()
-    
+
     def update_progress(self, value: float, status: str = "") -> None:
         """更新进度
-        
+
         Args:
             value: 进度值 (0.0 - 1.0)
             status: 状态文本
         """
         self.progress_bar.value = value
         self.progress_text.value = f"{int(value * 100)}%"
-        
+
         if status:
             self.status_text.value = status
-        
+
         self.page.update()
-    
+
     def hide(self) -> None:
         """隐藏进度对话框"""
         self.dialog.open = False
@@ -420,7 +424,7 @@ def show_destructive_confirmation(
     on_confirm: Callable
 ) -> None:
     """显示危险操作确认对话框（需要输入确认）
-    
+
     Args:
         page: 页面对象
         title: 标题
@@ -432,7 +436,7 @@ def show_destructive_confirmation(
         label=f"输入 '{item_name}' 以确认",
         hint_text=item_name,
     )
-    
+
     def handle_confirm(e):
         if confirm_field.value == item_name:
             dialog.open = False
@@ -445,11 +449,11 @@ def show_destructive_confirmation(
             )
             page.snack_bar.open = True
             page.update()
-    
+
     def handle_cancel(e):
         dialog.open = False
         page.update()
-    
+
     dialog = ft.AlertDialog(
         title=ft.Row([
             ft.Icon(ft.Icons.WARNING, color=THEME.error, size=24),
@@ -479,7 +483,7 @@ def show_destructive_confirmation(
             ),
         ],
     )
-    
+
     page.dialog = dialog
     dialog.open = True
     page.update()

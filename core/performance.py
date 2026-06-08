@@ -32,20 +32,31 @@ class PerformanceMetrics:
     @property
     def throughput_mb_per_sec(self) -> float:
         if self.duration_seconds > 0 and self.bytes_processed > 0:
-            return (self.bytes_processed / (1024 * 1024)) / self.duration_seconds
+            return (self.bytes_processed / (1024 * 1024)) / \
+                self.duration_seconds
         return 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "operation": self.operation,
-            "duration_seconds": round(self.duration_seconds, 3),
-            "memory_peak_mb": round(self.memory_peak_mb, 2),
-            "memory_delta_mb": round(self.memory_delta_mb, 2),
+            "duration_seconds": round(
+                self.duration_seconds,
+                3),
+            "memory_peak_mb": round(
+                self.memory_peak_mb,
+                2),
+            "memory_delta_mb": round(
+                self.memory_delta_mb,
+                2),
             "files_processed": self.files_processed,
             "bytes_processed": self.bytes_processed,
             "errors": self.errors,
-            "throughput_files_per_sec": round(self.throughput_files_per_sec, 2),
-            "throughput_mb_per_sec": round(self.throughput_mb_per_sec, 2),
+            "throughput_files_per_sec": round(
+                self.throughput_files_per_sec,
+                2),
+            "throughput_mb_per_sec": round(
+                self.throughput_mb_per_sec,
+                2),
             "metadata": self.metadata,
         }
 
@@ -55,7 +66,7 @@ class PerformanceMetrics:
         if self.files_processed > 0:
             parts.append(f"{self.files_processed}文件")
         if self.bytes_processed > 0:
-            parts.append(f"{self.bytes_processed / (1024*1024):.1f}MB")
+            parts.append(f"{self.bytes_processed / (1024 * 1024):.1f}MB")
         if self.memory_peak_mb > 0:
             parts.append(f"内存峰值{self.memory_peak_mb:.1f}MB")
         if self.errors > 0:
@@ -69,7 +80,7 @@ class PerformanceMetrics:
             f"内存峰值: {self.memory_peak_mb:.2f}MB",
             f"内存增量: {self.memory_delta_mb:.2f}MB",
             f"处理文件: {self.files_processed}个",
-            f"处理数据: {self.bytes_processed / (1024*1024):.2f}MB",
+            f"处理数据: {self.bytes_processed / (1024 * 1024):.2f}MB",
         ]
         if self.throughput_files_per_sec > 0:
             lines.append(f"文件吞吐量: {self.throughput_files_per_sec:.2f}文件/秒")

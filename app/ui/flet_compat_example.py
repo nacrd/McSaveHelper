@@ -32,7 +32,7 @@ dropdown = Dropdown(
 # ============================================================================
 # import flet as ft_original
 # from app.ui import flet_compat as ft
-# 
+#
 # # 所有 ft.xxx 自动使用兼容版本
 # container = ft.Container(alignment=ft.alignment.center())
 
@@ -42,7 +42,7 @@ dropdown = Dropdown(
 # ============================================================================
 # import flet as ft
 # from app.ui.flet_compat import alignment, Image, ImageFit, Dropdown
-# 
+#
 # # 在应用入口处一次性替换
 # ft.alignment.center = alignment.center
 # ft.alignment.top_left = alignment.top_left

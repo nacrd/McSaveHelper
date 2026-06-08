@@ -58,8 +58,16 @@ def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
         text_align=ft.TextAlign.RIGHT,
         weight=ft.FontWeight.BOLD,
     )
-    durability_text = ft.Text("", size=6, color=DURABILITY_HIGH, text_align=ft.TextAlign.CENTER)
-    enchantment_text = ft.Text("", size=7, color=ENCHANTMENT_COLOR, text_align=ft.TextAlign.LEFT)
+    durability_text = ft.Text(
+        "",
+        size=6,
+        color=DURABILITY_HIGH,
+        text_align=ft.TextAlign.CENTER)
+    enchantment_text = ft.Text(
+        "",
+        size=7,
+        color=ENCHANTMENT_COLOR,
+        text_align=ft.TextAlign.LEFT)
 
     stack = ft.Stack(
         [
@@ -100,7 +108,13 @@ def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
         padding=0,
         content=stack,
     )
-    return ItemSlotControl(container, image, icon, count_text, durability_text, enchantment_text)
+    return ItemSlotControl(
+        container,
+        image,
+        icon,
+        count_text,
+        durability_text,
+        enchantment_text)
 
 
 def reset_item_slot(slot: ItemSlotControl) -> None:
@@ -115,12 +129,16 @@ def reset_item_slot(slot: ItemSlotControl) -> None:
     slot.enchantment_text.value = ""
 
 
-def apply_item_to_slot(slot: ItemSlotControl, item_info: ItemInfo, tooltip: str) -> None:
+def apply_item_to_slot(
+        slot: ItemSlotControl,
+        item_info: ItemInfo,
+        tooltip: str) -> None:
     slot.container.bgcolor = SLOT_BG_FILLED
     slot.container.tooltip = tooltip
     slot.icon.value = get_item_emoji(item_info.id)
     slot.icon.visible = True
-    slot.count_text.value = f"×{item_info.count}" if item_info.count > 1 else ""
+    slot.count_text.value = f"×{
+        item_info.count}" if item_info.count > 1 else ""
 
     if item_info.durability_percent is not None:
         percent = item_info.durability_percent

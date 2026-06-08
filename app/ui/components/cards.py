@@ -56,13 +56,13 @@ def placeholder(
     height: int = 150,
 ) -> ft.Container:
     """创建美化的空状态占位符
-    
+
     Args:
         icon: 显示的图标（emoji）
         title: 主标题
         subtitle: 副标题说明
         height: 容器高度
-    
+
     Returns:
         ft.Container: 美化的占位符容器
     """

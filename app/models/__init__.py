@@ -4,7 +4,7 @@ from app.models.mapping import PlayerMapping
 
 __all__ = [
     "AppConfig",
-    "BatchSettings", 
+    "BatchSettings",
     "UISettings",
     "MigrationConfig",
     "PlayerMapping",

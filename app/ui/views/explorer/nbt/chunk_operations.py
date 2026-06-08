@@ -66,7 +66,7 @@ class ChunkOperations:
                             ], spacing=2, expand=True),
                             ft.TextButton(
                                 "查看",
-                                on_click=lambda e, data=obj["data"], title=obj["title"]: 
+                                on_click=lambda e, data=obj["data"], title=obj["title"]:
                                     self.show_chunk_object(data, title)
                             ),
                         ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -87,7 +87,9 @@ class ChunkOperations:
 
     def show_chunk_object(self, data: Any, title: str) -> None:
         """显示区块对象的 NBT"""
-        if hasattr(self.ctx, "_current_chunk_target") and self.ctx._current_chunk_target:
+        if hasattr(
+                self.ctx,
+                "_current_chunk_target") and self.ctx._current_chunk_target:
             self.ctx._current_chunk_object = {
                 "data": data,
                 "title": title,

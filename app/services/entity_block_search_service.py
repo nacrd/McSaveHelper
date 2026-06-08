@@ -26,7 +26,11 @@ class SearchResult:
             self.extra_info = {}
 
     def __repr__(self) -> str:
-        return f"SearchResult({self.result_type}, {self.name}, {self.position}, {self.dimension})"
+        return f"SearchResult({
+            self.result_type}, {
+            self.name}, {
+            self.position}, {
+                self.dimension})"
 
 
 @dataclass
@@ -131,12 +135,13 @@ class EntityBlockSearchService:
         world_path: Path,
         search_type: str,  # "entity"、"block" 或 "container"
         target: str,  # 实体/方块 ID
-        dimensions: Optional[List[str]] = None,  # ["overworld", "nether", "end"]
+        # ["overworld", "nether", "end"]
+        dimensions: Optional[List[str]] = None,
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> List[SearchResult]:
         """搜索实体或方块
-        
+
         Args:
             world_path: 存档路径
             search_type: 搜索类型（entity、block 或 container）
@@ -144,7 +149,7 @@ class EntityBlockSearchService:
             dimensions: 要搜索的维度列表
             progress_callback: 进度回调
             log_callback: 日志回调
-            
+
         Returns:
             搜索结果列表
         """
@@ -174,7 +179,9 @@ class EntityBlockSearchService:
             with tracker.track("实体方块搜索", {"world": world_path.name, "type": search_type, "target": target}):
                 if dimensions is None:
                     dimensions = ["overworld", "nether", "end"]
-                dimensions = [d for d in dimensions if d in {"overworld", "nether", "end"}]
+                dimensions = [
+                    d for d in dimensions if d in {
+                        "overworld", "nether", "end"}]
                 if not dimensions:
                     raise ValueError("未选择有效维度")
 
@@ -186,36 +193,24 @@ class EntityBlockSearchService:
 
                 for dimension in dimensions:
                     progress(total_progress, f"搜索维度: {dimension}")
-                    
+
                     if search_type == "entity":
                         self._search_entities_in_dimension(
-                            world_path,
-                            dimension,
-                            target,
-                            log,
-                            lambda v, m: progress(total_progress + v * step, m),
-                        )
+                            world_path, dimension, target, log, lambda v, m: progress(
+                                total_progress + v * step, m), )
                     elif search_type == "block":
                         self._search_blocks_in_dimension(
-                            world_path,
-                            dimension,
-                            target,
-                            log,
-                            lambda v, m: progress(total_progress + v * step, m),
-                        )
+                            world_path, dimension, target, log, lambda v, m: progress(
+                                total_progress + v * step, m), )
                     elif search_type == "container":
                         self._search_containers_in_dimension(
-                            world_path,
-                            dimension,
-                            target,
-                            log,
-                            lambda v, m: progress(total_progress + v * step, m),
-                        )
+                            world_path, dimension, target, log, lambda v, m: progress(
+                                total_progress + v * step, m), )
 
                     if self._is_result_limit_reached():
                         log(f"结果数量达到上限 {self.MAX_RESULTS}，已停止继续扫描", "WARNING")
                         break
-                     
+
                     total_progress += step
 
                 progress(1.0, f"搜索完成，找到 {len(self.results)} 个结果")
@@ -245,7 +240,7 @@ class EntityBlockSearchService:
         progress: Callable[[float, str], None],
     ) -> None:
         """在指定维度搜索实体
-        
+
         Args:
             world_path: 存档路径
             dimension: 维度
@@ -254,7 +249,8 @@ class EntityBlockSearchService:
             progress: 进度回调
         """
         try:
-            region_files = self._get_dimension_region_files(world_path, dimension)
+            region_files = self._get_dimension_region_files(
+                world_path, dimension)
             if not region_files:
                 log(f"维度 {dimension} 没有区块文件", "WARNING")
                 return
@@ -263,17 +259,17 @@ class EntityBlockSearchService:
 
             try:
                 from anvil import Region
-                
+
                 total = len(region_files)
                 for idx, region_file in enumerate(region_files):
                     if self._is_result_limit_reached():
                         return
-                    progress(idx / total, f"搜索区块文件 {idx+1}/{total}")
+                    progress(idx / total, f"搜索区块文件 {idx + 1}/{total}")
                     self.summary.scanned_regions += 1
-                    
+
                     try:
                         region = Region.from_file(str(region_file))
-                        
+
                         # 搜索每个区块
                         for cx in range(32):
                             for cz in range(32):
@@ -290,13 +286,13 @@ class EntityBlockSearchService:
                                         )
                                 except Exception:
                                     self.summary.skipped_chunks += 1
-                                    
+
                     except Exception as e:
                         log(f"读取区块文件 {region_file.name} 失败: {e}", "WARNING")
-                        
+
             except ImportError:
                 log("anvil-parser2 未安装，无法搜索实体", "ERROR")
-                
+
         except Exception as e:
             log(f"搜索维度 {dimension} 失败: {e}", "ERROR")
 
@@ -307,7 +303,7 @@ class EntityBlockSearchService:
         dimension: str,
     ) -> None:
         """在区块中搜索实体
-        
+
         Args:
             chunk: 区块对象
             target: 目标实体 ID
@@ -315,14 +311,14 @@ class EntityBlockSearchService:
         """
         try:
             entities = self._get_entities(chunk)
-             
+
             if not entities:
                 return
-            
+
             for entity in entities:
                 try:
                     entity_id = self._tag_to_str(entity.get('id', ''))
-                     
+
                     # 检查是否匹配
                     if self._matches_target(entity_id, target):
                         # 获取位置
@@ -331,30 +327,34 @@ class EntityBlockSearchService:
                             x = int(float(self._tag_value(pos[0])))
                             y = int(float(self._tag_value(pos[1])))
                             z = int(float(self._tag_value(pos[2])))
-                            
+
                             # 提取额外信息
                             extra_info: Dict[str, Any] = {}
-                            
+
                             # 村民：职业
                             if 'villager' in entity_id:
                                 villager_data = entity.get('VillagerData', {})
                                 if hasattr(villager_data, 'get'):
-                                    profession = villager_data.get('profession', 'unknown')
-                                    extra_info['profession'] = self._tag_to_str(profession)
-                            
+                                    profession = villager_data.get(
+                                        'profession', 'unknown')
+                                    extra_info['profession'] = self._tag_to_str(
+                                        profession)
+
                             # 生命值
                             health = entity.get('Health', None)
                             if health is not None:
                                 try:
-                                    extra_info['health'] = float(self._tag_value(health))
+                                    extra_info['health'] = float(
+                                        self._tag_value(health))
                                 except (ValueError, TypeError):
                                     pass
-                            
+
                             # 自定义名称
                             custom_name = entity.get('CustomName', None)
                             if custom_name:
-                                extra_info['custom_name'] = self._tag_to_str(custom_name)
-                            
+                                extra_info['custom_name'] = self._tag_to_str(
+                                    custom_name)
+
                             # 添加结果
                             result = SearchResult(
                                 result_type="entity",
@@ -366,10 +366,10 @@ class EntityBlockSearchService:
                             self.results.append(result)
                             if len(self.results) >= self.MAX_RESULTS:
                                 return
-                            
+
                 except Exception:
                     pass  # 跳过无效实体
-                    
+
         except Exception:
             pass  # 跳过损坏的区块数据
 
@@ -382,7 +382,7 @@ class EntityBlockSearchService:
         progress: Callable[[float, str], None],
     ) -> None:
         """在指定维度搜索方块
-        
+
         Args:
             world_path: 存档路径
             dimension: 维度
@@ -391,7 +391,8 @@ class EntityBlockSearchService:
             progress: 进度回调
         """
         try:
-            region_files = self._get_dimension_region_files(world_path, dimension)
+            region_files = self._get_dimension_region_files(
+                world_path, dimension)
             if not region_files:
                 log(f"维度 {dimension} 没有区块文件", "WARNING")
                 return
@@ -400,17 +401,17 @@ class EntityBlockSearchService:
 
             try:
                 from anvil import Region
-                
+
                 total = len(region_files)
                 for idx, region_file in enumerate(region_files):
                     if self._is_result_limit_reached():
                         return
-                    progress(idx / total, f"搜索区块文件 {idx+1}/{total}")
+                    progress(idx / total, f"搜索区块文件 {idx + 1}/{total}")
                     self.summary.scanned_regions += 1
-                    
+
                     try:
                         region = Region.from_file(str(region_file))
-                        
+
                         # 搜索每个区块
                         for cx in range(32):
                             for cz in range(32):
@@ -427,13 +428,13 @@ class EntityBlockSearchService:
                                         )
                                 except Exception:
                                     self.summary.skipped_chunks += 1
-                                    
+
                     except Exception as e:
                         log(f"读取区块文件 {region_file.name} 失败: {e}", "WARNING")
-                        
+
             except ImportError:
                 log("anvil-parser2 未安装，无法搜索方块", "ERROR")
-                
+
         except Exception as e:
             log(f"搜索维度 {dimension} 失败: {e}", "ERROR")
 
@@ -444,7 +445,7 @@ class EntityBlockSearchService:
         dimension: str,
     ) -> None:
         """在区块中搜索方块
-        
+
         Args:
             chunk: 区块对象
             target: 目标方块 ID
@@ -476,7 +477,11 @@ class EntityBlockSearchService:
                             break
                         block_name = self._get_block_name(block)
                         block_id = self._tag_to_str(getattr(block, "id", ""))
-                        if self._matches_target(block_name, target) or self._matches_target(block_id, target):
+                        if self._matches_target(
+                                block_name,
+                                target) or self._matches_target(
+                                block_id,
+                                target):
                             matching_sections.append(section_y)
                             break
                 except Exception:
@@ -496,23 +501,25 @@ class EntityBlockSearchService:
                                 if block is None:
                                     continue
                                 block_name = self._get_block_name(block)
-                                block_id = self._tag_to_str(getattr(block, "id", ""))
-                                if self._matches_target(block_name, target) or self._matches_target(block_id, target):
+                                block_id = self._tag_to_str(
+                                    getattr(block, "id", ""))
+                                if self._matches_target(
+                                        block_name,
+                                        target) or self._matches_target(
+                                        block_id,
+                                        target):
                                     world_x = chunk.x * 16 + x
                                     world_z = chunk.z * 16 + z
                                     result = SearchResult(
-                                        result_type="block",
-                                        name=block_name,
-                                        position=(world_x, y, world_z),
-                                        dimension=dimension,
-                                        extra_info=self._get_container_info_at(chunk, world_x, y, world_z),
-                                    )
+                                        result_type="block", name=block_name, position=(
+                                            world_x, y, world_z), dimension=dimension, extra_info=self._get_container_info_at(
+                                            chunk, world_x, y, world_z), )
                                     self.results.append(result)
                                     if len(self.results) >= self.MAX_RESULTS:
                                         return
                             except Exception:
                                 pass
-                            
+
         except Exception:
             pass
 
@@ -526,7 +533,8 @@ class EntityBlockSearchService:
     ) -> None:
         """在指定维度搜索容器方块实体。"""
         try:
-            region_files = self._get_dimension_region_files(world_path, dimension)
+            region_files = self._get_dimension_region_files(
+                world_path, dimension)
             if not region_files:
                 log(f"维度 {dimension} 没有区块文件", "WARNING")
                 return
@@ -540,7 +548,7 @@ class EntityBlockSearchService:
                 for idx, region_file in enumerate(region_files):
                     if self._is_result_limit_reached():
                         return
-                    progress(idx / total, f"搜索容器 {idx+1}/{total}")
+                    progress(idx / total, f"搜索容器 {idx + 1}/{total}")
                     self.summary.scanned_regions += 1
 
                     try:
@@ -553,7 +561,8 @@ class EntityBlockSearchService:
                                     chunk = region.get_chunk(cx, cz)
                                     if chunk is not None:
                                         self.summary.scanned_chunks += 1
-                                        self._search_containers_in_chunk(chunk, target, dimension)
+                                        self._search_containers_in_chunk(
+                                            chunk, target, dimension)
                                 except Exception:
                                     self.summary.skipped_chunks += 1
                     except Exception as e:
@@ -565,7 +574,11 @@ class EntityBlockSearchService:
         except Exception as e:
             log(f"搜索维度 {dimension} 失败: {e}", "ERROR")
 
-    def _search_containers_in_chunk(self, chunk: Any, target: str, dimension: str) -> None:
+    def _search_containers_in_chunk(
+            self,
+            chunk: Any,
+            target: str,
+            dimension: str) -> None:
         """在区块中搜索容器方块实体。"""
         try:
             if not hasattr(chunk, "data") or not chunk.data:
@@ -596,7 +609,8 @@ class EntityBlockSearchService:
         except Exception:
             pass
 
-    def _get_container_info_at(self, chunk: Any, x: int, y: int, z: int) -> Dict[str, Any]:
+    def _get_container_info_at(
+            self, chunk: Any, x: int, y: int, z: int) -> Dict[str, Any]:
         """返回指定坐标容器内容摘要；非容器返回空字典。"""
         try:
             for block_entity in self._get_block_entities(chunk):
@@ -639,19 +653,25 @@ class EntityBlockSearchService:
                     return list(entities)
         return []
 
-    def _get_block_entity_position(self, block_entity: Any) -> Optional[Tuple[int, int, int]]:
+    def _get_block_entity_position(
+            self, block_entity: Any) -> Optional[Tuple[int, int, int]]:
         try:
             x = block_entity.get("x", block_entity.get("X"))
             y = block_entity.get("y", block_entity.get("Y"))
             z = block_entity.get("z", block_entity.get("Z"))
             if x is None or y is None or z is None:
                 return None
-            return (int(self._tag_value(x)), int(self._tag_value(y)), int(self._tag_value(z)))
+            return (int(self._tag_value(x)), int(
+                self._tag_value(y)), int(self._tag_value(z)))
         except Exception:
             return None
 
     def _extract_container_info(self, block_entity: Any) -> Dict[str, Any]:
-        items = block_entity.get("Items", []) if hasattr(block_entity, "get") else []
+        items = block_entity.get(
+            "Items",
+            []) if hasattr(
+            block_entity,
+            "get") else []
         parsed_items = []
 
         for item in items or []:
@@ -666,7 +686,9 @@ class EntityBlockSearchService:
             except Exception:
                 pass
 
-        custom_name = block_entity.get("CustomName", None) if hasattr(block_entity, "get") else None
+        custom_name = block_entity.get(
+            "CustomName", None) if hasattr(
+            block_entity, "get") else None
         info: Dict[str, Any] = {
             "item_count": len(parsed_items),
             "items": "; ".join(parsed_items) if parsed_items else "空",
@@ -690,7 +712,10 @@ class EntityBlockSearchService:
     def _is_result_limit_reached(self) -> bool:
         return len(self.results) >= self.MAX_RESULTS
 
-    def _get_dimension_region_files(self, world_path: Path, dimension: str) -> List[Path]:
+    def _get_dimension_region_files(
+            self,
+            world_path: Path,
+            dimension: str) -> List[Path]:
         dimension_path = self._get_dimension_path(world_path, dimension)
         if not dimension_path:
             return []
@@ -713,13 +738,16 @@ class EntityBlockSearchService:
         except Exception:
             return range(-4, 20)
 
-    def _get_dimension_path(self, world_path: Path, dimension: str) -> Optional[Path]:
+    def _get_dimension_path(
+            self,
+            world_path: Path,
+            dimension: str) -> Optional[Path]:
         """获取维度路径
-        
+
         Args:
             world_path: 存档路径
             dimension: 维度名称
-            
+
         Returns:
             维度路径或 None
         """
@@ -746,9 +774,10 @@ class EntityBlockSearchService:
             return None
         return None
 
-    def export_results_to_text(self, output_path: Path, results: Optional[List[SearchResult]] = None) -> None:
+    def export_results_to_text(
+            self, output_path: Path, results: Optional[List[SearchResult]] = None) -> None:
         """将搜索结果导出为文本文件
-        
+
         Args:
             output_path: 输出文件路径
         """
@@ -760,19 +789,23 @@ class EntityBlockSearchService:
                 f.write(f"扫描区块: {self.summary.scanned_chunks}\n")
                 f.write(f"跳过区块: {self.summary.skipped_chunks}\n")
                 f.write("=" * 80 + "\n\n")
-                 
+
                 for idx, result in enumerate(export_results, 1):
                     f.write(f"{idx}. {result.name}\n")
                     f.write(f"   类型: {result.result_type}\n")
-                    f.write(f"   位置: X={result.position[0]}, Y={result.position[1]}, Z={result.position[2]}\n")
+                    f.write(
+                        f"   位置: X={
+                            result.position[0]}, Y={
+                            result.position[1]}, Z={
+                            result.position[2]}\n")
                     f.write(f"   维度: {result.dimension}\n")
-                    
+
                     if result.extra_info:
                         f.write(f"   额外信息:\n")
                         for key, value in result.extra_info.items():
                             f.write(f"      {key}: {value}\n")
-                    
+
                     f.write("\n")
-                    
+
         except Exception as e:
             logger.error(f"导出结果失败: {e}", module="EntityBlockSearch")

@@ -33,18 +33,25 @@ class ServerPropertiesView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(page_header(
-            "server.properties 编辑器",
-            ft.Text("读取、编辑并保存 Minecraft 服务器配置文件", size=12, color=THEME.text_muted),
-            icon="📋",
-        ))
-        self._path_field = text_field(label="服务器根目录或 server.properties", hint_text="选择服务器根目录")
+        self.controls.append(
+            page_header(
+                "server.properties 编辑器",
+                ft.Text(
+                    "读取、编辑并保存 Minecraft 服务器配置文件",
+                    size=12,
+                    color=THEME.text_muted),
+                icon="📋",
+            ))
+        self._path_field = text_field(
+            label="服务器根目录或 server.properties",
+            hint_text="选择服务器根目录")
         self.controls.append(card(ft.Column([
             ft.Row([self._path_field, btn_ghost("浏览", width=90, on_click=self._pick)], spacing=10),
             ft.Text("选择路径后，可通过顶栏“读取配置”加载 server.properties。", size=11, color=THEME.text_muted),
         ], spacing=10), padding=16))
         self._form = ft.Column(spacing=10)
-        self.controls.append(card(ft.Column([section_title("配置项"), self._form, btn_success("保存", width=100, on_click=self._save)], spacing=10), padding=0))
+        self.controls.append(card(ft.Column([section_title("配置项"), self._form, btn_success(
+            "保存", width=100, on_click=self._save)], spacing=10), padding=0))
         self._populate(DEFAULT_SERVER_PROPERTIES.copy())
 
     def _pick(self, e: ft.ControlEvent) -> None:
@@ -68,11 +75,24 @@ class ServerPropertiesView(ft.Column):
         for key, value in props.items():
             desc = PROPERTY_DESCRIPTIONS.get(key, "自定义配置项")
             if key in BOOLEAN_PROPERTIES:
-                control: ft.Control = ft.Checkbox(label=key, value=str(value).lower() == "true", label_style=ft.TextStyle(color=THEME.text_secondary))
+                control: ft.Control = ft.Checkbox(
+                    label=key,
+                    value=str(value).lower() == "true",
+                    label_style=ft.TextStyle(
+                        color=THEME.text_secondary))
             elif key in ENUM_PROPERTIES:
-                control = ft.Dropdown(options=[ft.dropdown.Option(v) for v in ENUM_PROPERTIES[key]], value=value, width=220, border_color=THEME.border_standard)
+                control = ft.Dropdown(
+                    options=[
+                        ft.dropdown.Option(v) for v in ENUM_PROPERTIES[key]],
+                    value=value,
+                    width=220,
+                    border_color=THEME.border_standard)
             else:
-                control = text_field(value=str(value), label=key, expand=False, width=260)
+                control = text_field(
+                    value=str(value),
+                    label=key,
+                    expand=False,
+                    width=260)
             self._fields[key] = control
             self._form.controls.append(ft.Row([
                 control,

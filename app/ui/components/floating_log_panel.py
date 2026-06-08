@@ -18,7 +18,7 @@ def _is_app_closing() -> bool:
 
 class FloatingLogPanel(ft.Container):
     """可拖拽移动的悬浮球日志面板
-    
+
     特性：
     - 悬浮球可自由拖拽移动
     - 面板可通过标题栏拖拽
@@ -41,10 +41,10 @@ class FloatingLogPanel(ft.Container):
         self._offset_top = 200.0
         self._last_x = 0.0
         self._last_y = 0.0
-        
+
         # 加载保存的位置
         self._load_position()
-        
+
         # 创建日志列表（使用ListView以获得更好的滚动体验）
         self._log_col = ft.ListView(
             spacing=2,
@@ -53,14 +53,14 @@ class FloatingLogPanel(ft.Container):
             auto_scroll=True,
             on_scroll=self._on_scroll,
         )
-        
+
         # 状态文本
         self._status_text = ft.Text(
             "",
             size=10,
             color=THEME.text_muted,
         )
-        
+
         # 自动滚动开关
         self._auto_scroll_btn = ft.Container(
             content=ft.Icon(
@@ -73,16 +73,19 @@ class FloatingLogPanel(ft.Container):
             border_radius=4,
             tooltip="自动滚动" if self._auto_scroll else "已暂停自动滚动",
         )
-        
+
         # 清除按钮
         self._clear_btn = ft.Container(
-            content=ft.Icon(ft.Icons.DELETE_OUTLINE, size=14, color=THEME.text_muted),
+            content=ft.Icon(
+                ft.Icons.DELETE_OUTLINE,
+                size=14,
+                color=THEME.text_muted),
             on_click=self._clear,
             padding=4,
             border_radius=4,
             tooltip="清除日志",
         )
-        
+
         # 关闭按钮
         self._close_btn = ft.Container(
             content=ft.Text("×", size=18, color=THEME.text_secondary),
@@ -91,13 +94,18 @@ class FloatingLogPanel(ft.Container):
             border_radius=4,
             tooltip="收起",
         )
-        
+
         # 标题栏（可拖拽）
         header_content = ft.Row(
             [
-                ft.Text(f"📜 {title}", size=12, color=THEME.mc_gold, weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    f"📜 {title}",
+                    size=12,
+                    color=THEME.mc_gold,
+                    weight=ft.FontWeight.BOLD),
                 self._status_text,
-                ft.Container(expand=True),
+                ft.Container(
+                    expand=True),
                 self._auto_scroll_btn,
                 self._clear_btn,
                 self._close_btn,
@@ -111,7 +119,7 @@ class FloatingLogPanel(ft.Container):
             padding=ft.Padding(left=10, right=6, top=4, bottom=4),
             bgcolor=THEME.mc_coal,
         )
-        
+
         # 用手势检测器包装标题栏
         self._header_detector = ft.GestureDetector(
             content=header,
@@ -119,7 +127,7 @@ class FloatingLogPanel(ft.Container):
             on_pan_update=self._on_pan_update,
             on_pan_end=self._on_pan_end,
         )
-        
+
         # 日志容器（带内边距）
         log_container = ft.Container(
             content=self._log_col,
@@ -127,7 +135,7 @@ class FloatingLogPanel(ft.Container):
             bgcolor=THEME.bg_primary,
             expand=True,
         )
-        
+
         # 整体面板
         super().__init__(
             content=ft.Column(
@@ -183,16 +191,18 @@ class FloatingLogPanel(ft.Container):
             if self._is_dragging:
                 dx = e.local_position.x - self._last_x
                 dy = e.local_position.y - self._last_y
-                
+
                 self._offset_left += dx
                 self._offset_top += dy
-                self._offset_left = max(0, min(self._page.width - self.width, self._offset_left))
-                self._offset_top = max(0, min(self._page.height - self.height, self._offset_top))
-                
+                self._offset_left = max(
+                    0, min(self._page.width - self.width, self._offset_left))
+                self._offset_top = max(
+                    0, min(self._page.height - self.height, self._offset_top))
+
                 self.left = self._offset_left
                 self.top = self._offset_top
                 self.update()
-                
+
                 self._last_x = e.local_position.x
                 self._last_y = e.local_position.y
         except Exception:
@@ -233,7 +243,7 @@ class FloatingLogPanel(ft.Container):
             )
             self._auto_scroll_btn.tooltip = "自动滚动" if self._auto_scroll else "已暂停自动滚动"
             self._auto_scroll_btn.update()
-            
+
             if self._auto_scroll and self._log_col.controls:
                 self._log_col.scroll_to(index=-1)
                 self.update()
@@ -256,7 +266,7 @@ class FloatingLogPanel(ft.Container):
             if hasattr(self, '_flush_timer') and self._flush_timer is not None:
                 self._flush_timer.cancel()
                 self._flush_timer = None
-            
+
             self.visible = False
             self._expanded = False
             self._save_position()
@@ -279,7 +289,7 @@ class FloatingLogPanel(ft.Container):
         # 关闭时跳过日志更新
         if _is_app_closing():
             return
-        
+
         try:
             color_map = {
                 "info": THEME.text_primary,
@@ -305,12 +315,12 @@ class FloatingLogPanel(ft.Container):
                 self._log_col.controls.pop(0)
             # 更新计数
             self._status_text.value = f"({len(self._log_col.controls)})"
-            
+
             # 优化：使用单个定时器，避免创建多个 Timer
             if self.visible:
                 now = time.monotonic()
                 last = getattr(self, '_last_log_update', 0.0)
-                
+
                 if (now - last) >= 0.3:  # 增加更新间隔到 0.3 秒
                     self._last_log_update = now
                     self._schedule_flush()
@@ -319,7 +329,7 @@ class FloatingLogPanel(ft.Container):
                     self._schedule_flush()
         except Exception:
             pass
-    
+
     def _schedule_flush(self) -> None:
         """延迟刷新 UI，避免频繁更新"""
         if not hasattr(self, '_flush_timer') or self._flush_timer is None:
@@ -337,7 +347,7 @@ class FloatingLogPanel(ft.Container):
 
             def _flush():
                 run_on_ui(self._page, _flush_ui)
-             
+
             self._flush_timer = threading.Timer(0.3, _flush)
             self._flush_timer.daemon = True
             self._flush_timer.start()
@@ -360,8 +370,12 @@ class FloatingLogPanel(ft.Container):
 
 class FloatingLogButton(ft.Container):
     """悬浮球按钮 - 点击展开/收起日志面板，支持拖拽移动"""
-    
-    def __init__(self, floating_panel: FloatingLogPanel, page: ft.Page, on_click=None) -> None:
+
+    def __init__(
+            self,
+            floating_panel: FloatingLogPanel,
+            page: ft.Page,
+            on_click=None) -> None:
         self._floating_panel = floating_panel
         self._on_click_handler = on_click
         self._page = page
@@ -371,10 +385,10 @@ class FloatingLogButton(ft.Container):
         self._last_x = 0.0
         self._last_y = 0.0
         self._storage_key = "floating_log_button_position"
-        
+
         # 加载保存的位置
         self._load_position()
-        
+
         # 按钮容器
         self._button = ft.Container(
             content=ft.Text("📜", size=20),
@@ -387,7 +401,7 @@ class FloatingLogButton(ft.Container):
             shadow=mc_shadow(2),
             border=mc_border(),
         )
-        
+
         # 拖拽检测器
         self._gesture_detector = ft.GestureDetector(
             content=self._button,
@@ -396,7 +410,7 @@ class FloatingLogButton(ft.Container):
             on_pan_end=self._on_pan_end,
             on_tap=self._click,
         )
-        
+
         super().__init__(
             content=self._gesture_detector,
             width=48,
@@ -440,16 +454,18 @@ class FloatingLogButton(ft.Container):
             if self._is_dragging:
                 dx = e.local_position.x - self._last_x
                 dy = e.local_position.y - self._last_y
-                
+
                 self._offset_right -= dx  # 修正左右方向
                 self._offset_bottom -= dy
-                self._offset_right = max(0, min(self._page.width - 48, self._offset_right))
-                self._offset_bottom = max(0, min(self._page.height - 48, self._offset_bottom))
-                
+                self._offset_right = max(
+                    0, min(self._page.width - 48, self._offset_right))
+                self._offset_bottom = max(
+                    0, min(self._page.height - 48, self._offset_bottom))
+
                 self.right = self._offset_right
                 self.bottom = self._offset_bottom
                 self.update()
-                
+
                 self._last_x = e.local_position.x
                 self._last_y = e.local_position.y
         except Exception:
@@ -473,7 +489,8 @@ class FloatingLogButton(ft.Container):
                 self._button.content = ft.Text("📜", size=20)
             else:
                 self._floating_panel.set_visible(True)
-                self._button.content = ft.Text("×", size=18, color=THEME.mc_redstone)
+                self._button.content = ft.Text(
+                    "×", size=18, color=THEME.mc_redstone)
             self._button.update()
             if self._on_click_handler:
                 self._on_click_handler()
@@ -492,7 +509,8 @@ class FloatingLogButton(ft.Container):
         """更新图标"""
         try:
             if expanded:
-                self._button.content = ft.Text("×", size=18, color=THEME.mc_redstone)
+                self._button.content = ft.Text(
+                    "×", size=18, color=THEME.mc_redstone)
             else:
                 self._button.content = ft.Text("📜", size=20)
             self._button.update()

@@ -13,7 +13,7 @@ ITEM_EMOJI_MAP = {
     "minecraft:copper_ingot": "🟠",
     "minecraft:netherite_ingot": "⬛",
     "minecraft:amethyst_shard": "🟣",
-    
+
     # 工具
     "minecraft:diamond_sword": "⚔️",
     "minecraft:diamond_pickaxe": "⛏️",
@@ -26,7 +26,7 @@ ITEM_EMOJI_MAP = {
     "minecraft:trident": "🔱",
     "minecraft:fishing_rod": "🎣",
     "minecraft:shears": "✂️",
-    
+
     # 盔甲
     "minecraft:diamond_helmet": "🪖",
     "minecraft:diamond_chestplate": "👔",
@@ -34,7 +34,7 @@ ITEM_EMOJI_MAP = {
     "minecraft:diamond_boots": "👢",
     "minecraft:elytra": "🦅",
     "minecraft:shield": "🛡️",
-    
+
     # 食物
     "minecraft:apple": "🍎",
     "minecraft:bread": "🍞",
@@ -48,7 +48,7 @@ ITEM_EMOJI_MAP = {
     "minecraft:cookie": "🍪",
     "minecraft:melon_slice": "🍉",
     "minecraft:honey_bottle": "🍯",
-    
+
     # 方块
     "minecraft:dirt": "🟤",
     "minecraft:grass_block": "🟩",
@@ -67,7 +67,7 @@ ITEM_EMOJI_MAP = {
     "minecraft:tnt": "💣",
     "minecraft:obsidian": "⬛",
     "minecraft:bedrock": "▓",
-    
+
     # 特殊物品
     "minecraft:totem_of_undying": "🗿",
     "minecraft:nether_star": "⭐",
@@ -86,13 +86,13 @@ ITEM_EMOJI_MAP = {
     "minecraft:saddle": "🏇",
     "minecraft:name_tag": "🏷️",
     "minecraft:lead": "🪢",
-    
+
     # 药水相关
     "minecraft:potion": "🧪",
     "minecraft:splash_potion": "💊",
     "minecraft:experience_bottle": "✨",
     "minecraft:brewing_stand": "⚗️",
-    
+
     # 唱片
     "minecraft:music_disc_13": "💿",
     "minecraft:music_disc_cat": "💿",
@@ -104,13 +104,13 @@ def get_item_emoji(item_id: str) -> str:
     """获取物品对应的 Emoji，如果没有则返回默认图标"""
     if item_id in ITEM_EMOJI_MAP:
         return ITEM_EMOJI_MAP[item_id]
-    
+
     # 基于物品类型的智能回退
     if not item_id or ":" not in item_id:
         return "📦"
-    
+
     _, local_id = item_id.split(":", 1)
-    
+
     # 工具类
     if "sword" in local_id:
         return "⚔️"
@@ -122,7 +122,7 @@ def get_item_emoji(item_id: str) -> str:
         return "🥄"
     if "hoe" in local_id:
         return "🚜"
-    
+
     # 盔甲类
     if "helmet" in local_id:
         return "🪖"
@@ -132,7 +132,7 @@ def get_item_emoji(item_id: str) -> str:
         return "👖"
     if "boots" in local_id:
         return "👢"
-    
+
     # 方块类
     if "_ore" in local_id:
         return "⛰️"
@@ -146,10 +146,10 @@ def get_item_emoji(item_id: str) -> str:
         return "🟫"
     if "glass" in local_id:
         return "🔲"
-    
+
     # 食物类
     if "food" in local_id or "cooked" in local_id or "bread" in local_id or "stew" in local_id:
         return "🍖"
-    
+
     # 默认
     return "📦"

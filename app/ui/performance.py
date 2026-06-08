@@ -34,19 +34,19 @@ class PerformanceMetric:
 
 class PerformanceMonitor:
     """性能监控器（单例）"""
-    
+
     _instance: Optional['PerformanceMonitor'] = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if getattr(self, '_initialized', False):
             return
-        
+
         self._initialized = True
         self.enabled: bool = False
         self.metrics: Dict[str, deque] = {}
@@ -93,37 +93,40 @@ class PerformanceMonitor:
             if metric_name not in self.metrics:
                 self.metrics[metric_name] = deque(maxlen=self.max_samples)
             self.metrics[metric_name].append(metric)
-    
+
     def get_metrics(self, metric_name: str) -> List[PerformanceMetric]:
         """获取指定指标的所有记录
-        
+
         Args:
             metric_name: 指标名称
-            
+
         Returns:
             指标记录列表
         """
         return list(self.metrics.get(metric_name, []))
-    
-    def get_average(self, metric_name: str, last_n: Optional[int] = None) -> Optional[float]:
+
+    def get_average(
+            self,
+            metric_name: str,
+            last_n: Optional[int] = None) -> Optional[float]:
         """获取指标的平均值
-        
+
         Args:
             metric_name: 指标名称
             last_n: 仅计算最后N个样本
-            
+
         Returns:
             平均值，如果没有数据则返回 None
         """
         metrics = self.metrics.get(metric_name, [])
         if not metrics:
             return None
-        
+
         if last_n:
             metrics = list(metrics)[-last_n:]
-        
+
         return sum(m.value for m in metrics) / len(metrics)
-    
+
     def get_memory_usage(self) -> float:
         """获取当前内存使用（MB）
 
@@ -143,23 +146,23 @@ class PerformanceMonitor:
         if self._process is None:
             return 0.0
         return self._process.cpu_percent(interval=0.1)
-    
+
     def clear(self) -> None:
         """清除所有指标"""
         self.metrics.clear()
-    
+
     def summary(self) -> Dict[str, Dict[str, float]]:
         """生成性能摘要
-        
+
         Returns:
             包含所有指标统计信息的字典
         """
         summary = {}
-        
+
         for metric_name, metric_list in self.metrics.items():
             if not metric_list:
                 continue
-            
+
             values = [m.value for m in metric_list]
             summary[metric_name] = {
                 "count": len(values),
@@ -168,17 +171,17 @@ class PerformanceMonitor:
                 "max": max(values),
                 "latest": values[-1],
             }
-        
+
         return summary
-    
+
     def print_summary(self) -> None:
         """打印性能摘要到控制台"""
         summary = self.summary()
-        
-        print("\n" + "="*60)
+
+        print("\n" + "=" * 60)
         print("性能监控摘要")
-        print("="*60)
-        
+        print("=" * 60)
+
         for metric_name, stats in summary.items():
             print(f"\n{metric_name}:")
             print(f"  样本数: {stats['count']}")
@@ -186,10 +189,10 @@ class PerformanceMonitor:
             print(f"  最小值: {stats['min']:.2f}")
             print(f"  最大值: {stats['max']:.2f}")
             print(f"  最新值: {stats['latest']:.2f}")
-        
+
         print(f"\n内存使用: {self.get_memory_usage():.2f} MB")
         print(f"CPU 使用率: {self.get_cpu_percent():.1f}%")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
 
 # 全局性能监控器
@@ -198,14 +201,14 @@ perf_monitor = PerformanceMonitor()
 
 class Timer:
     """计时器上下文管理器
-    
+
     用于测量代码块执行时间
-    
+
     Example:
         with Timer("load_data"):
             load_large_dataset()
     """
-    
+
     def __init__(
         self,
         name: str,
@@ -219,32 +222,33 @@ class Timer:
         self.callback = callback
         self.start_time: float = 0.0
         self.elapsed: float = 0.0
-    
+
     def __enter__(self):
         if self.enabled:
             self.start_time = time.perf_counter()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.enabled:
-            self.elapsed = (time.perf_counter() - self.start_time) * 1000  # 转换为毫秒
-            
+            self.elapsed = (
+                time.perf_counter() - self.start_time) * 1000  # 转换为毫秒
+
             if self.auto_record:
                 perf_monitor.record(self.name, self.elapsed, "ms")
-            
+
             if self.callback:
                 self.callback(self.name, self.elapsed)
-    
+
     def __str__(self) -> str:
         return f"{self.name}: {self.elapsed:.2f}ms"
 
 
 def measure_time(func: Callable) -> Callable:
     """函数执行时间装饰器
-    
+
     Args:
         func: 要测量的函数
-        
+
     Returns:
         包装后的函数
     """
@@ -256,41 +260,41 @@ def measure_time(func: Callable) -> Callable:
 
 class AsyncOperationTracker:
     """异步操作跟踪器
-    
+
     跟踪后台任务、文件IO等异步操作的性能
     """
-    
+
     def __init__(self):
         self.operations: Dict[str, float] = {}
         self.completed: Dict[str, float] = {}
         self._lock = threading.Lock()
-    
+
     def start(self, operation_id: str) -> None:
         """开始跟踪异步操作
-        
+
         Args:
             operation_id: 操作唯一标识
         """
         with self._lock:
             self.operations[operation_id] = time.time()
-    
+
     def complete(self, operation_id: str) -> Optional[float]:
         """完成异步操作跟踪
-        
+
         Args:
             operation_id: 操作唯一标识
-            
+
         Returns:
             操作耗时（秒），如果操作不存在则返回 None
         """
         with self._lock:
             if operation_id not in self.operations:
                 return None
-            
+
             start_time = self.operations.pop(operation_id)
             elapsed = time.time() - start_time
             self.completed[operation_id] = elapsed
-            
+
             # 记录到性能监控器
             perf_monitor.record(
                 f"async_operation",
@@ -298,24 +302,24 @@ class AsyncOperationTracker:
                 "ms",
                 operation_id=operation_id
             )
-            
+
             return elapsed
-    
+
     def get_pending_operations(self) -> List[str]:
         """获取所有待完成的操作
-        
+
         Returns:
             待完成操作ID列表
         """
         with self._lock:
             return list(self.operations.keys())
-    
+
     def get_operation_time(self, operation_id: str) -> Optional[float]:
         """获取操作的执行时间
-        
+
         Args:
             operation_id: 操作唯一标识
-            
+
         Returns:
             执行时间（秒），如果未完成则返回已用时间
         """
@@ -333,53 +337,53 @@ async_tracker = AsyncOperationTracker()
 
 class FrameRateMonitor:
     """帧率监控器
-    
+
     监控UI更新频率
     """
-    
+
     def __init__(self, window_size: int = 60):
         self.frame_times: deque = deque(maxlen=window_size)
         self.last_frame_time: float = time.time()
-    
+
     def tick(self) -> None:
         """记录一次UI更新"""
         current_time = time.time()
         frame_time = current_time - self.last_frame_time
         self.frame_times.append(frame_time)
         self.last_frame_time = current_time
-    
+
     def get_fps(self) -> float:
         """获取当前帧率
-        
+
         Returns:
             FPS值
         """
         if len(self.frame_times) < 2:
             return 0.0
-        
+
         avg_frame_time = sum(self.frame_times) / len(self.frame_times)
         if avg_frame_time == 0:
             return 0.0
-        
+
         return 1.0 / avg_frame_time
-    
+
     def get_average_frame_time(self) -> float:
         """获取平均帧时间（毫秒）
-        
+
         Returns:
             平均帧时间
         """
         if not self.frame_times:
             return 0.0
-        
+
         return (sum(self.frame_times) / len(self.frame_times)) * 1000
 
 
 def log_slow_operation(threshold_ms: float = 100):
     """慢操作日志装饰器
-    
+
     如果操作超过阈值，自动记录日志
-    
+
     Args:
         threshold_ms: 阈值（毫秒）
     """
@@ -388,11 +392,16 @@ def log_slow_operation(threshold_ms: float = 100):
             start = time.perf_counter()
             result = func(*args, **kwargs)
             elapsed = (time.perf_counter() - start) * 1000
-            
+
             if elapsed > threshold_ms:
-                print(f"[PERF WARNING] {func.__name__} 执行缓慢: {elapsed:.2f}ms (阈值: {threshold_ms}ms)")
-                perf_monitor.record(f"slow_operation_{func.__name__}", elapsed, "ms")
-            
+                print(
+                    f"[PERF WARNING] {
+                        func.__name__} 执行缓慢: {
+                        elapsed:.2f}ms (阈值: {threshold_ms}ms)")
+                perf_monitor.record(
+                    f"slow_operation_{
+                        func.__name__}", elapsed, "ms")
+
             return result
         return wrapper
     return decorator
@@ -404,7 +413,8 @@ class ResourceUsageMonitor:
     监控内存、CPU等系统资源使用情况，并可定时输出摘要到日志。
     """
 
-    def __init__(self, sample_interval: float = 2.0, print_interval: float = 120.0):
+    def __init__(self, sample_interval: float = 2.0,
+                 print_interval: float = 120.0):
         self.sample_interval = sample_interval
         self.print_interval = print_interval
         self._running = False
@@ -414,70 +424,74 @@ class ResourceUsageMonitor:
         # 优化：添加采样计数器，降低高开销操作的频率
         self._sample_count = 0
         self._thread_check_interval = 10  # 每10次采样才检查一次线程阻塞
-    
+
     def start(self) -> None:
         """开始监控"""
         if self._process is None:
             return
-        
+
         # 如果已经在运行且线程存活，不重复启动
         if self._running and self._thread and self._thread.is_alive():
             return
-        
+
         # 如果状态异常（标记为运行但线程不存活），先清理
         if self._running and (not self._thread or not self._thread.is_alive()):
             self._running = False
             self._thread = None
-        
+
         self._running = True
         self._last_print_time = time.time()
-        self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="ResourceMonitor")
+        self._thread = threading.Thread(
+            target=self._monitor_loop,
+            daemon=True,
+            name="ResourceMonitor")
         self._thread.start()
-    
+
     def stop(self) -> None:
         """停止监控"""
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         self._thread = None
-    
+
     def set_print_interval(self, seconds: float) -> None:
         """设置定时打印间隔（秒）"""
         self.print_interval = max(5.0, seconds)
-    
+
     def _monitor_loop(self) -> None:
         """监控循环"""
         try:
             # 首次调用 cpu_percent 初始化（不阻塞）
             if self._process:
                 self._process.cpu_percent()
-            
+
             while self._running:
                 try:
                     # 记录内存使用
                     memory_mb = self._process.memory_info().rss / 1024 / 1024
                     perf_monitor.record("memory_usage", memory_mb, "MB")
-                    
+
                     # 记录CPU使用率（非阻塞模式）
                     cpu_percent = self._process.cpu_percent()
                     perf_monitor.record("cpu_usage", cpu_percent, "%")
-                    
+
                     # 健康检查（CPU 过载 / 内存压力 / UI 卡死 / 线程阻塞）
                     health_monitor.check(cpu_percent, memory_mb)
 
                     # 定时打印摘要
                     now = time.time()
-                    if self.print_interval > 0 and (now - self._last_print_time) >= self.print_interval:
+                    if self.print_interval > 0 and (
+                            now - self._last_print_time) >= self.print_interval:
                         self._last_print_time = now
                         self._print_log_summary()
-                    
+
                 except Exception:
                     pass
-                
+
                 time.sleep(self.sample_interval)
         except Exception:
             pass
-    
+
     def _print_log_summary(self) -> None:
         """将性能摘要输出到日志"""
         try:
@@ -485,7 +499,7 @@ class ResourceUsageMonitor:
             summary = perf_monitor.summary()
             if not summary:
                 return
-            
+
             lines = ["[性能监控] 周期摘要"]
             for metric_name, stats in summary.items():
                 lines.append(
@@ -550,13 +564,15 @@ class HealthMonitor:
         self._lock = threading.Lock()
 
         # ── 线程监控状态 ──
-        self._thread_snapshots: Dict[int, Dict[str, Any]] = {}  # thread_id -> {location, timestamp, alerted}
+        # thread_id -> {location, timestamp, alerted}
+        self._thread_snapshots: Dict[int, Dict[str, Any]] = {}
         self._blocked_threads: set = set()
 
         # ── 回调 ──
         self._on_alert: Optional[Callable[[HealthAlert], None]] = None
 
-    def set_alert_callback(self, callback: Callable[[HealthAlert], None]) -> None:
+    def set_alert_callback(
+            self, callback: Callable[[HealthAlert], None]) -> None:
         """设置告警回调（每次触发告警时调用）"""
         self._on_alert = callback
 
@@ -567,7 +583,11 @@ class HealthMonitor:
             if self._hang_alerted:
                 self._hang_alerted = False
 
-    def check(self, cpu_percent: float, memory_mb: float, check_threads: bool = True) -> None:
+    def check(
+            self,
+            cpu_percent: float,
+            memory_mb: float,
+            check_threads: bool = True) -> None:
         """由 ResourceUsageMonitor 采样循环调用，检查各项指标。"""
         now = time.time()
 
@@ -598,46 +618,60 @@ class HealthMonitor:
 
         if avg >= self.cpu_critical_threshold:
             if self._should_alert("cpu_critical"):
-                self._fire_alert(HealthAlert(
-                    level=AlertLevel.CRITICAL,
-                    category="cpu",
-                    message=f"CPU 持续过载！近 {self.cpu_sustained_samples} 次平均 {avg:.1f}%（严重阈值 {self.cpu_critical_threshold}%）",
-                    value=avg,
-                    threshold=self.cpu_critical_threshold,
-                ))
+                self._fire_alert(
+                    HealthAlert(
+                        level=AlertLevel.CRITICAL,
+                        category="cpu",
+                        message=f"CPU 持续过载！近 {
+                            self.cpu_sustained_samples} 次平均 {
+                            avg:.1f}%（严重阈值 {
+                            self.cpu_critical_threshold}%）",
+                        value=avg,
+                        threshold=self.cpu_critical_threshold,
+                    ))
                 self._cpu_alerted = True
         elif avg >= self.cpu_warning_threshold:
             if self._should_alert("cpu_warning"):
-                self._fire_alert(HealthAlert(
-                    level=AlertLevel.WARNING,
-                    category="cpu",
-                    message=f"CPU 使用率偏高，近 {self.cpu_sustained_samples} 次平均 {avg:.1f}%（警告阈值 {self.cpu_warning_threshold}%）",
-                    value=avg,
-                    threshold=self.cpu_warning_threshold,
-                ))
+                self._fire_alert(
+                    HealthAlert(
+                        level=AlertLevel.WARNING,
+                        category="cpu",
+                        message=f"CPU 使用率偏高，近 {
+                            self.cpu_sustained_samples} 次平均 {
+                            avg:.1f}%（警告阈值 {
+                            self.cpu_warning_threshold}%）",
+                        value=avg,
+                        threshold=self.cpu_warning_threshold,
+                    ))
         else:
             self._cpu_alerted = False
 
     def _check_memory(self, memory_mb: float) -> None:
         if memory_mb >= self.memory_critical_mb:
             if self._should_alert("memory_critical"):
-                self._fire_alert(HealthAlert(
-                    level=AlertLevel.CRITICAL,
-                    category="memory",
-                    message=f"内存使用极高：{memory_mb:.0f} MB（严重阈值 {self.memory_critical_mb:.0f} MB）",
-                    value=memory_mb,
-                    threshold=self.memory_critical_mb,
-                ))
+                self._fire_alert(
+                    HealthAlert(
+                        level=AlertLevel.CRITICAL,
+                        category="memory",
+                        message=f"内存使用极高：{
+                            memory_mb:.0f} MB（严重阈值 {
+                            self.memory_critical_mb:.0f} MB）",
+                        value=memory_mb,
+                        threshold=self.memory_critical_mb,
+                    ))
                 self._memory_alerted = True
         elif memory_mb >= self.memory_warning_mb:
             if self._should_alert("memory_warning"):
-                self._fire_alert(HealthAlert(
-                    level=AlertLevel.WARNING,
-                    category="memory",
-                    message=f"内存使用偏高：{memory_mb:.0f} MB（警告阈值 {self.memory_warning_mb:.0f} MB）",
-                    value=memory_mb,
-                    threshold=self.memory_warning_mb,
-                ))
+                self._fire_alert(
+                    HealthAlert(
+                        level=AlertLevel.WARNING,
+                        category="memory",
+                        message=f"内存使用偏高：{
+                            memory_mb:.0f} MB（警告阈值 {
+                            self.memory_warning_mb:.0f} MB）",
+                        value=memory_mb,
+                        threshold=self.memory_warning_mb,
+                    ))
         else:
             self._memory_alerted = False
 
@@ -647,13 +681,16 @@ class HealthMonitor:
 
         if elapsed >= self.hang_timeout:
             if not self._hang_alerted and self._should_alert("hang"):
-                self._fire_alert(HealthAlert(
-                    level=AlertLevel.CRITICAL,
-                    category="hang",
-                    message=f"UI 可能已卡死：{elapsed:.0f} 秒无心跳响应（阈值 {self.hang_timeout:.0f}s）",
-                    value=elapsed,
-                    threshold=self.hang_timeout,
-                ))
+                self._fire_alert(
+                    HealthAlert(
+                        level=AlertLevel.CRITICAL,
+                        category="hang",
+                        message=f"UI 可能已卡死：{
+                            elapsed:.0f} 秒无心跳响应（阈值 {
+                            self.hang_timeout:.0f}s）",
+                        value=elapsed,
+                        threshold=self.hang_timeout,
+                    ))
                 self._hang_alerted = True
         else:
             self._hang_alerted = False
@@ -661,12 +698,12 @@ class HealthMonitor:
     def _check_thread_blocking(self, now: float) -> None:
         """检测线程阻塞和死锁"""
         import sys
-        
+
         try:
             # 获取所有线程的当前堆栈帧
             frames = sys._current_frames()
             current_threads = set()
-            
+
             for thread_id, frame in frames.items():
                 current_threads.add(thread_id)
                 thread_name = self._get_thread_name(thread_id)
@@ -674,10 +711,13 @@ class HealthMonitor:
                     self._thread_snapshots.pop(thread_id, None)
                     self._blocked_threads.discard(thread_id)
                     continue
-                
+
                 # 提取线程位置指纹：文件名:行号:函数名
-                location = f"{frame.f_code.co_filename}:{frame.f_lineno}:{frame.f_code.co_name}"
-                
+                location = f"{
+                    frame.f_code.co_filename}:{
+                    frame.f_lineno}:{
+                    frame.f_code.co_name}"
+
                 # 检查是否为良性等待（time.sleep, threading.Event.wait 等）
                 is_benign_wait = self._is_benign_wait(frame)
                 if is_benign_wait:
@@ -692,7 +732,7 @@ class HealthMonitor:
                     }
                     self._blocked_threads.discard(thread_id)
                     continue
-                 
+
                 # 如果是新线程或位置变化，更新快照
                 if thread_id not in self._thread_snapshots:
                     self._thread_snapshots[thread_id] = {
@@ -704,7 +744,7 @@ class HealthMonitor:
                     }
                 else:
                     snapshot = self._thread_snapshots[thread_id]
-                    
+
                     # 位置变化，说明线程还在活动
                     if snapshot["location"] != location:
                         snapshot["location"] = location
@@ -716,44 +756,55 @@ class HealthMonitor:
                     else:
                         # 位置未变，检查是否超时
                         elapsed = now - snapshot["timestamp"]
-                        
+
                         # 良性等待的超时阈值更宽松
-                        threshold = self.thread_block_timeout * 2 if is_benign_wait else self.thread_block_timeout
-                        
+                        threshold = self.thread_block_timeout * \
+                            2 if is_benign_wait else self.thread_block_timeout
+
                         if elapsed >= threshold:
-                            if not snapshot["alerted"] and self._should_alert(f"thread_block_{thread_id}"):
+                            if not snapshot["alerted"] and self._should_alert(
+                                    f"thread_block_{thread_id}"):
                                 # 提取堆栈信息
                                 stack_lines = []
                                 f = frame
                                 depth = 0
                                 while f is not None and depth < 5:
-                                    stack_lines.append(f"  {f.f_code.co_filename}:{f.f_lineno} in {f.f_code.co_name}")
+                                    stack_lines.append(
+                                        f"  {
+                                            f.f_code.co_filename}:{
+                                            f.f_lineno} in {
+                                            f.f_code.co_name}")
                                     f = f.f_back
                                     depth += 1
-                                
-                                stack_info = "\n".join(stack_lines) if stack_lines else location
-                                thread_name = snapshot.get("name", f"Thread-{thread_id}")
-                                
+
+                                stack_info = "\n".join(
+                                    stack_lines) if stack_lines else location
+                                thread_name = snapshot.get(
+                                    "name", f"Thread-{thread_id}")
+
                                 # 良性等待降级为警告
                                 level = AlertLevel.WARNING if is_benign_wait else AlertLevel.CRITICAL
-                                
-                                self._fire_alert(HealthAlert(
-                                    level=level,
-                                    category="thread_block",
-                                    message=f"线程 {thread_name} 可能阻塞：{elapsed:.0f}s 无进展（阈值 {threshold:.0f}s）\n堆栈:\n{stack_info}",
-                                    value=elapsed,
-                                    threshold=threshold,
-                                ))
-                                
+
+                                self._fire_alert(
+                                    HealthAlert(
+                                        level=level,
+                                        category="thread_block",
+                                        message=f"线程 {thread_name} 可能阻塞：{
+                                            elapsed:.0f}s 无进展（阈值 {
+                                            threshold:.0f}s）\n堆栈:\n{stack_info}",
+                                        value=elapsed,
+                                        threshold=threshold,
+                                    ))
+
                                 snapshot["alerted"] = True
                                 self._blocked_threads.add(thread_id)
-            
+
             # 清理已退出的线程
             dead_threads = set(self._thread_snapshots.keys()) - current_threads
             for thread_id in dead_threads:
                 self._thread_snapshots.pop(thread_id, None)
                 self._blocked_threads.discard(thread_id)
-                
+
         except Exception:
             pass  # 线程检测失败不影响其他监控
 
@@ -792,24 +843,32 @@ class HealthMonitor:
             while f is not None and depth < 10:
                 func_name = f.f_code.co_name
                 file_name = f.f_code.co_filename
-                
+
                 # 常见的良性等待模式
-                if func_name in ('sleep', 'wait', 'join', 'select', 'poll', 'recv', 'accept'):
+                if func_name in (
+                    'sleep',
+                    'wait',
+                    'join',
+                    'select',
+                    'poll',
+                    'recv',
+                        'accept'):
                     return True
-                
+
                 # threading 模块的等待
-                if 'threading.py' in file_name and func_name in ('wait', '_wait'):
+                if 'threading.py' in file_name and func_name in (
+                        'wait', '_wait'):
                     return True
-                
+
                 # queue 模块的阻塞获取
                 if 'queue.py' in file_name and func_name in ('get', 'put'):
                     return True
-                
+
                 f = f.f_back
                 depth += 1
         except Exception:
             pass
-        
+
         return False
 
     def _should_alert(self, key: str) -> bool:

@@ -20,8 +20,11 @@ class PlayerTabMixin:
     def _build_player_tab(self) -> None:
         left = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
         left.controls.append(
-            ft.Text("选择玩家", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary)
-        )
+            ft.Text(
+                "选择玩家",
+                size=14,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.text_primary))
         self._player_dropdown = ft.Dropdown(
             options=[], on_select=self._on_player_selected,
             border_color=THEME.border_standard, text_size=13,
@@ -108,7 +111,8 @@ class PlayerTabMixin:
                 if not field:
                     continue
                 try:
-                    value = self._get_tag_at_path(self._current_player_data, path)
+                    value = self._get_tag_at_path(
+                        self._current_player_data, path)
                     field.value = self._tag_display_value(value)
                 except Exception:
                     field.value = ""
@@ -124,11 +128,14 @@ class PlayerTabMixin:
             staged = 0
             for key, path in self._player_edit_mapping().items():
                 field = self._player_edit_fields.get(key)
-                if not field or field.value is None or str(field.value).strip() == "":
+                if not field or field.value is None or str(
+                        field.value).strip() == "":
                     continue
-                old_value = self._get_tag_at_path(self._current_player_data, path)
+                old_value = self._get_tag_at_path(
+                    self._current_player_data, path)
                 new_value = self._coerce_like_tag(str(field.value), old_value)
-                if self._tag_display_value(old_value) == self._tag_display_value(new_value):
+                if self._tag_display_value(
+                        old_value) == self._tag_display_value(new_value):
                     continue
                 self._staged_nbt_changes.append({
                     "target": self.current_uuid,
@@ -143,7 +150,8 @@ class PlayerTabMixin:
                 staged += 1
             self._update_nbt_stage_status()
             if staged:
-                self.app.info_dialog("已暂存", f"已暂存 {staged} 个玩家数据修改，可到 NBT 页查看并提交。")
+                self.app.info_dialog(
+                    "已暂存", f"已暂存 {staged} 个玩家数据修改，可到 NBT 页查看并提交。")
                 self._switch_tab(5)
             else:
                 self.app.info_dialog("提示", "没有检测到需要暂存的玩家数据修改。")
@@ -156,7 +164,8 @@ class PlayerTabMixin:
         player_names = self.world_session.get_player_names()
         players = []
         for uuid, name in player_names.items():
-            display = name or self.world_session._format_uuid_with_hyphens(uuid)
+            display = name or self.world_session._format_uuid_with_hyphens(
+                uuid)
             formatted = self.world_session._format_uuid_with_hyphens(uuid)
             players.append((formatted, display))
         self._player_dropdown.options = [
@@ -232,11 +241,14 @@ class PlayerTabMixin:
                 item_service = get_item_service()
                 count = item_service.load_language_file(Path(path))
                 if count > 0:
-                    self.app.info_dialog("成功", f"成功导入 {count} 个物品/附魔名称。\n物品栏和装备预览将使用新名称。")
+                    self.app.info_dialog(
+                        "成功", f"成功导入 {count} 个物品/附魔名称。\n物品栏和装备预览将使用新名称。")
                     if self.current_uuid:
                         self._load_player_data(self.current_uuid)
                 else:
-                    self.app.info_dialog("提示", "未能从文件中解析出有效的物品名称。\n\n支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n- 直接 ID 映射 (minecraft:xxx)")
+                    self.app.info_dialog(
+                        "提示",
+                        "未能从文件中解析出有效的物品名称。\n\n支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n- 直接 ID 映射 (minecraft:xxx)")
         except Exception as ex:
             self.app.handle_exception(ex, title="导入语言文件失败")
 

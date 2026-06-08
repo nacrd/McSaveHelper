@@ -28,24 +28,39 @@ class CompareView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(page_header(
-            "存档对比",
-            ft.Text("比较两个世界的 level.dat、玩家数据和区域文件差异", size=12, color=THEME.text_muted),
-            icon="⚖",
-        ))
+        self.controls.append(
+            page_header(
+                "存档对比",
+                ft.Text(
+                    "比较两个世界的 level.dat、玩家数据和区域文件差异",
+                    size=12,
+                    color=THEME.text_muted),
+                icon="⚖",
+            ))
 
-        self._left_field = current_save_field(label="基准存档", hint_text="请通过侧边栏「设置当前存档」设置基准存档")
+        self._left_field = current_save_field(
+            label="基准存档", hint_text="请通过侧边栏「设置当前存档」设置基准存档")
         self._right_field = text_field(label="目标存档", hint_text="指定要对比的目标存档目录")
-        picker = ft.Column([
-            self._left_field,
-            ft.Row([self._right_field, btn_ghost("浏览对比目标", width=120, on_click=lambda e: self._pick(self._right_field))], spacing=10),
-            ft.Text("设置两份存档后，可通过顶栏“开始对比”执行。", size=11, color=THEME.text_muted),
-        ], spacing=10)
+        picker = ft.Column([self._left_field,
+                            ft.Row([self._right_field,
+                                    btn_ghost("浏览对比目标",
+                                              width=120,
+                                              on_click=lambda e: self._pick(self._right_field))],
+                                   spacing=10),
+                            ft.Text("设置两份存档后，可通过顶栏“开始对比”执行。",
+                                    size=11,
+                                    color=THEME.text_muted),
+                            ],
+                           spacing=10)
         self.controls.append(card(picker, padding=16))
 
-        self._summary = ft.Text("通过侧边栏设置基准存档，再指定目标存档后开始对比。", size=12, color=THEME.text_muted)
+        self._summary = ft.Text(
+            "通过侧边栏设置基准存档，再指定目标存档后开始对比。",
+            size=12,
+            color=THEME.text_muted)
         self._result = ft.Column(spacing=12)
-        self.controls.append(card(ft.Column([section_title("结果"), self._summary, self._result], spacing=8), padding=0))
+        self.controls.append(card(ft.Column(
+            [section_title("结果"), self._summary, self._result], spacing=8), padding=0))
 
     def _pick(self, field: ft.TextField) -> None:
         path = self.app.pick_directory()
@@ -70,12 +85,17 @@ class CompareView(ft.Column):
             self._result.controls.clear()
             self._comparing = True
             self.update()
-             
+
             def _run():
                 try:
                     result = self._service.compare_worlds(left, right)
+
                     def _update_ui() -> None:
-                        self._summary.value = f"变更项: {result.summary['changed']} / {sum(v for k, v in result.summary.items() if k != 'changed')}"
+                        self._summary.value = f"变更项: {
+                            result.summary['changed']} / {
+                            sum(
+                                v for k,
+                                v in result.summary.items() if k != 'changed')}"
                         self._result.controls.extend([
                             self._group("WorldInfo 差异", result.world_info),
                             self._group("玩家数据差异", result.players),
@@ -89,7 +109,7 @@ class CompareView(ft.Column):
                         self._comparing = False
                         self.app.handle_exception(error, title="存档对比失败")
                     run_on_ui(self.app.page, _handle_error, ex)
-             
+
             threading.Thread(target=_run, daemon=True).start()
         except Exception as ex:
             self._comparing = False
@@ -116,7 +136,13 @@ class CompareView(ft.Column):
                 subtitle="该分组中的两份存档数据一致",
                 height=110,
             ))
-        return card(ft.Column([ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary), *rows], spacing=8), padding=12)
+        return card(ft.Column([ft.Text(title,
+                                       size=14,
+                                       weight=ft.FontWeight.BOLD,
+                                       color=THEME.text_primary),
+                               *rows],
+                              spacing=8),
+                    padding=12)
 
     def on_save_selected(self, path: str) -> None:
         """统一入口设置当前存档回调"""

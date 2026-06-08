@@ -26,8 +26,16 @@ def _setup_console() -> None:
         import ctypes
         kernel32 = ctypes.windll.kernel32
         if kernel32.AllocConsole():
-            sys.stdout = open('CONOUT$', 'w', encoding='utf-8', errors='replace')
-            sys.stderr = open('CONOUT$', 'w', encoding='utf-8', errors='replace')
+            sys.stdout = open(
+                'CONOUT$',
+                'w',
+                encoding='utf-8',
+                errors='replace')
+            sys.stderr = open(
+                'CONOUT$',
+                'w',
+                encoding='utf-8',
+                errors='replace')
             sys.stdin = open('CONIN$', 'r', encoding='utf-8', errors='replace')
     except Exception:
         pass
@@ -50,12 +58,12 @@ def main() -> None:
 
     try:
         import flet as ft
-        
+
         # ============================================================================
         # Flet 0.85+ API 兼容性补丁（Monkey Patch）
         # ============================================================================
         _patch_flet_api(ft)
-        
+
         from app.application import Application
 
         ft.run(Application)
@@ -75,7 +83,7 @@ def main() -> None:
 def _patch_flet_api(ft) -> None:
     """
     Flet 0.85+ API 兼容性补丁
-    
+
     修复以下 API 变更：
     1. ft.alignment.center 等便捷属性不存在
     2. ft.ImageFit 改为 ft.BoxFit
@@ -98,21 +106,23 @@ def _patch_flet_api(ft) -> None:
             ft.alignment.bottom_left = ft.alignment.Alignment(-1, 1)
             ft.alignment.bottom_center = ft.alignment.Alignment(0, 1)
             ft.alignment.bottom_right = ft.alignment.Alignment(1, 1)
-        
+
         # 2. 修复 ImageFit -> BoxFit
         if not hasattr(ft, 'ImageFit'):
             ft.ImageFit = ft.BoxFit
-        
+
         # 3. 包装 Image 构造函数（src 可选）
         _original_image = ft.Image
+
         def _image_wrapper(src=None, **kwargs):
             if src is None:
                 src = ""
             return _original_image(src=src, **kwargs)
         ft.Image = _image_wrapper
-        
+
         # 4. 包装 Dropdown 构造函数（on_change 作为参数）
         _original_dropdown = ft.Dropdown
+
         def _dropdown_wrapper(on_change=None, on_select=None, **kwargs):
             dropdown = _original_dropdown(**kwargs)
             if on_change is not None:
@@ -121,13 +131,13 @@ def _patch_flet_api(ft) -> None:
                 dropdown.on_select = on_select
             return dropdown
         ft.Dropdown = _dropdown_wrapper
-        
+
         # 5. 兼容 Spacer（已移除，用 Container 替代）
         if not hasattr(ft, 'Spacer'):
             def _spacer_wrapper():
                 return ft.Container(expand=True)
             ft.Spacer = _spacer_wrapper
-        
+
         # 6. 修复 ft.border.all() API
         if hasattr(ft, 'border') and not hasattr(ft.border, 'all'):
             def _border_all(width, color):
@@ -139,9 +149,10 @@ def _patch_flet_api(ft) -> None:
                     bottom=ft.border.BorderSide(width, color),
                 )
             ft.border.all = _border_all
-        
+
         # 7. 修复 Page.set_clipboard() API
         _original_page_init = ft.Page.__init__
+
         def _page_init_wrapper(self, *args, **kwargs):
             _original_page_init(self, *args, **kwargs)
             # 添加 set_clipboard 方法
@@ -151,13 +162,13 @@ def _patch_flet_api(ft) -> None:
                     self.set_clipboard_async(text)
                 self.set_clipboard = _set_clipboard
         ft.Page.__init__ = _page_init_wrapper
-        
+
         # 8. 包装 Page.run_task（自动转换为 async）
         import inspect
-        
+
         _original_page_class = ft.Page
         _original_run_task = _original_page_class.run_task
-        
+
         def _run_task_wrapper(self, handler, *args, **kwargs):
             """包装 run_task，自动将普通函数转为 async"""
             if inspect.iscoroutinefunction(handler):
@@ -168,9 +179,9 @@ def _patch_flet_api(ft) -> None:
                 async def _async_wrapper():
                     return handler(*args, **kwargs)
                 return _original_run_task(self, _async_wrapper)
-        
+
         ft.Page.run_task = _run_task_wrapper
-        
+
     except Exception as e:
         print(f"[WARNING] Flet API 补丁失败: {e}")
 

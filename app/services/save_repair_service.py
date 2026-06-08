@@ -76,7 +76,10 @@ class RepairReport:
             f"level.dat: {'已修复' if self.level_dat_fixed else '正常'}",
         ]
         if self.level_dat_repaired_fields:
-            lines.append(f"  修复字段: {', '.join(self.level_dat_repaired_fields)}")
+            lines.append(
+                f"  修复字段: {
+                    ', '.join(
+                        self.level_dat_repaired_fields)}")
         if self.backup_path:
             lines.append(f"备份位置: {self.backup_path}")
         lines.append(f"耗时: {self.elapsed_seconds:.1f}s")
@@ -141,7 +144,10 @@ class DetectReport:
         if info.world_name:
             lines.append(f"名称: {info.world_name}")
         if info.version_name:
-            lines.append(f"版本: {info.version_name} (DataVersion {info.data_version})")
+            lines.append(
+                f"版本: {
+                    info.version_name} (DataVersion {
+                    info.data_version})")
         if info.game_type_name:
             lines.append(f"模式: {info.game_type_name}")
         lines.append(f"难度: {info.difficulty_name}")
@@ -151,7 +157,10 @@ class DetectReport:
             hours = info.play_time_ticks / 72000
             lines.append(f"游戏时间: {hours:.1f} 小时")
         lines.append(f"存档大小: {info.world_size_mb:.1f} MB")
-        lines.append(f"维度: {', '.join(info.dimensions) if info.dimensions else '无'}")
+        lines.append(
+            f"维度: {
+                ', '.join(
+                    info.dimensions) if info.dimensions else '无'}")
         lines.append(f"区域文件: {info.region_count}, 区块: {info.total_chunks}")
         lines.append(f"玩家: {info.player_count}")
 
@@ -164,7 +173,10 @@ class DetectReport:
                 lines.append(f"  - {name}")
             if len(self.unreadable_regions) > 10:
                 lines.append(f"  ... 共 {len(self.unreadable_regions)} 个")
-        lines.append(f"玩家检查: {self.players_checked}, 有问题: {self.players_with_issues}")
+        lines.append(
+            f"玩家检查: {
+                self.players_checked}, 有问题: {
+                self.players_with_issues}")
         if self.player_issues:
             for pname, pissues in list(self.player_issues.items())[:5]:
                 lines.append(f"  {pname}: {', '.join(pissues)}")
@@ -210,6 +222,8 @@ _LEVEL_DAT_REQUIRED_FIELDS: Dict[str, Any] = {
 }
 
 # 玩家数据必需字段及默认值工厂函数（避免跨文件共享可变对象）
+
+
 def _player_defaults() -> Dict[str, Any]:
     return {
         "Pos": NbtList[NbtList[Double]]([
@@ -268,7 +282,12 @@ class SaveRepairService:
         start_time = time.monotonic()
 
         def log(msg: str, level: str = "INFO") -> None:
-            getattr(logger, level.lower(), logger.info)(msg, module="SaveDetect")
+            getattr(
+                logger,
+                level.lower(),
+                logger.info)(
+                msg,
+                module="SaveDetect")
             if log_callback:
                 log_callback(msg, level)
             issue_level = {
@@ -364,9 +383,11 @@ class SaveRepairService:
                         info.data_version, f"未知({info.data_version})"
                     )
                     info.game_type = int(data.get("GameType", 0))
-                    info.game_type_name = _GAME_TYPE_NAMES.get(info.game_type, "未知")
+                    info.game_type_name = _GAME_TYPE_NAMES.get(
+                        info.game_type, "未知")
                     info.difficulty = int(data.get("Difficulty", 2))
-                    info.difficulty_name = _DIFFICULTY_NAMES.get(info.difficulty, "未知")
+                    info.difficulty_name = _DIFFICULTY_NAMES.get(
+                        info.difficulty, "未知")
                     info.seed = int(data.get("RandomSeed", 0))
                     info.spawn_pos = (
                         int(data.get("SpawnX", 0)),
@@ -413,8 +434,12 @@ class SaveRepairService:
             info.player_count = len(list(playerdata_dir.glob("*.dat")))
 
         log(
-            f"世界: {info.world_name}, 版本: {info.version_name}, "
-            f"大小: {info.world_size_mb:.1f}MB, 区域: {info.region_count}, 玩家: {info.player_count}",
+            f"世界: {
+                info.world_name}, 版本: {
+                info.version_name}, " f"大小: {
+                info.world_size_mb:.1f}MB, 区域: {
+                    info.region_count}, 玩家: {
+                        info.player_count}",
             "INFO",
         )
 
@@ -438,7 +463,8 @@ class SaveRepairService:
         completed = 0
         lock = threading.Lock()
 
-        def detect_region(idx: int, region_file: Path) -> Tuple[int, List[str]]:
+        def detect_region(
+                idx: int, region_file: Path) -> Tuple[int, List[str]]:
             """检测单个区域文件，返回 (损坏区块数, 问题列表)"""
             if self.is_cancelled:
                 return 0, []
@@ -458,7 +484,8 @@ class SaveRepairService:
                             if chunk is not None:
                                 if not self._validate_chunk(chunk):
                                     damaged += 1
-                                    problems.append(f"区块({chunk_x},{chunk_z})数据无效")
+                                    problems.append(
+                                        f"区块({chunk_x},{chunk_z})数据无效")
                         except Exception:
                             damaged += 1
 
@@ -654,7 +681,12 @@ class SaveRepairService:
         start_time = time.monotonic()
 
         def log(msg: str, level: str = "INFO") -> None:
-            getattr(logger, level.lower(), logger.info)(msg, module="SaveRepair")
+            getattr(
+                logger,
+                level.lower(),
+                logger.info)(
+                msg,
+                module="SaveRepair")
             if log_callback:
                 log_callback(msg, level)
             issue_level = {
@@ -742,7 +774,9 @@ class SaveRepairService:
 
         temp_backup_dir: Optional[Path] = None
         try:
-            temp_backup_dir = Path(tempfile.mkdtemp(prefix="mcsavehelper_backup_"))
+            temp_backup_dir = Path(
+                tempfile.mkdtemp(
+                    prefix="mcsavehelper_backup_"))
             dest = temp_backup_dir / world_path.name
 
             # 带进度的复制
@@ -813,7 +847,8 @@ class SaveRepairService:
         completed = 0
         lock = threading.Lock()
 
-        def process_region(idx: int, region_file: Path) -> Tuple[int, int, int]:
+        def process_region(
+                idx: int, region_file: Path) -> Tuple[int, int, int]:
             """处理单个区域文件，返回 (checked, damaged, quarantined_flag)"""
             if self.is_cancelled:
                 return 0, 0, 0
@@ -922,12 +957,14 @@ class SaveRepairService:
         except Exception:
             return False
 
-    def _quarantine_file(self, file_path: Path, log: Callable[[str, str], None]) -> None:
+    def _quarantine_file(self, file_path: Path,
+                         log: Callable[[str, str], None]) -> None:
         try:
             new_path = file_path.with_suffix(file_path.suffix + ".corrupted")
             if new_path.exists():
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                new_path = file_path.with_suffix(f"{file_path.suffix}.corrupted_{timestamp}")
+                new_path = file_path.with_suffix(
+                    f"{file_path.suffix}.corrupted_{timestamp}")
                 log(f"已有隔离文件存在，使用新名称: {new_path.name}", "WARNING")
 
             file_path.rename(new_path)
@@ -967,15 +1004,20 @@ class SaveRepairService:
                         nbt_data.save(player_file)
                         report.players_fixed += 1
                         log(
-                            f"玩家数据 {player_file.name} 已修复缺失字段: {', '.join(repaired)}",
+                            f"玩家数据 {
+                                player_file.name} 已修复缺失字段: {
+                                ', '.join(repaired)}",
                             "SUCCESS",
                         )
-                        report.issues.append(RepairIssue(
-                            level=IssueLevel.FIXED,
-                            category="player",
-                            message=f"{player_file.name}: 修复 {', '.join(repaired)}",
-                            file_path=str(player_file),
-                        ))
+                        report.issues.append(
+                            RepairIssue(
+                                level=IssueLevel.FIXED,
+                                category="player",
+                                message=f"{
+                                    player_file.name}: 修复 {
+                                    ', '.join(repaired)}",
+                                file_path=str(player_file),
+                            ))
                     else:
                         log(f"玩家数据 {player_file.name} 字段完整", "INFO")
 
@@ -1043,19 +1085,22 @@ class SaveRepairService:
             nbt_data = nbtlib.load(str(level_dat))
         except Exception as e:
             log(f"level.dat 无法解析: {e}", "ERROR")
-            self._restore_level_dat_from_backup(level_dat, level_dat_old, report, log)
+            self._restore_level_dat_from_backup(
+                level_dat, level_dat_old, report, log)
             return
 
         # 检查 Data 字段
         if "Data" not in nbt_data:
             log("level.dat 缺少 Data 字段", "ERROR")
-            self._restore_level_dat_from_backup(level_dat, level_dat_old, report, log)
+            self._restore_level_dat_from_backup(
+                level_dat, level_dat_old, report, log)
             return
 
         data = nbt_data["Data"]
         if not isinstance(data, nbtlib.tag.Compound):
             log("level.dat 的 Data 字段类型错误", "ERROR")
-            self._restore_level_dat_from_backup(level_dat, level_dat_old, report, log)
+            self._restore_level_dat_from_backup(
+                level_dat, level_dat_old, report, log)
             return
 
         # 字段级修复

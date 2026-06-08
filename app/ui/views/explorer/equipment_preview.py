@@ -53,7 +53,11 @@ class EquipmentPreview(ft.Column):
             self._slot_rows[nbt_slot] = row
             self.controls.append(row)
 
-    def _create_slot(self, nbt_slot: int, slot_icon_emoji: str, label: str) -> ft.Row:
+    def _create_slot(
+            self,
+            nbt_slot: int,
+            slot_icon_emoji: str,
+            label: str) -> ft.Row:
         slot = create_item_slot(self._slot_size, count_size=8)
         slot_container = slot.container
 
@@ -125,7 +129,8 @@ class EquipmentPreview(ft.Column):
                         apply_texture_to_slot(slot, uri)
 
         unique_ids = list(set(slot_item_map.values()))
-        self._texture_service.load_textures_async(unique_ids, on_loaded=_on_loaded)
+        self._texture_service.load_textures_async(
+            unique_ids, on_loaded=_on_loaded)
 
     def add_custom_slot(self, slot_id: int, icon: str, label: str) -> None:
         if slot_id in self._equip_slots:

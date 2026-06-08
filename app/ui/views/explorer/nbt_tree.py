@@ -15,40 +15,38 @@ class NBTTreeView(ft.Column):
     MAX_CHILDREN = 100  # 大幅降低默认最大子节点数
 
     _TYPE_INFO = {
-        "Compound":  ("📦", "Compound",  THEME.accent_light),
-        "List":      ("📋", "List",      THEME.accent_light),
-        "String":    ("🔤", "String",    THEME.terminal_green),
-        "Int":       ("🔢", "Int",       THEME.terminal_cyan),
-        "Long":      ("🔢", "Long",      THEME.terminal_cyan),
-        "Byte":      ("🔵", "Byte",      THEME.terminal_blue),
-        "Short":     ("🔢", "Short",     THEME.terminal_cyan),
-        "Float":     ("📐", "Float",     THEME.terminal_purple),
-        "Double":    ("📐", "Double",    THEME.terminal_purple),
-        "IntArray":  ("🧮", "IntArray",  THEME.warning_light),
+        "Compound": ("📦", "Compound", THEME.accent_light),
+        "List": ("📋", "List", THEME.accent_light),
+        "String": ("🔤", "String", THEME.terminal_green),
+        "Int": ("🔢", "Int", THEME.terminal_cyan),
+        "Long": ("🔢", "Long", THEME.terminal_cyan),
+        "Byte": ("🔵", "Byte", THEME.terminal_blue),
+        "Short": ("🔢", "Short", THEME.terminal_cyan),
+        "Float": ("📐", "Float", THEME.terminal_purple),
+        "Double": ("📐", "Double", THEME.terminal_purple),
+        "IntArray": ("🧮", "IntArray", THEME.warning_light),
         "ByteArray": ("🧮", "ByteArray", THEME.warning_light),
-        "str":       ("🔤", "String",    THEME.terminal_green),
-        "int":       ("🔢", "Number",    THEME.terminal_cyan),
-        "float":     ("📐", "Number",    THEME.terminal_purple),
-        "bool":      ("🔘", "Boolean",   THEME.terminal_blue),
-        "NoneType":  ("∅", "Null",      THEME.text_muted),
+        "str": ("🔤", "String", THEME.terminal_green),
+        "int": ("🔢", "Number", THEME.terminal_cyan),
+        "float": ("📐", "Number", THEME.terminal_purple),
+        "bool": ("🔘", "Boolean", THEME.terminal_blue),
+        "NoneType": ("∅", "Null", THEME.text_muted),
         "TAG_Compound": ("📦", "Compound", THEME.accent_light),
-        "NBTFile":   ("📦", "Compound", THEME.accent_light),
-        "TAG_List":  ("📋", "List",     THEME.accent_light),
-        "TAG_String": ("🔤", "String",  THEME.terminal_green),
-        "TAG_Int":   ("🔢", "Int",      THEME.terminal_cyan),
-        "TAG_Long":  ("🔢", "Long",     THEME.terminal_cyan),
-        "TAG_Byte":  ("🔵", "Byte",     THEME.terminal_blue),
-        "TAG_Short": ("🔢", "Short",    THEME.terminal_cyan),
-        "TAG_Float": ("📐", "Float",    THEME.terminal_purple),
-        "TAG_Double": ("📐", "Double",  THEME.terminal_purple),
+        "NBTFile": ("📦", "Compound", THEME.accent_light),
+        "TAG_List": ("📋", "List", THEME.accent_light),
+        "TAG_String": ("🔤", "String", THEME.terminal_green),
+        "TAG_Int": ("🔢", "Int", THEME.terminal_cyan),
+        "TAG_Long": ("🔢", "Long", THEME.terminal_cyan),
+        "TAG_Byte": ("🔵", "Byte", THEME.terminal_blue),
+        "TAG_Short": ("🔢", "Short", THEME.terminal_cyan),
+        "TAG_Float": ("📐", "Float", THEME.terminal_purple),
+        "TAG_Double": ("📐", "Double", THEME.terminal_purple),
         "TAG_Int_Array": ("🧮", "IntArray", THEME.warning_light),
         "TAG_Byte_Array": ("🧮", "ByteArray", THEME.warning_light),
     }
 
-    def __init__(
-        self,
-        on_stage_change: Optional[Callable[[List[Union[str, int]], Any, Any, str], None]] = None,
-    ) -> None:
+    def __init__(self, on_stage_change: Optional[Callable[[
+            List[Union[str, int]], Any, Any, str], None]] = None, ) -> None:
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._root_data: Any = None
@@ -112,30 +110,32 @@ class NBTTreeView(ft.Column):
 
     def get_modified_data(self) -> Any:
         return self._root_data
-    
+
     def export_json(self, path: str) -> bool:
         """导出 NBT 数据为 JSON 文件"""
         try:
             if self._root_data is None:
                 return False
-            
+
             def convert_to_serializable(obj):
                 if hasattr(obj, 'value'):
                     return convert_to_serializable(obj.value)
                 elif isinstance(obj, dict):
-                    return {k: convert_to_serializable(v) for k, v in obj.items()}
+                    return {
+                        k: convert_to_serializable(v) for k,
+                        v in obj.items()}
                 elif isinstance(obj, list):
                     return [convert_to_serializable(item) for item in obj]
                 elif isinstance(obj, (int, float, str, bool, type(None))):
                     return obj
                 else:
                     return str(obj)
-            
+
             serializable_data = convert_to_serializable(self._root_data)
-            
+
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(serializable_data, f, ensure_ascii=False, indent=2)
-            
+
             return True
         except Exception:
             return False
@@ -166,37 +166,55 @@ class NBTTreeView(ft.Column):
 
     def _build_nodes(self, data: Any, path_prefix: str, depth: int) -> List:
         if not self._show_all_children and depth > self.MAX_DEPTH:
-            return [ft.Text("  " * depth + "…（深度已达上限）", size=12, color=THEME.text_muted)]
+            return [
+                ft.Text(
+                    "  " *
+                    depth +
+                    "…（深度已达上限）",
+                    size=12,
+                    color=THEME.text_muted)]
 
         nodes: List = []
         try:
             if self._is_mapping_node(data):
                 items = list(self._mapping_items(data))
                 total_count = len(items)
-                if not self._show_all_children and len(items) > self.MAX_CHILDREN:
+                if not self._show_all_children and len(
+                        items) > self.MAX_CHILDREN:
                     items = items[:self.MAX_CHILDREN]
                 for key, value in items:
                     child_path = f"{path_prefix}.{key}" if path_prefix else key
-                    nodes.append(self._build_node(key, value, child_path, depth))
+                    nodes.append(
+                        self._build_node(
+                            key, value, child_path, depth))
                 if not self._show_all_children and total_count > self.MAX_CHILDREN:
                     nodes.append(
-                        self._build_omitted_notice(total_count - self.MAX_CHILDREN, depth)
-                    )
+                        self._build_omitted_notice(
+                            total_count -
+                            self.MAX_CHILDREN,
+                            depth))
             elif self._is_list_node(data):
                 length = len(data)
-                show_count = length if self._show_all_children else min(length, self.MAX_CHILDREN)
+                show_count = length if self._show_all_children else min(
+                    length, self.MAX_CHILDREN)
                 for i in range(show_count):
                     child_path = f"{path_prefix}[{i}]"
-                    nodes.append(self._build_node(f"[{i}]", data[i], child_path, depth))
+                    nodes.append(self._build_node(
+                        f"[{i}]", data[i], child_path, depth))
                 if not self._show_all_children and length > self.MAX_CHILDREN:
                     nodes.append(
-                        self._build_omitted_notice(length - self.MAX_CHILDREN, depth)
-                    )
+                        self._build_omitted_notice(
+                            length - self.MAX_CHILDREN, depth))
         except Exception:
             pass
         return nodes
 
-    def _build_node(self, key: str, value: Any, path: str, depth: int) -> ft.Control:
+    def _build_node(
+            self,
+            key: str,
+            value: Any,
+            path: str,
+            depth: int) -> ft.Control:
         type_name = self._get_type_name(value)
         icon, label, val_color = self._TYPE_INFO.get(
             type_name, ("❓", type_name, THEME.text_muted)
@@ -207,36 +225,61 @@ class NBTTreeView(ft.Column):
             count = len(value) if hasattr(value, '__len__') else 0
             subtitle = f"{count} 项"
             title_controls = [
-                self._type_badge(icon, label, val_color),
-                ft.Text(key, size=13, weight=ft.FontWeight.BOLD,
-                        color=THEME.warning if is_highlighted else THEME.text_primary),
-                ft.Text(subtitle, size=11, color=THEME.text_secondary),
+                self._type_badge(
+                    icon,
+                    label,
+                    val_color),
+                ft.Text(
+                    key,
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.warning if is_highlighted else THEME.text_primary),
+                ft.Text(
+                    subtitle,
+                    size=11,
+                    color=THEME.text_secondary),
             ]
             if self._editable:
                 title_controls.append(ft.Container(expand=True))
-                title_controls.append(ft.IconButton(
-                    icon=ft.Icons.ADD,
-                    tooltip="新增字段",
-                    icon_size=14,
-                    on_click=lambda e, p=path: self._open_add_field_dialog(p, is_list=False)
-                ))
-                if depth > 0:
-                    title_controls.append(ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        tooltip="删除此字段",
+                title_controls.append(
+                    ft.IconButton(
+                        icon=ft.Icons.ADD,
+                        tooltip="新增字段",
                         icon_size=14,
-                        icon_color=THEME.error,
-                        on_click=lambda e, p=path, k=key: self._confirm_delete(p, k)
-                    ))
-            title_row = ft.Row(title_controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                        on_click=lambda e,
+                        p=path: self._open_add_field_dialog(
+                            p,
+                            is_list=False)))
+                if depth > 0:
+                    title_controls.append(
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE,
+                            tooltip="删除此字段",
+                            icon_size=14,
+                            icon_color=THEME.error,
+                            on_click=lambda e,
+                            p=path,
+                            k=key: self._confirm_delete(
+                                p,
+                                k)))
+            title_row = ft.Row(
+                title_controls,
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER)
             children = self._build_nodes(value, path, depth + 1)
             return ft.ExpansionTile(
                 title=title_row,
                 controls=children,
-                expanded=self._is_expanded(depth, is_highlighted),
+                expanded=self._is_expanded(
+                    depth,
+                    is_highlighted),
                 bgcolor=self._row_bg(depth),
                 collapsed_bgcolor=self._row_bg(depth),
-                tile_padding=ft.Padding(left=depth * 16, top=2, bottom=2, right=8),
+                tile_padding=ft.Padding(
+                    left=depth * 16,
+                    top=2,
+                    bottom=2,
+                    right=8),
                 controls_padding=0,
                 dense=True,
             )
@@ -247,36 +290,61 @@ class NBTTreeView(ft.Column):
             if list_type:
                 subtitle = f"{subtitle} · {list_type}"
             title_controls = [
-                self._type_badge(icon, label, val_color),
-                ft.Text(key, size=13, weight=ft.FontWeight.BOLD,
-                        color=THEME.warning if is_highlighted else THEME.text_primary),
-                ft.Text(subtitle, size=11, color=THEME.text_secondary),
+                self._type_badge(
+                    icon,
+                    label,
+                    val_color),
+                ft.Text(
+                    key,
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.warning if is_highlighted else THEME.text_primary),
+                ft.Text(
+                    subtitle,
+                    size=11,
+                    color=THEME.text_secondary),
             ]
             if self._editable:
                 title_controls.append(ft.Container(expand=True))
-                title_controls.append(ft.IconButton(
-                    icon=ft.Icons.ADD,
-                    tooltip="新增列表项",
-                    icon_size=14,
-                    on_click=lambda e, p=path: self._open_add_field_dialog(p, is_list=True)
-                ))
-                if depth > 0:
-                    title_controls.append(ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        tooltip="删除此列表",
+                title_controls.append(
+                    ft.IconButton(
+                        icon=ft.Icons.ADD,
+                        tooltip="新增列表项",
                         icon_size=14,
-                        icon_color=THEME.error,
-                        on_click=lambda e, p=path, k=key: self._confirm_delete(p, k)
-                    ))
-            title_row = ft.Row(title_controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                        on_click=lambda e,
+                        p=path: self._open_add_field_dialog(
+                            p,
+                            is_list=True)))
+                if depth > 0:
+                    title_controls.append(
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE,
+                            tooltip="删除此列表",
+                            icon_size=14,
+                            icon_color=THEME.error,
+                            on_click=lambda e,
+                            p=path,
+                            k=key: self._confirm_delete(
+                                p,
+                                k)))
+            title_row = ft.Row(
+                title_controls,
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER)
             children = self._build_nodes(value, path, depth + 1)
             return ft.ExpansionTile(
                 title=title_row,
                 controls=children,
-                expanded=self._is_expanded(depth, is_highlighted),
+                expanded=self._is_expanded(
+                    depth,
+                    is_highlighted),
                 bgcolor=self._row_bg(depth),
                 collapsed_bgcolor=self._row_bg(depth),
-                tile_padding=ft.Padding(left=depth * 16, top=2, bottom=2, right=8),
+                tile_padding=ft.Padding(
+                    left=depth * 16,
+                    top=2,
+                    bottom=2,
+                    right=8),
                 controls_padding=0,
                 dense=True,
             )
@@ -291,25 +359,47 @@ class NBTTreeView(ft.Column):
                         overflow=ft.TextOverflow.ELLIPSIS, expand=True),
             ]
             if self._editable:
-                controls.append(ft.TextButton("编辑", on_click=lambda e, p=path, v=value, t=type_name: self._open_edit_dialog(p, v, t)))
+                controls.append(
+                    ft.TextButton(
+                        "编辑",
+                        on_click=lambda e,
+                        p=path,
+                        v=value,
+                        t=type_name: self._open_edit_dialog(
+                            p,
+                            v,
+                            t)))
                 if depth > 0:
-                    controls.append(ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        tooltip="删除此字段",
-                        icon_size=14,
-                        icon_color=THEME.error,
-                        on_click=lambda e, p=path, k=key: self._confirm_delete(p, k)
-                    ))
-            title_row = ft.Row(controls, spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+                    controls.append(
+                        ft.IconButton(
+                            icon=ft.Icons.DELETE,
+                            tooltip="删除此字段",
+                            icon_size=14,
+                            icon_color=THEME.error,
+                            on_click=lambda e,
+                            p=path,
+                            k=key: self._confirm_delete(
+                                p,
+                                k)))
+            title_row = ft.Row(
+                controls,
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER)
             return ft.Container(
                 content=title_row,
-                padding=ft.Padding(left=depth * 16 + 28, top=2, bottom=2, right=8),
+                padding=ft.Padding(
+                    left=depth * 16 + 28,
+                    top=2,
+                    bottom=2,
+                    right=8),
                 bgcolor=self._row_bg(depth),
-                border=self._left_border(THEME.border_subtle),
+                border=self._left_border(
+                    THEME.border_subtle),
             )
 
     def _build_summary(self, stats: Dict[str, int]) -> ft.Control:
-        mode = "完整显示" if self._show_all_children else f"每层最多 {self.MAX_CHILDREN} 项"
+        mode = "完整显示" if self._show_all_children else f"每层最多 {
+            self.MAX_CHILDREN} 项"
         expand_state = "全部展开" if self._expand_all else "默认展开"
         if self._collapse_all:
             expand_state = "全部折叠"
@@ -361,7 +451,10 @@ class NBTTreeView(ft.Column):
             bottom=transparent,
         )
 
-    def _build_omitted_notice(self, omitted_count: int, depth: int) -> ft.Control:
+    def _build_omitted_notice(
+            self,
+            omitted_count: int,
+            depth: int) -> ft.Control:
         return ft.Container(
             content=ft.Text(
                 f"还有 {omitted_count} 项未显示，点击上方“展开全部”可一次性显示全部 NBT。",
@@ -438,10 +531,12 @@ class NBTTreeView(ft.Column):
         def stage_change(e: Any = None) -> None:
             try:
                 path_parts = self._parse_path(path)
-                new_value = self._coerce_value(value_field.value or "", value, type_name)
+                new_value = self._coerce_value(
+                    value_field.value or "", value, type_name)
                 old_value = self._set_value_at_path(path_parts, new_value)
                 if self._on_stage_change:
-                    self._on_stage_change(path_parts, old_value, new_value, path)
+                    self._on_stage_change(
+                        path_parts, old_value, new_value, path)
                 dialog.open = False
                 self.page.update()
                 self._rebuild_tree()
@@ -461,7 +556,8 @@ class NBTTreeView(ft.Column):
     def _raw_text(value: Any, type_name: str) -> str:
         try:
             if type_name in ("IntArray", "ByteArray"):
-                return json.dumps([int(x) for x in list(value)], ensure_ascii=False)
+                return json.dumps([int(x)
+                                  for x in list(value)], ensure_ascii=False)
             if type_name in ("dict", "list", "bool", "NoneType"):
                 return json.dumps(value, ensure_ascii=False)
             return str(getattr(value, "value", value))
@@ -470,9 +566,16 @@ class NBTTreeView(ft.Column):
 
     @staticmethod
     def _is_mapping_node(value: Any) -> bool:
-        return isinstance(value, dict) or (
-            hasattr(value, "keys") and hasattr(value, "__getitem__") and type(value).__name__ in ("NBTFile", "TAG_Compound")
-        )
+        return isinstance(
+            value,
+            dict) or (
+            hasattr(
+                value,
+                "keys") and hasattr(
+                value,
+                "__getitem__") and type(value).__name__ in (
+                    "NBTFile",
+                "TAG_Compound"))
 
     @staticmethod
     def _mapping_items(value: Any) -> List[tuple]:
@@ -511,7 +614,8 @@ class NBTTreeView(ft.Column):
             parts.append(current)
         return parts
 
-    def _set_value_at_path(self, path_parts: List[Union[str, int]], new_value: Any) -> Any:
+    def _set_value_at_path(
+            self, path_parts: List[Union[str, int]], new_value: Any) -> Any:
         if self._root_data is None:
             raise ValueError("未加载 NBT 数据")
         node = self._root_data
@@ -586,7 +690,8 @@ class NBTTreeView(ft.Column):
                 items = list(value)
                 if len(items) <= 8:
                     return "[" + ", ".join(str(x) for x in items) + "]"
-                return "[" + ", ".join(str(x) for x in items[:8]) + f", …] ({len(items)} 项)"
+                return "[" + ", ".join(str(x)
+                                       for x in items[:8]) + f", …] ({len(items)} 项)"
             if type_name == "String":
                 s = str(v)
                 return f'"{s}"'
@@ -653,12 +758,14 @@ class NBTTreeView(ft.Column):
                 if is_list:
                     if not self._is_list_node(parent_node):
                         raise ValueError("父节点不是列表")
-                    new_value = self._create_default_value(type_dropdown.value, value_field.value)
+                    new_value = self._create_default_value(
+                        type_dropdown.value, value_field.value)
                     old_length = len(parent_node)
                     parent_node.append(new_value)
                     if self._on_stage_change:
                         new_path_parts = path_parts + [old_length]
-                        self._on_stage_change(new_path_parts, None, new_value, f"{parent_path}[{old_length}]")
+                        self._on_stage_change(
+                            new_path_parts, None, new_value, f"{parent_path}[{old_length}]")
                 else:
                     if not self._is_mapping_node(parent_node):
                         raise ValueError("父节点不是Compound")
@@ -667,11 +774,13 @@ class NBTTreeView(ft.Column):
                         raise ValueError("字段名不能为空")
                     if key in parent_node:
                         raise ValueError("字段已存在")
-                    new_value = self._create_default_value(type_dropdown.value, value_field.value)
+                    new_value = self._create_default_value(
+                        type_dropdown.value, value_field.value)
                     parent_node[key] = new_value
                     if self._on_stage_change:
                         new_path_parts = path_parts + [key]
-                        self._on_stage_change(new_path_parts, None, new_value, f"{parent_path}.{key}")
+                        self._on_stage_change(
+                            new_path_parts, None, new_value, f"{parent_path}.{key}")
                 dialog.open = False
                 self.page.update()
                 self._rebuild_tree()
@@ -691,8 +800,12 @@ class NBTTreeView(ft.Column):
         if not self.page:
             return
         dialog = ft.AlertDialog(
-            title=ft.Text("确认删除", color=THEME.text_primary),
-            content=ft.Text(f"确定要删除 {key} 吗？此操作将进入暂存区。", color=THEME.text_secondary),
+            title=ft.Text(
+                "确认删除",
+                color=THEME.text_primary),
+            content=ft.Text(
+                f"确定要删除 {key} 吗？此操作将进入暂存区。",
+                color=THEME.text_secondary),
             actions=[],
         )
 
@@ -707,7 +820,8 @@ class NBTTreeView(ft.Column):
                 if node is None:
                     raise ValueError("找不到节点")
                 last_part = path_parts[-1]
-                old_value = node[last_part] if isinstance(last_part, (str, int)) else None
+                old_value = node[last_part] if isinstance(
+                    last_part, (str, int)) else None
                 if isinstance(last_part, int) and self._is_list_node(node):
                     del node[last_part]
                 elif isinstance(last_part, str) and self._is_mapping_node(node):
@@ -749,37 +863,49 @@ class NBTTreeView(ft.Column):
             return nbtlib.String(raw_value)
         elif type_name == "Int":
             try:
-                return nbtlib.Int(int(raw_value)) if raw_value else nbtlib.Int(0)
+                return nbtlib.Int(
+                    int(raw_value)) if raw_value else nbtlib.Int(0)
             except ValueError:
                 return nbtlib.Int(0)
         elif type_name == "Long":
             try:
-                return nbtlib.Long(int(raw_value)) if raw_value else nbtlib.Long(0)
+                return nbtlib.Long(
+                    int(raw_value)) if raw_value else nbtlib.Long(0)
             except ValueError:
                 return nbtlib.Long(0)
         elif type_name == "Byte":
             try:
-                return nbtlib.Byte(int(raw_value)) if raw_value else nbtlib.Byte(0)
+                return nbtlib.Byte(
+                    int(raw_value)) if raw_value else nbtlib.Byte(0)
             except ValueError:
                 return nbtlib.Byte(0)
         elif type_name == "Short":
             try:
-                return nbtlib.Short(int(raw_value)) if raw_value else nbtlib.Short(0)
+                return nbtlib.Short(
+                    int(raw_value)) if raw_value else nbtlib.Short(0)
             except ValueError:
                 return nbtlib.Short(0)
         elif type_name == "Float":
             try:
-                return nbtlib.Float(float(raw_value)) if raw_value else nbtlib.Float(0.0)
+                return nbtlib.Float(
+                    float(raw_value)) if raw_value else nbtlib.Float(0.0)
             except ValueError:
                 return nbtlib.Float(0.0)
         elif type_name == "Double":
             try:
-                return nbtlib.Double(float(raw_value)) if raw_value else nbtlib.Double(0.0)
+                return nbtlib.Double(
+                    float(raw_value)) if raw_value else nbtlib.Double(0.0)
             except ValueError:
                 return nbtlib.Double(0.0)
         elif type_name == "Boolean":
             normalized = raw_value.strip().lower()
-            return nbtlib.Byte(1 if normalized in ("true", "1", "yes", "y", "是") else 0)
+            return nbtlib.Byte(
+                1 if normalized in (
+                    "true",
+                    "1",
+                    "yes",
+                    "y",
+                    "是") else 0)
         elif type_name == "Compound":
             return nbtlib.Compound({})
         elif type_name == "List":
@@ -795,7 +921,8 @@ class NBTTreeView(ft.Column):
                     child_path = f"{path_prefix}.{key}" if path_prefix else key
                     if q in str(key).lower():
                         self._matched_keys.add(child_path.lower())
-                    if self._is_mapping_node(value) or self._is_list_node(value):
+                    if self._is_mapping_node(
+                            value) or self._is_list_node(value):
                         self._collect_matches(value, child_path)
                     else:
                         raw = str(getattr(value, 'value', value)).lower()

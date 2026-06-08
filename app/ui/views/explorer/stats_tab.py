@@ -117,7 +117,8 @@ class StatsTabMixin:
             scroll=ft.ScrollMode.AUTO
         )
 
-    def _build_block_pie_shapes(self, items: List[Tuple[str, int]]) -> List[cv.Shape]:
+    def _build_block_pie_shapes(
+            self, items: List[Tuple[str, int]]) -> List[cv.Shape]:
         """构建方块分布饼图的形状列表"""
         colors = [
             "#66BB6A", "#42A5F5", "#FFA726",
@@ -141,8 +142,12 @@ class StatsTabMixin:
         start = -90.0
         cx, cy, radius = 130, 104, 76
         shapes.append(
-            cv.Circle(cx, cy, radius + 2, paint=ft.Paint(color=THEME.border_light))
-        )
+            cv.Circle(
+                cx,
+                cy,
+                radius + 2,
+                paint=ft.Paint(
+                    color=THEME.border_light)))
 
         for idx, (_, value) in enumerate(items):
             sweep = value / total * 360
@@ -163,7 +168,10 @@ class StatsTabMixin:
             )
             start += sweep
 
-        shapes.append(cv.Circle(cx, cy, 38, paint=ft.Paint(color=THEME.bg_card)))
+        shapes.append(
+            cv.Circle(
+                cx, cy, 38, paint=ft.Paint(
+                    color=THEME.bg_card)))
         shapes.append(
             cv.Text(
                 x=102,
@@ -263,7 +271,8 @@ class StatsTabMixin:
 
             def _run():
                 try:
-                    stats = service.analyze_world(self.world_session.world_path)
+                    stats = service.analyze_world(
+                        self.world_session.world_path)
 
                     async def _update_ui():
                         try:
@@ -293,9 +302,8 @@ class StatsTabMixin:
                                 stats.entity_stats.top_entities[:10] if stats.entity_stats else []
                             )
                             self._fill_rank(
-                                self._size_stats_col,
-                                list(service.get_region_size_distribution(stats).items())
-                            )
+                                self._size_stats_col, list(
+                                    service.get_region_size_distribution(stats).items()))
                             self._stats_status.value = "统计完成。"
                             safe_update(self._tab_stats)
                         except Exception as ex:

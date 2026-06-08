@@ -13,7 +13,8 @@ from app.ui.views.explorer.utils import safe_update
 class WorldInfoPanel(ft.Column):
     """存档信息展示面板 - 分组卡片式布局"""
 
-    GAME_TYPE_MAP: Dict[int, str] = {0: "生存模式", 1: "创造模式", 2: "冒险模式", 3: "旁观模式"}
+    GAME_TYPE_MAP: Dict[int, str] = {
+        0: "生存模式", 1: "创造模式", 2: "冒险模式", 3: "旁观模式"}
     DIFFICULTY_MAP: Dict[int, str] = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
 
     def __init__(
@@ -27,7 +28,7 @@ class WorldInfoPanel(ft.Column):
         self._t = t_cb or (lambda k, d="", **kw: d)
         self._on_backup_click = on_backup_click
         self._on_restore_click = on_restore_click
-        
+
         # 美化的占位符
         self._placeholder = ft.Container(
             content=ft.Column([
@@ -54,7 +55,10 @@ class WorldInfoPanel(ft.Column):
         )
         self.controls = [self._placeholder]
 
-    def update_info(self, world_info: Optional[WorldInfo], stats: Optional[Dict[str, int]] = None) -> None:
+    def update_info(self,
+                    world_info: Optional[WorldInfo],
+                    stats: Optional[Dict[str,
+                                         int]] = None) -> None:
         """更新存档信息显示"""
         self.controls.clear()
         if world_info is None:
@@ -79,29 +83,46 @@ class WorldInfoPanel(ft.Column):
                 ver += "（快照）"
             if world_info.version_series:
                 ver += f" | 系列: {world_info.version_series}"
-            basic_rows.append(self._row("📦 游戏版本", f"{ver}（ID: {world_info.version}）"))
+            basic_rows.append(
+                self._row(
+                    "📦 游戏版本", f"{ver}（ID: {
+                        world_info.version}）"))
         elif world_info.version:
             basic_rows.append(self._row("📦 游戏版本 ID", str(world_info.version)))
 
-        gt = self.GAME_TYPE_MAP.get(world_info.game_type) if world_info.game_type is not None else None
+        gt = self.GAME_TYPE_MAP.get(
+            world_info.game_type) if world_info.game_type is not None else None
         if gt:
             basic_rows.append(self._row("🎮 游戏模式", gt))
 
-        diff = self.DIFFICULTY_MAP.get(world_info.difficulty) if world_info.difficulty is not None else None
+        diff = self.DIFFICULTY_MAP.get(
+            world_info.difficulty) if world_info.difficulty is not None else None
         if diff is not None:
             basic_rows.append(self._row("⚔️ 难度", diff))
 
         if world_info.hardcore is not None:
-            basic_rows.append(self._row("💀 极限模式", "是" if world_info.hardcore else "否"))
+            basic_rows.append(
+                self._row(
+                    "💀 极限模式",
+                    "是" if world_info.hardcore else "否"))
 
         if world_info.allow_commands is not None:
-            basic_rows.append(self._row("⌨️ 允许命令", "是" if world_info.allow_commands else "否"))
+            basic_rows.append(
+                self._row(
+                    "⌨️ 允许命令",
+                    "是" if world_info.allow_commands else "否"))
 
         if world_info.was_modded is not None:
-            basic_rows.append(self._row("🔧 使用过模组", "是" if world_info.was_modded else "否"))
+            basic_rows.append(
+                self._row(
+                    "🔧 使用过模组",
+                    "是" if world_info.was_modded else "否"))
 
         if world_info.initialized is not None:
-            basic_rows.append(self._row("✅ 已初始化", "是" if world_info.initialized else "否"))
+            basic_rows.append(
+                self._row(
+                    "✅ 已初始化",
+                    "是" if world_info.initialized else "否"))
 
         if basic_rows:
             self.controls.append(self._section_card("📋 基本信息", basic_rows))
@@ -112,8 +133,12 @@ class WorldInfoPanel(ft.Column):
             gen_rows.append(self._row("🌱 世界种子", str(world_info.seed)))
         if world_info.spawn_x is not None:
             gen_rows.append(
-                self._row("📍 出生点", f"X: {world_info.spawn_x}  Y: {world_info.spawn_y}  Z: {world_info.spawn_z}")
-            )
+                self._row(
+                    "📍 出生点",
+                    f"X: {
+                        world_info.spawn_x}  Y: {
+                        world_info.spawn_y}  Z: {
+                        world_info.spawn_z}"))
         if gen_rows:
             self.controls.append(self._section_card("🌍 世界生成", gen_rows))
 
@@ -121,10 +146,17 @@ class WorldInfoPanel(ft.Column):
         time_rows = []
         if world_info.last_played:
             try:
-                dt = datetime.datetime.fromtimestamp(world_info.last_played / 1000)
-                time_rows.append(self._row("🕐 最后游玩", dt.strftime("%Y-%m-%d %H:%M:%S")))
+                dt = datetime.datetime.fromtimestamp(
+                    world_info.last_played / 1000)
+                time_rows.append(
+                    self._row(
+                        "🕐 最后游玩",
+                        dt.strftime("%Y-%m-%d %H:%M:%S")))
             except Exception:
-                time_rows.append(self._row("🕐 最后游玩", str(world_info.last_played)))
+                time_rows.append(
+                    self._row(
+                        "🕐 最后游玩", str(
+                            world_info.last_played)))
         if world_info.time is not None:
             ticks = int(world_info.time)
             days = ticks // 24000
@@ -157,10 +189,25 @@ class WorldInfoPanel(ft.Column):
         stat_rows = []
         if stats:
             if stats.get("world_path"):
-                stat_rows.append(self._row("📂 存档路径", str(stats.get("world_path"))))
-            stat_rows.append(self._row("👥 玩家数", str(stats.get("player_count", 0))))
-            stat_rows.append(self._row("🧭 维度数", str(stats.get("dimension_count", 0))))
-            stat_rows.append(self._row("🗺️ 区域文件数", str(stats.get("region_count", 0))))
+                stat_rows.append(
+                    self._row(
+                        "📂 存档路径", str(
+                            stats.get("world_path"))))
+            stat_rows.append(
+                self._row(
+                    "👥 玩家数", str(
+                        stats.get(
+                            "player_count", 0))))
+            stat_rows.append(
+                self._row(
+                    "🧭 维度数", str(
+                        stats.get(
+                            "dimension_count", 0))))
+            stat_rows.append(
+                self._row(
+                    "🗺️ 区域文件数", str(
+                        stats.get(
+                            "region_count", 0))))
         if stat_rows:
             self.controls.append(self._section_card("📊 统计信息", stat_rows))
 
@@ -170,16 +217,21 @@ class WorldInfoPanel(ft.Column):
             enabled = world_info.data_packs.get("enabled", [])
             disabled = world_info.data_packs.get("disabled", [])
             if enabled:
-                dp_rows.append(self._row("✅ 已启用", ", ".join(enabled[:10]) + ("..." if len(enabled) > 10 else "")))
+                dp_rows.append(self._row("✅ 已启用", ", ".join(
+                    enabled[:10]) + ("..." if len(enabled) > 10 else "")))
             if disabled:
-                dp_rows.append(self._row("❌ 已禁用", ", ".join(disabled[:10]) + ("..." if len(disabled) > 10 else "")))
+                dp_rows.append(self._row("❌ 已禁用", ", ".join(
+                    disabled[:10]) + ("..." if len(disabled) > 10 else "")))
             if dp_rows:
                 self.controls.append(self._section_card("📦 数据包", dp_rows))
 
         # ── 6. 其他信息 ──
         other_rows = []
         if world_info.server_brands:
-            other_rows.append(self._row("🖥️ 服务器品牌", ", ".join(str(b) for b in world_info.server_brands)))
+            other_rows.append(
+                self._row(
+                    "🖥️ 服务器品牌", ", ".join(
+                        str(b) for b in world_info.server_brands)))
         if other_rows:
             self.controls.append(self._section_card("🔧 其他", other_rows))
 
@@ -219,8 +271,11 @@ class WorldInfoPanel(ft.Column):
 
         if not self.controls:
             self.controls.append(
-                ft.Text("存档信息为空", size=14, color=THEME.text_muted, text_align=ft.TextAlign.CENTER)
-            )
+                ft.Text(
+                    "存档信息为空",
+                    size=14,
+                    color=THEME.text_muted,
+                    text_align=ft.TextAlign.CENTER))
         safe_update(self)
 
     def _section_card(self, title: str, rows: List[ft.Row]) -> ft.Container:

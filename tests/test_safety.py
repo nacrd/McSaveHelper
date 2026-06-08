@@ -29,7 +29,11 @@ def test_update_server_properties_rejects_newline_injection(tmp_path: Path):
     props.write_bytes(original)
 
     with pytest.raises(ValueError):
-        update_server_properties(tmp_path, "world\nop=true", lambda msg, level: None)
+        update_server_properties(
+            tmp_path,
+            "world\nop=true",
+            lambda msg,
+            level: None)
 
     assert props.read_bytes() == original
 
@@ -51,7 +55,9 @@ def test_process_regions_parallel_accepts_empty_input():
     progress_values = []
     logs = []
 
-    process_regions_parallel([], [], progress_values.append, lambda msg, level: logs.append((msg, level)))
+    process_regions_parallel(
+        [], [], progress_values.append, lambda msg, level: logs.append(
+            (msg, level)))
 
     assert progress_values == [1.0]
     assert logs[-1] == ("区块总计修改: 0 处", "INFO")
@@ -71,7 +77,8 @@ def test_replace_directory_tree_rejects_non_world_destination(tmp_path: Path):
     assert (dst / "notes.txt").read_text(encoding="utf-8") == "keep"
 
 
-def test_replace_directory_tree_allows_existing_world_destination(tmp_path: Path):
+def test_replace_directory_tree_allows_existing_world_destination(
+        tmp_path: Path):
     src = tmp_path / "src_world"
     src.mkdir()
     (src / "level.dat").write_text("new", encoding="utf-8")

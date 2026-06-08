@@ -28,7 +28,7 @@ class I18nService:
     @property
     def available_languages(self) -> List[str]:
         """可用语言代码列表
-        
+
         Returns:
             List[str]: 可用语言代码列表
         """
@@ -37,7 +37,7 @@ class I18nService:
     @property
     def current_language(self) -> str:
         """当前使用的语言代码
-        
+
         Returns:
             str: 当前语言代码
         """
@@ -45,12 +45,12 @@ class I18nService:
 
     def translate(self, key: str, default: str = "", **kwargs) -> str:
         """翻译指定的键，支持格式化参数
-        
+
         Args:
             key: 翻译键
             default: 默认文本（当键不存在时使用）
             **kwargs: 格式化参数
-            
+
         Returns:
             str: 翻译后的文本
         """
@@ -58,7 +58,7 @@ class I18nService:
 
     def set_language(self, lang_code: str) -> None:
         """切换语言
-        
+
         Args:
             lang_code: 语言代码
         """
@@ -70,10 +70,10 @@ class I18nService:
 
     def get_display_name(self, lang_code: str) -> str:
         """获取语言的显示名称
-        
+
         Args:
             lang_code: 语言代码
-            
+
         Returns:
             str: 语言的显示名称
         """
@@ -86,7 +86,7 @@ _i18n_service: Optional[I18nService] = None
 
 def get_i18n() -> I18nService:
     """获取I18nService单例实例
-    
+
     Returns:
         I18nService: I18nService实例
     """
@@ -98,12 +98,12 @@ def get_i18n() -> I18nService:
 
 def t(key: str, default: str = "", **kwargs) -> str:
     """翻译快捷函数
-    
+
     Args:
         key: 翻译键
         default: 默认文本
         **kwargs: 格式化参数
-        
+
     Returns:
         str: 翻译后的文本
     """

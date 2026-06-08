@@ -9,7 +9,7 @@ from app.ui.theme import THEME
 
 class McButton(ft.Container):
     """Minecraft-style button that supports disabled state with hover/pressed animations"""
-    
+
     def __init__(
         self,
         text: str,
@@ -31,7 +31,7 @@ class McButton(ft.Container):
         self._text_color = text_color or THEME.text_primary
         self._disabled = False
         self._is_pressed = False
-        
+
         super().__init__(
             content=self._build_content(),
             width=width,
@@ -48,14 +48,14 @@ class McButton(ft.Container):
             on_hover=self._handle_hover,  # type: ignore[arg-type]
             ink=True,
         )
-    
+
     def _adjust_brightness(self, color: str, factor: float) -> str:
         """Adjust color brightness by factor
-        
+
         Args:
             color: Hex color string (e.g., "#55FF55")
             factor: Brightness adjustment factor (>1 lighter, <1 darker)
-            
+
         Returns:
             str: Adjusted hex color
         """
@@ -73,12 +73,12 @@ class McButton(ft.Container):
             return f"#{r:02X}{g:02X}{b:02X}"
         except Exception:
             return color
-    
+
     def _handle_hover(self, e: ft.ControlEvent) -> None:
         """Handle hover event with visual feedback"""
         if self._disabled:
             return
-        
+
         try:
             if e.data == "true":
                 # Hover state - brighter color and enhanced shadow
@@ -97,7 +97,7 @@ class McButton(ft.Container):
             self.update()
         except Exception:
             pass
-    
+
     def _handle_click(self, e: ft.ControlEvent) -> None:
         """Handle click event with pressed animation"""
         if self._disabled:
@@ -125,7 +125,8 @@ class McButton(ft.Container):
                 self._on_click_handler(e)
 
             # Reset to normal state after brief delay. Prefer Flet's page task
-            # scheduler because this handler can run without a raw asyncio loop.
+            # scheduler because this handler can run without a raw asyncio
+            # loop.
             self._schedule_reset_pressed_state()
         except Exception:
             pass
@@ -172,14 +173,15 @@ class McButton(ft.Container):
             self.shadow = None
         except Exception:
             pass
-    
+
     def _build_content(self) -> ft.Row:
         icon_color = THEME.text_muted if self._disabled else self._text_color
         text_color = THEME.text_muted if self._disabled else self._text_color
-        
+
         controls: list[ft.Control] = []
         if self._icon:
-            controls.append(ft.Icon(ft.Icons[self._icon.upper()] if hasattr(ft.Icons, self._icon.upper()) else self._icon, size=16, color=icon_color))  # type: ignore[arg-type]
+            controls.append(ft.Icon(ft.Icons[self._icon.upper()] if hasattr(ft.Icons, self._icon.upper(
+            )) else self._icon, size=16, color=icon_color))  # type: ignore[arg-type]
         else:
             controls.append(ft.Container(width=0))
         controls.append(ft.Text(
@@ -189,18 +191,18 @@ class McButton(ft.Container):
             color=text_color,
             font_family="monospace",
         ))
-        
+
         return ft.Row(
             controls,
             spacing=6,
             alignment=ft.MainAxisAlignment.CENTER,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
-    
+
     @property
     def disabled(self) -> bool:
         return self._disabled
-    
+
     @disabled.setter
     def disabled(self, value: bool) -> None:
         self._disabled = value
@@ -211,9 +213,9 @@ class McButton(ft.Container):
         self._text = text
         self.content = self._build_content()
 
-    def set_on_click(self, on_click: Optional[Callable[[ft.ControlEvent], Any]]) -> None:
+    def set_on_click(
+            self, on_click: Optional[Callable[[ft.ControlEvent], Any]]) -> None:
         self._on_click_handler = on_click
-
 
 
 def _mc_button(
@@ -247,7 +249,8 @@ def btn_ghost(
     height: int = 40,
 ) -> ft.Container:
     """Secondary button - stone gray"""
-    return _mc_button(text, THEME.mc_stone, on_click, width, height, text_color=THEME.text_primary)
+    return _mc_button(text, THEME.mc_stone, on_click, width,
+                      height, text_color=THEME.text_primary)
 
 
 def btn_success(

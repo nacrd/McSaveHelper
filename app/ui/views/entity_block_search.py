@@ -111,12 +111,15 @@ class EntityBlockSearchView(ft.Column):
             weight=ft.FontWeight.BOLD,
             color=THEME.text_primary,
         )
-        self._status_summary_text = ft.Text("", size=12, color=THEME.text_secondary)
+        self._status_summary_text = ft.Text(
+            "", size=12, color=THEME.text_secondary)
         self._status_progress = ft.ProgressBar(width=200, visible=False)
 
         # 搜索按钮
-        self._search_btn = btn_primary("🔍 开始搜索", on_click=self._start_search, height=40)
-        self._export_btn = btn_ghost("📊 导出结果", on_click=self._export_results, height=40)
+        self._search_btn = btn_primary(
+            "🔍 开始搜索", on_click=self._start_search, height=40)
+        self._export_btn = btn_ghost(
+            "📊 导出结果", on_click=self._export_results, height=40)
 
         # 结果列表容器
         self._results_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
@@ -307,7 +310,8 @@ class EntityBlockSearchView(ft.Column):
             ("minecraft:sheep", "羊"),
             ("minecraft:chicken", "鸡"),
         ]
-        return [ft.dropdown.Option(id, f"{name} ({id})") for id, name in entities]
+        return [ft.dropdown.Option(id, f"{name} ({id})")
+                for id, name in entities]
 
     def _get_block_options(self) -> List[ft.dropdown.Option]:
         """获取方块预设选项"""
@@ -319,7 +323,8 @@ class EntityBlockSearchView(ft.Column):
             ("minecraft:emerald_ore", "绿宝石矿石"),
             ("minecraft:ancient_debris", "远古残骸"),
         ]
-        return [ft.dropdown.Option(id, f"{name} ({id})") for id, name in blocks]
+        return [ft.dropdown.Option(id, f"{name} ({id})")
+                for id, name in blocks]
 
     def _get_container_options(self) -> List[ft.dropdown.Option]:
         """获取容器预设选项"""
@@ -330,7 +335,11 @@ class EntityBlockSearchView(ft.Column):
             ("minecraft:hopper", "漏斗"),
             ("minecraft:furnace", "熔炉"),
         ]
-        return [ft.dropdown.Option(id, f"{name} ({id})") for id, name in containers]
+        return [
+            ft.dropdown.Option(
+                id,
+                f"{name} ({id})") for id,
+            name in containers]
 
     def _on_search_type_change(self, e: Any) -> None:
         """搜索类型改变时更新预设选项"""
@@ -344,7 +353,7 @@ class EntityBlockSearchView(ft.Column):
         elif search_type == "container":
             self._target_dropdown.label = "容器类型"
             self._target_dropdown.options = self._get_container_options()
-        
+
         if self._target_dropdown.options:
             self._target_dropdown.value = self._target_dropdown.options[0].key
         self._target_dropdown.update()
@@ -358,7 +367,7 @@ class EntityBlockSearchView(ft.Column):
         is_preset = self._target_source_dropdown.value == "preset"
         self._target_dropdown.visible = is_preset
         self._custom_target_field.visible = not is_preset
-        
+
         if update:
             self._target_dropdown.update()
             self._custom_target_field.update()
@@ -380,7 +389,7 @@ class EntityBlockSearchView(ft.Column):
             target = self._target_dropdown.value
         else:
             target = self._custom_target_field.value.strip()
-        
+
         if not target:
             self.app.warn_dialog("提示", "请选择或输入目标 ID")
             return
@@ -393,7 +402,7 @@ class EntityBlockSearchView(ft.Column):
             dimensions.append("nether")
         if self._dim_end.value:
             dimensions.append("end")
-        
+
         if not dimensions:
             self.app.warn_dialog("提示", "请至少选择一个维度")
             return
@@ -402,7 +411,7 @@ class EntityBlockSearchView(ft.Column):
         self._searching = True
         self._search_btn.disabled = True
         self._search_btn.update()
-        
+
         self._status_title_text.value = "🔄 搜索中..."
         self._status_title_text.color = THEME.mc_gold
         self._status_progress.visible = True
@@ -418,14 +427,14 @@ class EntityBlockSearchView(ft.Column):
                     target_id=target,
                     dimensions=dimensions,
                 )
-                
+
                 self._search_results = results
                 self._last_search_meta = {
                     "type": search_type,
                     "target": target,
                     "dimensions": dimensions,
                 }
-                
+
                 # 更新 UI
                 def _update_ui():
                     self._render_results()
@@ -439,12 +448,12 @@ class EntityBlockSearchView(ft.Column):
                     self._status_summary_text.update()
                     self._status_progress.update()
                     self._search_btn.update()
-                
+
                 if hasattr(self.app.page, 'run_task'):
                     self.app.page.run_task(_update_ui)
                 else:
                     _update_ui()
-                    
+
             except Exception as ex:
                 def _show_error():
                     self._status_title_text.value = "❌ 搜索失败"
@@ -458,7 +467,7 @@ class EntityBlockSearchView(ft.Column):
                     self._status_progress.update()
                     self._search_btn.update()
                     self.app.handle_exception(ex, title="搜索失败")
-                
+
                 if hasattr(self.app.page, 'run_task'):
                     self.app.page.run_task(_show_error)
                 else:
@@ -469,7 +478,7 @@ class EntityBlockSearchView(ft.Column):
     def _render_results(self) -> None:
         """渲染搜索结果"""
         self._results_list.controls.clear()
-        
+
         if not self._search_results:
             self._results_list.controls.append(
                 placeholder(
@@ -482,8 +491,9 @@ class EntityBlockSearchView(ft.Column):
         else:
             displayed = min(len(self._search_results), self.DISPLAY_LIMIT)
             for i, result in enumerate(self._search_results[:displayed]):
-                self._results_list.controls.append(self._build_result_row(i, result))
-            
+                self._results_list.controls.append(
+                    self._build_result_row(i, result))
+
             if len(self._search_results) > displayed:
                 self._results_list.controls.append(
                     ft.Text(
@@ -492,14 +502,18 @@ class EntityBlockSearchView(ft.Column):
                         color=THEME.warning,
                     )
                 )
-        
+
         self._results_list.update()
 
-    def _build_result_row(self, index: int, result: SearchResult) -> ft.Container:
+    def _build_result_row(
+            self,
+            index: int,
+            result: SearchResult) -> ft.Container:
         """构建单个结果行"""
-        dim_label = self.DIMENSION_LABELS.get(result.dimension, result.dimension)
+        dim_label = self.DIMENSION_LABELS.get(
+            result.dimension, result.dimension)
         pos_text = f"({result.x}, {result.y}, {result.z})"
-        
+
         return ft.Container(
             content=ft.Row([
                 ft.Text(f"#{index + 1}", size=11, color=THEME.mc_gold, width=40),
@@ -518,7 +532,7 @@ class EntityBlockSearchView(ft.Column):
         if not self._search_results:
             self.app.warn_dialog("提示", "没有可导出的搜索结果")
             return
-        
+
         try:
             path = self.app.save_file(
                 title="导出搜索结果",
@@ -527,6 +541,7 @@ class EntityBlockSearchView(ft.Column):
             )
             if path:
                 self.service.export_results(self._search_results, Path(path))
-                self.app.info_dialog("导出成功", f"已导出 {len(self._search_results)} 个结果到：\n{path}")
+                self.app.info_dialog(
+                    "导出成功", f"已导出 {len(self._search_results)} 个结果到：\n{path}")
         except Exception as ex:
             self.app.handle_exception(ex, title="导出失败")

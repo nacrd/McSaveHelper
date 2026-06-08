@@ -30,7 +30,14 @@ def patch_nbt(
 
     # String (白名单内)
     if isinstance(tag, nbtlib.tag.String):
-        if key_name and key_name.lower() in {'owner', 'uuid', 'trusted', 'target', 'id', 'owneruuid', 'playeruuid'}:
+        if key_name and key_name.lower() in {
+            'owner',
+            'uuid',
+            'trusted',
+            'target',
+            'id',
+            'owneruuid',
+                'playeruuid'}:
             curr = str(tag)
             for m in mappings:
                 if curr == m[2]:
@@ -47,7 +54,9 @@ def patch_nbt(
                     least_k = f"{suffix}Least"
                     if least_k in tag:
                         try:
-                            if int(tag[k]) == old_m and int(tag[least_k]) == old_l:
+                            if int(
+                                    tag[k]) == old_m and int(
+                                    tag[least_k]) == old_l:
                                 tag[k] = nbtlib.tag.Long(new_m)
                                 tag[least_k] = nbtlib.tag.Long(new_l)
                                 changes += 1

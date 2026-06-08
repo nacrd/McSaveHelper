@@ -1,4 +1,5 @@
 """存档对比服务"""
+import threading
 from pathlib import Path
 import hashlib
 from typing import Any, Dict, List, Optional
@@ -33,42 +34,79 @@ class WorldCompareService:
     def __init__(self, log: Optional[LogCallback] = None) -> None:
         self.log: LogCallback = log or _default_log
 
-    def compare_worlds(self, left_path: Path, right_path: Path) -> WorldCompareResult:
+    def compare_worlds(
+            self,
+            left_path: Path,
+            right_path: Path) -> WorldCompareResult:
         left = WorldSession(left_path, log=self.log)
         right = WorldSession(right_path, log=self.log)
-        
+
         world_info = self._compare_world_info(left, right)
         players = self._compare_players(left, right)
         regions = self._compare_regions(left_path, right_path)
-        changed = sum(1 for item in world_info + players + regions if not item.same)
+        changed = sum(
+            1 for item in world_info +
+            players +
+            regions if not item.same)
         return WorldCompareResult(
-            summary={"world_info": len(world_info), "players": len(players), "regions": len(regions), "changed": changed},
+            summary={
+                "world_info": len(world_info),
+                "players": len(players),
+                "regions": len(regions),
+                "changed": changed},
             world_info=world_info,
             players=players,
             regions=regions,
         )
 
-    def _compare_world_info(self, left: WorldSession, right: WorldSession) -> List[CompareItem]:
+    def _compare_world_info(
+            self,
+            left: WorldSession,
+            right: WorldSession) -> List[CompareItem]:
         li = left.get_world_info()
         ri = right.get_world_info()
         ldict = asdict(li) if li else {}
         rdict = asdict(ri) if ri else {}
         keys = sorted(set(ldict) | set(rdict))
-        return [CompareItem(key, ldict.get(key), rdict.get(key), ldict.get(key) == rdict.get(key)) for key in keys]
+        return [
+            CompareItem(
+                key,
+                ldict.get(key),
+                rdict.get(key),
+                ldict.get(key) == rdict.get(key)) for key in keys]
 
-    def _compare_players(self, left: WorldSession, right: WorldSession) -> List[CompareItem]:
+    def _compare_players(
+            self,
+            left: WorldSession,
+            right: WorldSession) -> List[CompareItem]:
         lplayers = self._player_summary(left)
         rplayers = self._player_summary(right)
         keys = sorted(set(lplayers) | set(rplayers))
-        return [CompareItem(key, lplayers.get(key), rplayers.get(key), lplayers.get(key) == rplayers.get(key)) for key in keys]
+        return [
+            CompareItem(
+                key,
+                lplayers.get(key),
+                rplayers.get(key),
+                lplayers.get(key) == rplayers.get(key)) for key in keys]
 
-    def _compare_regions(self, left_path: Path, right_path: Path) -> List[CompareItem]:
-        left_regions = {p.name: self._file_signature(p) for p in scan_all_regions(left_path)}
-        right_regions = {p.name: self._file_signature(p) for p in scan_all_regions(right_path)}
+    def _compare_regions(
+            self,
+            left_path: Path,
+            right_path: Path) -> List[CompareItem]:
+        left_regions = {p.name: self._file_signature(
+            p) for p in scan_all_regions(left_path)}
+        right_regions = {p.name: self._file_signature(
+            p) for p in scan_all_regions(right_path)}
         keys = sorted(set(left_regions) | set(right_regions))
-        return [CompareItem(key, left_regions.get(key), right_regions.get(key), left_regions.get(key) == right_regions.get(key)) for key in keys]
+        return [
+            CompareItem(
+                key,
+                left_regions.get(key),
+                right_regions.get(key),
+                left_regions.get(key) == right_regions.get(key)) for key in keys]
 
-    def _player_summary(self, session: WorldSession) -> Dict[str, Dict[str, Any]]:
+    def _player_summary(
+            self, session: WorldSession) -> Dict[str, Dict[str, Any]]:
         names = session.get_player_names()
         result: Dict[str, Dict[str, Any]] = {}
         for uuid, name in names.items():
@@ -89,13 +127,12 @@ class WorldCompareService:
         return {"size": st.st_size, "mtime": int(st.st_mtime)}
 
 
-import threading
-
 _compare_service: Optional[WorldCompareService] = None
 _compare_service_lock = threading.Lock()
 
 
-def get_world_compare_service(log: Optional[LogCallback] = None) -> WorldCompareService:
+def get_world_compare_service(
+        log: Optional[LogCallback] = None) -> WorldCompareService:
     """获取世界比较服务单例（线程安全）"""
     global _compare_service
     with _compare_service_lock:

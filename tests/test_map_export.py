@@ -8,12 +8,12 @@ def test_map_export_region_scanning_logic():
     """Test that the region scanning logic only scans overworld region files."""
     # Simulate the scanning logic from map_export_service.py
     # This test doesn't require PIL to be installed
-    
+
     # Create a mock world directory structure
     import tempfile
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
-        
+
         # Create overworld region directory with a region file
         overworld_region = tmp_path / "region"
         overworld_region.mkdir()
@@ -46,12 +46,15 @@ def test_map_export_region_scanning_logic():
         # Verify scan_all_regions would include all dimensions (the old bug)
         from core.scanner import scan_all_regions
         all_regions = scan_all_regions(tmp_path)
-        assert len(all_regions) == 5  # All dimensions included (including 2 overworld files)
+        # All dimensions included (including 2 overworld files)
+        assert len(all_regions) == 5
 
         # Now test the new scanning logic (only overworld)
         region_dir = tmp_path / "region"
         region_files = list(region_dir.glob("*.mca"))
-        region_files = [f for f in region_files if f.is_file() and re.match(r"^r\.-?\d+\.-?\d+\.mca$", f.name)]
+        region_files = [
+            f for f in region_files if f.is_file() and re.match(
+                r"^r\.-?\d+\.-?\d+\.mca$", f.name)]
         region_files = sorted(region_files)
 
         # Should only have overworld region files
@@ -65,7 +68,7 @@ def test_map_export_service_raises_on_missing_region_dir():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp_dir:
         tmp_path = Path(tmp_dir)
-        
+
         # Create a world without region directory
         world = tmp_path / "world"
         world.mkdir()
@@ -74,14 +77,14 @@ def test_map_export_service_raises_on_missing_region_dir():
         # Test the region directory check logic
         region_dir = world / "region"
         assert not region_dir.exists()
-        
+
         # This would raise ValueError in the service
         # We can't test the full service without PIL, but we can test the logic
         try:
             from app.services.map_export_service import MapExportService, PIL_AVAILABLE
             if not PIL_AVAILABLE:
                 pytest.skip("PIL not available")
-                
+
             service = MapExportService()
             # The service would fail when trying to scan
         except ImportError:

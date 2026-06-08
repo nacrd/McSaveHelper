@@ -39,7 +39,7 @@ class ConversionResult:
 def detect_endian(file_path: Path) -> str:
     """
     检测 NBT 文件的字节序（大端序 'big' 或小端序 'little'）。
-    
+
     通过读取第一个字节（标签 ID）和后续长度来判断。
     Java 版 NBT 以大端序存储，Bedrock 版以小端序存储。
     """
@@ -69,7 +69,7 @@ def detect_endian(file_path: Path) -> str:
 def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:
     """
     加载 NBT 文件，可选择指定字节序。
-    
+
     如果 byteorder 为 None，则自动检测。
     """
     if byteorder is None:
@@ -84,14 +84,17 @@ def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:
 def save_nbt(file_path: Path, nbt_data: File, byteorder: str = 'big') -> None:
     """
     以指定字节序保存 NBT 文件。
-    
+
     使用原子写入模式避免数据损坏：先写入临时文件，成功后再替换原文件。
     """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = None
     fd = None
     try:
-        fd, tmp_name = tempfile.mkstemp(prefix=f".{file_path.name}.", suffix=".tmp", dir=str(file_path.parent))
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{
+                file_path.name}.", suffix=".tmp", dir=str(
+                file_path.parent))
         tmp_path = Path(tmp_name)
         # 立即关闭文件描述符，允许 nbtlib 打开文件进行写入
         os.close(fd)
@@ -112,10 +115,13 @@ def save_nbt(file_path: Path, nbt_data: File, byteorder: str = 'big') -> None:
             tmp_path.unlink(missing_ok=True)
 
 
-def convert_endian(src_path: Path, dst_path: Path, target_byteorder: str) -> None:
+def convert_endian(
+        src_path: Path,
+        dst_path: Path,
+        target_byteorder: str) -> None:
     """
     转换 NBT 文件的字节序（Java ↔ Bedrock）。
-    
+
     Args:
         src_path: 源文件路径
         dst_path: 目标文件路径
@@ -137,7 +143,7 @@ def convert_endian(src_path: Path, dst_path: Path, target_byteorder: str) -> Non
 class IdMapping:
     """
     Java ↔ Bedrock 方块/物品 ID 映射。
-    
+
     映射基于已知的 ID 转换表。
     """
     # Java 到 Bedrock 的方块 ID 映射（示例，需要扩充）
@@ -169,19 +175,20 @@ class IdMapping:
         "minecraft:diamond": "minecraft:diamond",
         # 更多映射...
     }
-    
+
     # Bedrock 到 Java 的逆向映射
-    BLOCK_BEDROCK_TO_JAVA: Dict[str, str] = {v: k for k, v in BLOCK_JAVA_TO_BEDROCK.items()}
-    
+    BLOCK_BEDROCK_TO_JAVA: Dict[str, str] = {
+        v: k for k, v in BLOCK_JAVA_TO_BEDROCK.items()}
+
     @classmethod
     def convert_block_id(cls, block_id: str, to_bedrock: bool) -> str:
         """
         转换方块 ID。
-        
+
         Args:
             block_id: 原始方块 ID
             to_bedrock: 如果为 True，表示 Java -> Bedrock；否则 Bedrock -> Java
-        
+
         Returns:
             转换后的方块 ID，若未找到映射则返回原值。
         """
@@ -189,7 +196,7 @@ class IdMapping:
             return cls.BLOCK_JAVA_TO_BEDROCK.get(block_id, block_id)
         else:
             return cls.BLOCK_BEDROCK_TO_JAVA.get(block_id, block_id)
-    
+
     @classmethod
     def convert_item_id(cls, item_id: str, to_bedrock: bool) -> str:
         """转换物品 ID（暂时与方块相同）"""
@@ -222,12 +229,12 @@ class VersionDowngrader:
     """
     版本软着陆：处理 Data Components 和未知方块。
     """
-    
+
     @staticmethod
     def strip_data_components(tag: Compound) -> Compound:
         """
         剥离 1.20.5+ 的物品组件格式，降级为旧版的 tag 嵌套结构。
-        
+
         将 `components` 内的数据移动到 `tag` 中。
         """
         if not isinstance(tag, Compound):
@@ -244,7 +251,7 @@ class VersionDowngrader:
             # 删除 components
             del tag["components"]
         return tag
-    
+
     @staticmethod
     def replace_unknown_blocks(tag: Any, target_version: int) -> Any:
         """
@@ -270,7 +277,8 @@ class VersionDowngrader:
                         # 替换为 air
                         tag[key] = String("minecraft:air")
                 else:
-                    VersionDowngrader.replace_unknown_blocks(value, target_version)
+                    VersionDowngrader.replace_unknown_blocks(
+                        value, target_version)
         elif isinstance(tag, List):
             for item in tag:
                 VersionDowngrader.replace_unknown_blocks(item, target_version)
@@ -282,13 +290,13 @@ def convert_world(src_path: Path, dst_path: Path,
                   target_version: Optional[int] = None) -> ConversionResult:
     """
     转换整个世界存档（高级接口）。
-    
+
     Args:
         src_path: 源世界路径
         dst_path: 目标世界路径
         target_platform: "java" 或 "bedrock"
         target_version: 目标版本 ID（仅 Java 版有效）
-    
+
     Returns:
         ConversionResult: 转换结果，包含成功状态、已转换文件数和错误摘要
     """
@@ -305,16 +313,18 @@ def convert_world(src_path: Path, dst_path: Path,
         if src_path.resolve() != dst_path.resolve():
             try:
                 import shutil
-                replace_directory_tree(src_path, dst_path, ignore=shutil.ignore_patterns('*.tmp', '*.bak', '*.old'))
+                replace_directory_tree(
+                    src_path, dst_path, ignore=shutil.ignore_patterns(
+                        '*.tmp', '*.bak', '*.old'))
             except Exception as e:
                 raise ConversionError(f"复制世界目录失败: {e}")
             work_path = dst_path
         else:
             work_path = src_path  # 原地转换
-        
+
         # 2. 确定目标字节序
         target_byteorder = "big" if target_platform == "java" else "little"
-        
+
         # 3. 遍历所有 NBT 文件进行转换
         nbt_extensions = {".dat", ".nbt"}
         for root, dirs, files in os.walk(work_path):
@@ -325,15 +335,16 @@ def convert_world(src_path: Path, dst_path: Path,
                     try:
                         src_byteorder = detect_endian(file_path)
                         data = load_nbt(file_path, byteorder=src_byteorder)
-                        
+
                         if target_platform != "java":
                             to_bedrock = (target_platform == "bedrock")
                             convert_block_ids_in_nbt(data, to_bedrock)
-                        
+
                         if target_version is not None:
                             VersionDowngrader.strip_data_components(data)
-                            VersionDowngrader.replace_unknown_blocks(data, target_version)
-                        
+                            VersionDowngrader.replace_unknown_blocks(
+                                data, target_version)
+
                         save_nbt(file_path, data, byteorder=target_byteorder)
                         tracker.increment_files(1)
                         result.converted_files += 1
@@ -342,7 +353,7 @@ def convert_world(src_path: Path, dst_path: Path,
                         result.errors.append(message)
                         _logger.warning(message, module="Converter")
                         tracker.increment_errors(1)
-        
+
         # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
         if target_platform != "java" or target_version is not None:
             try:
@@ -359,7 +370,8 @@ def convert_world(src_path: Path, dst_path: Path,
                                 chunk = region.get_chunk(x, z)
                                 if chunk is None:
                                     continue
-                                data = chunk.data if hasattr(chunk, 'data') else chunk
+                                data = chunk.data if hasattr(
+                                    chunk, 'data') else chunk
                                 if not isinstance(data, nbtlib.tag.Compound):
                                     continue
 
@@ -369,8 +381,10 @@ def convert_world(src_path: Path, dst_path: Path,
                                     region_modified = True
 
                                 if target_version is not None:
-                                    VersionDowngrader.strip_data_components(data)
-                                    VersionDowngrader.replace_unknown_blocks(data, target_version)
+                                    VersionDowngrader.strip_data_components(
+                                        data)
+                                    VersionDowngrader.replace_unknown_blocks(
+                                        data, target_version)
                                     region_modified = True
 
                         if region_modified and hasattr(region, "save"):
@@ -386,7 +400,7 @@ def convert_world(src_path: Path, dst_path: Path,
                 message = "anvil-parser 未安装，跳过区域文件转换"
                 result.warnings.append(message)
                 _logger.warning(message, module="Converter")
-        
+
     return result
 
 

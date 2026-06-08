@@ -27,7 +27,12 @@ class SetBlockResult:
 
 
 class BlockDataService:
-    def get_block_at(self, chunk_data: Any, world_x: int, world_y: int, world_z: int) -> Optional[BlockStateInfo]:
+    def get_block_at(
+            self,
+            chunk_data: Any,
+            world_x: int,
+            world_y: int,
+            world_z: int) -> Optional[BlockStateInfo]:
         local_x = world_x & 15
         local_y = world_y & 15
         local_z = world_z & 15
@@ -37,17 +42,32 @@ class BlockDataService:
             return None
         section = self._find_section(sections, section_y)
         if section is None:
-            return BlockStateInfo(world_x, world_y, world_z, section_y, local_x, local_y, local_z, 0, "minecraft:air", {})
+            return BlockStateInfo(
+                world_x,
+                world_y,
+                world_z,
+                section_y,
+                local_x,
+                local_y,
+                local_z,
+                0,
+                "minecraft:air",
+                {})
         block_states = self._get(section, "block_states")
         if block_states is None:
-            palette = self._get(section, "Palette") or self._get(section, "palette")
+            palette = self._get(
+                section,
+                "Palette") or self._get(
+                section,
+                "palette")
             data = self._get(section, "BlockStates")
         else:
             palette = self._get(block_states, "palette")
             data = self._get(block_states, "data")
         if palette is None or len(palette) == 0:
             return None
-        palette_index = self._decode_palette_index(data, len(palette), local_x, local_y, local_z)
+        palette_index = self._decode_palette_index(
+            data, len(palette), local_x, local_y, local_z)
         if palette_index < 0 or palette_index >= len(palette):
             return None
         state = palette[palette_index]
@@ -79,29 +99,44 @@ class BlockDataService:
         section_y = world_y // 16
         sections = self._get(chunk_data, "sections")
         if sections is None:
-            return SetBlockResult(False, "", block_name, -1, False, "区块无 sections 数据")
+            return SetBlockResult(
+                False, "", block_name, -1, False, "区块无 sections 数据")
         section = self._find_section(sections, section_y)
         if section is None:
-            return SetBlockResult(False, "", block_name, -1, False, f"未找到 section Y={section_y}")
+            return SetBlockResult(
+                False, "", block_name, -1, False, f"未找到 section Y={section_y}")
         block_states = self._get(section, "block_states")
         if block_states is None:
-            return SetBlockResult(False, "", block_name, -1, False, "section 无 block_states（旧版格式暂不支持写入）")
+            return SetBlockResult(False, "", block_name, -
+                                  1, False, "section 无 block_states（旧版格式暂不支持写入）")
         palette = self._get(block_states, "palette")
         data = self._get(block_states, "data")
         if palette is None or len(palette) == 0:
-            return SetBlockResult(False, "", block_name, -1, False, "palette 为空")
+            return SetBlockResult(
+                False, "", block_name, -1, False, "palette 为空")
         old_palette_size = len(palette)
-        old_index = self._decode_palette_index(data, old_palette_size, local_x, local_y, local_z)
+        old_index = self._decode_palette_index(
+            data, old_palette_size, local_x, local_y, local_z)
         if old_index < 0 or old_index >= old_palette_size:
-            return SetBlockResult(False, "", block_name, -1, False, f"当前 palette_index={old_index} 越界")
+            return SetBlockResult(False, "", block_name, -
+                                  1, False, f"当前 palette_index={old_index} 越界")
         old_state = palette[old_index]
         old_name = self._value(self._get(old_state, "Name", "unknown"))
-        new_palette_index = self._find_or_add_palette_entry(palette, block_name, properties or {})
+        new_palette_index = self._find_or_add_palette_entry(
+            palette, block_name, properties or {})
         if new_palette_index == old_index:
-            return SetBlockResult(True, old_name, block_name, new_palette_index, False, "目标方块与当前方块相同，无需修改")
+            return SetBlockResult(
+                True,
+                old_name,
+                block_name,
+                new_palette_index,
+                False,
+                "目标方块与当前方块相同，无需修改")
         new_palette_size = len(palette)
-        old_bits = max(4, (old_palette_size - 1).bit_length()) if old_palette_size > 1 else 4
-        new_bits = max(4, (new_palette_size - 1).bit_length()) if new_palette_size > 1 else 4
+        old_bits = max(4, (old_palette_size - 1).bit_length()
+                       ) if old_palette_size > 1 else 4
+        new_bits = max(4, (new_palette_size - 1).bit_length()
+                       ) if new_palette_size > 1 else 4
         repacked = new_bits != old_bits
         if data is None or old_palette_size <= 1:
             all_indices = [0] * 4096
@@ -117,10 +152,12 @@ class BlockDataService:
             new_name=block_name,
             palette_index=new_palette_index,
             repacked=repacked,
-            message=f"已将 {old_name} 替换为 {block_name}（palette #{new_palette_index}）" + ("，数据已重打包" if repacked else ""),
+            message=f"已将 {old_name} 替换为 {block_name}（palette #{new_palette_index}）" + (
+                "，数据已重打包" if repacked else ""),
         )
 
-    def _find_or_add_palette_entry(self, palette: Any, block_name: str, properties: Dict[str, str]) -> int:
+    def _find_or_add_palette_entry(
+            self, palette: Any, block_name: str, properties: Dict[str, str]) -> int:
         for i, entry in enumerate(palette):
             name = self._value(self._get(entry, "Name", ""))
             if name != block_name:
@@ -142,7 +179,8 @@ class BlockDataService:
                 return -1
         return len(palette) - 1
 
-    def _create_palette_entry(self, block_name: str, properties: Dict[str, str]) -> Any:
+    def _create_palette_entry(self, block_name: str,
+                              properties: Dict[str, str]) -> Any:
         try:
             from nbtlib import Compound, String
             entry = Compound({"Name": String(block_name)})
@@ -188,29 +226,44 @@ class BlockDataService:
                 indices.append(value & mask)
         return indices
 
-    def _encode_all_indices(self, indices: List[int], palette_size: int) -> List[int]:
-        bits = max(4, (palette_size - 1).bit_length()) if palette_size > 1 else 4
+    def _encode_all_indices(
+            self,
+            indices: List[int],
+            palette_size: int) -> List[int]:
+        bits = max(4, (palette_size - 1).bit_length()
+                   ) if palette_size > 1 else 4
         values_per_long = 64 // bits
         num_longs = (4096 + values_per_long - 1) // values_per_long
         longs = [0] * num_longs
         for i, palette_index in enumerate(indices):
             long_index = i // values_per_long
             bit_offset = (i % values_per_long) * bits
-            longs[long_index] |= (palette_index & ((1 << bits) - 1)) << bit_offset
+            longs[long_index] |= (
+                palette_index & (
+                    (1 << bits) -
+                    1)) << bit_offset
         for j in range(num_longs):
             if longs[j] >= (1 << 63):
                 longs[j] -= (1 << 64)
         return longs
 
-    def _set_block_states_data(self, block_states: Any, longs: List[int]) -> None:
+    def _set_block_states_data(
+            self,
+            block_states: Any,
+            longs: List[int]) -> None:
         # First check if we already have a data array and can modify in-place
         current_data = self._get(block_states, "data")
         if current_data is not None:
             # Try modifying existing array in-place first
             try:
                 # Check if it's an array-like object with setitem and len
-                if hasattr(current_data, "__len__") and hasattr(current_data, "__setitem__"):
-                    # In-place replacement: either overwrite all elements or resize if needed
+                if hasattr(
+                        current_data,
+                        "__len__") and hasattr(
+                        current_data,
+                        "__setitem__"):
+                    # In-place replacement: either overwrite all elements or
+                    # resize if needed
                     if len(current_data) == len(longs):
                         for i in range(len(longs)):
                             current_data[i] = longs[i]
@@ -225,7 +278,7 @@ class BlockDataService:
                         return
             except Exception:
                 pass  # If in-place fails, fall back to replacing the array
-        
+
         # Fall back to replacing the data field
         try:
             from nbtlib.tag import LongArray
@@ -255,7 +308,13 @@ class BlockDataService:
                 return section
         return None
 
-    def _decode_palette_index(self, data: Any, palette_size: int, local_x: int, local_y: int, local_z: int) -> int:
+    def _decode_palette_index(
+            self,
+            data: Any,
+            palette_size: int,
+            local_x: int,
+            local_y: int,
+            local_z: int) -> int:
         if data is None or palette_size <= 1:
             return 0
         bits = max(4, (palette_size - 1).bit_length())

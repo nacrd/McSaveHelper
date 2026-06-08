@@ -25,7 +25,10 @@ def validate_world_name(world_name: str) -> str:
     return name
 
 
-def safe_destination_world(src_world: Path, dest_dir: Path, world_name: str) -> Path:
+def safe_destination_world(
+        src_world: Path,
+        dest_dir: Path,
+        world_name: str) -> Path:
     """Return a validated destination world path under dest_dir."""
     safe_name = validate_world_name(world_name)
     base = dest_dir.resolve()
@@ -55,27 +58,34 @@ def _is_relative_to(path: Path, base: Path) -> bool:
         return False
 
 
-def replace_directory_tree(src_path: Path, dst_path: Path, *, ignore=None) -> None:
+def replace_directory_tree(
+        src_path: Path,
+        dst_path: Path,
+        *,
+        ignore=None) -> None:
     """Safely replace dst_path with a copy of src_path using atomic operations.
-    
+
     使用原子操作确保数据完整性：先复制到临时目录，成功后再替换目标目录。
     如果复制过程中发生错误，原目标目录会被保留。
     """
     import tempfile
     import os
-    
+
     src_resolved = src_path.resolve()
     dst_resolved = dst_path.resolve()
     _ensure_distinct_tree(src_resolved, dst_resolved)
-    
+
     if dst_resolved.exists():
         if not dst_resolved.is_dir():
             raise ValueError(f"目标路径不是目录: {dst_resolved}")
-        if any(dst_resolved.iterdir()) and not (dst_resolved / "level.dat").exists():
+        if any(
+                dst_resolved.iterdir()) and not (
+                dst_resolved /
+                "level.dat").exists():
             raise ValueError(f"目标目录不是 Minecraft 存档目录，拒绝删除: {dst_resolved}")
-    
+
     dst_resolved.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # 使用原子操作：先复制到临时目录，再替换
     temp_dir = None
     try:
@@ -85,26 +95,33 @@ def replace_directory_tree(src_path: Path, dst_path: Path, *, ignore=None) -> No
             dir=str(dst_resolved.parent)
         )
         temp_path = Path(temp_dir)
-        
+
         # 复制源目录到临时目录
-        shutil.copytree(src_resolved, temp_path / dst_resolved.name, ignore=ignore)
-        
+        shutil.copytree(
+            src_resolved,
+            temp_path /
+            dst_resolved.name,
+            ignore=ignore)
+
         # 原子替换：先删除旧目录（如果存在），再移动临时目录
         final_temp_path = temp_path / dst_resolved.name
         if dst_resolved.exists():
             shutil.rmtree(dst_resolved)
-        
+
         # 使用 os.replace 进行原子移动
         os.replace(str(final_temp_path), str(dst_resolved))
         temp_dir = None  # 标记为已成功处理
-        
+
     finally:
         # 清理临时目录（如果还有）
         if temp_dir and Path(temp_dir).exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def update_server_properties(dest_dir: Path, world_name: str, log: LogCallback) -> None:
+def update_server_properties(
+        dest_dir: Path,
+        world_name: str,
+        log: LogCallback) -> None:
     """修改 server.properties 文件中的 level-name 设置
 
     查找并更新服务端根目录下的 server.properties 文件，

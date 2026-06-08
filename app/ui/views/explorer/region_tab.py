@@ -89,11 +89,15 @@ class RegionTabMixin:
             bgcolor=THEME.bg_card,
         )
 
-        self._heatmap_coord_btn = btn_ghost("隐藏坐标", width=112, on_click=lambda e: self._toggle_heatmap_coordinates())
-        self._heatmap_empty_btn = btn_ghost("显示空格", width=112, on_click=lambda e: self._toggle_heatmap_empty_regions())
+        self._heatmap_coord_btn = btn_ghost(
+            "隐藏坐标", width=112, on_click=lambda e: self._toggle_heatmap_coordinates())
+        self._heatmap_empty_btn = btn_ghost(
+            "显示空格", width=112, on_click=lambda e: self._toggle_heatmap_empty_regions())
 
-        self._region_stats_text = ft.Text("等待设置当前存档...", size=12, color=THEME.text_muted)
-        self._region_status_text = ft.Text("👆 点击方块查看详情", size=13, color=THEME.text_secondary)
+        self._region_stats_text = ft.Text(
+            "等待设置当前存档...", size=12, color=THEME.text_muted)
+        self._region_status_text = ft.Text(
+            "👆 点击方块查看详情", size=13, color=THEME.text_secondary)
 
         action_row = ft.Column([
             ft.Row([
@@ -110,7 +114,8 @@ class RegionTabMixin:
             ], spacing=8),
         ], spacing=8)
 
-        view_option_row = ft.Row([self._heatmap_coord_btn, self._heatmap_empty_btn], spacing=8)
+        view_option_row = ft.Row(
+            [self._heatmap_coord_btn, self._heatmap_empty_btn], spacing=8)
         heatmap_card = card(ft.Container(
             content=heatmap_view,
             bgcolor=THEME.bg_secondary,
@@ -130,7 +135,8 @@ class RegionTabMixin:
             self._region_status_text,
         ], spacing=6), padding=10)
 
-        self._region_legend_container = ft.Container(content=self._create_region_legend_content())
+        self._region_legend_container = ft.Container(
+            content=self._create_region_legend_content())
         legend = card(self._region_legend_container, padding=10)
 
         left_panel = ft.Container(
@@ -185,7 +191,8 @@ class RegionTabMixin:
             *legend_rows,
         ], spacing=5)
 
-    def _get_region_display_legend(self) -> tuple[str, list[tuple[str, str, str]]]:
+    def _get_region_display_legend(
+            self) -> tuple[str, list[tuple[str, str, str]]]:
         if self._region_display_mode == "biome":
             return "🌿 主要群系图例", [
                 ("#1E88E5", "水域", "海洋 / 河流"),
@@ -216,7 +223,8 @@ class RegionTabMixin:
     def _change_region_display_mode(self, e: ft.ControlEvent) -> None:
         mode = self._region_display_mode_dropdown.value or "activity"
         self._region_display_mode = mode
-        if self._heatmap is not None and hasattr(self._heatmap, "set_display_mode"):
+        if self._heatmap is not None and hasattr(
+                self._heatmap, "set_display_mode"):
             self._heatmap.set_display_mode(mode)
         self._region_help_text.value = self._get_region_display_help(mode)
         self._region_legend_container.content = self._create_region_legend_content()
@@ -226,11 +234,13 @@ class RegionTabMixin:
             data = self._heatmap_service.get_all_data()
             size = data.get(self._selected_region_coord)
             if size is not None:
-                self._on_region_selected(self._selected_region_coord, size, None)
+                self._on_region_selected(
+                    self._selected_region_coord, size, None)
 
     def _change_region_detail_level(self, e: ft.ControlEvent) -> None:
         level = self._region_detail_level_dropdown.value or "auto"
-        if self._heatmap is not None and hasattr(self._heatmap, "set_detail_level"):
+        if self._heatmap is not None and hasattr(
+                self._heatmap, "set_detail_level"):
             self._heatmap.set_detail_level(level)
 
     def _get_region_display_help(self, mode: str) -> str:
@@ -240,13 +250,19 @@ class RegionTabMixin:
             return "读取区块 NBT 中的结构 starts/references，按区域内主要结构类型着色。"
         return "按文件大小相对平均值着色，适合快速判断玩家活动和内容密集区域。"
 
-    def _get_region_mode_value_text(self, coord: tuple[int, int], size: int, stats: dict[str, Any]) -> str:
+    def _get_region_mode_value_text(
+            self, coord: tuple[int, int], size: int, stats: dict[str, Any]) -> str:
         mode = self._region_display_mode
         if mode == "biome":
             meta = self._heatmap_service.get_region_meta(coord)
             biome = meta.get("dominant_biome", "unknown")
             biomes = meta.get("biomes", {}) or {}
-            names = ", ".join(list(biomes.keys())[:4]) if isinstance(biomes, dict) else ""
+            names = ", ".join(
+                list(
+                    biomes.keys())[
+                    :4]) if isinstance(
+                biomes,
+                dict) else ""
             return f"🌿 主要群系: {biome}" + (f"（含 {names}）" if names else "")
         if mode == "structure":
             meta = self._heatmap_service.get_region_meta(coord)
@@ -254,7 +270,15 @@ class RegionTabMixin:
             if count <= 0:
                 return "🏛️ 未发现结构引用"
             structures = meta.get("structures", {}) or {}
-            names = ", ".join(list(structures.keys())[:4]) if isinstance(structures, dict) else str(meta.get("dominant_structure", "unknown"))
+            names = ", ".join(
+                list(
+                    structures.keys())[
+                    :4]) if isinstance(
+                structures,
+                dict) else str(
+                    meta.get(
+                        "dominant_structure",
+                        "unknown"))
             positions = meta.get("structure_positions", []) or []
             if positions:
                 pos_lines = []
@@ -267,7 +291,8 @@ class RegionTabMixin:
                         pos_lines.append(f"{name}@X{px}, Z{pz}")
                     else:
                         pos_lines.append(f"{name}@X{px}, Y{py}, Z{pz}")
-                return f"🏛️ 结构引用: {count} 个（{names}）\n   📍 结构坐标: " + "；".join(pos_lines)
+                return f"🏛️ 结构引用: {count} 个（{names}）\n   📍 结构坐标: " + \
+                    "；".join(pos_lines)
             return f"🏛️ 结构引用: {count} 个（{names}）"
         if stats['avg_size'] > 0:
             ratio = size / stats['avg_size']
@@ -305,16 +330,26 @@ class RegionTabMixin:
             self._heatmap_empty_btn.set_text("隐藏空格" if enabled else "显示空格")
             safe_update(self._heatmap_empty_btn)
 
-    def _on_region_selected(self, coord: Optional[Tuple[int, int]], size: Optional[int], detail: Optional[Dict[str, Any]] = None) -> None:
+    def _on_region_selected(self,
+                            coord: Optional[Tuple[int,
+                                                  int]],
+                            size: Optional[int],
+                            detail: Optional[Dict[str,
+                                                  Any]] = None) -> None:
         stats = self._heatmap_service.get_statistics()
         if coord is None or size is None:
             self._selected_region_coord = None
             lines = [
-                f"📊 区域总数: {stats['total_regions']} 个",
-                f"💾 总大小: {format_size(stats['total_size'])}",
-                f"📈 平均: {format_size(stats['avg_size'])}",
-                f"🔍 最小: {format_size(stats['min_size'])} | 最大: {format_size(stats['max_size'])}",
-            ]
+                f"📊 区域总数: {
+                    stats['total_regions']} 个", f"💾 总大小: {
+                    format_size(
+                        stats['total_size'])}", f"📈 平均: {
+                    format_size(
+                        stats['avg_size'])}", f"🔍 最小: {
+                            format_size(
+                                stats['min_size'])} | 最大: {
+                                    format_size(
+                                        stats['max_size'])}", ]
             self._region_stats_text.value = "\n".join(lines)
             self._region_stats_text.color = THEME.text_primary
             self._region_status_text.value = "✅ 扫描完成，点击方块查看详情"
@@ -325,7 +360,10 @@ class RegionTabMixin:
 
         self._selected_region_coord = coord
         value_text = self._get_region_mode_value_text(coord, size, stats)
-        avg_text = f"平均 {format_size(int(stats['avg_size']))}" if stats['avg_size'] > 0 else "平均未知"
+        avg_text = f"平均 {
+            format_size(
+                int(
+                    stats['avg_size']))}" if stats['avg_size'] > 0 else "平均未知"
         region_x, region_z = coord
         chunk_x0 = region_x * 32
         chunk_x1 = region_x * 32 + 31
@@ -363,7 +401,9 @@ class RegionTabMixin:
             if not self.world_session or not self._selected_region_coord:
                 self.app.warn_dialog("提示", "请先在区域地图中选择一个区域。")
                 return
-            region_dir = Path(self._dimension_region_dirs.get(self._current_dimension, ""))
+            region_dir = Path(
+                self._dimension_region_dirs.get(
+                    self._current_dimension, ""))
             coord = self._selected_region_coord
             region_path = region_dir / f"r.{coord[0]}.{coord[1]}.mca"
             if not region_path.exists():
@@ -372,7 +412,8 @@ class RegionTabMixin:
             from app.services.region_editor_service import get_region_editor_service
             service = get_region_editor_service(log=self.app.log)
             if service.reset_region(region_path, backup=True):
-                self.app.info_dialog("成功", f"已删除区域 {coord}，游戏下次进入会重新生成。备份文件保留为 .bak。")
+                self.app.info_dialog(
+                    "成功", f"已删除区域 {coord}，游戏下次进入会重新生成。备份文件保留为 .bak。")
                 self._selected_region_coord = None
                 self._refresh_heatmap()
             else:
@@ -385,7 +426,9 @@ class RegionTabMixin:
             if not self.world_session or not self._selected_region_coord:
                 self.app.warn_dialog("提示", "请先在区域地图中选择一个区域。")
                 return
-            region_dir = Path(self._dimension_region_dirs.get(self._current_dimension, ""))
+            region_dir = Path(
+                self._dimension_region_dirs.get(
+                    self._current_dimension, ""))
             if not region_dir:
                 self.app.warn_dialog("提示", "当前维度没有可用的 region 目录。")
                 return
@@ -394,8 +437,10 @@ class RegionTabMixin:
             if not region_path.exists():
                 self.app.warn_dialog("提示", f"区域文件不存在: {region_path.name}")
                 return
-            relative_path = region_path.resolve().relative_to(self.world_session.world_path.resolve())
-            self._region_file_field.value = str(relative_path).replace("\\", "/")
+            relative_path = region_path.resolve().relative_to(
+                self.world_session.world_path.resolve())
+            self._region_file_field.value = str(
+                relative_path).replace("\\", "/")
             self._chunk_x_field.value = "0"
             self._chunk_z_field.value = "0"
             safe_update(self._region_file_field)
@@ -410,23 +455,29 @@ class RegionTabMixin:
             if not self.world_session:
                 self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return False
-            region_dir = Path(self._dimension_region_dirs.get(self._current_dimension, ""))
+            region_dir = Path(
+                self._dimension_region_dirs.get(
+                    self._current_dimension, ""))
             if not region_dir:
                 self.app.warn_dialog("提示", "当前维度没有可用的 region 目录。")
                 return False
             world_x = int(float((self._world_x_field.value or "0").strip()))
             world_z = int(float((self._world_z_field.value or "0").strip()))
-            region_x, region_z, local_chunk_x, local_chunk_z = self._world_coords_to_region_chunk(world_x, world_z)
+            region_x, region_z, local_chunk_x, local_chunk_z = self._world_coords_to_region_chunk(
+                world_x, world_z)
             region_path = region_dir / f"r.{region_x}.{region_z}.mca"
-            relative_path = region_path.resolve().relative_to(self.world_session.world_path.resolve())
-            self._region_file_field.value = str(relative_path).replace("\\", "/")
+            relative_path = region_path.resolve().relative_to(
+                self.world_session.world_path.resolve())
+            self._region_file_field.value = str(
+                relative_path).replace("\\", "/")
             self._chunk_x_field.value = str(local_chunk_x)
             self._chunk_z_field.value = str(local_chunk_z)
             safe_update(self._region_file_field)
             safe_update(self._chunk_x_field)
             safe_update(self._chunk_z_field)
             if not region_path.exists():
-                self.app.warn_dialog("提示", f"已填入坐标，但区域文件不存在: r.{region_x}.{region_z}.mca")
+                self.app.warn_dialog(
+                    "提示", f"已填入坐标，但区域文件不存在: r.{region_x}.{region_z}.mca")
                 return False
             return True
         except ValueError:
@@ -444,10 +495,13 @@ class RegionTabMixin:
         try:
             if not self.world_session:
                 return
-            if not hasattr(self, "_region_stats_text") or self._heatmap is None:
+            if not hasattr(
+                    self,
+                    "_region_stats_text") or self._heatmap is None:
                 return
             self._selected_region_coord = None
-            region_dir_str = self._dimension_region_dirs.get(self._current_dimension)
+            region_dir_str = self._dimension_region_dirs.get(
+                self._current_dimension)
             if not region_dir_str:
                 self._region_stats_text.value = "⚠️ 未找到当前维度的 region 目录"
                 self._region_stats_text.color = THEME.warning
@@ -509,11 +563,16 @@ class RegionTabMixin:
     def _update_region_stats(self) -> None:
         stats = self._heatmap_service.get_statistics()
         lines = [
-            f"📊 区域总数: {stats['total_regions']} 个",
-            f"💾 总大小: {format_size(stats['total_size'])}",
-            f"📈 平均: {format_size(stats['avg_size'])}",
-            f"🔍 最小: {format_size(stats['min_size'])} | 最大: {format_size(stats['max_size'])}",
-        ]
+            f"📊 区域总数: {
+                stats['total_regions']} 个", f"💾 总大小: {
+                format_size(
+                    stats['total_size'])}", f"📈 平均: {
+                    format_size(
+                        stats['avg_size'])}", f"🔍 最小: {
+                            format_size(
+                                stats['min_size'])} | 最大: {
+                                    format_size(
+                                        stats['max_size'])}", ]
         self._region_stats_text.value = "\n".join(lines)
         self._region_stats_text.color = THEME.text_primary
         safe_update(self._region_stats_text)

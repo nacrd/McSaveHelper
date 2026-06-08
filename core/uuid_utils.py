@@ -21,7 +21,9 @@ def get_offline_uuid_str(name: str) -> str:
     Returns:
         格式化的 UUID 字符串 (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
     """
-    digest = bytearray(hashlib.md5(f"OfflinePlayer:{name}".encode('utf-8')).digest())
+    digest = bytearray(
+        hashlib.md5(
+            f"OfflinePlayer:{name}".encode('utf-8')).digest())
     digest[6] = (digest[6] & 0x0F) | 0x30
     digest[8] = (digest[8] & 0x3F) | 0x80
     return str(uuid.UUID(bytes=bytes(digest)))
@@ -39,7 +41,7 @@ def uuid_to_ints(uuid_str: str) -> List[int]:
     hex_s = uuid_str.replace("-", "")
     values = []
     for i in range(0, 32, 8):
-        value = int(hex_s[i:i+8], 16)
+        value = int(hex_s[i:i + 8], 16)
         if value >= 0x80000000:
             value -= 0x100000000
         values.append(value)
@@ -59,7 +61,7 @@ def uuid_to_most_least(uuid_str: str) -> Tuple[int, int]:
     high = int(hex_s[:16], 16)
     low = int(hex_s[16:], 16)
     return struct.unpack('>q', struct.pack('>Q', high))[0], \
-           struct.unpack('>q', struct.pack('>Q', low))[0]
+        struct.unpack('>q', struct.pack('>Q', low))[0]
 
 
 def get_online_uuid(
@@ -87,7 +89,8 @@ def get_online_uuid(
             official_name = data.get('name', name)  # Mojang 返回的官方大小写
             uuid_str = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:32]}"
             if log_callback:
-                log_callback(f"正版UUID获取成功: {uuid_str} (官方名称: {official_name})", "API")
+                log_callback(
+                    f"正版UUID获取成功: {uuid_str} (官方名称: {official_name})", "API")
             return uuid_str, official_name
         else:
             if log_callback:
@@ -114,7 +117,10 @@ def get_name_from_uuid(
     if log_callback:
         log_callback(f"正在通过UUID查询玩家名: {uuid} ...", "API")
     try:
-        url = f"https://sessionserver.mojang.com/session/minecraft/profile/{uuid.replace('-', '')}"
+        url = f"https://sessionserver.mojang.com/session/minecraft/profile/{
+            uuid.replace(
+                '-',
+                '')}"
         r = requests.get(url, timeout=5)
         time.sleep(0.3)
         if r.status_code == 200:
@@ -141,7 +147,11 @@ def load_usercache(world_path: Path) -> dict:
         UUID 到玩家名的映射字典
     """
     cache: dict = {}
-    for p in [world_path.parent / "usercache.json", world_path.parent.parent / "usercache.json"]:
+    for p in [
+        world_path.parent /
+        "usercache.json",
+        world_path.parent.parent /
+            "usercache.json"]:
         if p.exists():
             try:
                 with open(p, 'r', encoding='utf-8') as f:
@@ -178,30 +188,31 @@ def build_mappings(
     pd = world_path / "playerdata"
     if not pd.exists():
         return []
-    maps: List[Tuple[List[int], List[int], str, str, Tuple[int, int], Tuple[int, int]]] = []
+    maps: List[Tuple[List[int], List[int], str,
+                     str, Tuple[int, int], Tuple[int, int]]] = []
     new_uuids = set()
     processed_names = set()
-    
+
     # 处理自定义UUID映射
     custom_mappings = custom_mappings or {}
     if custom_mappings:
         log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
-    
+
     for f in pd.glob("*.dat"):
         old_u = f.stem
         if old_u in new_uuids:
             continue
-        
+
         name = cache.get(old_u)
         if not name and not offline_mode:
             name = get_name_from_uuid(old_u, log)
-        
+
         # 检查是否有自定义UUID映射
         custom_uuid = None
         if name and name in custom_mappings:
             custom_uuid = custom_mappings[name]
             log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
-        
+
         if not name and manual_names:
             name = manual_names[0]
             log(f"使用手动输入的玩家名: {name}", "MANUAL")
@@ -209,7 +220,7 @@ def build_mappings(
             if name in custom_mappings:
                 custom_uuid = custom_mappings[name]
                 log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
-        
+
         if name:
             processed_names.add(name)
             # 优先使用自定义UUID，否则使用离线UUID
@@ -217,7 +228,7 @@ def build_mappings(
                 new_u = custom_uuid
             else:
                 new_u = get_offline_uuid_str(name)
-            
+
             maps.append((
                 uuid_to_ints(old_u),
                 uuid_to_ints(new_u),
@@ -230,7 +241,7 @@ def build_mappings(
             log(f"映射: {name} ({old_u} -> {new_u})", "INFO")
         else:
             log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
-    
+
     # 处理手动输入但不在playerdata中的玩家
     if manual_names:
         for name in manual_names:
@@ -242,7 +253,7 @@ def build_mappings(
                 else:
                     new_u = get_offline_uuid_str(name)
                     log(f"为手动玩家 {name} 生成离线UUID: {new_u}", "INFO")
-                
+
                 # 添加一个虚拟映射（仅用于生成双UUID文件）
                 offline_uuid = get_offline_uuid_str(name)
                 maps.append((
@@ -253,5 +264,5 @@ def build_mappings(
                     uuid_to_most_least(offline_uuid),
                     uuid_to_most_least(new_u)
                 ))
-    
+
     return maps

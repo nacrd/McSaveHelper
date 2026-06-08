@@ -29,7 +29,8 @@ def process_region_file(
             for z in range(32):
                 chunk = region.get_chunk(x, z)
                 if chunk:
-                    data = chunk if isinstance(chunk, nbtlib.tag.Compound) else chunk.data
+                    data = chunk if isinstance(
+                        chunk, nbtlib.tag.Compound) else chunk.data
                     if data:
                         _, c = patch_nbt(data, mappings)
                         changes += c
@@ -73,7 +74,11 @@ def process_regions_parallel(
         return
 
     with ThreadPoolExecutor(max_workers=min(8, total)) as executor:
-        futures = [executor.submit(process_region_file, f, mappings) for f in files]
+        futures = [
+            executor.submit(
+                process_region_file,
+                f,
+                mappings) for f in files]
         for future in as_completed(futures):
             path, changes, error = future.result()
             done += 1

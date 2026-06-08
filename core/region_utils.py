@@ -6,9 +6,11 @@ import re
 REGION_FILE_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.mca$")
 
 
-def parse_region_coords(path_or_name: Union[Path, str]) -> Optional[Tuple[int, int]]:
+def parse_region_coords(
+        path_or_name: Union[Path, str]) -> Optional[Tuple[int, int]]:
     """解析 MCA 区域文件坐标。"""
-    name = path_or_name.name if isinstance(path_or_name, Path) else str(path_or_name)
+    name = path_or_name.name if isinstance(
+        path_or_name, Path) else str(path_or_name)
     match = REGION_FILE_RE.match(name)
     if not match:
         return None
@@ -29,7 +31,9 @@ def scan_region_dir(region_dir: Path) -> List[Path]:
     return sorted(files)
 
 
-def iter_region_dirs(world_path: Path, include_dimensions: bool = True) -> Iterable[Path]:
+def iter_region_dirs(
+        world_path: Path,
+        include_dimensions: bool = True) -> Iterable[Path]:
     """枚举世界存档中的 region 目录。"""
     yield world_path / "region"
     if not include_dimensions:
@@ -59,9 +63,12 @@ def iter_region_dirs(world_path: Path, include_dimensions: bool = True) -> Itera
         pass
 
 
-def scan_regions(world_path: Path, include_dimensions: bool = True) -> List[Path]:
+def scan_regions(
+        world_path: Path,
+        include_dimensions: bool = True) -> List[Path]:
     """扫描世界存档中的有效 MCA 文件。"""
     files: List[Path] = []
-    for region_dir in iter_region_dirs(world_path, include_dimensions=include_dimensions):
+    for region_dir in iter_region_dirs(
+            world_path, include_dimensions=include_dimensions):
         files.extend(scan_region_dir(region_dir))
     return sorted(files, key=lambda p: str(p))

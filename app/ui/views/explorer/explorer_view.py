@@ -30,7 +30,13 @@ from app.ui.views.explorer.explorer_helpers import (
 )
 
 
-class ExplorerView(WorldInfoTabMixin, PlayerTabMixin, RegionTabMixin, StatsTabMixin, NbtTabMixin, ft.Column):
+class ExplorerView(
+        WorldInfoTabMixin,
+        PlayerTabMixin,
+        RegionTabMixin,
+        StatsTabMixin,
+        NbtTabMixin,
+        ft.Column):
     """存档浏览器视图"""
 
     def __init__(self, app: "Application") -> None:
@@ -81,32 +87,29 @@ class ExplorerView(WorldInfoTabMixin, PlayerTabMixin, RegionTabMixin, StatsTabMi
         self._tab_nbt = ft.Container()
         self._tab_nbt.expand = True
         self._region_display_mode = "activity"
-        
+
         self._tabs_content = [
-            self._tab_world_info, 
-            self._tab_player, 
-            self._tab_region, 
+            self._tab_world_info,
+            self._tab_player,
+            self._tab_region,
             self._tab_stats,
             self._tab_search,
             self._tab_nbt
         ]
         self._tab_index = 0
-        
+
         # 追踪哪些标签页已构建
         self._tabs_built = [False] * 6
 
         self._tab_bar, self._tab_labels_row, self._tab_buttons, self._tab_labels_widgets = segmented_tab_bar(
             [
-                TabSpec("存档信息", "🌍"),
-                TabSpec("玩家", "🧍"),
-                TabSpec("区域", "🧱"),
-                TabSpec("统计", "📊"),
-                TabSpec("搜索", "🔍"),
-                TabSpec("NBT", "📜"),
-            ],
-            selected_index=0,
-            on_select=self._switch_tab,
-        )
+                TabSpec(
+                    "存档信息", "🌍"), TabSpec(
+                    "玩家", "🧍"), TabSpec(
+                    "区域", "🧱"), TabSpec(
+                        "统计", "📊"), TabSpec(
+                            "搜索", "🔍"), TabSpec(
+                                "NBT", "📜"), ], selected_index=0, on_select=self._switch_tab, )
         self._content_box = panel(
             content=self._tabs_content[0],
             padding=10,
@@ -144,7 +147,7 @@ class ExplorerView(WorldInfoTabMixin, PlayerTabMixin, RegionTabMixin, StatsTabMi
                     if self.current_uuid:
                         self._load_player_data(self.current_uuid)
                 self._tabs_built[index] = True
-            
+
             self._tab_index = index
             for i, lbl in enumerate(self._tab_labels_widgets):
                 selected = i == index
@@ -171,27 +174,35 @@ class ExplorerView(WorldInfoTabMixin, PlayerTabMixin, RegionTabMixin, StatsTabMi
             for idx, btn in enumerate(self._tab_buttons):
                 btn.width = tab_width
                 btn.height = tab_height
-                btn.padding = ft.Padding(left=4, right=4, top=4, bottom=4) if compact else ft.Padding(left=6, right=6, top=6, bottom=6)
+                btn.padding = ft.Padding(
+                    left=4, right=4, top=4, bottom=4) if compact else ft.Padding(
+                    left=6, right=6, top=6, bottom=6)
                 if idx < len(self._tab_labels_widgets):
                     self._tab_labels_widgets[idx].size = 10 if compact else 12
             self._tab_labels_row.spacing = 4 if compact else 8
-            self._tab_bar.padding = ft.Padding(left=6, right=6, top=6, bottom=6) if compact else ft.Padding(left=10, right=10, top=10, bottom=10)
-            self._content_box.padding = ft.Padding(left=6, right=6, top=6, bottom=6) if compact else ft.Padding(left=10, right=10, top=10, bottom=10)
+            self._tab_bar.padding = ft.Padding(
+                left=6, right=6, top=6, bottom=6) if compact else ft.Padding(
+                left=10, right=10, top=10, bottom=10)
+            self._content_box.padding = ft.Padding(
+                left=6, right=6, top=6, bottom=6) if compact else ft.Padding(
+                left=10, right=10, top=10, bottom=10)
             if hasattr(self, '_player_left_panel'):
                 self._player_left_panel.width = 300 if compact else 340
             if hasattr(self, '_region_left_panel'):
                 self._region_side_panel.width = 320 if compact else 360
                 self._region_side_panel.height = 280 if compact else 320
-            if self._heatmap is not None and hasattr(self._heatmap, 'resize_map'):
-                self._heatmap.resize_map(340 if compact else 420, 220 if compact else 260)
+            if self._heatmap is not None and hasattr(
+                    self._heatmap, 'resize_map'):
+                self._heatmap.resize_map(
+                    340 if compact else 420, 220 if compact else 260)
             safe_update(self)
         except Exception:
             pass
 
     def _build_search_tab(self) -> None:
-        self._entity_block_search_view = EntityBlockSearchView(self.app, compact=True)
+        self._entity_block_search_view = EntityBlockSearchView(
+            self.app, compact=True)
         self._tab_search.content = self._entity_block_search_view
-    
 
     def on_save_selected(self, path: str) -> None:
         """当存档被选择时调用（从侧边栏）"""
@@ -222,7 +233,9 @@ class ExplorerView(WorldInfoTabMixin, PlayerTabMixin, RegionTabMixin, StatsTabMi
             def _load():
                 try:
                     session = WorldSession(Path(path), log=self.app.log)
-                    async def _apply_loaded_world(loaded_session: WorldSession):
+
+                    async def _apply_loaded_world(
+                            loaded_session: WorldSession):
                         try:
                             self._populate_world(loaded_session)
                         except Exception as ui_ex:
@@ -233,22 +246,27 @@ class ExplorerView(WorldInfoTabMixin, PlayerTabMixin, RegionTabMixin, StatsTabMi
                         self._world_label.value = "❌ 无效的存档目录"
                         self._world_label.color = THEME.error
                         safe_update(self._world_label)
-                        self.app.error_dialog("无效的存档", f"所选目录不是有效的 Minecraft 存档：\n\n{err_msg}\n\n请确保选择包含 level.dat 的存档根目录")
+                        self.app.error_dialog(
+                            "无效的存档", f"所选目录不是有效的 Minecraft 存档：\n\n{err_msg}\n\n请确保选择包含 level.dat 的存档根目录")
                     self.app.page.run_task(_show_error, str(ex))
                 except RuntimeError as ex:
                     async def _show_nbt_error(err_msg: str):
                         self._world_label.value = "❌ NBT 解析失败"
                         self._world_label.color = THEME.error
                         safe_update(self._world_label)
-                        self.app.error_dialog("NBT 解析失败", f"level.dat 文件损坏或格式不兼容：\n\n{err_msg}\n\n可能原因：\n• 存档文件损坏\n• 不支持的 Minecraft 版本\n• 文件被其他程序占用")
+                        self.app.error_dialog(
+                            "NBT 解析失败",
+                            f"level.dat 文件损坏或格式不兼容：\n\n{err_msg}\n\n可能原因：\n• 存档文件损坏\n• 不支持的 Minecraft 版本\n• 文件被其他程序占用")
                     self.app.page.run_task(_show_nbt_error, str(ex))
                 except Exception as ex:
                     async def _show_general_error(err_msg: str, err_type: str):
                         self._world_label.value = "❌ 加载存档失败"
                         self._world_label.color = THEME.warning
                         safe_update(self._world_label)
-                        self.app.error_dialog("加载存档失败", f"{err_type}: {err_msg}")
-                    self.app.page.run_task(_show_general_error, str(ex), type(ex).__name__)
+                        self.app.error_dialog(
+                            "加载存档失败", f"{err_type}: {err_msg}")
+                    self.app.page.run_task(
+                        _show_general_error, str(ex), type(ex).__name__)
 
             threading.Thread(target=_load, daemon=True).start()
         except Exception as ex:

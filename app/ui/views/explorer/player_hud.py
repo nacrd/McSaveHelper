@@ -13,7 +13,7 @@ class PlayerHUDCard(ft.Column):
         super().__init__(spacing=8)
         self._t = t_cb or (lambda k, d="", **kw: d)
         self._attrs: Dict[str, ft.Text] = {}
-        
+
         rows_data = [
             ("health", "生命值", "♥"),
             ("food", "饥饿值", "🍖"),
@@ -22,14 +22,24 @@ class PlayerHUDCard(ft.Column):
             ("dimension", "维度", "🌍"),
             ("pos", "坐标", "📍"),
         ]
-        
+
         self.controls.append(
-            ft.Text("玩家状态", size=16, weight=ft.FontWeight.BOLD, color=THEME.text_primary)
-        )
-        
+            ft.Text(
+                "玩家状态",
+                size=16,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.text_primary))
+
         for key, label_text, icon in rows_data:
-            lbl = ft.Text(f"{icon} {label_text}:", size=13, color=THEME.text_secondary)
-            val = ft.Text("--", size=13, weight=ft.FontWeight.BOLD, color=THEME.accent_light)
+            lbl = ft.Text(
+                f"{icon} {label_text}:",
+                size=13,
+                color=THEME.text_secondary)
+            val = ft.Text(
+                "--",
+                size=13,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.accent_light)
             self._attrs[key] = val
             self.controls.append(ft.Row([lbl, val], spacing=10))
 
@@ -62,7 +72,13 @@ class PlayerHUDCard(ft.Column):
                     self._attrs["dimension"].value = ds
             pos = player_data.get("Pos")
             if pos is not None and len(pos) >= 3:
-                self._attrs["pos"].value = f"{float(pos[0]):.1f}, {float(pos[1]):.1f}, {float(pos[2]):.1f}"
+                self._attrs["pos"].value = f"{
+                    float(
+                        pos[0]):.1f}, {
+                    float(
+                        pos[1]):.1f}, {
+                    float(
+                        pos[2]):.1f}"
         except Exception:
             pass
         safe_update(self)

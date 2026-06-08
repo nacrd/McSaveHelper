@@ -1,4 +1,5 @@
 """server.properties 编辑服务"""
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -44,7 +45,12 @@ PROPERTY_DESCRIPTIONS: Dict[str, str] = {
     "spawn-protection": "出生点保护半径",
 }
 
-BOOLEAN_PROPERTIES = {"online-mode", "pvp", "allow-flight", "enable-command-block", "white-list"}
+BOOLEAN_PROPERTIES = {
+    "online-mode",
+    "pvp",
+    "allow-flight",
+    "enable-command-block",
+    "white-list"}
 INTEGER_RANGES: Dict[str, Tuple[int, int]] = {
     "max-players": (1, 100000),
     "server-port": (1, 65535),
@@ -67,7 +73,9 @@ class ServerPropertiesService:
         if not props_path.exists():
             return DEFAULT_SERVER_PROPERTIES.copy()
         props: Dict[str, str] = {}
-        for line in props_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        for line in props_path.read_text(
+                encoding="utf-8",
+                errors="replace").splitlines():
             raw = line.strip()
             if not raw or raw.startswith("#") or "=" not in raw:
                 continue
@@ -119,13 +127,12 @@ class ServerPropertiesService:
         return errors
 
 
-import threading
-
 _server_properties_service: Optional[ServerPropertiesService] = None
 _server_properties_service_lock = threading.Lock()
 
 
-def get_server_properties_service(log: Optional[LogCallback] = None) -> ServerPropertiesService:
+def get_server_properties_service(
+        log: Optional[LogCallback] = None) -> ServerPropertiesService:
     """获取服务器属性服务单例（线程安全）"""
     global _server_properties_service
     with _server_properties_service_lock:

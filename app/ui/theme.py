@@ -11,30 +11,30 @@ class ThemeColors:
     bg_secondary: str = "#1C1C1C"
     bg_card: str = "#383838"
     bg_card_hover: str = "#484848"
-    
+
     # Border colors - Minecraft beveled style
     border_light: str = "#A0A0A0"      # Top/left highlight
     border_dark: str = "#1A1A1A"       # Bottom/right shadow
     border_standard: str = "#5A5A5A"
     border_subtle: str = "#3F3F3F"
-    
+
     # Accent colors
     accent: str = "#55FF55"
     accent_hover: str = "#7AFF7A"
-    
+
     # Status colors
     success: str = "#55FF55"
     warning: str = "#FFAA00"
     error: str = "#FF5555"
     info: str = "#55AAFF"
-    
+
     # Text colors
     text_primary: str = "#FFFFFF"
     text_secondary: str = "#AAAAAA"
     text_muted: str = "#707070"
     text_disabled: str = "#4A4A4A"
     text_invert: str = "#000000"  # 反色文本（用于亮色背景按钮）
-    
+
     # Terminal colors
     terminal_green: str = "#55FF55"
     terminal_yellow: str = "#FFAA00"
@@ -42,7 +42,7 @@ class ThemeColors:
     terminal_blue: str = "#5599FF"
     terminal_cyan: str = "#55FFFF"
     terminal_purple: str = "#AA55FF"
-    
+
     # Minecraft block colors
     mc_stone: str = "#7D7D7D"
     mc_dirt: str = "#96651B"
@@ -55,10 +55,10 @@ class ThemeColors:
     mc_emerald: str = "#17DD62"
     mc_redstone: str = "#DD0000"
     mc_obsidian: str = "#0F0F1E"
-    
+
     # Effects
     shadow: str = "rgba(0, 0, 0, 0.6)"
-    
+
     # Backward compatibility aliases
     border_tertiary: str = "#A0A0A0"  # Alias for border_light
     accent_light: str = "#7AFF7A"     # Alias for accent_hover

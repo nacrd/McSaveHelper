@@ -139,7 +139,10 @@ class UUIDMappingTable(ft.Column):
         )
         self.controls.append(tb)
 
-    def _add_row_with_values(self, player_name: str = "", uuid: str = "") -> None:
+    def _add_row_with_values(
+            self,
+            player_name: str = "",
+            uuid: str = "") -> None:
         nf = ft.TextField(
             value=player_name,
             border_color=THEME.border_standard,
@@ -189,7 +192,8 @@ class UUIDMappingTable(ft.Column):
         self._sync()
 
     def _delete_row(self, row_container: ft.Container) -> None:
-        self._row_data = [r for r in self._row_data if r["container"] is not row_container]
+        self._row_data = [
+            r for r in self._row_data if r["container"] is not row_container]
         self.controls.remove(row_container)
         self._sync()
         _safe_update(self)

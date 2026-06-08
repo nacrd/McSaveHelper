@@ -71,10 +71,22 @@ class NbtTabMixin:
         )
 
         # 快速加载按钮
-        quick_load_buttons = ft.Row([
-            ft.Container(content=btn_ghost("玩家", on_click=self._load_current_player_nbt, height=32), expand=True),
-            ft.Container(content=btn_ghost("世界", on_click=self._load_level_nbt, height=32), expand=True),
-        ], spacing=6)
+        quick_load_buttons = ft.Row(
+            [
+                ft.Container(
+                    content=btn_ghost(
+                        "玩家",
+                        on_click=self._load_current_player_nbt,
+                        height=32),
+                    expand=True),
+                ft.Container(
+                    content=btn_ghost(
+                        "世界",
+                        on_click=self._load_level_nbt,
+                        height=32),
+                    expand=True),
+            ],
+            spacing=6)
 
         # 数据源区域
         data_source_section = ft.Column([
@@ -88,10 +100,14 @@ class NbtTabMixin:
             label="区域文件", hint_text="region/r.0.0.mca",
             width=250, expand=False,
         )
-        self._chunk_x_field = text_field(value="0", label="区块X", width=80, expand=False)
-        self._chunk_z_field = text_field(value="0", label="区块Z", width=80, expand=False)
-        self._world_x_field = text_field(value="0", label="世界X", width=80, expand=False)
-        self._world_z_field = text_field(value="0", label="世界Z", width=80, expand=False)
+        self._chunk_x_field = text_field(
+            value="0", label="区块X", width=80, expand=False)
+        self._chunk_z_field = text_field(
+            value="0", label="区块Z", width=80, expand=False)
+        self._world_x_field = text_field(
+            value="0", label="世界X", width=80, expand=False)
+        self._world_z_field = text_field(
+            value="0", label="世界Z", width=80, expand=False)
 
         chunk_section = ft.Column([
             ft.Text("📦 区块", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
@@ -107,23 +123,33 @@ class NbtTabMixin:
         ], spacing=6)
 
         # 方块操作
-        self._block_y_field = text_field(value="64", label="Y", width=60, expand=False)
-        self._block_query_result = ft.Text("", size=10, color=THEME.text_muted, max_lines=2)
+        self._block_y_field = text_field(
+            value="64", label="Y", width=60, expand=False)
+        self._block_query_result = ft.Text(
+            "", size=10, color=THEME.text_muted, max_lines=2)
         self._block_replace_name_field = text_field(
             label="方块ID", hint_text="stone",
             width=250, expand=False,
         )
 
-        block_section = ft.Column([
-            ft.Text("🧱 方块", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            ft.Row([
-                self._block_y_field,
-                btn_ghost("查询", on_click=self._query_block_at_current_coords, height=30),
-            ], spacing=6),
-            self._block_query_result,
-            self._block_replace_name_field,
-            ft.Container(content=btn_primary("替换", on_click=self._replace_block_at_current_coords, height=32), expand=True),
-        ], spacing=6)
+        block_section = ft.Column([ft.Text("🧱 方块",
+                                           size=13,
+                                           weight=ft.FontWeight.BOLD,
+                                           color=THEME.text_primary),
+                                   ft.Row([self._block_y_field,
+                                           btn_ghost("查询",
+                                                     on_click=self._query_block_at_current_coords,
+                                                     height=30),
+                                           ],
+                                          spacing=6),
+                                   self._block_query_result,
+                                   self._block_replace_name_field,
+                                   ft.Container(content=btn_primary("替换",
+                                                                    on_click=self._replace_block_at_current_coords,
+                                                                    height=32),
+                                                expand=True),
+                                   ],
+                                  spacing=6)
 
         # 左侧面板容器
         left_content = ft.Column(
@@ -209,7 +235,10 @@ class NbtTabMixin:
         """构建右侧暂存区面板"""
         # 暂存区状态
         self._nbt_stage_status = ft.Text(
-            "暂存区: 0 个变更", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_muted,
+            "暂存区: 0 个变更",
+            size=12,
+            weight=ft.FontWeight.BOLD,
+            color=THEME.text_muted,
         )
 
         # 暂存列表
@@ -224,10 +253,18 @@ class NbtTabMixin:
         # 右侧面板
         right_content = ft.Column(
             [
-                ft.Text("📋 暂存区", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                ft.Text(
+                    "📋 暂存区",
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary),
                 self._nbt_stage_status,
-                ft.Divider(height=1, color=THEME.border_light),
-                ft.Container(content=self._nbt_stage_list, expand=True),
+                ft.Divider(
+                    height=1,
+                    color=THEME.border_light),
+                ft.Container(
+                    content=self._nbt_stage_list,
+                    expand=True),
                 action_buttons,
             ],
             spacing=8,
@@ -311,9 +348,15 @@ class NbtTabMixin:
         if hasattr(self, '_data_loader'):
             self._data_loader.export_nbt_json(e)
 
-    def _stage_nbt_change(self, path_parts: List[Union[str, int]], old_value: Any, new_value: Any, display_path: str) -> None:
+    def _stage_nbt_change(self,
+                          path_parts: List[Union[str,
+                                                 int]],
+                          old_value: Any,
+                          new_value: Any,
+                          display_path: str) -> None:
         if hasattr(self, '_stage_manager'):
-            self._stage_manager.stage_change(path_parts, old_value, new_value, display_path)
+            self._stage_manager.stage_change(
+                path_parts, old_value, new_value, display_path)
 
     def _update_nbt_stage_status(self) -> None:
         if hasattr(self, '_stage_manager'):
@@ -335,7 +378,8 @@ class NbtTabMixin:
         if hasattr(self, '_chunk_ops'):
             self._chunk_ops.on_chunk_object_filter(e)
 
-    def _query_block_at_current_coords(self, e: Any = None, silent: bool = False) -> None:
+    def _query_block_at_current_coords(
+            self, e: Any = None, silent: bool = False) -> None:
         if hasattr(self, '_chunk_ops'):
             self._chunk_ops.query_block_at_current_coords(e, silent)
 

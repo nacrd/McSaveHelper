@@ -120,7 +120,11 @@ class LogRecord:
         """
         return json.dumps(self.to_dict(), ensure_ascii=False)
 
-    def format_text(self, include_timestamp: bool = True, include_module: bool = True, include_level: bool = True) -> str:
+    def format_text(
+            self,
+            include_timestamp: bool = True,
+            include_module: bool = True,
+            include_level: bool = True) -> str:
         """格式化为文本
 
         Args:
@@ -230,7 +234,10 @@ class ConsoleHandler(LogHandler):
         timestamp = record.timestamp.strftime("%H:%M:%S")
         module_str = f" [{record.module}]" if record.module else ""
 
-        message = record.format_text(include_timestamp=False, include_module=False, include_level=False)
+        message = record.format_text(
+            include_timestamp=False,
+            include_module=False,
+            include_level=False)
 
         output = f"{color}[{timestamp}] [{level_name}]{module_str} {message}{self._reset}"
 
@@ -298,7 +305,7 @@ class FileHandler(LogHandler):
 
         for i in range(self.backup_count - 1, 0, -1):
             old_file = self.filepath.with_suffix(f".{i}.log")
-            new_file = self.filepath.with_suffix(f".{i+1}.log")
+            new_file = self.filepath.with_suffix(f".{i + 1}.log")
             if old_file.exists():
                 old_file.rename(new_file)
 
@@ -356,7 +363,8 @@ class UIHandler(LogHandler):
     通过回调函数将日志发送到 UI 界面显示。
     """
 
-    def __init__(self, log_callback: LogCallback, level: LogLevel = LogLevel.INFO) -> None:
+    def __init__(self, log_callback: LogCallback,
+                 level: LogLevel = LogLevel.INFO) -> None:
         super().__init__(level)
         self.log_callback: LogCallback = log_callback
 
@@ -464,7 +472,10 @@ class LogManager:
             try:
                 handler.handle(record)
             except Exception as e:
-                print(f"日志处理器 {handler.__class__.__name__} 失败: {e}", file=sys.stderr)
+                print(
+                    f"日志处理器 {
+                        handler.__class__.__name__} 失败: {e}",
+                    file=sys.stderr)
 
     def add_handler(self, handler: LogHandler) -> None:
         """添加日志处理器
@@ -530,7 +541,8 @@ class LogManager:
 
         self._queue.put(record)
 
-    def debug(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def debug(self, message: str, module: str = "",
+              extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 DEBUG 级别日志
 
         Args:
@@ -540,7 +552,8 @@ class LogManager:
         """
         self.log(LogLevel.DEBUG, message, module, extra)
 
-    def info(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def info(self, message: str, module: str = "",
+             extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 INFO 级别日志
 
         Args:
@@ -550,7 +563,8 @@ class LogManager:
         """
         self.log(LogLevel.INFO, message, module, extra)
 
-    def success(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def success(self, message: str, module: str = "",
+                extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 SUCCESS 级别日志
 
         Args:
@@ -560,7 +574,8 @@ class LogManager:
         """
         self.log(LogLevel.SUCCESS, message, module, extra)
 
-    def api(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def api(self, message: str, module: str = "",
+            extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 API 级别日志
 
         Args:
@@ -570,7 +585,8 @@ class LogManager:
         """
         self.log(LogLevel.API, message, module, extra)
 
-    def warning(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def warning(self, message: str, module: str = "",
+                extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 WARNING 级别日志
 
         Args:
@@ -580,7 +596,8 @@ class LogManager:
         """
         self.log(LogLevel.WARNING, message, module, extra)
 
-    def error(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def error(self, message: str, module: str = "",
+              extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 ERROR 级别日志
 
         Args:
@@ -590,7 +607,8 @@ class LogManager:
         """
         self.log(LogLevel.ERROR, message, module, extra)
 
-    def critical(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def critical(self, message: str, module: str = "",
+                 extra: Optional[Dict[str, Any]] = None) -> None:
         """记录 CRITICAL 级别日志
 
         Args:

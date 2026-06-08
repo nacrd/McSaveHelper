@@ -17,6 +17,7 @@ try:
 except ImportError:
     PIL_AVAILABLE = False
 
+
 class MapExportService:
     """地图导出服务"""
 
@@ -50,7 +51,8 @@ class MapExportService:
 
     def __init__(self) -> None:
         if not PIL_AVAILABLE:
-            raise ImportError("需要安装 Pillow 库才能使用地图导出功能\n请运行: pip install Pillow")
+            raise ImportError(
+                "需要安装 Pillow 库才能使用地图导出功能\n请运行: pip install Pillow")
 
     def export_map(
         self,
@@ -62,7 +64,7 @@ class MapExportService:
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> Dict[str, Any]:
         """导出地图
-        
+
         Args:
             world_path: 存档路径
             output_path: 输出文件路径
@@ -70,7 +72,7 @@ class MapExportService:
             scale: 缩放比例
             progress_callback: 进度回调
             log_callback: 日志回调
-            
+
         Returns:
             导出结果字典
         """
@@ -115,7 +117,13 @@ class MapExportService:
             # 分析区块范围
             progress(0.15, "分析地图范围...")
             bounds = self._analyze_region_bounds(region_files, log)
-            log(f"地图范围: X[{bounds['min_x']} ~ {bounds['max_x']}], Z[{bounds['min_z']} ~ {bounds['max_z']}]", "INFO")
+            log(
+                f"地图范围: X[{
+                    bounds['min_x']} ~ {
+                    bounds['max_x']}], Z[{
+                    bounds['min_z']} ~ {
+                    bounds['max_z']}]",
+                "INFO")
 
             # 创建地图图像
             progress(0.25, "创建地图图像...")
@@ -161,11 +169,11 @@ class MapExportService:
         log: Callable[[str, str], None],
     ) -> Dict[str, int]:
         """分析区块文件范围
-        
+
         Args:
             region_files: 区块文件列表
             log: 日志回调
-            
+
         Returns:
             范围字典
         """
@@ -173,7 +181,7 @@ class MapExportService:
         max_x = float('-inf')
         min_z = float('inf')
         max_z = float('-inf')
-        
+
         for region_file in region_files:
             coords = parse_region_coords(region_file)
             if coords is not None:
@@ -201,7 +209,7 @@ class MapExportService:
         progress: Callable[[float, str], None],
     ) -> Image.Image:
         """创建地图图像
-        
+
         Args:
             world_path: 存档路径
             region_files: 区块文件列表
@@ -210,7 +218,7 @@ class MapExportService:
             scale: 缩放比例
             log: 日志回调
             progress: 进度回调
-            
+
         Returns:
             PIL 图像对象
         """
@@ -242,21 +250,24 @@ class MapExportService:
             )
 
         log(f"创建 {width}x{height} 的图像 (预计 {estimated_mb:.0f} MB)", "INFO")
-        
+
         # 创建图像
-        image = Image.new("RGB", (width, height), color=(135, 206, 235))  # 天蓝色背景
+        image = Image.new(
+            "RGB", (width, height), color=(
+                135, 206, 235))  # 天蓝色背景
 
         try:
             from anvil import Region
-            
+
             # 使用像素访问对象，比逐个 putpixel 调用快得多
             pixels = image.load()
-            
+
             total = len(region_files)
             for idx, region_file in enumerate(region_files):
                 # 更新进度 (25% - 95%)
-                progress(0.25 + (idx / total) * 0.70, f"渲染区块 {idx+1}/{total}")
-                
+                progress(0.25 + (idx / total) * 0.70,
+                         f"渲染区块 {idx + 1}/{total}")
+
                 try:
                     # 解析区块坐标
                     coords = parse_region_coords(region_file)
@@ -264,10 +275,10 @@ class MapExportService:
                         continue
 
                     rx, rz = coords
-                    
+
                     # 读取区块
                     region = Region.from_file(str(region_file))
-                    
+
                     # 渲染区块
                     for cx in range(32):
                         for cz in range(32):
@@ -288,10 +299,10 @@ class MapExportService:
                                     )
                             except Exception:
                                 pass  # 跳过损坏的区块
-                                
+
                 except Exception as e:
                     log(f"处理区块文件 {region_file.name} 失败: {e}", "WARNING")
-                    
+
         except ImportError:
             log("anvil-parser2 未安装，使用简化渲染", "WARNING")
             # 简化渲染：绘制网格
@@ -317,7 +328,7 @@ class MapExportService:
         pixels: Any = None,
     ) -> None:
         """渲染单个区块
-        
+
         Args:
             image: PIL 图像对象
             chunk: 区块对象
@@ -333,11 +344,11 @@ class MapExportService:
         try:
             if pixels is None:
                 pixels = image.load()
-            
+
             # 计算区块在图像中的位置
             chunk_x = (rx - bounds["min_x"]) * 32 + cx
             chunk_z = (rz - bounds["min_z"]) * 32 + cz
-            
+
             # 获取区块的最高方块
             for bx in range(16):
                 for bz in range(16):
@@ -348,21 +359,22 @@ class MapExportService:
                             # 获取方块类型
                             block = chunk.get_block(bx, y, bz)
                             color = self._get_block_color(block, y, map_type)
-                            
+
                             # 计算像素位置
                             px = (chunk_x * 16 + bx) // scale
                             py = (chunk_z * 16 + bz) // scale
-                            
+
                             # 绘制像素（使用像素访问对象，比 putpixel 快 5-10 倍）
                             if 0 <= px < image.width and 0 <= py < image.height:
                                 pixels[px, py] = color
                     except Exception:
                         pass  # 跳过无效方块
-                        
+
         except Exception:
             pass  # 跳过损坏的区块数据
 
-    def _get_highest_block_y(self, chunk: Any, x: int, z: int) -> Optional[int]:
+    def _get_highest_block_y(self, chunk: Any, x: int,
+                             z: int) -> Optional[int]:
         try:
             try:
                 from anvil.chunk import _section_height_range
@@ -396,35 +408,38 @@ class MapExportService:
         except Exception:
             return None
 
-    def _get_block_color(self, block: Any, y: int, map_type: str) -> Tuple[int, int, int]:
+    def _get_block_color(self, block: Any, y: int,
+                         map_type: str) -> Tuple[int, int, int]:
         """获取方块颜色
-        
+
         Args:
             block: 方块对象
             y: Y 坐标
             map_type: 地图类型
-            
+
         Returns:
             RGB 颜色元组
         """
         try:
             block_name = block.name()
-            
+
             if block_name in self.BLOCK_COLORS:
                 color = self.BLOCK_COLORS[block_name]
             else:
                 color = self._generate_color_from_name(block_name)
-            
+
             # 地形图：根据高度调整亮度
             if map_type == "terrain":
                 factor = (y + 64) / 383.0  # 归一化到 [0, 1]
-                color = tuple(int(c * (0.5 + factor * 0.5)) for c in color)  # type: ignore[assignment]
-            
+                color = tuple(int(c * (0.5 + factor * 0.5))
+                              for c in color)  # type: ignore[assignment]
+
             return color
-            
+
         except Exception:
             return (128, 128, 128)  # 默认灰色
 
-    def _generate_color_from_name(self, block_name: str) -> Tuple[int, int, int]:
+    def _generate_color_from_name(
+            self, block_name: str) -> Tuple[int, int, int]:
         h = hashlib.md5(block_name.encode("utf-8")).digest()
         return (h[0], h[1], h[2])

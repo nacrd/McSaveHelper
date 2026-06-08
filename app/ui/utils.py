@@ -28,7 +28,11 @@ def safe_update(control: ft.Control) -> None:
         pass
 
 
-def run_on_ui(page: ft.Page | None, func: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+def run_on_ui(page: ft.Page | None,
+              func: Callable[...,
+                             Any],
+              *args: Any,
+              **kwargs: Any) -> None:
     """在 Flet UI 线程上执行回调；页面不可用时安全跳过。
 
     Flet 控件更新必须尽量在 UI 线程中完成。后台线程、Timer 或服务回调

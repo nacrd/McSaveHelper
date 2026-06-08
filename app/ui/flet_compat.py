@@ -8,39 +8,39 @@ from typing import Optional, Any, Callable
 # ============================================================================
 class AlignmentCompat:
     """兼容旧版 ft.alignment 便捷属性"""
-    
+
     @staticmethod
     def center():
         return ft.alignment.Alignment(0, 0)
-    
+
     @staticmethod
     def top_left():
         return ft.alignment.Alignment(-1, -1)
-    
+
     @staticmethod
     def top_center():
         return ft.alignment.Alignment(0, -1)
-    
+
     @staticmethod
     def top_right():
         return ft.alignment.Alignment(1, -1)
-    
+
     @staticmethod
     def center_left():
         return ft.alignment.Alignment(-1, 0)
-    
+
     @staticmethod
     def center_right():
         return ft.alignment.Alignment(1, 0)
-    
+
     @staticmethod
     def bottom_left():
         return ft.alignment.Alignment(-1, 1)
-    
+
     @staticmethod
     def bottom_center():
         return ft.alignment.Alignment(0, 1)
-    
+
     @staticmethod
     def bottom_right():
         return ft.alignment.Alignment(1, 1)
@@ -68,7 +68,7 @@ def Image(
     # Flet 0.85+ 要求 src 必传，旧版可选
     if src is None and src_base64 is None:
         src = ""  # 提供默认空字符串
-    
+
     return ft.Image(
         src=src,
         src_base64=src_base64,
@@ -117,13 +117,13 @@ def Dropdown(
         width=width,
         **kwargs
     )
-    
+
     # Flet 0.85+ 不支持 on_change 作为构造参数，需要事后设置
     if on_change is not None:
         dropdown.on_change = on_change
     if on_select is not None:
         dropdown.on_select = on_select
-    
+
     return dropdown
 
 
@@ -137,7 +137,7 @@ def ResponsiveRow(
 ) -> ft.Row:
     """
     兼容旧版 ResponsiveRow，在 Flet 0.85 中避免使用 Wrap 布局
-    
+
     注意：这会失去响应式布局能力，建议手动使用 Row/Column 组合
     """
     return ft.Row(

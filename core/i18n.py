@@ -292,7 +292,11 @@ class TranslationManager:
         except Exception as e:
             print(f"保存语言配置时出错: {e}")
 
-    def get(self, key: str, default: Optional[str] = None, **kwargs: Any) -> str:
+    def get(
+            self,
+            key: str,
+            default: Optional[str] = None,
+            **kwargs: Any) -> str:
         """获取翻译文本
 
         Args:
@@ -328,7 +332,11 @@ class TranslationManager:
 
         return result
 
-    def translate(self, key: str, default: Optional[str] = None, **kwargs: Any) -> str:
+    def translate(
+            self,
+            key: str,
+            default: Optional[str] = None,
+            **kwargs: Any) -> str:
         """翻译文本（get 的别名
 
         Args:
@@ -425,7 +433,8 @@ def init_translations(
     """
     global _translation_manager
     if _translation_manager is None:
-        _translation_manager = TranslationManager(translations_dir, language_loader, language_saver)
+        _translation_manager = TranslationManager(
+            translations_dir, language_loader, language_saver)
     else:
         if language_loader is not None:
             _translation_manager._language_loader = language_loader

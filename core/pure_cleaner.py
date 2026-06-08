@@ -47,7 +47,8 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
                         continue
                     total_chunks += 1
                     # 一次遍历处理方块、实体和方块实体
-                    blocks_replaced, entities_removed = _purge_mod_data_in_chunk(chunk)
+                    blocks_replaced, entities_removed = _purge_mod_data_in_chunk(
+                        chunk)
                     total_blocks_replaced += blocks_replaced
                     total_entities_removed += entities_removed
                     if blocks_replaced > 0 or entities_removed > 0:

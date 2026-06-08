@@ -25,10 +25,8 @@ class MigrationController:
             mc = app.config.migration
 
             if not mc.src_path and not mc.batch_mode:
-                app.warn_dialog(
-                    app._t("dialogs.warning", "提示"),
-                    app._t("messages.please_select_source", "请先通过侧边栏设置客户端存档目录"),
-                )
+                app.warn_dialog(app._t("dialogs.warning", "提示"), app._t(
+                    "messages.please_select_source", "请先通过侧边栏设置客户端存档目录"), )
                 return
 
             app.set_start_button_enabled(False)
@@ -37,7 +35,7 @@ class MigrationController:
             self.save_config()
 
             dest_dir = mc.dest_path or os.getcwd()
-            
+
             # 开始跟踪异步操作
             operation_id = "migration_batch" if mc.batch_mode else "migration_single"
             async_tracker.start(operation_id)
@@ -104,30 +102,49 @@ class MigrationController:
                 app.log(f"迁移耗时: {elapsed:.2f}秒", "INFO")
 
             app.log_header(app._t("messages.migration_complete", "迁移完成"))
-            app.log(app._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
-                           output_path=output_path), "SUCCESS")
+            app.log(
+                app._t(
+                    "messages.migration_success",
+                    "迁移完成！输出目录: {output_path}",
+                    output_path=output_path),
+                "SUCCESS")
             app.set_progress_label(app._t("top_bar.completed", "已完成"))
 
-            if hasattr(app, "notification_manager") and app.notification_manager:
-                app.notification_manager.show_success(f"迁移完成！输出目录: {output_path}")
+            if hasattr(
+                    app,
+                    "notification_manager") and app.notification_manager:
+                app.notification_manager.show_success(
+                    f"迁移完成！输出目录: {output_path}")
             else:
                 app.info_dialog(
-                    app._t("dialogs.success", "成功"),
-                    app._t("messages.migration_success", "迁移完成！输出目录: {output_path}",
-                           output_path=output_path),
+                    app._t(
+                        "dialogs.success",
+                        "成功"),
+                    app._t(
+                        "messages.migration_success",
+                        "迁移完成！输出目录: {output_path}",
+                        output_path=output_path),
                 )
         except Exception as e:
             async_tracker.complete("migration_single")
             app.handle_exception(
                 e,
-                title=app._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
+                title=app._t(
+                    "messages.migration_exception",
+                    "迁移失败: {error}",
+                    error=str(e)),
                 log=True,
                 show_dialog=False,
             )
             app.set_progress_label(app._t("top_bar.failed", "失败"))
             app.error_dialog(
-                app._t("dialogs.error", "错误"),
-                app._t("messages.migration_exception", "迁移失败: {error}", error=str(e)),
+                app._t(
+                    "dialogs.error",
+                    "错误"),
+                app._t(
+                    "messages.migration_exception",
+                    "迁移失败: {error}",
+                    error=str(e)),
                 exception=e,
                 show_details=True,
             )
@@ -141,7 +158,10 @@ class MigrationController:
         app = self.app
         mc = app.config.migration
         try:
-            app.log_header(app._t("messages.batch_migration_started", "开始批量处理"))
+            app.log_header(
+                app._t(
+                    "messages.batch_migration_started",
+                    "开始批量处理"))
             self.save_config()
             results = app.migration.run_batch(
                 dest_dir=dest_dir,
@@ -157,7 +177,10 @@ class MigrationController:
                 progress_cb=app.update_progress,
             )
             success = sum(1 for r in results.values() if r["success"])
-            app.log_header(app._t("messages.batch_migration_complete_header", "批量处理完成"))
+            app.log_header(
+                app._t(
+                    "messages.batch_migration_complete_header",
+                    "批量处理完成"))
             app.log(app._t("messages.batch_migration_complete",
                            "成功: {success}/{total}",
                            success=success, total=len(results)), "SUCCESS")
@@ -165,7 +188,10 @@ class MigrationController:
         except Exception as e:
             app.handle_exception(
                 e,
-                title=app._t("messages.save_failed", "批量处理失败: {error}", error=str(e)),
+                title=app._t(
+                    "messages.save_failed",
+                    "批量处理失败: {error}",
+                    error=str(e)),
                 log=True,
                 show_dialog=False,
             )

@@ -30,11 +30,17 @@ class MappingsView(ft.Column):
     def _build(self) -> None:
         self.controls.clear()
 
-        self.controls.append(page_header(
-            self._t("mappings.title", "映射管理"),
-            ft.Text("管理 UUID 映射和物品映射，用于存档转换和存档浏览器。", size=12, color=THEME.text_muted),
-            icon="🔗",
-        ))
+        self.controls.append(
+            page_header(
+                self._t(
+                    "mappings.title",
+                    "映射管理"),
+                ft.Text(
+                    "管理 UUID 映射和物品映射，用于存档转换和存档浏览器。",
+                    size=12,
+                    color=THEME.text_muted),
+                icon="🔗",
+            ))
 
         self._build_uuid_section()
         self._build_item_section()
@@ -74,7 +80,11 @@ class MappingsView(ft.Column):
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=16)))
 
     def _build_item_section(self) -> None:
         from app.services.item_service import get_item_service
@@ -101,9 +111,15 @@ class MappingsView(ft.Column):
             padding=ft.Padding(left=20, right=20, bottom=12),
         ))
 
-        self._item_id_field = text_field(label="物品 ID", hint_text="modid:item_name", expand=False, width=260)
-        self._item_name_field = text_field(label="显示名称", hint_text="显示在物品栏中的名称", expand=False, width=200)
-        self._item_mapping_status = ft.Text("", size=11, color=THEME.text_muted)
+        self._item_id_field = text_field(
+            label="物品 ID",
+            hint_text="modid:item_name",
+            expand=False,
+            width=260)
+        self._item_name_field = text_field(
+            label="显示名称", hint_text="显示在物品栏中的名称", expand=False, width=200)
+        self._item_mapping_status = ft.Text(
+            "", size=11, color=THEME.text_muted)
         add_row = ft.Row([
             self._item_id_field, self._item_name_field,
             btn_success("添加", width=80, on_click=self._add_item_mapping),
@@ -114,7 +130,8 @@ class MappingsView(ft.Column):
             padding=ft.Padding(left=20, right=20, bottom=12),
         ))
 
-        self._item_search_field = text_field(label="搜索物品 ID 或名称", on_change=self._on_item_search)
+        self._item_search_field = text_field(
+            label="搜索物品 ID 或名称", on_change=self._on_item_search)
         self._item_table_container = ft.Container()
         s.controls.append(ft.Container(
             content=ft.Column([
@@ -128,7 +145,11 @@ class MappingsView(ft.Column):
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=16)))
 
     def _render_item_table(self, filter_text: str) -> None:
         mappings = self._item_service.get_custom_item_mappings()
@@ -144,19 +165,33 @@ class MappingsView(ft.Column):
         rows = []
         filter_lower = filter_text.lower()
         for item_id, display_name in sorted(mappings.items()):
-            if filter_lower and filter_lower not in item_id.lower() and filter_lower not in display_name.lower():
+            if filter_lower and filter_lower not in item_id.lower(
+            ) and filter_lower not in display_name.lower():
                 continue
-            rows.append(ft.DataRow(cells=[
-                ft.DataCell(ft.Text(item_id, size=12, color=THEME.text_secondary, font_family="monospace")),
-                ft.DataCell(ft.Text(display_name, size=12, color=THEME.text_primary)),
-                ft.DataCell(ft.IconButton(
-                    icon=ft.Icons.DELETE_OUTLINE,
-                    icon_color=THEME.mc_redstone,
-                    icon_size=18,
-                    tooltip="删除",
-                    on_click=lambda e, iid=item_id: self._delete_item_mapping(iid),
-                )),
-            ]))
+            rows.append(
+                ft.DataRow(
+                    cells=[
+                        ft.DataCell(
+                            ft.Text(
+                                item_id,
+                                size=12,
+                                color=THEME.text_secondary,
+                                font_family="monospace")),
+                        ft.DataCell(
+                            ft.Text(
+                                display_name,
+                                size=12,
+                                color=THEME.text_primary)),
+                        ft.DataCell(
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                icon_color=THEME.mc_redstone,
+                                icon_size=18,
+                                tooltip="删除",
+                                on_click=lambda e,
+                                iid=item_id: self._delete_item_mapping(iid),
+                            )),
+                    ]))
 
         if not rows:
             self._item_table_container.content = placeholder(
@@ -170,22 +205,47 @@ class MappingsView(ft.Column):
         self._item_table_container.content = ft.Container(
             content=ft.DataTable(
                 columns=[
-                    ft.DataColumn(ft.Text("物品 ID", size=12, weight=ft.FontWeight.BOLD, color=THEME.mc_gold)),
-                    ft.DataColumn(ft.Text("显示名称", size=12, weight=ft.FontWeight.BOLD, color=THEME.mc_gold)),
-                    ft.DataColumn(ft.Text("操作", size=12, weight=ft.FontWeight.BOLD, color=THEME.mc_gold)),
+                    ft.DataColumn(
+                        ft.Text(
+                            "物品 ID",
+                            size=12,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.mc_gold)),
+                    ft.DataColumn(
+                        ft.Text(
+                            "显示名称",
+                            size=12,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.mc_gold)),
+                    ft.DataColumn(
+                        ft.Text(
+                            "操作",
+                            size=12,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.mc_gold)),
                 ],
                 rows=rows,
                 heading_row_color=THEME.bg_secondary,
                 data_row_color=THEME.bg_card,
                 border=ft.Border(
-                    left=ft.BorderSide(1, THEME.border_subtle),
-                    top=ft.BorderSide(1, THEME.border_subtle),
-                    right=ft.BorderSide(1, THEME.border_subtle),
-                    bottom=ft.BorderSide(1, THEME.border_subtle),
+                    left=ft.BorderSide(
+                        1,
+                        THEME.border_subtle),
+                    top=ft.BorderSide(
+                        1,
+                        THEME.border_subtle),
+                    right=ft.BorderSide(
+                        1,
+                        THEME.border_subtle),
+                    bottom=ft.BorderSide(
+                        1,
+                        THEME.border_subtle),
                 ),
                 column_spacing=20,
             ),
-            height=min(350, 40 + len(rows) * 42),
+            height=min(
+                350,
+                40 + len(rows) * 42),
         )
 
     def _on_item_search(self, e: ft.ControlEvent) -> None:

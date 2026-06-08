@@ -23,12 +23,12 @@ class MapExportView(ft.Column):
     def __init__(self, app: "Application") -> None:
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
-        
+
         # 检查依赖
         if not PIL_AVAILABLE:
             self._build_missing_dependency_ui()
             return
-            
+
         self.service = MapExportService()
         self.expand = True
 
@@ -40,7 +40,7 @@ class MapExportView(ft.Column):
         self._world_path_field = current_save_field(
             hint_text="请通过侧边栏「设置当前存档」设置要导出的当前存档目录",
         )
-        
+
         self._output_path_field = text_field(
             label="输出文件",
             hint_text="选择保存位置",
@@ -82,7 +82,8 @@ class MapExportView(ft.Column):
         )
 
         # 按钮
-        self._select_output_btn = btn_ghost("💾 选择输出", on_click=self._select_output)
+        self._select_output_btn = btn_ghost(
+            "💾 选择输出", on_click=self._select_output)
         self._export_btn = btn_primary("🗺️ 开始导出", on_click=self._start_export)
 
         # 构建 UI
@@ -92,7 +93,7 @@ class MapExportView(ft.Column):
         """构建缺少依赖时的 UI"""
         self.spacing = 20
         self.expand = True
-        
+
         error_card = card(
             ft.Column(
                 [
@@ -140,14 +141,17 @@ class MapExportView(ft.Column):
                 spacing=12,
             )
         )
-        
+
         self.controls = [error_card]
 
     def _build_ui(self) -> None:
         """构建 UI"""
         header = page_header(
             "地图导出",
-            ft.Text("将存档地图导出为 PNG 图片（俯视图/地形图）", size=12, color=THEME.text_muted),
+            ft.Text(
+                "将存档地图导出为 PNG 图片（俯视图/地形图）",
+                size=12,
+                color=THEME.text_muted),
             icon="🗺️",
         )
 
@@ -289,13 +293,22 @@ class MapExportView(ft.Column):
             except Exception:
                 pass
 
-    def _export_thread(self, world_path: Path, output_path: Path, map_type: str, scale: int) -> None:
+    def _export_thread(
+            self,
+            world_path: Path,
+            output_path: Path,
+            map_type: str,
+            scale: int) -> None:
         """导出线程"""
         try:
             run_on_ui(self.app.page, self.app.show_progress, "正在导出地图...")
 
             def progress_callback(value: float, msg: str) -> None:
-                run_on_ui(self.app.page, self.app.update_progress_with_task, msg or "导出地图", value)
+                run_on_ui(
+                    self.app.page,
+                    self.app.update_progress_with_task,
+                    msg or "导出地图",
+                    value)
 
             def log_callback(msg: str, level: str) -> None:
                 pass
@@ -313,7 +326,9 @@ class MapExportView(ft.Column):
                 if results['success']:
                     result_text = "导出完成！\n\n"
                     result_text += f"✓ 输出文件: {results['output_path']}\n"
-                    result_text += f"✓ 图像尺寸: {results['dimensions'][0]} x {results['dimensions'][1]}\n"
+                    result_text += f"✓ 图像尺寸: {
+                        results['dimensions'][0]} x {
+                        results['dimensions'][1]}\n"
                     result_text += f"✓ 处理区块: {results['chunks_processed']}"
                     self._result_text.value = result_text
                     self._result_text.update()
@@ -345,7 +360,8 @@ class MapExportView(ft.Column):
             self._world_path_field.update()
             if not self._output_path_field.value:
                 world_path = Path(path)
-                self._output_path_field.value = str(world_path.parent / f"{world_path.name}_map.png")
+                self._output_path_field.value = str(
+                    world_path.parent / f"{world_path.name}_map.png")
                 self._output_path_field.update()
         except Exception:
             pass

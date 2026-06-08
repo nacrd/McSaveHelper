@@ -53,8 +53,13 @@ class WorldInfoTabMixin:
                     stat = backup.stat()
                     size_mb = stat.st_size / (1024 * 1024)
                     mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
-                    label = f"{backup.name} ({mtime.strftime('%Y-%m-%d %H:%M:%S')} - {size_mb:.1f} MB)"
-                    backup_options.append(ft.dropdown.Option(str(backup), label))
+                    label = f"{
+                        backup.name} ({
+                        mtime.strftime('%Y-%m-%d %H:%M:%S')} - {
+                        size_mb:.1f} MB)"
+                    backup_options.append(
+                        ft.dropdown.Option(
+                            str(backup), label))
 
                 backup_dropdown = ft.Dropdown(
                     label="选择备份",
@@ -81,7 +86,8 @@ class WorldInfoTabMixin:
                     try:
                         selected_backup = Path(backup_dropdown.value)
                         replace = replace_switch.value
-                        if self.world_session.restore_backup(selected_backup, replace):
+                        if self.world_session.restore_backup(
+                                selected_backup, replace):
                             dialog.open = False
                             self.page.update()
                             if replace:

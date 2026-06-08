@@ -36,10 +36,17 @@ class InventoryGrid(ft.Column):
         main_rows: List[ft.Control] = []
         for row in range(3):
             slots_row = [make_slot(9 + row * 9 + col) for col in range(9)]
-            main_rows.append(ft.Row(slots_row, spacing=2, alignment=ft.MainAxisAlignment.START))
+            main_rows.append(
+                ft.Row(
+                    slots_row,
+                    spacing=2,
+                    alignment=ft.MainAxisAlignment.START))
 
         hotbar_slots = [make_slot(col) for col in range(9)]
-        hotbar_row = ft.Row(hotbar_slots, spacing=2, alignment=ft.MainAxisAlignment.START)
+        hotbar_row = ft.Row(
+            hotbar_slots,
+            spacing=2,
+            alignment=ft.MainAxisAlignment.START)
 
         self.controls = [
             ft.Text("主物品栏", size=12, color=THEME.text_muted),
@@ -95,7 +102,8 @@ class InventoryGrid(ft.Column):
                         apply_texture_to_slot(slot, uri)
 
         unique_ids = list(set(slot_item_map.values()))
-        self._texture_service.load_textures_async(unique_ids, on_loaded=_on_loaded)
+        self._texture_service.load_textures_async(
+            unique_ids, on_loaded=_on_loaded)
 
     def clear(self) -> None:
         self.set_inventory([])

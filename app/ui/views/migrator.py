@@ -48,11 +48,15 @@ class MigratorView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(page_header(
-            "存档转换",
-            ft.Text("跨版本迁移世界、玩家数据、UUID 和资源映射", size=12, color=THEME.text_muted),
-            icon="📦",
-        ))
+        self.controls.append(
+            page_header(
+                "存档转换",
+                ft.Text(
+                    "跨版本迁移世界、玩家数据、UUID 和资源映射",
+                    size=12,
+                    color=THEME.text_muted),
+                icon="📦",
+            ))
         content = ft.Row(
             [self._build_left(), ft.Container(width=18), self._build_right()],
             expand=True,
@@ -87,8 +91,12 @@ class MigratorView(ft.Column):
         ))
 
         self._dest_field = text_field(
-            label=self._t("left_panel.server_root", "输出目录"),
-            hint_text=self._t("left_panel.placeholder_default_dir", "默认为程序当前目录"),
+            label=self._t(
+                "left_panel.server_root",
+                "输出目录"),
+            hint_text=self._t(
+                "left_panel.placeholder_default_dir",
+                "默认为程序当前目录"),
             on_change=lambda e: self._sync_field_to_config(),
         )
         s.controls.append(ft.Container(
@@ -101,8 +109,12 @@ class MigratorView(ft.Column):
         ))
 
         self._name_field = text_field(
-            label=self._t("left_panel.world_folder_name", "世界文件夹名"),
-            hint_text=self._t("left_panel.placeholder_world_name", "例如: world"),
+            label=self._t(
+                "left_panel.world_folder_name",
+                "世界文件夹名"),
+            hint_text=self._t(
+                "left_panel.placeholder_world_name",
+                "例如: world"),
             value=mc.world_name or "world",
             on_change=lambda e: self._sync_field_to_config(),
         )
@@ -121,12 +133,19 @@ class MigratorView(ft.Column):
         s.controls.append(section_title("🔄 版本转换"))
 
         self._vc_platform_dd = ft.Dropdown(
-            options=[ft.dropdown.Option(k, v) for k, v in PLATFORM_OPTIONS],
+            options=[
+                ft.dropdown.Option(
+                    k,
+                    v) for k,
+                v in PLATFORM_OPTIONS],
             value=mc.target_platform or "java",
             width=150,
             border_color=THEME.border_standard,
             text_size=13,
-            on_select=lambda e: setattr(self.app.config.migration, "target_platform", e.control.value),
+            on_select=lambda e: setattr(
+                self.app.config.migration,
+                "target_platform",
+                e.control.value),
         )
         self._vc_version_dd = ft.Dropdown(
             options=[ft.dropdown.Option(
@@ -164,7 +183,8 @@ class MigratorView(ft.Column):
             padding=ft.Padding(left=20, right=20, bottom=8),
         ))
 
-        self._vc_warn_box = ft.Text("", size=11, color=THEME.warning, visible=False)
+        self._vc_warn_box = ft.Text(
+            "", size=11, color=THEME.warning, visible=False)
         s.controls.append(ft.Container(
             content=self._vc_warn_box,
             padding=ft.Padding(left=20, right=20, bottom=18),
@@ -190,10 +210,18 @@ class MigratorView(ft.Column):
             padding=ft.Padding(left=20, right=20, bottom=8),
         ))
 
-        s.controls.append(ft.Container(
-            content=ft.Text("UUID 查询", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_secondary),
-            padding=ft.Padding(left=20, right=20, bottom=4),
-        ))
+        s.controls.append(
+            ft.Container(
+                content=ft.Text(
+                    "UUID 查询",
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_secondary),
+                padding=ft.Padding(
+                    left=20,
+                    right=20,
+                    bottom=4),
+            ))
         self._query_field = text_field(
             hint_text="输入玩家名查询 UUID", expand=True,
         )
@@ -240,10 +268,12 @@ class MigratorView(ft.Column):
         s.controls.append(section_title(
             self._t("right_panel.mode_settings", "⚙️ 转换模式")))
 
-        self._mode_fast = ft.Radio(value="fast",
-                                    label=self._t("right_panel.fast_mode", "⚡ 快速模式"))
-        self._mode_full = ft.Radio(value="full",
-                                    label=self._t("right_panel.full_mode", "🧠 完整模式"))
+        self._mode_fast = ft.Radio(
+            value="fast", label=self._t(
+                "right_panel.fast_mode", "⚡ 快速模式"))
+        self._mode_full = ft.Radio(
+            value="full", label=self._t(
+                "right_panel.full_mode", "🧠 完整模式"))
         mode_group = ft.RadioGroup(
             content=ft.Row([self._mode_fast, self._mode_full], spacing=30),
             value=mc.mode, on_change=self._on_mode_change,
@@ -273,19 +303,34 @@ class MigratorView(ft.Column):
             self._t("right_panel.migration_options", "📦 处理选项")))
 
         self._offline_cb = checkbox(
-            self._t("right_panel.offline_mode", "离线模式（不请求 Mojang API）"),
+            self._t(
+                "right_panel.offline_mode",
+                "离线模式（不请求 Mojang API）"),
             value=mc.offline_mode,
-            on_change=lambda e: setattr(self.app.config.migration, 'offline_mode', e.control.value),
+            on_change=lambda e: setattr(
+                self.app.config.migration,
+                'offline_mode',
+                e.control.value),
         )
         self._clean_cb = checkbox(
-            self._t("right_panel.clean_mode", "精简存档（移除缓存/日志）"),
+            self._t(
+                "right_panel.clean_mode",
+                "精简存档（移除缓存/日志）"),
             value=mc.clean_mode,
-            on_change=lambda e: setattr(self.app.config.migration, 'clean_mode', e.control.value),
+            on_change=lambda e: setattr(
+                self.app.config.migration,
+                'clean_mode',
+                e.control.value),
         )
         self._pure_clean_cb = checkbox(
-            self._t("right_panel.pure_clean_mode", "纯净扫描（移除模组方块/实体）"),
+            self._t(
+                "right_panel.pure_clean_mode",
+                "纯净扫描（移除模组方块/实体）"),
             value=mc.pure_clean_mode,
-            on_change=lambda e: setattr(self.app.config.migration, 'pure_clean_mode', e.control.value),
+            on_change=lambda e: setattr(
+                self.app.config.migration,
+                'pure_clean_mode',
+                e.control.value),
         )
 
         cb_col = ft.Column(
@@ -321,8 +366,8 @@ class MigratorView(ft.Column):
             hint_text="包含多个世界存档的目录",
             on_change=lambda e: self._sync_field_to_config(),
         )
-        self._batch_scan_btn = btn_primary("🔍 扫描", width=90, height=38,
-                                            on_click=lambda e: self._scan_batch())
+        self._batch_scan_btn = btn_primary(
+            "🔍 扫描", width=90, height=38, on_click=lambda e: self._scan_batch())
         self._batch_result = ft.Text("", size=11, color=THEME.text_muted)
         self._batch_detail_col = ft.Column([
             ft.Row([
@@ -421,7 +466,8 @@ class MigratorView(ft.Column):
         if not name:
             return
         offline_uuid = self.app.uuid.generate_offline_uuid(name)
-        online_uuid, official_name = self.app.uuid.query_online_uuid(name, self.app.log)
+        online_uuid, official_name = self.app.uuid.query_online_uuid(
+            name, self.app.log)
 
         lines = [f"玩家: {name}"]
         lines.append(f"离线 UUID: {offline_uuid}")

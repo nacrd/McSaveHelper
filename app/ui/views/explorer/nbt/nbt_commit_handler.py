@@ -111,7 +111,8 @@ class NbtCommitHandler:
                 if change.get("format") == "chunk":
                     target = change["target"]
                     if isinstance(target, dict) and "region_path" in target:
-                        key = (str(target["region_path"]), target["chunk_x"], target["chunk_z"])
+                        key = (str(target["region_path"]),
+                               target["chunk_x"], target["chunk_z"])
                         if key not in chunk_changes:
                             chunk_changes[key] = {
                                 "target": target,

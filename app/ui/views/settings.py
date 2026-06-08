@@ -43,18 +43,34 @@ class SettingsView(ft.Column):
     def _build_general_card(self) -> None:
         cfg = self.app.config
         s = ft.Column(spacing=0)
-        s.controls.append(section_title(self._t("settings.general.title", "通用设置")))
+        s.controls.append(
+            section_title(
+                self._t(
+                    "settings.general.title",
+                    "通用设置")))
 
         self._version_var = checkbox(
-            self._t("settings.general.version_detection", "启用版本自动检测"),
+            self._t(
+                "settings.general.version_detection",
+                "启用版本自动检测"),
             value=cfg.version_detection,
-            on_change=lambda e: self._on_version_detection_change(e.control.value),
+            on_change=lambda e: self._on_version_detection_change(
+                e.control.value),
         )
-        s.controls.append(ft.Container(content=self._version_var,
-                                       padding=ft.Padding(left=20, right=20, top=10)))
+        s.controls.append(
+            ft.Container(
+                content=self._version_var,
+                padding=ft.Padding(
+                    left=20,
+                    right=20,
+                    top=10)))
 
-        self._api_timeout_field = text_field(value=str(cfg.api_timeout), width=100, expand=False,
-                                             on_change=lambda e: self._on_api_timeout_change(e))
+        self._api_timeout_field = text_field(
+            value=str(
+                cfg.api_timeout),
+            width=100,
+            expand=False,
+            on_change=lambda e: self._on_api_timeout_change(e))
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.general.api_timeout", "API 超时 (秒)")),
@@ -65,7 +81,11 @@ class SettingsView(ft.Column):
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=16)))
 
     # ─── 界面设置 ───────────────────────────────
 
@@ -79,7 +99,8 @@ class SettingsView(ft.Column):
             value=cfg.theme,
             width=120, border_color=THEME.border_standard, text_size=13,
         )
-        self._theme_dropdown.on_change = lambda e: self._on_theme_change(e.control.value)
+        self._theme_dropdown.on_change = lambda e: self._on_theme_change(
+            e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
@@ -93,7 +114,8 @@ class SettingsView(ft.Column):
             value=cfg.language,
             width=120, border_color=THEME.border_standard, text_size=13,
         )
-        self._lang_dropdown.on_change = lambda e: self._on_language_change(e.control.value)
+        self._lang_dropdown.on_change = lambda e: self._on_language_change(
+            e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.language", "语言")),
@@ -107,24 +129,39 @@ class SettingsView(ft.Column):
             value=cfg.ui_settings.get("auto_clear_log", False),
             on_change=lambda e: self._on_auto_clear_change(e.control.value),
         )
-        s.controls.append(ft.Container(content=self._auto_clear_var,
-                                       padding=ft.Padding(left=20, right=20, bottom=10)))
+        s.controls.append(
+            ft.Container(
+                content=self._auto_clear_var,
+                padding=ft.Padding(
+                    left=20,
+                    right=20,
+                    bottom=10)))
 
         self._show_log_panel_var = checkbox(
             self._t("settings.ui.show_log_panel", "显示悬浮日志面板"),
             value=cfg.ui_settings.get("show_log_panel", True),
             on_change=lambda e: self._on_show_log_panel_change(e.control.value),
         )
-        s.controls.append(ft.Container(content=self._show_log_panel_var,
-                                       padding=ft.Padding(left=20, right=20, bottom=10)))
+        s.controls.append(
+            ft.Container(
+                content=self._show_log_panel_var,
+                padding=ft.Padding(
+                    left=20,
+                    right=20,
+                    bottom=10)))
 
         self._perf_monitor_var = checkbox(
             self._t("settings.ui.enable_performance_monitor", "启用性能监控"),
             value=cfg.ui_settings.get("enable_performance_monitor", False),
             on_change=lambda e: self._on_perf_monitor_change(e.control.value),
         )
-        s.controls.append(ft.Container(content=self._perf_monitor_var,
-                                       padding=ft.Padding(left=20, right=20, bottom=10)))
+        s.controls.append(
+            ft.Container(
+                content=self._perf_monitor_var,
+                padding=ft.Padding(
+                    left=20,
+                    right=20,
+                    bottom=10)))
 
         self._perf_print_interval_field = text_field(
             value=str(cfg.ui_settings.get("performance_print_interval", 60)),
@@ -141,17 +178,29 @@ class SettingsView(ft.Column):
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=16)))
 
     # ─── 批量处理 ───────────────────────────────
 
     def _build_batch_card(self) -> None:
         cfg = self.app.config
         s = ft.Column(spacing=0)
-        s.controls.append(section_title(self._t("settings.batch.title", "批量处理")))
+        s.controls.append(
+            section_title(
+                self._t(
+                    "settings.batch.title",
+                    "批量处理")))
 
-        self._max_concurrent_field = text_field(value=str(cfg.max_concurrent), width=100, expand=False,
-                                                on_change=lambda e: self._on_max_concurrent_change(e))
+        self._max_concurrent_field = text_field(
+            value=str(
+                cfg.max_concurrent),
+            width=100,
+            expand=False,
+            on_change=lambda e: self._on_max_concurrent_change(e))
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.batch.max_concurrent", "最大并发处理数 (1‑16)")),
@@ -161,23 +210,41 @@ class SettingsView(ft.Column):
         ))
 
         self._preserve_var = checkbox(
-            self._t("settings.batch.preserve_structure", "保留原始文件结构"),
-            value=cfg.batch_processing.get("preserve_structure", True),
-            on_change=lambda e: self._on_preserve_structure_change(e.control.value),
+            self._t(
+                "settings.batch.preserve_structure",
+                "保留原始文件结构"),
+            value=cfg.batch_processing.get(
+                "preserve_structure",
+                True),
+            on_change=lambda e: self._on_preserve_structure_change(
+                e.control.value),
         )
-        s.controls.append(ft.Container(content=self._preserve_var,
-                                       padding=ft.Padding(left=20, right=20, bottom=20)))
+        s.controls.append(
+            ft.Container(
+                content=self._preserve_var,
+                padding=ft.Padding(
+                    left=20,
+                    right=20,
+                    bottom=20)))
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=16)))
 
     # ─── 清理模式 ───────────────────────────────
 
     def _build_cleanup_card(self) -> None:
         cfg = self.app.config
         s = ft.Column(spacing=0)
-        s.controls.append(section_title(self._t("settings.cleanup.title", "清理模式")))
+        s.controls.append(
+            section_title(
+                self._t(
+                    "settings.cleanup.title",
+                    "清理模式")))
 
         s.controls.append(ft.Container(
             content=ft.Text(
@@ -210,7 +277,11 @@ class SettingsView(ft.Column):
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=16)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=16)))
 
     # ─── 操作按钮 ───────────────────────────────
 
@@ -228,7 +299,11 @@ class SettingsView(ft.Column):
         ], spacing=10)
         c = card(ft.Column(spacing=0), padding=0)
         c.content = ft.Container(content=btn_row, padding=20)
-        self.controls.append(ft.Container(content=c, padding=ft.Padding(bottom=24)))
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(
+                    bottom=24)))
 
     # ─── 回调（即时生效 + 自动保存）──────────────
 
@@ -240,18 +315,22 @@ class SettingsView(ft.Column):
         c._config["ui_settings"]["show_log_panel"] = self._show_log_panel_var.value
         c._config["ui_settings"]["enable_performance_monitor"] = self._perf_monitor_var.value
         try:
-            c._config["ui_settings"]["performance_print_interval"] = max(5, int(self._perf_print_interval_field.value or "60"))
+            c._config["ui_settings"]["performance_print_interval"] = max(
+                5, int(self._perf_print_interval_field.value or "60"))
         except ValueError:
             c._config["ui_settings"]["performance_print_interval"] = 60
         c._config["ui_settings"]["preserve_structure"] = self._preserve_var.value
         c._config["ui_settings"]["theme"] = self._theme_dropdown.value
         c._config["ui_settings"]["language"] = self._lang_dropdown.value
-        c._config["batch_processing"]["max_concurrent"] = int(self._max_concurrent_field.value or "2")
+        c._config["batch_processing"]["max_concurrent"] = int(
+            self._max_concurrent_field.value or "2")
         try:
-            c._config["api_timeout"] = int(self._api_timeout_field.value or "10")
+            c._config["api_timeout"] = int(
+                self._api_timeout_field.value or "10")
         except ValueError:
             pass
-        c.cleanup_patterns = [x.strip() for x in self._cleanup_field.value.split("\n") if x.strip()]
+        c.cleanup_patterns = [
+            x.strip() for x in self._cleanup_field.value.split("\n") if x.strip()]
         c.save()
 
     def _on_version_detection_change(self, value: bool) -> None:
@@ -281,7 +360,11 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _on_show_log_panel_change(self, value: bool) -> None:
-        if hasattr(self.app, 'floating_log_panel') and hasattr(self.app, '_log_fab'):
+        if hasattr(
+                self.app,
+                'floating_log_panel') and hasattr(
+                self.app,
+                '_log_fab'):
             self.app._log_fab.set_visible(value)
             self.app.floating_log_panel.set_visible(False)
         self._persist()
@@ -292,7 +375,9 @@ class SettingsView(ft.Column):
             perf_monitor.enable()
             resource_monitor.start()
             try:
-                interval = max(5.0, float(self._perf_print_interval_field.value or "60"))
+                interval = max(
+                    5.0, float(
+                        self._perf_print_interval_field.value or "60"))
             except ValueError:
                 interval = 60.0
             resource_monitor.set_print_interval(interval)

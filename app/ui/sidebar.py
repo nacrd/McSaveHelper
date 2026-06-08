@@ -25,13 +25,17 @@ class Sidebar(ft.Container):
     ) -> None:
         self._tabs: List[Dict[str, Any]] = list(tabs)
         self._on_tab_select: Callable[[str], None] = on_tab_select
-        self._on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]] = on_tabs_reorder
+        self._on_tabs_reorder: Optional[Callable[[
+            List[Dict[str, Any]]], None]] = on_tabs_reorder
         # 保留 on_import_save 作为兼容回调；新 UI 语义为“设置当前存档”
         self._on_import_save: Optional[Callable[[], None]] = on_import_save
-        self._on_set_current_save: Optional[Callable[[], None]] = on_set_current_save
-        self._on_recent_save_select: Optional[Callable[[str], None]] = on_recent_save_select
+        self._on_set_current_save: Optional[Callable[[
+        ], None]] = on_set_current_save
+        self._on_recent_save_select: Optional[Callable[[
+            str], None]] = on_recent_save_select
         self._recent_saves: List[Dict[str, Any]] = list(recent_saves or [])
-        self._selected_id: Optional[str] = default_tab or (tabs[0]["id"] if tabs else None)
+        self._selected_id: Optional[str] = default_tab or (
+            tabs[0]["id"] if tabs else None)
         self._buttons: Dict[str, ft.Container] = {}
         self._recent_save_col: ft.Column = ft.Column(spacing=4)
         self._sidebar_width = width
@@ -88,18 +92,21 @@ class Sidebar(ft.Container):
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
                                 alignment=ft.Alignment(0, 0),
-                                padding=ft.Padding(left=8, right=8, top=6, bottom=6),
+                                padding=ft.Padding(
+                                    left=8, right=8, top=6, bottom=6),
                                 border_radius=4,
                                 bgcolor=THEME.mc_grass,
                                 border=mc_border(1),
                                 ink=True,
                                 on_click=self._handle_set_current_save,
                             ),
-                            padding=ft.Padding(left=0, right=0, top=8, bottom=0),
+                            padding=ft.Padding(
+                                left=0, right=0, top=8, bottom=0),
                         ),
                         ft.Container(
                             content=self._current_save_name,
-                            padding=ft.Padding(left=2, right=2, top=6, bottom=0),
+                            padding=ft.Padding(
+                                left=2, right=2, top=6, bottom=0),
                         ),
                         ft.Container(
                             content=ft.Column(
@@ -115,7 +122,8 @@ class Sidebar(ft.Container):
                                 ],
                                 spacing=5,
                             ),
-                            padding=ft.Padding(left=0, right=0, top=10, bottom=0),
+                            padding=ft.Padding(
+                                left=0, right=0, top=10, bottom=0),
                         ),
                     ],
                     spacing=2,
@@ -195,7 +203,7 @@ class Sidebar(ft.Container):
             bgcolor=THEME.mc_gold if selected else THEME.bg_secondary,
             border=mc_border(2),
         )
-        
+
         text_ctrl = ft.Text(
             label_text,
             size=12,
@@ -203,7 +211,7 @@ class Sidebar(ft.Container):
             weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500,
             font_family="monospace",
         )
-        
+
         marker = ft.Text(
             "▶" if selected else "",
             size=10,
@@ -215,7 +223,7 @@ class Sidebar(ft.Container):
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
-        
+
         container = ft.Container(
             content=row,
             padding=8,
@@ -226,12 +234,12 @@ class Sidebar(ft.Container):
             on_click=lambda e, tid=tab["id"]: self._safe_select(tid),
             on_hover=lambda e, tid=tab["id"]: self._handle_hover(e, tid),
         )
-        
+
         return container
-    
+
     def _handle_hover(self, e: ft.ControlEvent, tab_id: str) -> None:
         """Handle hover event for tab buttons
-        
+
         Args:
             e: Control event
             tab_id: Tab ID
@@ -239,10 +247,10 @@ class Sidebar(ft.Container):
         try:
             if tab_id not in self._buttons:
                 return
-            
+
             container = self._buttons[tab_id]
             is_selected = tab_id == self._selected_id
-            
+
             if e.data == "true":
                 # Hover state - brighter background and enhanced shadow
                 if not is_selected:
@@ -270,7 +278,7 @@ class Sidebar(ft.Container):
                         icon_slot = row.controls[0]
                         if isinstance(icon_slot, ft.Container):
                             icon_slot.bgcolor = THEME.bg_secondary
-            
+
             container.update()
         except Exception:
             pass
@@ -313,12 +321,15 @@ class Sidebar(ft.Container):
             return
 
         for save in self._recent_saves[:5]:
-            self._recent_save_col.controls.append(self._build_recent_save_item(save))
+            self._recent_save_col.controls.append(
+                self._build_recent_save_item(save))
 
     def _build_recent_save_item(self, save: Dict[str, Any]) -> ft.Container:
         """构建最近存档列表项"""
-        save_id = str(save.get("id") or save.get("path") or save.get("name") or "")
-        save_name = str(save.get("name") or save.get("label") or save_id or "未命名存档")
+        save_id = str(save.get("id") or save.get(
+            "path") or save.get("name") or "")
+        save_name = str(save.get("name") or save.get(
+            "label") or save_id or "未命名存档")
         save_path = str(save.get("path") or save_id)
 
         return ft.Container(
@@ -366,7 +377,10 @@ class Sidebar(ft.Container):
         except Exception:
             pass
 
-    def set_current_save_name(self, name: Optional[str], path: Optional[str] = None) -> None:
+    def set_current_save_name(
+            self,
+            name: Optional[str],
+            path: Optional[str] = None) -> None:
         try:
             if name:
                 self._current_save_name.value = f"当前存档: {name}"
@@ -406,7 +420,9 @@ class Sidebar(ft.Container):
             text_group = row.controls[1]
             if isinstance(icon_slot, ft.Container):
                 icon_slot.bgcolor = THEME.mc_gold if selected else THEME.bg_secondary
-            if isinstance(text_group, ft.Column) and len(text_group.controls) >= 2:
+            if isinstance(
+                    text_group, ft.Column) and len(
+                    text_group.controls) >= 2:
                 tc = text_group.controls[0]
                 marker = text_group.controls[1]
                 tc.color = THEME.text_primary if selected else THEME.text_secondary
@@ -446,10 +462,10 @@ class Sidebar(ft.Container):
     def get_tab_order(self) -> List[str]:
         """返回当前标签页 ID 的顺序"""
         return [t["id"] for t in self._tabs]
-    
+
     def set_width(self, width: int) -> None:
         """动态设置侧边栏宽度
-        
+
         Args:
             width: 新的侧边栏宽度
         """
@@ -460,7 +476,7 @@ class Sidebar(ft.Container):
             self.update()
         except Exception:
             pass
-    
+
     @property
     def sidebar_width(self) -> int:
         """获取当前侧边栏宽度"""

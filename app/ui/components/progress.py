@@ -8,14 +8,14 @@ from app.ui.theme import THEME, mc_border
 
 class McProgressBar(ft.Container):
     """Minecraft-style progress bar with decorative border and animations
-    
+
     Features:
     - Beveled border decoration
     - Smooth progress animations
     - Optional percentage text
     - Customizable colors
     """
-    
+
     def __init__(
         self,
         value: float = 0.0,
@@ -31,7 +31,7 @@ class McProgressBar(ft.Container):
         self._bgcolor = bgcolor
         self._show_percentage = show_percentage
         self._animated = animated
-        
+
         # Create inner progress bar
         self._progress_bar = ft.ProgressBar(
             value=value,
@@ -41,7 +41,7 @@ class McProgressBar(ft.Container):
             border_radius=0,
             bar_height=height - 4,
         )
-        
+
         # Percentage text (optional)
         self._percentage_text = ft.Text(
             self._format_percentage(value),
@@ -51,7 +51,7 @@ class McProgressBar(ft.Container):
             font_family="monospace",
             visible=show_percentage,
         )
-        
+
         # Build container with decorative border
         content = ft.Stack([
             # Background layer
@@ -76,7 +76,7 @@ class McProgressBar(ft.Container):
                 height=height,
             ),
         ])
-        
+
         super().__init__(
             content=content,
             width=width,
@@ -84,28 +84,28 @@ class McProgressBar(ft.Container):
             bgcolor=THEME.bg_card,
             border_radius=0,
         )
-    
+
     def _format_percentage(self, value: float) -> str:
         """Format percentage value as string"""
         return f"{int(value * 100)}%"
-    
+
     @property
     def value(self) -> float:
         """Get current progress value"""
         return self._value
-    
+
     @value.setter
     def value(self, new_value: float) -> None:
         """Set progress value with animation (compatibility with native ProgressBar)
-        
+
         Args:
             new_value: Progress value (0.0 to 1.0)
         """
         self.set_value(new_value)
-    
+
     def set_value(self, value: float) -> None:
         """Set progress value with animation
-        
+
         Args:
             value: Progress value (0.0 to 1.0)
         """
@@ -117,10 +117,10 @@ class McProgressBar(ft.Container):
             self.update()
         except Exception:
             pass
-    
+
     def set_color(self, color: str) -> None:
         """Set progress bar color
-        
+
         Args:
             color: Hex color string
         """
@@ -130,7 +130,7 @@ class McProgressBar(ft.Container):
             self.update()
         except Exception:
             pass
-    
+
     def reset(self) -> None:
         """Reset progress to 0"""
         self.set_value(0.0)

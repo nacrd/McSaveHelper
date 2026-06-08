@@ -48,7 +48,13 @@ def run_full(
     # 2. 加载缓存与构建映射
     cache = load_usercache(src_world)
     log(f"本地缓存: {len(cache)} 条", "CACHE")
-    mappings = build_mappings(dest_world, cache, offline_mode, manual_names, log, custom_mappings)
+    mappings = build_mappings(
+        dest_world,
+        cache,
+        offline_mode,
+        manual_names,
+        log,
+        custom_mappings)
     if not mappings:
         log("未生成任何 UUID 映射，终止", "ERROR")
         return

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import flet as ft
 import nbtlib
 
 from app.ui.views.explorer.utils import safe_update
@@ -42,14 +43,17 @@ class NbtDataLoader:
             data_dir = world_path / "data"
             if data_dir.exists():
                 for path in sorted(data_dir.glob("*.dat")):
-                    candidates.append((f"数据 / {path.name}", path.relative_to(world_path)))
+                    candidates.append(
+                        (f"数据 / {path.name}", path.relative_to(world_path)))
 
             # stats/*.json, advancements/*.json
-            for folder_name, label in [("stats", "统计"), ("advancements", "进度")]:
+            for folder_name, label in [
+                    ("stats", "统计"), ("advancements", "进度")]:
                 folder = world_path / folder_name
                 if folder.exists():
                     for path in sorted(folder.glob("*.json")):
-                        candidates.append((f"{label} / {path.name}", path.relative_to(world_path)))
+                        candidates.append(
+                            (f"{label} / {path.name}", path.relative_to(world_path)))
 
             # 填充选项字典
             for label, relative_path in candidates:
@@ -59,10 +63,10 @@ class NbtDataLoader:
             # 更新下拉框
             if hasattr(self.ctx, "_nbt_target_dropdown"):
                 self.ctx._nbt_target_dropdown.options = [
-                    self.ctx.ft.dropdown.Option(key, label) for label, key in [
-                        (label, str(path).replace("\\", "/")) for label, path in candidates
-                    ]
-                ]
+                    ft.dropdown.Option(
+                        key, label) for label, key in [
+                        (label, str(path).replace(
+                            "\\", "/")) for label, path in candidates]]
                 safe_update(self.ctx._nbt_target_dropdown)
         except Exception as ex:
             self.ctx.app.handle_exception(ex, title="刷新 NBT 目标失败")
@@ -123,7 +127,8 @@ class NbtDataLoader:
         self.ctx._current_nbt_label = label
         self.ctx._current_edit_format = "nbt"
         self.ctx._nbt_target_label.value = self.ctx._current_nbt_label
-        self.ctx._nbt_target_dropdown.value = str(relative_path).replace("\\", "/")
+        self.ctx._nbt_target_dropdown.value = str(
+            relative_path).replace("\\", "/")
         safe_update(self.ctx._nbt_target_label)
         safe_update(self.ctx._nbt_target_dropdown)
         self.ctx._nbt_tree.load_nbt(nbtlib.load(path))
@@ -143,7 +148,8 @@ class NbtDataLoader:
         self.ctx._current_nbt_label = label.replace("NBT 文件", "JSON 文件")
         self.ctx._current_edit_format = "json"
         self.ctx._nbt_target_label.value = self.ctx._current_nbt_label
-        self.ctx._nbt_target_dropdown.value = str(relative_path).replace("\\", "/")
+        self.ctx._nbt_target_dropdown.value = str(
+            relative_path).replace("\\", "/")
         safe_update(self.ctx._nbt_target_label)
         safe_update(self.ctx._nbt_target_dropdown)
 
@@ -159,13 +165,18 @@ class NbtDataLoader:
                 self.ctx.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
 
-            relative_text = (self.ctx._region_file_field.value or "").strip().replace("\\", "/")
+            relative_text = (
+                self.ctx._region_file_field.value or "").strip().replace(
+                "\\", "/")
             if not relative_text:
-                self.ctx.app.warn_dialog("提示", "请输入区域文件路径，例如 region/r.0.0.mca。")
+                self.ctx.app.warn_dialog(
+                    "提示", "请输入区域文件路径，例如 region/r.0.0.mca。")
                 return
 
             relative_path = Path(relative_text)
-            region_path = (self.ctx.world_session.world_path / relative_path).resolve()
+            region_path = (
+                self.ctx.world_session.world_path /
+                relative_path).resolve()
             world_root = self.ctx.world_session.world_path.resolve()
 
             # 安全检查：确保文件在存档目录内
@@ -176,14 +187,16 @@ class NbtDataLoader:
                 return
 
             if not region_path.exists() or region_path.suffix.lower() != ".mca":
-                self.ctx.app.warn_dialog("提示", f"区域文件不存在或不是 .mca 文件: {relative_text}")
+                self.ctx.app.warn_dialog(
+                    "提示", f"区域文件不存在或不是 .mca 文件: {relative_text}")
                 return
 
             chunk_x = int((self.ctx._chunk_x_field.value or "0").strip())
             chunk_z = int((self.ctx._chunk_z_field.value or "0").strip())
 
             # 加载区块数据
-            result = self.ctx.world_session.load_chunk_nbt(relative_path, chunk_x, chunk_z)
+            result = self.ctx.world_session.load_chunk_nbt(
+                relative_path, chunk_x, chunk_z)
             if result is None:
                 self.ctx.app.warn_dialog("提示", "该区块不存在或无法读取。")
                 return
@@ -222,12 +235,19 @@ class NbtDataLoader:
     def fill_chunk_from_world_coords(self, e: Any = None) -> None:
         """根据世界坐标填入区块坐标"""
         try:
-            world_x = int(float((self.ctx._world_x_field.value or "0").strip()))
-            world_z = int(float((self.ctx._world_z_field.value or "0").strip()))
-            region_x, region_z, chunk_x, chunk_z = self.ctx._world_coords_to_region_chunk(world_x, world_z)
+            world_x = int(
+                float(
+                    (self.ctx._world_x_field.value or "0").strip()))
+            world_z = int(
+                float(
+                    (self.ctx._world_z_field.value or "0").strip()))
+            region_x, region_z, chunk_x, chunk_z = self.ctx._world_coords_to_region_chunk(
+                world_x, world_z)
 
             # 确定维度路径
-            if hasattr(self.ctx, "_current_dimension") and self.ctx._current_dimension:
+            if hasattr(
+                    self.ctx,
+                    "_current_dimension") and self.ctx._current_dimension:
                 dim_name = self.ctx._current_dimension
                 if dim_name == "overworld":
                     region_path = "region"
@@ -261,7 +281,9 @@ class NbtDataLoader:
     def reload_current_nbt_target(self) -> None:
         """重新加载当前 NBT 目标"""
         if isinstance(self.ctx._current_nbt_target, Path):
-            self.load_nbt_file(self.ctx._current_nbt_target, self.ctx._current_nbt_label)
+            self.load_nbt_file(
+                self.ctx._current_nbt_target,
+                self.ctx._current_nbt_label)
         elif isinstance(self.ctx._current_nbt_target, str):
             self.ctx._load_player_data(self.ctx._current_nbt_target)
         elif isinstance(self.ctx._current_nbt_target, dict) and "region_path" in self.ctx._current_nbt_target:

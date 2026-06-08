@@ -76,7 +76,8 @@ def run_fast(
             if not offline_mode:
                 online_uuid, official_name = get_online_uuid(name, log)
                 if official_name and official_name != name and name in templates_by_name:
-                    templates_by_name.setdefault(official_name, templates_by_name[name])
+                    templates_by_name.setdefault(
+                        official_name, templates_by_name[name])
 
             # 确保 playerdata 目录存在
             pd.mkdir(exist_ok=True)

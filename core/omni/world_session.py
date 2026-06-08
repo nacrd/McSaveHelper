@@ -67,7 +67,10 @@ class ChunkTarget:
 class WorldSession:
     """存档会话管理器，提供延迟加载与任务队列"""
 
-    def __init__(self, world_path: Path, log: Optional[LogCallback] = None) -> None:
+    def __init__(
+            self,
+            world_path: Path,
+            log: Optional[LogCallback] = None) -> None:
         """
         初始化会话，仅读取基础信息并扫描目录结构。
 
@@ -158,7 +161,7 @@ class WorldSession:
             except OSError:
                 pass
         self._log(f"发现 {len(self._data_files)} 个数据文件", "SCAN")
-        
+
         # 扫描 usercache.json（限制搜索深度，避免遍历版本目录）
         import json
         player_set = set(self._player_files.keys())
@@ -195,7 +198,8 @@ class WorldSession:
                         cache_map[uuid] = name
                         if uuid in player_set:
                             match_count += 1
-                self._log(f"候选 usercache: {path}, 匹配 {match_count}/{len(player_set)}", "IMPORT")
+                self._log(
+                    f"候选 usercache: {path}, 匹配 {match_count}/{len(player_set)}", "IMPORT")
                 if match_count > best_match:
                     best_match = match_count
                     best_cache = cache_map
@@ -224,7 +228,9 @@ class WorldSession:
             if data is None:
                 data = {}
             version = data.get("Version", {}).get("Id", 0) if data else 0
-            version_name = data.get("Version", {}).get("Name", None) if data else None
+            version_name = data.get(
+                "Version", {}).get(
+                "Name", None) if data else None
             game_type = data.get("GameType", None) if data else None
             last_played = data.get("LastPlayed", None) if data else None
             spawn_x = data.get("SpawnX", None) if data else None
@@ -240,11 +246,16 @@ class WorldSession:
             raining = data.get("raining", None) if data else None
             thunder_time = data.get("thunderTime", None) if data else None
             thundering = data.get("thundering", None) if data else None
-            version_series = data.get("Version", {}).get("Series", None) if data else None
-            version_snapshot = data.get("Version", {}).get("Snapshot", None) if data else None
+            version_series = data.get(
+                "Version", {}).get(
+                "Series", None) if data else None
+            version_snapshot = data.get(
+                "Version", {}).get(
+                "Snapshot", None) if data else None
             server_brands = data.get("ServerBrands", None) if data else None
             was_modded = data.get("WasModded", None) if data else None
-            clear_weather_time = data.get("clearWeatherTime", None) if data else None
+            clear_weather_time = data.get(
+                "clearWeatherTime", None) if data else None
             initialized = data.get("initialized", None) if data else None
 
             seed = None
@@ -261,9 +272,9 @@ class WorldSession:
                     disabled = dp.get("Disabled", [])
                     if enabled or disabled:
                         data_packs = {
-                            "enabled": [str(e) for e in enabled] if enabled else [],
-                            "disabled": [str(d) for d in disabled] if disabled else [],
-                        }
+                            "enabled": [
+                                str(e) for e in enabled] if enabled else [], "disabled": [
+                                str(d) for d in disabled] if disabled else [], }
 
             self._world_info = WorldInfo(
                 version=version,
@@ -295,7 +306,10 @@ class WorldSession:
             self._log(f"已加载存档信息：版本 {version} ({version_name})", "INFO")
         except Exception as e:
             self._log(f"解析 level.dat 失败: {type(e).__name__}: {e}", "ERROR")
-            raise RuntimeError(f"NBT 解析失败 ({level_path.name}): {type(e).__name__}: {e}") from e
+            raise RuntimeError(
+                f"NBT 解析失败 ({
+                    level_path.name}): {
+                    type(e).__name__}: {e}") from e
 
     def get_world_info(self) -> Optional[WorldInfo]:
         """返回已加载的世界信息"""
@@ -332,7 +346,7 @@ class WorldSession:
         if data is None:
             return None
         for key in ("LastKnownName", "Name", "bukkit.lastKnownName",
-                     "CustomName", "display.Name", "lastKnownName", "name"):
+                    "CustomName", "display.Name", "lastKnownName", "name"):
             tag = data.get(key)
             if tag is not None:
                 name = str(tag.value) if hasattr(tag, 'value') else str(tag)
@@ -457,7 +471,8 @@ class WorldSession:
             key_path: 键路径列表，例如 ["Data", "Player", "Health"]
             value: 新值（必须是 NBT 兼容类型）
         """
-        if isinstance(target, str) and (target.endswith(".dat") or "/" in target or "\\" in target):
+        if isinstance(target, str) and (target.endswith(
+                ".dat") or "/" in target or "\\" in target):
             target = Path(target)
         elif isinstance(target, str):
             norm_target = self._normalize_uuid(target)
@@ -474,7 +489,10 @@ class WorldSession:
         action = Action(
             type='modify_nbt',
             target=target,
-            data={'key_path': key_path, 'value': value, 'operation': operation},
+            data={
+                'key_path': key_path,
+                'value': value,
+                'operation': operation},
         )
         self._action_queue.append(action)
         self._log(f"已队列化 NBT {operation}: {key_path} -> {value}", "QUEUE")
@@ -496,7 +514,10 @@ class WorldSession:
         action = Action(
             type='modify_json',
             target=target,
-            data={'key_path': key_path, 'value': value, 'operation': operation},
+            data={
+                'key_path': key_path,
+                'value': value,
+                'operation': operation},
         )
         self._action_queue.append(action)
         self._log(f"已队列化 JSON {operation}: {key_path} -> {value}", "QUEUE")
@@ -551,10 +572,13 @@ class WorldSession:
         self._action_queue.append(action)
         self._log("已队列化自定义操作", "QUEUE")
 
-    def queue_conversion(self, target_platform: str = "java", target_version: Optional[int] = None) -> None:
+    def queue_conversion(
+            self,
+            target_platform: str = "java",
+            target_version: Optional[int] = None) -> None:
         """
         队列化一个存档转换操作。
-        
+
         Args:
             target_platform: 目标平台，"java" 或 "bedrock"
             target_version: 目标版本 ID（仅 Java 版有效）
@@ -570,16 +594,21 @@ class WorldSession:
                     target_version=target_version
                 )
                 if success:
-                    self._log(f"存档转换成功 (平台: {target_platform}, 版本: {target_version})", "SUCCESS")
+                    self._log(
+                        f"存档转换成功 (平台: {target_platform}, 版本: {target_version})",
+                        "SUCCESS")
                 else:
                     self._log("存档转换失败", "ERROR")
             except Exception as e:
                 self._log(f"转换过程发生错误: {e}", "ERROR")
-        
+
         self.queue_custom(conversion_callback)
         self._log(f"已队列化转换操作到平台 {target_platform}", "QUEUE")
 
-    def commit(self, dest_path: Optional[Path] = None, backup: bool = True) -> bool:
+    def commit(
+            self,
+            dest_path: Optional[Path] = None,
+            backup: bool = True) -> bool:
         """
         执行所有队列中的操作，并将结果写入目标路径。
 
@@ -598,7 +627,8 @@ class WorldSession:
 
         # 1. 备份
         if backup and dest_path == self.world_path:
-            backup_dir = self.world_path.parent / f"{self.world_path.name}.backup"
+            backup_dir = self.world_path.parent / \
+                f"{self.world_path.name}.backup"
             try:
                 if backup_dir.exists():
                     shutil.rmtree(backup_dir)
@@ -625,9 +655,10 @@ class WorldSession:
         for idx, action in enumerate(self._action_queue):
             try:
                 self._execute_action(action, target_world)
-                self._log(f"操作 {idx+1}/{len(self._action_queue)} 执行成功", "ACTION")
+                self._log(
+                    f"操作 {idx + 1}/{len(self._action_queue)} 执行成功", "ACTION")
             except Exception as e:
-                self._log(f"操作 {idx+1} 执行失败: {e}", "ERROR")
+                self._log(f"操作 {idx + 1} 执行失败: {e}", "ERROR")
                 success = False
 
         # 4. 清空队列
@@ -679,7 +710,12 @@ class WorldSession:
 
         # 加载 NBT
         data = nbtlib.load(target_path)
-        self._apply_path_operation(data, key_path, value, operation, f"NBT 文件 {target_path}")
+        self._apply_path_operation(
+            data,
+            key_path,
+            value,
+            operation,
+            f"NBT 文件 {target_path}")
         # 保存
         data.save()
 
@@ -706,7 +742,12 @@ class WorldSession:
         operation = action.data.get('operation', 'set')
         with open(target_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        self._apply_path_operation(data, key_path, value, operation, f"JSON 文件 {target_path}")
+        self._apply_path_operation(
+            data,
+            key_path,
+            value,
+            operation,
+            f"JSON 文件 {target_path}")
         with open(target_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -722,7 +763,11 @@ class WorldSession:
             raise KeyError(f"{context} 的路径不能为空")
         node = data
         for key in key_path[:-1]:
-            if isinstance(key, int) and isinstance(node, list) and 0 <= key < len(node):
+            if isinstance(
+                    key,
+                    int) and isinstance(
+                    node,
+                    list) and 0 <= key < len(node):
                 node = node[key]
             elif isinstance(key, str) and isinstance(node, dict) and key in node:
                 node = node[key]
@@ -761,7 +806,10 @@ class WorldSession:
         else:
             raise KeyError(f"路径 {key_path} 无法应用到 {context}")
 
-    def _execute_delete_region(self, action: Action, target_world: Path) -> None:
+    def _execute_delete_region(
+            self,
+            action: Action,
+            target_world: Path) -> None:
         """删除区域文件"""
         x, z = action.target
         # 只删除标准 region 目录下的文件
@@ -774,7 +822,10 @@ class WorldSession:
             if region_file.exists():
                 region_file.unlink(missing_ok=True)
 
-    def _execute_rename_player(self, action: Action, target_world: Path) -> None:
+    def _execute_rename_player(
+            self,
+            action: Action,
+            target_world: Path) -> None:
         """重命名玩家文件"""
         old_uuid, new_uuid = action.target
         for folder in ["playerdata", "stats", "advancements"]:
@@ -787,7 +838,10 @@ class WorldSession:
                 new_name = f"{new_uuid}{suffix}"
                 new_path = folder_path / new_name
                 if new_path.exists():
-                    self._log(f"跳过玩家文件重命名冲突: {old_file.name} -> {new_name}", "WARN")
+                    self._log(
+                        f"跳过玩家文件重命名冲突: {
+                            old_file.name} -> {new_name}",
+                        "WARN")
                     continue
                 old_file.rename(new_path)
 
@@ -813,7 +867,7 @@ class WorldSession:
                     self._usercache[uuid] = name
                     imported += 1
             self._log(f"从 {path.name} 导入了 {imported} 个玩家名称", "IMPORT")
-            
+
             # 为所有在 player_files 中的 UUID 更新 player_names
             updated = 0
             for uuid in self._player_files.keys():
@@ -821,7 +875,8 @@ class WorldSession:
                     old = self._player_names.get(uuid)
                     self._player_names[uuid] = self._usercache[uuid]
                     updated += 1
-                    self._log(f"更新玩家名称: {uuid} -> {self._usercache[uuid]} (之前: {old})", "IMPORT")
+                    self._log(
+                        f"更新玩家名称: {uuid} -> {self._usercache[uuid]} (之前: {old})", "IMPORT")
             self._log(f"更新了 {updated} 个玩家名称", "IMPORT")
             return imported
         except Exception as e:
@@ -864,7 +919,8 @@ class WorldSession:
         ]
         for dim_id, dim_name, region_dir in vanilla_dims:
             if _has_regions(region_dir):
-                dimensions.append({"id": dim_id, "name": dim_name, "region_dir": str(region_dir)})
+                dimensions.append(
+                    {"id": dim_id, "name": dim_name, "region_dir": str(region_dir)})
                 seen.add(dim_id)
 
         # DIM* 格式（旧版模组维度）
@@ -912,7 +968,8 @@ class WorldSession:
                                     "the_nether": "🔥 下界",
                                     "the_end": "🌌 末地",
                                 }
-                                display_name = vanilla_map.get(dim_name_str, display_name)
+                                display_name = vanilla_map.get(
+                                    dim_name_str, display_name)
                             dimensions.append({
                                 "id": dim_id,
                                 "name": display_name,
@@ -927,7 +984,9 @@ class WorldSession:
         self._log(f"发现 {len(dimensions)} 个维度", "SCAN")
         return dimensions
 
-    def create_backup(self, backup_name: Optional[str] = None) -> Optional[Path]:
+    def create_backup(
+            self,
+            backup_name: Optional[str] = None) -> Optional[Path]:
         """
         创建当前存档的备份。
 
@@ -951,7 +1010,9 @@ class WorldSession:
                     self._log(f"清理旧备份失败: {e}", "WARNING")
                     # 尝试使用带后缀的名称
                     i = 1
-                    while (self.world_path.parent / f"{backup_name}_{i}").exists():
+                    while (
+                            self.world_path.parent /
+                            f"{backup_name}_{i}").exists():
                         i += 1
                     backup_dir = self.world_path.parent / f"{backup_name}_{i}"
             shutil.copytree(self.world_path, backup_dir)
@@ -961,7 +1022,10 @@ class WorldSession:
             self._log(f"创建备份失败: {e}", "ERROR")
             return None
 
-    def restore_backup(self, backup_path: Path, replace_current: bool = False) -> bool:
+    def restore_backup(
+            self,
+            backup_path: Path,
+            replace_current: bool = False) -> bool:
         """
         从备份恢复存档。
 
@@ -978,7 +1042,8 @@ class WorldSession:
                 return False
             if replace_current:
                 # 先备份当前存档
-                current_backup = self.create_backup(f"{self.world_path.name}_pre_restore")
+                current_backup = self.create_backup(
+                    f"{self.world_path.name}_pre_restore")
                 if current_backup is None:
                     self._log("无法在恢复前备份当前存档，取消恢复", "ERROR")
                     return False
@@ -1015,7 +1080,8 @@ class WorldSession:
             parent_dir = self.world_path.parent
             world_name = self.world_path.name
             for item in parent_dir.iterdir():
-                if item.is_dir() and item.name.startswith(world_name) and ("backup" in item.name or "restored" in item.name):
+                if item.is_dir() and item.name.startswith(world_name) and (
+                        "backup" in item.name or "restored" in item.name):
                     backups.append(item)
             # 按修改时间排序，最新的在前
             backups.sort(key=lambda x: x.stat().st_mtime, reverse=True)
@@ -1023,15 +1089,16 @@ class WorldSession:
             self._log(f"列出备份失败: {e}", "ERROR")
         return backups
 
-    def load_chunk_nbt(self, region_path: Path, chunk_x: int, chunk_z: int) -> Optional[Tuple[Any, Path]]:
+    def load_chunk_nbt(self, region_path: Path, chunk_x: int,
+                       chunk_z: int) -> Optional[Tuple[Any, Path]]:
         """
         加载指定区块的 NBT 数据
-        
+
         Args:
             region_path: 相对存档根目录的区域文件路径
             chunk_x: 区块在区域内的 X 坐标 (0-31)
             chunk_z: 区块在区域内的 Z 坐标 (0-31)
-        
+
         Returns:
             (区块数据, 绝对路径) 或 None
         """
@@ -1040,25 +1107,32 @@ class WorldSession:
             if not abs_region_path.exists():
                 self._log(f"区域文件不存在: {region_path}", "ERROR")
                 return None
-            
+
             from anvil import Region
             region = Region.from_file(str(abs_region_path))
             chunk = region.get_chunk(chunk_x, chunk_z)
-            
+
             if chunk is None or not hasattr(chunk, "data"):
-                self._log(f"区块数据不存在: {region_path} [{chunk_x}, {chunk_z}]", "WARNING")
+                self._log(
+                    f"区块数据不存在: {region_path} [{chunk_x}, {chunk_z}]",
+                    "WARNING")
                 return None
-            
+
             self._log(f"已加载区块: {region_path} [{chunk_x}, {chunk_z}]", "INFO")
             return chunk.data, abs_region_path
         except Exception as e:
             self._log(f"加载区块失败: {e}", "ERROR")
             return None
 
-    def queue_modify_chunk(self, region_path: Path, chunk_x: int, chunk_z: int, full_chunk_data: Any) -> None:
+    def queue_modify_chunk(
+            self,
+            region_path: Path,
+            chunk_x: int,
+            chunk_z: int,
+            full_chunk_data: Any) -> None:
         """
         队列化区块修改操作
-        
+
         Args:
             region_path: 相对存档根目录的区域文件路径
             chunk_x: 区块在区域内的 X 坐标 (0-31)
@@ -1079,26 +1153,43 @@ class WorldSession:
         self._action_queue.append(action)
         self._log(f"已队列化区块修改: {region_path} [{chunk_x}, {chunk_z}]", "QUEUE")
 
-    def _execute_modify_chunk(self, action: Action, target_world: Path) -> None:
+    def _execute_modify_chunk(
+            self,
+            action: Action,
+            target_world: Path) -> None:
         """执行区块修改操作"""
         target = action.target
         if not isinstance(target, ChunkTarget):
             raise ValueError("无效的区块目标")
-        
+
         abs_region_path = target_world / target.region_path
         if not abs_region_path.exists():
             raise ValueError(f"区域文件不存在: {target.region_path}")
-        
+
         # 备份区域文件
         from app.services.region_editor_service import get_region_editor_service
         editor = get_region_editor_service(log=self.log)
         editor._backup_region(abs_region_path, backup=True)
-        
-        # 写入区块
-        self._write_chunk(abs_region_path, target.chunk_x, target.chunk_z, target.full_chunk_data)
-        self._log(f"已写回区块: {target.region_path} [{target.chunk_x}, {target.chunk_z}]", "SAVE")
 
-    def _write_chunk(self, region_path: Path, chunk_x: int, chunk_z: int, chunk_data: Any) -> None:
+        # 写入区块
+        self._write_chunk(
+            abs_region_path,
+            target.chunk_x,
+            target.chunk_z,
+            target.full_chunk_data)
+        self._log(
+            f"已写回区块: {
+                target.region_path} [{
+                target.chunk_x}, {
+                target.chunk_z}]",
+            "SAVE")
+
+    def _write_chunk(
+            self,
+            region_path: Path,
+            chunk_x: int,
+            chunk_z: int,
+            chunk_data: Any) -> None:
         """将区块数据写回区域文件"""
         try:
             from app.services.region_editor_service import get_region_editor_service
@@ -1114,12 +1205,15 @@ class WorldSession:
             elif hasattr(chunk_data, "save"):
                 chunk_data.save(buffer, gzipped=False)
             else:
-                raise TypeError(f"不支持的区块 NBT 对象类型: {type(chunk_data).__name__}")
+                raise TypeError(
+                    f"不支持的区块 NBT 对象类型: {
+                        type(chunk_data).__name__}")
             nbt_bytes = buffer.getvalue()
             compressed = zlib.compress(nbt_bytes, 6)
             length = len(compressed) + 1
             chunk_record = length.to_bytes(4, "big") + b"\x02" + compressed
-            editor._write_chunk_record(region_path, chunk_x, chunk_z, chunk_record)
+            editor._write_chunk_record(
+                region_path, chunk_x, chunk_z, chunk_record)
         except Exception as e:
             self._log(f"写回区块失败: {e}", "ERROR")
             raise

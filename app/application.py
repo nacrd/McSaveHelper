@@ -89,7 +89,8 @@ class Application:
             self.migration: MigrationService = MigrationService(self.config)
         except Exception as e:
             print(f"[WARN] MigrationService 初始化失败: {e}")
-            self.migration = MigrationService.__new__(MigrationService)  # type: ignore
+            self.migration = MigrationService.__new__(
+                MigrationService)  # type: ignore
 
         try:
             self.uuid: UUIDService = UUIDService()
@@ -160,31 +161,34 @@ class Application:
         try:
             # 1. 初始化通知管理器
             self.notification_manager = NotificationManager(self.page)
-            
+
             # 2. 启用独立的卡死检测器（静默启用，输出到日志）
             hang_detector = get_hang_detector()
             hang_detector.enable()
             self._start_hang_detector_heartbeat()
-            
+
             # 3. 根据配置启用性能监控（可选）
-            enable_perf = self.config.ui_settings.get("enable_performance_monitor", False)
-            
+            enable_perf = self.config.ui_settings.get(
+                "enable_performance_monitor", False)
+
             if enable_perf:
                 perf_monitor.enable()
                 resource_monitor.start()
-                interval = float(self.config.ui_settings.get("performance_print_interval", 60))
+                interval = float(
+                    self.config.ui_settings.get(
+                        "performance_print_interval", 60))
                 resource_monitor.set_print_interval(max(5.0, interval))
                 # 配置健康监控告警回调
                 health_monitor.set_alert_callback(self._on_health_alert)
                 self._start_heartbeat()
-            
+
             # 4. 注册键盘快捷键
             register_default_shortcuts(
                 on_save=self._shortcut_save_config,
                 on_help=self._shortcut_show_help,
                 on_refresh=self._shortcut_refresh
             )
-            
+
             # 注册应用特定快捷键
             shortcut_manager.register(
                 "show_feedback",
@@ -193,10 +197,10 @@ class Application:
                 "显示反馈对话框",
                 [ModifierKey.CTRL]
             )
-            
+
             # 设置键盘事件处理
             self.page.on_keyboard_event = self._on_keyboard_event
-            
+
             # 4. 验证可访问性
             accessibility_results = validate_theme_accessibility()
             failed_checks = [
@@ -210,9 +214,9 @@ class Application:
                 )
             else:
                 logger.info("可访问性检查: 全部通过", module="accessibility")
-            
+
             logger.info("GUI 优化模块初始化完成", module="App")
-            
+
         except Exception as e:
             logger.error(f"GUI 优化模块初始化失败: {e}", module="App")
             # 降级：不使用优化功能
@@ -220,7 +224,7 @@ class Application:
 
     def _on_keyboard_event(self, e: ft.KeyboardEvent) -> None:
         """处理键盘事件
-        
+
         Args:
             e: 键盘事件
         """
@@ -282,17 +286,19 @@ class Application:
                 return
         except Exception:
             pass
-        
+
         if not self.notification_manager:
             return
         try:
             if alert.level == AlertLevel.CRITICAL:
                 async def _show_error(message: str):
-                    self.notification_manager.show_error(message, duration_ms=8000)
+                    self.notification_manager.show_error(
+                        message, duration_ms=8000)
                 self.page.run_task(_show_error, alert.message)
             else:
                 async def _show_warning(message: str):
-                    self.notification_manager.show_warning(message, duration_ms=5000)
+                    self.notification_manager.show_warning(
+                        message, duration_ms=5000)
                 self.page.run_task(_show_warning, alert.message)
         except Exception:
             pass
@@ -321,7 +327,10 @@ class Application:
                 _threading.Event().wait(2.0)  # 每 2 秒一次心跳
 
         self._hang_detector_active = True
-        t = _threading.Thread(target=_hang_beat_loop, daemon=True, name="HangDetectorHeartbeat")
+        t = _threading.Thread(
+            target=_hang_beat_loop,
+            daemon=True,
+            name="HangDetectorHeartbeat")
         t.start()
 
     # ════════════════════════════════════════════
@@ -330,12 +339,12 @@ class Application:
 
     def _t(self, key: str, default: str = "", **kwargs) -> str:
         """翻译快捷方法
-        
+
         Args:
             key: 翻译键
             default: 默认文本
             **kwargs: 格式化参数
-            
+
         Returns:
             str: 翻译后的文本
         """
@@ -346,7 +355,7 @@ class Application:
 
     def _on_page_error(self, e: ft.ControlEvent) -> None:
         """页面级全局异常兜底
-        
+
         Args:
             e: 控制事件
         """
@@ -355,9 +364,11 @@ class Application:
         traceback.print_exc()
         try:
             self.log(f"未捕获的异常: {error_msg}", "ERROR")
-            
+
             # 使用优化的错误报告对话框
-            if hasattr(self, 'notification_manager') and self.notification_manager:
+            if hasattr(
+                    self,
+                    'notification_manager') and self.notification_manager:
                 try:
                     # 尝试创建异常对象
                     exception = Exception(error_msg)
@@ -410,7 +421,7 @@ class Application:
 
     def _on_window_resize(self, e) -> None:
         """窗口大小变化时的响应（带防抖，兼容版）
-        
+
         Args:
             e: 窗口大小变化事件
         """
@@ -419,26 +430,26 @@ class Application:
             timer = getattr(self, '_resize_timer', None)
             if timer is not None:
                 timer.cancel()
-            
+
             import threading
             self._resize_timer = threading.Timer(0.15, self._apply_resize)
             self._resize_timer.daemon = True
             self._resize_timer.start()
         except Exception as ex:
             logger.error(f"窗口大小变化处理失败: {ex}", module="App")
-    
+
     def _apply_resize(self) -> None:
         """实际执行窗口大小调整（在防抖延迟后调用）"""
         try:
             width = self.page.window.width
             height = self.page.window.height
-            
+
             self._apply_responsive_layout(width, height)
-            
+
             self.page.update()
-            
+
             logger.debug(
-                f"窗口大小变化: {width}x{height}", 
+                f"窗口大小变化: {width}x{height}",
                 module="App"
             )
         except Exception as ex:
@@ -455,7 +466,11 @@ class Application:
             shell_pad = 6 if compact else 12
             shell_margin = 4 if compact else 12
             self._shell.padding = shell_pad
-            self._shell.margin = ft.Margin(left=shell_margin, right=shell_margin, top=0, bottom=shell_margin)
+            self._shell.margin = ft.Margin(
+                left=shell_margin,
+                right=shell_margin,
+                top=0,
+                bottom=shell_margin)
         if hasattr(self, '_scrollable_content'):
             self._scrollable_content.padding = 6 if compact else 14
         if hasattr(self, '_content'):
@@ -467,7 +482,9 @@ class Application:
                     btn.height = 34 if compact else 38
                 if hasattr(btn, 'width') and compact:
                     btn.width = min(getattr(btn, 'width', 120) or 120, 104)
-        current_view = self.views.get(self._sidebar.selected_id) if hasattr(self, '_sidebar') else None
+        current_view = self.views.get(
+            self._sidebar.selected_id) if hasattr(
+            self, '_sidebar') else None
         if current_view and hasattr(current_view, 'set_compact_mode'):
             current_view.set_compact_mode(compact)
 
@@ -490,7 +507,8 @@ class Application:
         """初始化日志系统"""
         def ui_log_callback(message: str, tag: str) -> None:
             ts = time.strftime("%H:%M:%S")
-            self.floating_log_panel.log(f"[{ts}] [{tag.upper()}] {message}", tag.lower())
+            self.floating_log_panel.log(
+                f"[{ts}] [{tag.upper()}] {message}", tag.lower())
 
         setup_default_logging(
             enable_console=True, enable_file=True, file_path=None,
@@ -552,13 +570,13 @@ class Application:
             page=self.page,
             title=self._t("log_panel.title", "日志"),
         )
-        
+
         # 日志悬浮球按钮
         self._log_fab = FloatingLogButton(
             floating_panel=self.floating_log_panel,
             page=self.page,
         )
-        
+
         # 初始化时根据配置设置可见性
         show_log = self.config.ui_settings.get("show_log_panel", True)
         self._log_fab.set_visible(show_log)
@@ -621,7 +639,7 @@ class Application:
 
     def _on_tabs_reorder(self, tabs: list) -> None:
         """侧边栏标签页排序变更回调
-        
+
         Args:
             tabs: 排序后的标签页列表
         """
@@ -646,7 +664,8 @@ class Application:
             context = CurrentSaveContext.from_path(path)
             if not context.is_valid:
                 self.warn_dialog("提示", "该最近存档已失效，目录中未找到 level.dat。")
-                self._recent_saves = [s for s in self._recent_saves if s.get("path") != path]
+                self._recent_saves = [
+                    s for s in self._recent_saves if s.get("path") != path]
                 self._sidebar.set_recent_saves(self._recent_saves)
                 self._save_recent_saves()
                 return
@@ -661,7 +680,8 @@ class Application:
         self._remember_recent_save(context)
         self._activate_explorer_with_current_save(context.display_path)
         if hasattr(self, "notification_manager") and self.notification_manager:
-            self.notification_manager.show_success(f"当前存档已设置为 {context.name}，相关功能将自动使用该存档")
+            self.notification_manager.show_success(
+                f"当前存档已设置为 {context.name}，相关功能将自动使用该存档")
 
     def _activate_explorer_with_current_save(self, path: str) -> None:
         try:
@@ -683,7 +703,8 @@ class Application:
         try:
             saves = self.config.config.get("recent_saves", [])
             if isinstance(saves, list):
-                return [s for s in saves if isinstance(s, dict) and s.get("path")][:5]
+                return [s for s in saves if isinstance(
+                    s, dict) and s.get("path")][:5]
         except Exception:
             pass
         return []
@@ -697,7 +718,8 @@ class Application:
 
     def _remember_recent_save(self, context: CurrentSaveContext) -> None:
         save = {"path": context.display_path, "name": context.name}
-        self._recent_saves = [s for s in self._recent_saves if s.get("path") != context.display_path]
+        self._recent_saves = [
+            s for s in self._recent_saves if s.get("path") != context.display_path]
         self._recent_saves.insert(0, save)
         self._recent_saves = self._recent_saves[:5]
         self._sidebar.set_recent_saves(self._recent_saves)
@@ -705,7 +727,7 @@ class Application:
 
     def _notify_current_view_save_selected(self, path: str) -> None:
         """通知当前视图存档已选中
-        
+
         Args:
             path: 存档路径
         """
@@ -796,16 +818,19 @@ class Application:
 
     def _build_window_controls(self) -> ft.Row:
         """构建窗口控制按钮组"""
-        self._maximize_window_button = self._window_button("□", THEME.mc_stone, self._toggle_maximize_window)
-        return ft.Row(
-            [
-                self._window_button("—", THEME.mc_stone, self._minimize_window),
-                self._maximize_window_button,
-                self._window_button("×", THEME.mc_redstone, self._close_window),
-            ],
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
+        self._maximize_window_button = self._window_button(
+            "□", THEME.mc_stone, self._toggle_maximize_window)
+        return ft.Row([self._window_button("—",
+                                           THEME.mc_stone,
+                                           self._minimize_window),
+                       self._maximize_window_button,
+                       self._window_button("×",
+                                           THEME.mc_redstone,
+                                           self._close_window),
+                       ],
+                      spacing=6,
+                      vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                      )
 
     def _minimize_window(self, e: ft.ControlEvent) -> None:
         self.page.window.minimized = True
@@ -820,7 +845,8 @@ class Application:
         try:
             if getattr(self.page.window, "minimized", False):
                 self.page.window.minimized = False
-            self.page.window.maximized = not bool(getattr(self.page.window, "maximized", False))
+            self.page.window.maximized = not bool(
+                getattr(self.page.window, "maximized", False))
             self.page.window.update()
             self._sync_maximize_button_state()
         except Exception as ex:
@@ -832,8 +858,10 @@ class Application:
             btn = getattr(self, "_maximize_window_button", None)
             if not btn or not isinstance(btn.content, ft.Text):
                 return
-            btn.content.value = "❐" if getattr(self.page.window, "maximized", False) else "□"
-            btn.tooltip = "还原" if getattr(self.page.window, "maximized", False) else "最大化"
+            btn.content.value = "❐" if getattr(
+                self.page.window, "maximized", False) else "□"
+            btn.tooltip = "还原" if getattr(
+                self.page.window, "maximized", False) else "最大化"
             btn.update()
         except Exception:
             pass
@@ -846,7 +874,8 @@ class Application:
         """处理系统窗口事件，确保标题栏关闭也执行清理。"""
         try:
             event_type = getattr(e, "type", None)
-            if event_type == ft.WindowEventType.CLOSE or str(event_type).lower().endswith("close"):
+            if event_type == ft.WindowEventType.CLOSE or str(
+                    event_type).lower().endswith("close"):
                 self._shutdown_app()
             elif str(event_type).lower().endswith(("maximize", "unmaximize", "restore", "resize")):
                 self._sync_maximize_button_state()
@@ -864,17 +893,17 @@ class Application:
         self._shutdown_started = True
 
         from app.ui.utils import set_app_closing
-        
+
         # 1. 设置关闭标记，防止新的 UI 更新
         set_app_closing(True)
-        
+
         # 2. 停止性能监控
         try:
             perf_monitor.disable()
             resource_monitor.stop()
         except Exception:
             pass
-        
+
         # 3. 停止心跳线程
         try:
             self._heartbeat_active = False
@@ -886,7 +915,7 @@ class Application:
             logger.shutdown()
         except Exception:
             pass
-        
+
         # 5. 调度异步销毁窗口
         try:
             async def _destroy_window():
@@ -983,7 +1012,7 @@ class Application:
 
     def _switch_view(self, view_id: str) -> None:
         """切换到指定视图
-        
+
         Args:
             view_id: 视图ID
         """
@@ -993,7 +1022,8 @@ class Application:
             current_view = self.views[view_id]
             self._content.content = current_view
             self._update_top_action(view_id, current_view)
-            if self._current_save_path and hasattr(current_view, 'on_save_selected'):
+            if self._current_save_path and hasattr(
+                    current_view, 'on_save_selected'):
                 try:
                     current_view.on_save_selected(self._current_save_path)
                 except Exception as ex:
@@ -1004,18 +1034,27 @@ class Application:
             self.log(f"加载视图 '{view_id}' 失败: {e}", "ERROR")
             self._handle_view_error(view_id, e)
 
-    def _update_top_action(self, view_id: str, current_view: ft.Control) -> None:
+    def _update_top_action(
+            self,
+            view_id: str,
+            current_view: ft.Control) -> None:
         actions = self._get_top_actions(view_id, current_view)
         self._top_actions.controls.clear()
         for action in actions:
             width = max(86, min(140, len(action.label) * 14 + 28))
             builder = btn_danger if action.style == "danger" else btn_primary
             self._top_actions.controls.append(
-                builder(action.label, on_click=action.handler, width=width, height=38)
-            )
+                builder(
+                    action.label,
+                    on_click=action.handler,
+                    width=width,
+                    height=38))
         self._top_actions.visible = bool(actions)
 
-    def _get_top_actions(self, view_id: str, current_view: ft.Control) -> List[TopAction]:
+    def _get_top_actions(
+            self,
+            view_id: str,
+            current_view: ft.Control) -> List[TopAction]:
         if view_id == "explorer":
             return [
                 TopAction("开始统计", lambda e: current_view._analyze_world_stats(e)),
@@ -1038,20 +1077,21 @@ class Application:
 
     def _handle_view_error(self, view_id: str, error: Exception) -> None:
         """处理视图加载错误
-        
+
         Args:
             view_id: 视图ID
             error: 异常对象
         """
         try:
-            self._content.content = self._build_error_placeholder(view_id, error)
+            self._content.content = self._build_error_placeholder(
+                view_id, error)
             self.page.update()
         except Exception:
             self._show_simple_error(view_id, error)
 
     def _show_simple_error(self, view_id: str, error: Exception) -> None:
         """显示简单错误信息
-        
+
         Args:
             view_id: 视图ID
             error: 异常对象
@@ -1070,10 +1110,10 @@ class Application:
 
     def _create_view(self, view_id: str) -> ft.Control:
         """创建指定视图
-        
+
         Args:
             view_id: 视图ID
-            
+
         Returns:
             ft.Control: 视图控件
         """
@@ -1097,31 +1137,34 @@ class Application:
             "mappings": MappingsView,
             "settings": SettingsView,
         }
-        
+
         view_class = view_map.get(view_id)
         if view_class:
             return view_class(self)
         return ft.Container()
 
-    def _build_error_placeholder(self, view_id: str, error: Exception) -> ft.Container:
+    def _build_error_placeholder(
+            self,
+            view_id: str,
+            error: Exception) -> ft.Container:
         """视图加载失败时的错误占位页面 - 可复制、可关闭
-        
+
         Args:
             view_id: 视图ID
             error: 异常对象
-            
+
         Returns:
             ft.Container: 错误占位页容器
         """
         tb = traceback.format_exc()
-        
+
         # 创建可选择的错误信息文本
         error_text = ft.SelectableText(
             str(error),
             size=13,
             color=THEME.text_secondary
         )
-        
+
         # 创建可选择的堆栈跟踪文本
         traceback_text = ft.SelectableText(
             tb,
@@ -1129,7 +1172,7 @@ class Application:
             color=THEME.text_muted,
             font_family="monospace"
         )
-        
+
         # 关闭按钮
         close_btn = ft.IconButton(
             icon=ft.Icons.CLOSE,
@@ -1137,7 +1180,7 @@ class Application:
             on_click=lambda e: self._close_error_view(),
             tooltip="关闭"
         )
-        
+
         # 重试按钮
         retry_btn = ft.ElevatedButton(
             "🔄 重试",
@@ -1145,24 +1188,27 @@ class Application:
             bgcolor=THEME.accent,
             color=THEME.text_primary,
         )
-        
+
         # 返回按钮
         back_btn = ft.OutlinedButton(
             "← 返回首页",
             on_click=lambda e: self._switch_view("explorer"),
         )
-        
+
         # 复制按钮
         copy_btn = ft.OutlinedButton(
             "📋 复制错误",
             on_click=lambda e: self._copy_error_to_clipboard(tb),
         )
-        
+
         return ft.Container(
             content=ft.Column([
                 # 标题行
                 ft.Row([
-                    ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
+                    ft.Icon(
+                        ft.Icons.ERROR_OUTLINE,
+                        size=48,
+                        color=THEME.error),
                     ft.Column([
                         ft.Text(
                             f"加载页面 '{view_id}' 时出错",
@@ -1175,11 +1221,15 @@ class Application:
                     ], spacing=4),
                     close_btn,
                 ], spacing=16, alignment=ft.MainAxisAlignment.START),
-                
+
                 ft.Divider(height=20, color=THEME.border_subtle),
-                
+
                 # 错误信息
-                ft.Text("错误信息：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_secondary),
+                ft.Text(
+                    "错误信息：",
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_secondary),
                 ft.Container(
                     content=error_text,
                     bgcolor=THEME.bg_secondary,
@@ -1187,11 +1237,15 @@ class Application:
                     padding=10,
                     width=700,
                 ),
-                
+
                 ft.Container(height=12),
-                
+
                 # 堆栈跟踪
-                ft.Text("详细信息（可复制）：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_secondary),
+                ft.Text(
+                    "详细信息（可复制）：",
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_secondary),
                 ft.Container(
                     content=ft.Container(
                         content=traceback_text,
@@ -1202,9 +1256,9 @@ class Application:
                     width=700,
                     height=250,
                 ),
-                
+
                 ft.Container(height=20),
-                
+
                 # 操作按钮
                 ft.Row([
                     retry_btn,
@@ -1215,10 +1269,10 @@ class Application:
             padding=40,
             expand=True,
         )
-    
+
     def _copy_error_to_clipboard(self, error_text: str) -> None:
         """复制错误信息到剪贴板
-        
+
         Args:
             error_text: 要复制的错误文本
         """
@@ -1227,7 +1281,7 @@ class Application:
             self.info_dialog("✅ 成功", "错误信息已复制到剪贴板\n你可以直接粘贴到任何地方")
         except Exception as e:
             self.warn_dialog("复制失败", f"无法复制到剪贴板，请手动选择并复制错误信息\n\n错误：{str(e)}")
-    
+
     def _close_error_view(self) -> None:
         """关闭错误页面，返回首页"""
         self.views.pop("error", None)
@@ -1235,7 +1289,7 @@ class Application:
 
     def _retry_view(self, view_id: str) -> None:
         """移除缓存的失败视图，重新尝试加载
-        
+
         Args:
             view_id: 视图ID
         """
@@ -1251,7 +1305,7 @@ class Application:
 
     def log(self, msg: str, level: str = "INFO") -> None:
         """记录日志
-        
+
         Args:
             msg: 日志消息
             level: 日志级别
@@ -1261,7 +1315,7 @@ class Application:
 
     def log_header(self, msg: str) -> None:
         """记录标题日志
-        
+
         Args:
             msg: 标题消息
         """
@@ -1279,14 +1333,14 @@ class Application:
 
     def update_progress(self, value: float) -> None:
         """更新进度条
-        
+
         Args:
             value: 进度值（0.0 到 1.0）
         """
         # 确保进度条可见
         if not self._progress_container.visible:
             self._progress_container.visible = True
-        
+
         # 使用新的进度条组件方法
         self._progress_bar.set_value(value)
         self._progress_label.value = self._t(
@@ -1297,7 +1351,7 @@ class Application:
 
     def show_progress(self, task_name: str = "") -> None:
         """显示进度条
-        
+
         Args:
             task_name: 任务名称（如"转换中"、"扫描中"等）
         """
@@ -1318,7 +1372,7 @@ class Application:
 
     def update_progress_with_task(self, task_name: str, value: float) -> None:
         """更新进度条（带任务名称）
-        
+
         Args:
             task_name: 任务名称
             value: 进度值（0.0 到 1.0）
@@ -1326,19 +1380,19 @@ class Application:
         # 确保进度条可见
         if not self._progress_container.visible:
             self._progress_container.visible = True
-        
+
         # 设置任务名称和进度
         if value >= 0 and value <= 1.0:
             self._progress_label.value = f"{task_name} {int(value * 100)}%"
         else:
             self._progress_label.value = task_name
-        
+
         self._progress_bar.set_value(value)
         self.page.update()
 
     def set_progress_label(self, text: str) -> None:
         """设置进度标签文本
-        
+
         Args:
             text: 标签文本
         """
@@ -1350,7 +1404,7 @@ class Application:
 
     def set_progress_value(self, value: float) -> None:
         """设置进度条值
-        
+
         Args:
             value: 进度值 (0.0 - 1.0)
         """
@@ -1368,10 +1422,15 @@ class Application:
             self.page.update()
             self._current_dialog = None
 
-    def _show_dialog(self, title: str, message: str, color: str = THEME.accent,
-                    include_details: bool = False, exception: Optional[Exception] = None) -> None:
+    def _show_dialog(
+            self,
+            title: str,
+            message: str,
+            color: str = THEME.accent,
+            include_details: bool = False,
+            exception: Optional[Exception] = None) -> None:
         """显示对话框
-        
+
         Args:
             title: 对话框标题
             message: 对话框消息
@@ -1381,22 +1440,27 @@ class Application:
         """
         # 先关闭现有对话框
         self._close_dialog()
-        
+
         # 构建内容
-        content_list: List[ft.Control] = [ft.Text(message, color=THEME.text_secondary)]
-        
+        content_list: List[ft.Control] = [
+            ft.Text(message, color=THEME.text_secondary)]
+
         # 存储完整错误信息用于复制
         full_error_text = f"{title}\n\n{message}"
-        
+
         if include_details and exception:
             error_details = traceback.format_exc()
             full_error_text += f"\n\n详细信息：\n{error_details}"
-            
+
             # 可滚动的错误详情容器
             details_container = ft.Container(
                 content=ft.Column(
                     [
-                        ft.Text("详细信息：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                        ft.Text(
+                            "详细信息：",
+                            size=12,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.text_primary),
                         ft.Container(
                             content=ft.Text(
                                 error_details,
@@ -1412,26 +1476,30 @@ class Application:
                     spacing=6,
                     scroll=ft.ScrollMode.AUTO,
                 ),
-                padding=ft.Padding(top=10, right=0, bottom=0, left=0),
+                padding=ft.Padding(
+                    top=10,
+                    right=0,
+                    bottom=0,
+                    left=0),
                 height=200,
             )
             content_list.append(details_container)
-        
+
         content = ft.Column(content_list, tight=True)
-        
+
         # 创建对话框实例
         d = ft.AlertDialog(
             title=ft.Text(title, color=THEME.text_primary),
             content=content,
             actions=[],
         )
-        
+
         # 定义关闭按钮的处理函数
         def handle_ok(e):
             d.open = False
             self.page.update()
             self._current_dialog = None
-        
+
         # 定义复制按钮的处理函数
         def handle_copy(e):
             try:
@@ -1442,7 +1510,7 @@ class Application:
                     # 尝试使用 clipboard 属性
                     self.page.clipboard = full_error_text
                     self.page.update()
-                
+
                 # 显示复制成功提示
                 self.page.snack_bar = ft.SnackBar(
                     content=ft.Text("错误信息已复制到剪贴板", color=THEME.text_primary),
@@ -1454,16 +1522,18 @@ class Application:
             except Exception:
                 # 如果复制失败，显示错误提示
                 self.page.snack_bar = ft.SnackBar(
-                    content=ft.Text("复制失败，错误信息可手动选择复制", color=THEME.text_primary),
+                    content=ft.Text(
+                        "复制失败，错误信息可手动选择复制",
+                        color=THEME.text_primary),
                     bgcolor=THEME.warning,
                     duration=3000,
                 )
                 self.page.snack_bar.open = True
                 self.page.update()
-        
+
         # 添加按钮
         actions = []
-        
+
         # 如果有错误详情，添加复制按钮
         if include_details and exception:
             actions.append(
@@ -1473,7 +1543,7 @@ class Application:
                     on_click=handle_copy,
                 )
             )
-        
+
         actions.append(
             ft.TextButton(
                 self._t("dialogs.ok", "确定"),
@@ -1481,9 +1551,9 @@ class Application:
                 on_click=handle_ok,
             )
         )
-        
+
         d.actions = actions
-        
+
         self._current_dialog = d
         self.page.overlay.append(d)
         d.open = True
@@ -1491,7 +1561,7 @@ class Application:
 
     def info_dialog(self, title: str, message: str) -> None:
         """显示信息对话框
-        
+
         Args:
             title: 对话框标题
             message: 对话框消息
@@ -1500,30 +1570,39 @@ class Application:
 
     def warn_dialog(self, title: str, message: str) -> None:
         """显示警告对话框
-        
+
         Args:
             title: 对话框标题
             message: 对话框消息
         """
         self._show_dialog(title, message, THEME.warning)
 
-    def error_dialog(self, title: str, message: str, 
-                    exception: Optional[Exception] = None, 
-                    show_details: bool = False) -> None:
+    def error_dialog(self, title: str, message: str,
+                     exception: Optional[Exception] = None,
+                     show_details: bool = False) -> None:
         """显示错误对话框，可以选择是否显示异常详情
-        
+
         Args:
             title: 对话框标题
             message: 对话框消息
             exception: 异常对象
             show_details: 是否显示异常详情
         """
-        self._show_dialog(title, message, THEME.error, include_details=show_details, exception=exception)
-        
-    def handle_exception(self, exception: Exception, title: Optional[str] = None, 
-                        log: bool = True, show_dialog: bool = True) -> None:
+        self._show_dialog(
+            title,
+            message,
+            THEME.error,
+            include_details=show_details,
+            exception=exception)
+
+    def handle_exception(
+            self,
+            exception: Exception,
+            title: Optional[str] = None,
+            log: bool = True,
+            show_dialog: bool = True) -> None:
         """统一异常处理方法
-        
+
         Args:
             exception: 异常对象
             title: 对话框标题
@@ -1532,15 +1611,19 @@ class Application:
         """
         if title is None:
             title = self._t("dialogs.error", "错误")
-        
+
         # 记录日志
         if log:
             logger.error(f"{title}: {str(exception)}", module="App")
             logger.error(traceback.format_exc(), module="App")
-        
+
         # 显示对话框
         if show_dialog:
-            self.error_dialog(title, str(exception), exception=exception, show_details=True)
+            self.error_dialog(
+                title,
+                str(exception),
+                exception=exception,
+                show_details=True)
 
     # ════════════════════════════════════════════
     #  文件选择
@@ -1548,7 +1631,7 @@ class Application:
 
     def pick_directory(self) -> Optional[str]:
         """选择目录对话框
-        
+
         Returns:
             Optional[str]: 选择的目录路径，取消则返回None
         """
@@ -1557,19 +1640,21 @@ class Application:
             root = Tk()
             root.withdraw()
             root.attributes('-topmost', True)
-            path = filedialog.askdirectory(title=self._t("common.select", "选择目录"))
+            path = filedialog.askdirectory(
+                title=self._t("common.select", "选择目录"))
             root.destroy()
             return path if path else None
         except Exception:
             return None
 
-    def pick_file(self, title: str = "", file_types: Optional[List[tuple]] = None) -> Optional[str]:
+    def pick_file(self, title: str = "",
+                  file_types: Optional[List[tuple]] = None) -> Optional[str]:
         """选择文件对话框
-        
+
         Args:
             title: 对话框标题
             file_types: 文件类型过滤
-            
+
         Returns:
             Optional[str]: 选择的文件路径，取消则返回None
         """
@@ -1578,7 +1663,8 @@ class Application:
             root = Tk()
             root.withdraw()
             root.attributes('-topmost', True)
-            ft_list = file_types or [(self._t("common.all_files", "所有文件"), "*.*")]
+            ft_list = file_types or [
+                (self._t("common.all_files", "所有文件"), "*.*")]
             d_title = title or self._t("common.select", "选择文件")
             path = filedialog.askopenfilename(title=d_title, filetypes=ft_list)
             root.destroy()
@@ -1589,12 +1675,12 @@ class Application:
     def save_file(self, title: str = "", default_ext: str = ".txt",
                   file_types: Optional[List[tuple]] = None) -> Optional[str]:
         """保存文件对话框
-        
+
         Args:
             title: 对话框标题
             default_ext: 默认扩展名
             file_types: 文件类型过滤
-            
+
         Returns:
             Optional[str]: 选择的文件路径，取消则返回None
         """
@@ -1603,7 +1689,8 @@ class Application:
             root = Tk()
             root.withdraw()
             root.attributes('-topmost', True)
-            ft_list = file_types or [(self._t("common.all_files", "所有文件"), "*.*")]
+            ft_list = file_types or [
+                (self._t("common.all_files", "所有文件"), "*.*")]
             d_title = title or self._t("common.save", "保存文件")
             path = filedialog.asksaveasfilename(
                 title=d_title, defaultextension=default_ext,
@@ -1629,7 +1716,7 @@ class Application:
     # ─── 公共 UI 控制方法（供控制器使用） ─────────
     def set_start_button_enabled(self, enabled: bool) -> None:
         """设置开始按钮的启用状态
-        
+
         Args:
             enabled: 是否启用按钮
         """
@@ -1637,7 +1724,7 @@ class Application:
 
     def set_progress_label(self, text: str) -> None:
         """设置进度标签文本
-        
+
         Args:
             text: 标签文本
         """
@@ -1645,7 +1732,7 @@ class Application:
 
     def set_progress_value(self, value: float) -> None:
         """设置进度条值
-        
+
         Args:
             value: 进度值 (0.0 - 1.0)
         """
@@ -1658,7 +1745,7 @@ class Application:
 
     def _run_single_thread(self, dest_dir: str) -> None:
         """执行单存档迁移的线程函数
-        
+
         Args:
             dest_dir: 目标目录
         """
@@ -1666,7 +1753,7 @@ class Application:
 
     def _run_batch_thread(self, dest_dir: str) -> None:
         """执行批量迁移的线程函数
-        
+
         Args:
             dest_dir: 目标目录
         """
@@ -1678,7 +1765,7 @@ class Application:
 
     def open_folder(self, path: str) -> None:
         """在系统文件管理器中打开目录
-        
+
         Args:
             path: 目录路径
         """
@@ -1721,7 +1808,7 @@ class Application:
 
     def _update_migrator_field(self, field_name: str, value: str) -> None:
         """更新 MigratorView 中的输入框值
-        
+
         Args:
             field_name: 字段名称
             value: 字段值
@@ -1738,7 +1825,7 @@ class Application:
 
     def _on_uuid_mappings_change(self, mappings: Dict[str, str]) -> None:
         """UUID 映射变更回调
-        
+
         Args:
             mappings: UUID 映射字典
         """

@@ -97,7 +97,10 @@ class SaveRepairView(ft.Column):
     def _build_ui(self) -> None:
         header = page_header(
             "存档修复",
-            ft.Text("检测存档状态、修复损坏的区块、玩家数据、level.dat", size=12, color=THEME.text_muted),
+            ft.Text(
+                "检测存档状态、修复损坏的区块、玩家数据、level.dat",
+                size=12,
+                color=THEME.text_muted),
             icon="🔧",
         )
 
@@ -314,7 +317,11 @@ class SaveRepairView(ft.Column):
             run_on_ui(self.app.page, self.app.show_progress, "正在检测存档...")
 
             def progress_callback(value: float, msg: str) -> None:
-                run_on_ui(self.app.page, self.app.update_progress_with_task, msg or "检测中", value)
+                run_on_ui(
+                    self.app.page,
+                    self.app.update_progress_with_task,
+                    msg or "检测中",
+                    value)
 
             def log_callback(msg: str, level: str) -> None:
                 run_on_ui(self.app.page, self._append_log, msg, level)
@@ -350,18 +357,34 @@ class SaveRepairView(ft.Column):
         if info.world_name:
             info_lines.append(f"名称: {info.world_name}")
         if info.version_name:
-            info_lines.append(f"版本: {info.version_name} (DataVersion {info.data_version})")
+            info_lines.append(
+                f"版本: {
+                    info.version_name} (DataVersion {
+                    info.data_version})")
         if info.game_type_name:
             info_lines.append(f"模式: {info.game_type_name}")
         info_lines.append(f"难度: {info.difficulty_name}")
         info_lines.append(f"种子: {info.seed}")
-        info_lines.append(f"出生点: ({info.spawn_pos[0]}, {info.spawn_pos[1]}, {info.spawn_pos[2]})")
+        info_lines.append(
+            f"出生点: ({
+                info.spawn_pos[0]}, {
+                info.spawn_pos[1]}, {
+                info.spawn_pos[2]})")
         if info.play_time_ticks > 0:
             hours = info.play_time_ticks / 72000
             info_lines.append(f"游戏时间: {hours:.1f} 小时")
-        info_lines.append(f"存档大小: {info.world_size_mb:.1f} MB ({info.total_files} 文件)")
-        info_lines.append(f"维度: {', '.join(info.dimensions) if info.dimensions else '无'}")
-        info_lines.append(f"区域文件: {info.region_count}  区块: ~{info.total_chunks}")
+        info_lines.append(
+            f"存档大小: {
+                info.world_size_mb:.1f} MB ({
+                info.total_files} 文件)")
+        info_lines.append(
+            f"维度: {
+                ', '.join(
+                    info.dimensions) if info.dimensions else '无'}")
+        info_lines.append(
+            f"区域文件: {
+                info.region_count}  区块: ~{
+                info.total_chunks}")
         info_lines.append(f"玩家数量: {info.player_count}")
 
         self._world_info_text.value = "\n".join(info_lines)
@@ -375,16 +398,19 @@ class SaveRepairView(ft.Column):
         if report.cancelled:
             result_lines.append("(操作已取消)\n")
 
-        result_lines.append(f"区块: {report.chunks_checked} 检查 / {report.chunks_damaged} 损坏")
+        result_lines.append(
+            f"区块: {report.chunks_checked} 检查 / {report.chunks_damaged} 损坏")
 
         if report.unreadable_regions:
             result_lines.append(f"无法读取的区域文件: {len(report.unreadable_regions)}")
             for name in report.unreadable_regions[:10]:
                 result_lines.append(f"  {name}")
             if len(report.unreadable_regions) > 10:
-                result_lines.append(f"  ... 共 {len(report.unreadable_regions)} 个")
+                result_lines.append(
+                    f"  ... 共 {len(report.unreadable_regions)} 个")
 
-        result_lines.append(f"玩家: {report.players_checked} 检查 / {report.players_with_issues} 有问题")
+        result_lines.append(
+            f"玩家: {report.players_checked} 检查 / {report.players_with_issues} 有问题")
         if report.player_issues:
             for pname, pissues in list(report.player_issues.items())[:5]:
                 result_lines.append(f"  {pname}: {', '.join(pissues)}")
@@ -415,7 +441,11 @@ class SaveRepairView(ft.Column):
             run_on_ui(self.app.page, self.app.show_progress, "正在修复存档...")
 
             def progress_callback(value: float, msg: str) -> None:
-                run_on_ui(self.app.page, self.app.update_progress_with_task, msg or "修复中", value)
+                run_on_ui(
+                    self.app.page,
+                    self.app.update_progress_with_task,
+                    msg or "修复中",
+                    value)
 
             def log_callback(msg: str, level: str) -> None:
                 run_on_ui(self.app.page, self._append_log, msg, level)

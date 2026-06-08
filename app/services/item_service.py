@@ -410,7 +410,10 @@ class ItemService:
         self._max_durability: Dict[str, int] = _MAX_DURABILITY.copy()
         self._custom_slots: Dict[int, str] = {}
 
-    def load_language_file(self, path: Path, namespace: str = "minecraft") -> int:
+    def load_language_file(
+            self,
+            path: Path,
+            namespace: str = "minecraft") -> int:
         """
         加载 Minecraft 语言文件（JSON 格式）
 
@@ -484,7 +487,9 @@ class ItemService:
         count = 0
         if isinstance(items, dict):
             for key, value in items.items():
-                if isinstance(key, str) and isinstance(value, str) and ":" in key:
+                if isinstance(
+                        key, str) and isinstance(
+                        value, str) and ":" in key:
                     self._name_map[key] = value
                     count += 1
         if isinstance(enchantments, dict):
@@ -496,12 +501,17 @@ class ItemService:
 
     def save_custom_mapping_file(self, path: Path) -> None:
         """导出当前非内置物品/附魔映射。"""
-        items = {k: v for k, v in self._name_map.items() if _VANILLA_ITEM_NAMES.get(k) != v}
-        enchantments = {k: v for k, v in self._enchantment_names.items() if _ENCHANTMENT_NAMES.get(k) != v}
-        path.write_text(
-            json.dumps({"items": items, "enchantments": enchantments}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        items = {k: v for k, v in self._name_map.items(
+        ) if _VANILLA_ITEM_NAMES.get(k) != v}
+        enchantments = {
+            k: v for k,
+            v in self._enchantment_names.items() if _ENCHANTMENT_NAMES.get(k) != v}
+        path.write_text(json.dumps({"items": items,
+                                    "enchantments": enchantments},
+                                   ensure_ascii=False,
+                                   indent=2),
+                        encoding="utf-8",
+                        )
 
     def set_item_mapping(self, item_id: str, display_name: str) -> None:
         if item_id and display_name:
@@ -529,16 +539,21 @@ class ItemService:
         return True
 
     def get_custom_item_mappings(self) -> Dict[str, str]:
-        return {k: v for k, v in self._name_map.items() if _VANILLA_ITEM_NAMES.get(k) != v}
+        return {k: v for k, v in self._name_map.items(
+        ) if _VANILLA_ITEM_NAMES.get(k) != v}
 
-    def extract_language_from_jar(self, jar_path: Path, locale: str = "zh_cn") -> int:
+    def extract_language_from_jar(
+            self,
+            jar_path: Path,
+            locale: str = "zh_cn") -> int:
         """从模组 JAR 中提取指定语言文件并加载。"""
         count = 0
         try:
             with zipfile.ZipFile(jar_path) as jar:
                 for name in jar.namelist():
                     lower = name.lower()
-                    if lower.endswith(f"/lang/{locale.lower()}.json") or lower.endswith(f"/lang/{locale.lower()}.lang"):
+                    if lower.endswith(
+                            f"/lang/{locale.lower()}.json") or lower.endswith(f"/lang/{locale.lower()}.lang"):
                         raw = jar.read(name).decode("utf-8", errors="replace")
                         if lower.endswith(".json"):
                             tmp = json.loads(raw)
@@ -546,7 +561,8 @@ class ItemService:
                             tmp = {}
                             for line in raw.splitlines():
                                 line = line.strip()
-                                if not line or line.startswith("#") or "=" not in line:
+                                if not line or line.startswith(
+                                        "#") or "=" not in line:
                                     continue
                                 key, value = line.split("=", 1)
                                 tmp[key.strip()] = value.strip()
@@ -555,7 +571,8 @@ class ItemService:
             return count
         return count
 
-    def _load_language_dict(self, data: Dict[str, Any], namespace: str = "minecraft") -> int:
+    def _load_language_dict(
+            self, data: Dict[str, Any], namespace: str = "minecraft") -> int:
         count = 0
         for key, value in data.items():
             if not isinstance(value, str):
@@ -648,7 +665,8 @@ class ItemService:
                     damage = int(damage_tag)
                     if max_dur is not None and max_dur > 0:
                         remaining = max_dur - damage
-                        durability_percent = max(0, min(100, (remaining / max_dur) * 100))
+                        durability_percent = max(
+                            0, min(100, (remaining / max_dur) * 100))
 
                 # 解析附魔
                 ench_tag = tag.get("Enchantments")
@@ -717,7 +735,8 @@ class ItemService:
             bar = "█" * filled + "░" * (bar_len - filled)
             lines.append(f"耐久: {bar} {item_info.durability_percent:.0f}%")
             if item_info.damage is not None and item_info.max_damage is not None:
-                lines.append(f"  ({item_info.max_damage - item_info.damage}/{item_info.max_damage})")
+                lines.append(
+                    f"  ({item_info.max_damage - item_info.damage}/{item_info.max_damage})")
 
         if item_info.enchantments:
             lines.append("附魔:")

@@ -95,7 +95,8 @@ def test_search_entities_reads_modern_and_legacy_keys():
     })
 
     service._search_entities_in_chunk(modern_chunk, "zombie", "overworld")
-    service._search_entities_in_chunk(legacy_chunk, "minecraft:pig", "overworld")
+    service._search_entities_in_chunk(
+        legacy_chunk, "minecraft:pig", "overworld")
 
     assert [result.name for result in service.results] == [
         "minecraft:zombie",
@@ -119,9 +120,12 @@ def test_dimension_region_files_do_not_scan_other_dimensions(tmp_path):
 
     service = EntityBlockSearchService()
 
-    assert service._get_dimension_region_files(world, "overworld") == [overworld_region / "r.0.0.mca"]
-    assert service._get_dimension_region_files(world, "nether") == [nether_region / "r.1.0.mca"]
-    assert service._get_dimension_region_files(world, "end") == [end_region / "r.2.0.mca"]
+    assert service._get_dimension_region_files(world, "overworld") == [
+        overworld_region / "r.0.0.mca"]
+    assert service._get_dimension_region_files(world, "nether") == [
+        nether_region / "r.1.0.mca"]
+    assert service._get_dimension_region_files(
+        world, "end") == [end_region / "r.2.0.mca"]
 
 
 def test_result_limit_helper_stops_at_max_results():

@@ -35,7 +35,7 @@ class MigrationService:
     @property
     def batch_worlds(self) -> List[Path]:
         """批量处理的世界存档列表
-        
+
         Returns:
             List[Path]: 世界存档路径列表
         """
@@ -44,7 +44,7 @@ class MigrationService:
     @property
     def scan_result(self) -> str:
         """扫描结果信息
-        
+
         Returns:
             str: 扫描结果描述
         """
@@ -52,10 +52,10 @@ class MigrationService:
 
     def scan_batch_dir(self, directory: str) -> List[Path]:
         """扫描批量目录，返回世界存档列表
-        
+
         Args:
             directory: 要扫描的目录路径
-            
+
         Returns:
             List[Path]: 找到的世界存档路径列表
         """
@@ -96,7 +96,7 @@ class MigrationService:
         progress_cb: ProgressCallback,
     ) -> str:
         """执行单存档迁移，返回输出路径
-        
+
         Args:
             src: 源存档目录路径
             dest: 目标输出目录路径
@@ -108,7 +108,7 @@ class MigrationService:
             manual_names_str: 逗号分隔的手动指定玩家名称
             log_cb: 日志回调函数
             progress_cb: 进度回调函数
-            
+
         Returns:
             str: 输出目录路径
         """
@@ -120,7 +120,15 @@ class MigrationService:
         tracker = get_tracker()
         with tracker.track("存档迁移", {"name": world_name, "mode": mode}):
             if mode == "fast":
-                run_fast(src_path, dest_path, world_name, offline, clean, pure_clean, manual, log_cb)
+                run_fast(
+                    src_path,
+                    dest_path,
+                    world_name,
+                    offline,
+                    clean,
+                    pure_clean,
+                    manual,
+                    log_cb)
             else:
                 custom_mappings = self._config.custom_uuid_mappings if self._config.use_custom_mapping else None
                 run_full(
@@ -137,7 +145,8 @@ class MigrationService:
                 )
 
             output_path = dest_path / world_name
-            if not self._apply_version_conversion(output_path, target_platform, target_version, log_cb):
+            if not self._apply_version_conversion(
+                    output_path, target_platform, target_version, log_cb):
                 raise RuntimeError("版本/平台转换失败，请查看日志获取详细信息")
         return str(output_path)
 
@@ -156,7 +165,7 @@ class MigrationService:
         progress_cb: ProgressCallback,
     ) -> Dict[str, Any]:
         """执行批量迁移，返回处理结果字典
-        
+
         Args:
             dest_dir: 目标输出目录路径
             mode: 迁移模式，"fast" 或 "full"
@@ -167,13 +176,14 @@ class MigrationService:
             max_concurrent: 最大并发处理数量
             log_cb: 日志回调函数
             progress_cb: 进度回调函数
-            
+
         Returns:
             Dict[str, Any]: 处理结果字典
         """
         dest_path = Path(dest_dir)
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
-        world_names = [f"world_{i+1}" for i in range(len(self._batch_worlds))]
+        world_names = [
+            f"world_{i + 1}" for i in range(len(self._batch_worlds))]
 
         self._batch_processor = BatchProcessor(
             max_concurrent,
@@ -188,7 +198,8 @@ class MigrationService:
             if result.get("success"):
                 output_name = result.get("world_name")
                 if output_name:
-                    converted = self._apply_version_conversion(dest_path / output_name, target_platform, target_version, log_cb)
+                    converted = self._apply_version_conversion(
+                        dest_path / output_name, target_platform, target_version, log_cb)
                     if not converted:
                         result["success"] = False
                         result["error"] = "版本/平台转换失败，请查看日志获取详细信息"
@@ -214,9 +225,14 @@ class MigrationService:
 
         from core.converter import ConversionError, convert_world
 
-        log_cb(f"开始应用版本/平台转换: platform={target_platform}, version={version_value or 'keep'}", "CONVERT")
+        log_cb(
+            f"开始应用版本/平台转换: platform={target_platform}, version={version_value or 'keep'}", "CONVERT")
         try:
-            result = convert_world(world_path, world_path, target_platform=target_platform, target_version=version_value)
+            result = convert_world(
+                world_path,
+                world_path,
+                target_platform=target_platform,
+                target_version=version_value)
         except ConversionError as e:
             logger.error(f"版本/平台转换失败: {e}", module="MigrationService")
             log_cb(f"版本/平台转换失败: {e}", "ERROR")
@@ -234,7 +250,8 @@ class MigrationService:
                 log_cb(error, "ERROR")
             if len(result.errors) > 5:
                 log_cb(f"还有 {len(result.errors) - 5} 个转换错误未显示", "ERROR")
-            logger.error(f"版本/平台转换完成但存在 {len(result.errors)} 个错误", module="MigrationService")
+            logger.error(
+                f"版本/平台转换完成但存在 {len(result.errors)} 个错误", module="MigrationService")
             return False
 
         log_cb(f"版本/平台转换完成，已处理 {result.converted_files} 个文件", "CONVERT")
@@ -243,7 +260,7 @@ class MigrationService:
     @staticmethod
     def open_folder(path: str) -> None:
         """在系统文件管理器中打开目录
-        
+
         Args:
             path: 要打开的目录路径
         """

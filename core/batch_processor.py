@@ -13,7 +13,7 @@ VersionDetector = Callable[[Path], Optional[str]]
 
 class BatchProcessor:
     """批量处理器"""
-    
+
     def __init__(
         self,
         max_workers: Optional[int] = None,
@@ -30,7 +30,7 @@ class BatchProcessor:
         self.is_running = False
         self._lock = threading.Lock()
         self._total_tasks = 0
-    
+
     def process_batch(
         self,
         world_paths: List[Path],
@@ -64,7 +64,7 @@ class BatchProcessor:
         """
         self.is_running = True
         self.results = {}
-        
+
         total_tasks = len(world_paths)
         self._total_tasks = total_tasks
 
@@ -75,48 +75,59 @@ class BatchProcessor:
             if progress_callback:
                 progress_callback(1.0)
             return self.results
-        
+
         if not world_names:
-            world_names = [f"world_{i+1}" for i in range(total_tasks)]
-        
+            world_names = [f"world_{i + 1}" for i in range(total_tasks)]
+
         if log_callback:
             log_callback(f"开始批量处理 {total_tasks} 个存档...", "INFO")
-        
+
         from core.performance import get_tracker
         tracker = get_tracker()
         with tracker.track("批量处理", {"count": str(total_tasks), "mode": mode}):
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 # 提交所有任务
                 future_to_world = {}
-                for i, (world_path, world_name) in enumerate(zip(world_paths, world_names)):
+                for i, (world_path, world_name) in enumerate(
+                        zip(world_paths, world_names)):
                     future = executor.submit(
                         self._process_single_world,
-                        world_path, dest_dir, world_name, mode, offline_mode, clean_mode,
-                        pure_clean_mode, manual_names, log_callback, i, total_tasks
-                    )
+                        world_path,
+                        dest_dir,
+                        world_name,
+                        mode,
+                        offline_mode,
+                        clean_mode,
+                        pure_clean_mode,
+                        manual_names,
+                        log_callback,
+                        i,
+                        total_tasks)
                     future_to_world[future] = (world_path.name, world_name, i)
-                
+
                 # 处理完成的任务
                 completed_count = 0
                 for future in as_completed(future_to_world):
                     world_path_name, world_name, task_index = future_to_world[future]
-                    
+
                     try:
                         result = future.result()
                         with self._lock:
                             self.results[world_path_name] = result
                             completed_count += 1
-                        
+
                         if log_callback:
                             status = "成功" if result["success"] else "失败"
-                            log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - {status}", 
-                                       "SUCCESS" if result["success"] else "ERROR")
-                        
+                            log_callback(
+                                f"任务 {
+                                    task_index + 1}/{total_tasks}: {world_name} - {status}",
+                                "SUCCESS" if result["success"] else "ERROR")
+
                         if progress_callback:
                             with self._lock:
                                 progress = completed_count / total_tasks
                             progress_callback(progress)
-                            
+
                     except Exception as e:
                         error_result = {
                             "success": False,
@@ -125,28 +136,31 @@ class BatchProcessor:
                         }
                         with self._lock:
                             self.results[world_path_name] = error_result
-                        
+
                         if log_callback:
-                            log_callback(f"任务 {task_index+1}/{total_tasks}: {world_name} - 失败: {e}", "ERROR")
-            
+                            log_callback(
+                                f"任务 {
+                                    task_index + 1}/{total_tasks}: {world_name} - 失败: {e}",
+                                "ERROR")
+
             tracker.increment_files(total_tasks)
             success = sum(1 for r in self.results.values() if r["success"])
             tracker.add_metadata("success", success)
             tracker.add_metadata("failed", total_tasks - success)
             if success < total_tasks:
                 tracker.increment_errors(total_tasks - success)
-        
+
         with self._lock:
             self.is_running = False
-        
+
         # 统计结果
         success_count = sum(1 for r in self.results.values() if r["success"])
         if log_callback:
-            log_callback(f"批量处理完成: {success_count}/{total_tasks} 个存档处理成功", 
-                       "SUCCESS" if success_count == total_tasks else "WARN")
-        
+            log_callback(f"批量处理完成: {success_count}/{total_tasks} 个存档处理成功",
+                         "SUCCESS" if success_count == total_tasks else "WARN")
+
         return self.results
-    
+
     def _process_single_world(
         self,
         world_path: Path,
@@ -162,22 +176,31 @@ class BatchProcessor:
         total_tasks: int
     ) -> Dict[str, Any]:
         """处理单个世界存档"""
-        
+
         def local_log(msg: str, level: str = "INFO") -> None:
             """本地日志函数"""
             if log_callback:
-                log_callback(f"[{task_index+1}/{total_tasks}] {msg}", level)
-        
+                log_callback(f"[{task_index + 1}/{total_tasks}] {msg}", level)
+
         try:
             # 检测版本
-            version = self.version_detector(world_path) if self.version_detector else None
+            version = self.version_detector(
+                world_path) if self.version_detector else None
             if version:
                 local_log(f"检测到版本: {version}", "INFO")
-            
+
             # 导入对应的处理模块
             if mode == "fast":
                 from core.fast_mode import run_fast
-                run_fast(world_path, dest_dir, world_name, offline_mode, clean_mode, pure_clean_mode, manual_names, local_log)
+                run_fast(
+                    world_path,
+                    dest_dir,
+                    world_name,
+                    offline_mode,
+                    clean_mode,
+                    pure_clean_mode,
+                    manual_names,
+                    local_log)
             else:
                 from core.full_mode import run_full
                 from core.worker import dummy_progress
@@ -193,24 +216,24 @@ class BatchProcessor:
                     dummy_progress,
                     self.custom_mappings,
                 )
-            
+
             return {
                 "success": True,
                 "world_name": world_name,
                 "version": version
             }
-            
+
         except Exception as e:
             return {
                 "success": False,
                 "error": str(e),
                 "world_name": world_name
             }
-    
+
     def stop(self) -> None:
         """停止批量处理"""
         self.is_running = False
-    
+
     def get_progress(self) -> float:
         """获取当前进度"""
         with self._lock:
@@ -224,15 +247,15 @@ class BatchProcessor:
 def scan_worlds_directory(directory: Path) -> List[Path]:
     """扫描目录中的世界存档"""
     worlds: List[Path] = []
-    
+
     if not directory.exists():
         return worlds
-    
+
     # 查找包含level.dat的目录
     for item in directory.iterdir():
         if item.is_dir():
             level_dat = item / "level.dat"
             if level_dat.exists():
                 worlds.append(item)
-    
+
     return sorted(worlds)

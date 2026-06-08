@@ -17,31 +17,31 @@ class TestConfigServiceConcurrency:
     def test_concurrent_config_updates(self):
         """测试多线程同时更新配置时的线程安全"""
         from app.services.config_service import ConfigService
-        
+
         # 使用临时目录避免影响真实配置
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            
+
             # 重置单例以使用新目录
             ConfigService._instance = None
-            
+
             config = ConfigService(config_dir)
-            
+
             errors = []
-            
+
             def update_config(thread_id):
                 try:
                     for i in range(50):
                         # 测试 setter 方法的线程安全
                         config.use_custom_mapping = (thread_id + i) % 2 == 0
                         config.language = f"lang_{thread_id}_{i}"
-                        
+
                         # 测试批量更新方法
                         config.update_batch_config(
                             version_detection=(thread_id + i) % 2 == 0,
                             max_concurrent=thread_id + 1,
                         )
-                        
+
                         # 测试 UUID 映射更新
                         config.set_custom_uuid_mapping(
                             f"player_{thread_id}_{i}",
@@ -49,23 +49,23 @@ class TestConfigServiceConcurrency:
                         )
                 except Exception as e:
                     errors.append((thread_id, str(e)))
-            
+
             threads = []
             for i in range(4):
                 t = threading.Thread(target=update_config, args=(i,))
                 threads.append(t)
                 t.start()
-            
+
             for t in threads:
                 t.join()
-            
+
             # 验证没有并发错误
             assert len(errors) == 0, f"并发错误: {errors}"
-            
+
             # 验证配置文件可以正常读取
             config_path = config_dir / "config.json"
             assert config_path.exists(), "配置文件未创建"
-            
+
             # 验证配置结构完整性
             config_dict = config.get_config_dict()
             assert "version_detection" in config_dict
@@ -73,30 +73,30 @@ class TestConfigServiceConcurrency:
             assert "custom_uuid_mappings" in config_dict
             assert "ui_settings" in config_dict
             assert isinstance(config_dict["custom_uuid_mappings"], dict)
-            
+
             # 清理单例
             ConfigService._instance = None
 
     def test_config_copy_not_reference(self):
         """测试 get_config_dict 返回副本而非引用"""
         from app.services.config_service import ConfigService
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
             ConfigService._instance = None
-            
+
             config = ConfigService(config_dir)
-            
+
             # 获取配置副本
             config_copy = config.get_config_dict()
-            
+
             # 修改副本
             config_copy["test_key"] = "test_value"
-            
+
             # 验证原配置未被修改
             original_config = config.get_config_dict()
             assert "test_key" not in original_config, "配置副本不是独立副本"
-            
+
             ConfigService._instance = None
 
     def test_invalid_config_is_backed_up(self):
@@ -105,7 +105,8 @@ class TestConfigServiceConcurrency:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            (config_dir / "config.json").write_text("{invalid json", encoding="utf-8")
+            (config_dir /
+             "config.json").write_text("{invalid json", encoding="utf-8")
             ConfigService._instance = None
 
             config = ConfigService(config_dir)
@@ -122,9 +123,9 @@ class TestBatchProcessorConcurrency:
     def test_concurrent_result_update(self):
         """测试多线程同时更新结果字典时的线程安全"""
         from core.batch_processor import BatchProcessor
-        
+
         processor = BatchProcessor(max_workers=4)
-        
+
         def update_results(worker_id):
             for i in range(100):
                 with processor._lock:
@@ -132,16 +133,16 @@ class TestBatchProcessorConcurrency:
                         "success": True,
                         "world_name": f"world_{worker_id}_{i}"
                     }
-        
+
         threads = []
         for i in range(4):
             t = threading.Thread(target=update_results, args=(i,))
             threads.append(t)
             t.start()
-        
+
         for t in threads:
             t.join()
-        
+
         assert len(processor.results) == 400
 
 
@@ -152,20 +153,20 @@ class TestSaveNbtResourceManagement:
         """测试保存失败时临时文件被正确清理"""
         from core.converter import save_nbt
         import nbtlib
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
             test_file = tmp_path / "test.dat"
-            
+
             # 创建一个无效的 NBT 数据来触发保存失败
             invalid_data = "not a valid nbt"
-            
+
             try:
                 save_nbt(test_file, invalid_data)
                 assert False, "Expected exception"
             except Exception:
                 pass
-            
+
             # 检查是否有遗留的临时文件
             temp_files = list(tmp_path.glob(".*.tmp"))
             assert len(temp_files) == 0, f"残留临时文件: {temp_files}"
@@ -178,7 +179,11 @@ class TestSaveNbtResourceManagement:
             world_path = Path(tmpdir)
             (world_path / "level.dat").write_bytes(b"bad")
 
-            result = convert_world(world_path, world_path, target_platform="java", target_version=1)
+            result = convert_world(
+                world_path,
+                world_path,
+                target_platform="java",
+                target_version=1)
 
             assert result.success is False
             assert bool(result) is False
@@ -198,14 +203,18 @@ class TestSaveNbtResourceManagement:
             def fake_convert_world(*args, **kwargs):
                 return ConversionResult(errors=["bad file"])
 
-            monkeypatch.setattr("core.converter.convert_world", fake_convert_world)
+            monkeypatch.setattr(
+                "core.converter.convert_world",
+                fake_convert_world)
 
             ok = service._apply_version_conversion(
-                Path(tmpdir), "java", "1", lambda msg, level: logs.append((msg, level))
-            )
+                Path(tmpdir), "java", "1", lambda msg, level: logs.append(
+                    (msg, level)))
 
             assert ok is False
-            assert any(level == "ERROR" and "bad file" in msg for msg, level in logs)
+            assert any(
+                level == "ERROR" and "bad file" in msg for msg,
+                level in logs)
 
             ConfigService._instance = None
 
@@ -216,89 +225,91 @@ class TestReplaceDirectoryTreeAtomicity:
     def test_atomic_replace_success(self):
         """测试正常替换目录"""
         from core.utils import replace_directory_tree
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            
+
             # 创建源目录
             src_dir = tmp_path / "source"
             src_dir.mkdir()
             (src_dir / "level.dat").write_text("source content")
             (src_dir / "playerdata").mkdir()
             (src_dir / "playerdata" / "test.dat").write_text("player data")
-            
+
             # 创建目标目录（模拟已有存档）
             dst_dir = tmp_path / "target"
             dst_dir.mkdir()
             (dst_dir / "level.dat").write_text("existing content")
             (dst_dir / "region").mkdir()
-            
+
             # 执行替换
             replace_directory_tree(src_dir, dst_dir)
-            
+
             # 验证目标目录内容被正确替换
             assert dst_dir.exists(), "目标目录不存在"
-            assert (dst_dir / "level.dat").read_text() == "source content", "内容未被替换"
+            assert (
+                dst_dir / "level.dat").read_text() == "source content", "内容未被替换"
             assert (dst_dir / "playerdata" / "test.dat").exists(), "子目录未被复制"
             assert not (dst_dir / "region").exists(), "旧目录内容未被删除"
 
     def test_atomic_replace_failure_keeps_original(self):
         """测试源目录读取失败时保留原目标目录"""
         from core.utils import replace_directory_tree
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            
+
             # 创建源目录
             src_dir = tmp_path / "source"
             src_dir.mkdir()
             (src_dir / "level.dat").write_text("original content")
-            
+
             # 创建一个无法读取的文件（权限问题）
             no_access_file = src_dir / "no_access.txt"
             no_access_file.write_text("cannot read")
-            
+
             # 创建目标目录（模拟已有存档）
             dst_dir = tmp_path / "target"
             dst_dir.mkdir()
             (dst_dir / "level.dat").write_text("existing content")
             (dst_dir / "region").mkdir()
-            
+
             # 测试应该失败但原目录应保留
             try:
                 # 使用不存在的路径作为源目录，确保失败
                 replace_directory_tree(src_dir / "nonexistent", dst_dir)
             except Exception:
                 pass
-            
+
             # 验证原目录仍然存在且内容完整
             assert dst_dir.exists(), "目标目录被意外删除"
             assert (dst_dir / "level.dat").exists(), "level.dat 丢失"
             assert (dst_dir / "region").exists(), "region 目录丢失"
-            assert (dst_dir / "level.dat").read_text() == "existing content", "原内容被修改"
+            assert (
+                dst_dir / "level.dat").read_text() == "existing content", "原内容被修改"
 
     def test_temp_directory_cleanup(self):
         """测试失败时临时目录被清理"""
         from core.utils import replace_directory_tree
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
-            
+
             # 创建源目录
             src_dir = tmp_path / "source"
             src_dir.mkdir()
             (src_dir / "level.dat").write_text("test")
-            
+
             # 创建目标目录
             dst_dir = tmp_path / "target"
             dst_dir.mkdir()
-            
+
             # 使用不存在的源路径来触发失败
             try:
                 replace_directory_tree(src_dir / "nonexistent", dst_dir)
             except Exception:
                 pass
-            
+
             # 检查是否有遗留的临时目录
             temp_dirs = list(tmp_path.glob(".tmp_target_*"))
             assert len(temp_dirs) == 0, f"残留临时目录: {temp_dirs}"
@@ -311,23 +322,26 @@ class TestMigrationControllerPublicMethods:
         """验证迁移控制器使用公共方法而非私有属性"""
         import ast
         from pathlib import Path
-        
-        controller_path = Path(__file__).parent.parent / "app" / "controllers" / "migration_controller.py"
+
+        controller_path = Path(__file__).parent.parent / \
+            "app" / "controllers" / "migration_controller.py"
         content = controller_path.read_text()
-        
+
         # 解析 AST
         tree = ast.parse(content)
-        
+
         # 查找所有属性访问
         private_attr_accesses = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
                 if isinstance(node.value, ast.Name) and node.value.id == 'app':
-                    if isinstance(node.attr, str) and node.attr.startswith('_'):
+                    if isinstance(
+                            node.attr,
+                            str) and node.attr.startswith('_'):
                         # 排除 _t 方法（这是翻译方法）
                         if node.attr != '_t':
                             private_attr_accesses.append(f"app.{node.attr}")
-        
+
         # 应该没有直接访问私有属性
         assert len(private_attr_accesses) == 0, \
             f"检测到直接访问私有属性: {private_attr_accesses}"
@@ -339,12 +353,19 @@ class TestOmniNbtEditing:
         from nbtlib import Int, String
         from nbtlib.tag import IntArray
 
-        assert NBTTreeView._parse_path("Inventory[0].Count") == ["Inventory", 0, "Count"]
+        assert NBTTreeView._parse_path("Inventory[0].Count") == [
+            "Inventory", 0, "Count"]
         assert NBTTreeView._coerce_value("64", Int(1), "Int") == Int(64)
-        assert NBTTreeView._coerce_value("diamond", String("stone"), "String") == String("diamond")
-        assert list(NBTTreeView._coerce_value("[1, 2, 3]", IntArray([0]), "IntArray")) == [1, 2, 3]
+        assert NBTTreeView._coerce_value(
+            "diamond", String("stone"), "String") == String("diamond")
+        assert list(
+            NBTTreeView._coerce_value(
+                "[1, 2, 3]", IntArray(
+                    [0]), "IntArray")) == [
+                1, 2, 3]
 
-    def test_world_session_commits_staged_player_nbt_list_path(self, tmp_path: Path):
+    def test_world_session_commits_staged_player_nbt_list_path(
+            self, tmp_path: Path):
         import nbtlib
         from nbtlib import Compound, File, Int, String
         from nbtlib.tag import List
@@ -353,17 +374,19 @@ class TestOmniNbtEditing:
         world = tmp_path / "world"
         playerdata = world / "playerdata"
         playerdata.mkdir(parents=True)
-        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1), "Name": String("test")})})}))
+        level = File(Compound({"Data": Compound(
+            {"Version": Compound({"Id": Int(1), "Name": String("test")})})}))
         level.save(world / "level.dat")
 
         player_uuid = "11111111-1111-1111-1111-111111111111"
-        player = File(Compound({
-            "Inventory": List[Compound]([Compound({"Count": Int(1), "id": String("minecraft:stone")})]),
-        }))
+        player = File(Compound({"Inventory": List[Compound](
+            [Compound({"Count": Int(1), "id": String("minecraft:stone")})]), }))
         player.save(playerdata / f"{player_uuid}.dat")
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session.queue_modify_nbt(player_uuid, ["Inventory", 0, "Count"], Int(64))
+        session.queue_modify_nbt(
+            player_uuid, [
+                "Inventory", 0, "Count"], Int(64))
 
         assert session.get_queue_size() == 1
         assert session.commit(backup=True)
@@ -373,18 +396,22 @@ class TestOmniNbtEditing:
         updated = nbtlib.load(playerdata / f"{player_uuid}.dat")
         assert updated["Inventory"][0]["Count"] == Int(64)
 
-    def test_world_session_commits_level_dat_relative_path(self, tmp_path: Path):
+    def test_world_session_commits_level_dat_relative_path(
+            self, tmp_path: Path):
         import nbtlib
         from nbtlib import Compound, File, Int, String
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
         world.mkdir()
-        level = File(Compound({"Data": Compound({"LevelName": String("old"), "Version": Compound({"Id": Int(1)})})}))
+        level = File(Compound({"Data": Compound(
+            {"LevelName": String("old"), "Version": Compound({"Id": Int(1)})})}))
         level.save(world / "level.dat")
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session.queue_modify_nbt(Path("level.dat"), ["Data", "LevelName"], String("new"))
+        session.queue_modify_nbt(
+            Path("level.dat"), [
+                "Data", "LevelName"], String("new"))
 
         assert session.get_queue_size() == 1
         assert session.commit(backup=True)
@@ -400,13 +427,15 @@ class TestOmniNbtEditing:
         world = tmp_path / "world"
         data_dir = world / "data"
         data_dir.mkdir(parents=True)
-        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level = File(
+            Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
         level.save(world / "level.dat")
         raids = File(Compound({"Data": Compound({"Name": String("old")})}))
         raids.save(data_dir / "raids.dat")
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session.queue_modify_nbt("data/raids.dat", ["Data", "Name"], String("new"))
+        session.queue_modify_nbt(
+            "data/raids.dat", ["Data", "Name"], String("new"))
 
         assert session.get_queue_size() == 1
         assert session.commit(backup=True)
@@ -414,16 +443,19 @@ class TestOmniNbtEditing:
         updated = nbtlib.load(data_dir / "raids.dat")
         assert updated["Data"]["Name"] == String("new")
 
-    def test_world_session_rejects_nbt_target_outside_world(self, tmp_path: Path):
+    def test_world_session_rejects_nbt_target_outside_world(
+            self, tmp_path: Path):
         from nbtlib import Compound, File, Int, String
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
         world.mkdir()
-        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level = File(
+            Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
         level.save(world / "level.dat")
         outside = tmp_path / "outside.dat"
-        File(Compound({"Data": Compound({"Name": String("old")})})).save(outside)
+        File(Compound({"Data": Compound({"Name": String("old")})})).save(
+            outside)
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
         session.queue_modify_nbt(outside, ["Data", "Name"], String("new"))
@@ -439,13 +471,16 @@ class TestOmniNbtEditing:
         world = tmp_path / "world"
         stats_dir = world / "stats"
         stats_dir.mkdir(parents=True)
-        level = File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level = File(
+            Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
         level.save(world / "level.dat")
         stats_path = stats_dir / "player.json"
-        stats_path.write_text(json.dumps({"stats": {"minecraft:mined": {"minecraft:stone": 1}}}), encoding="utf-8")
+        stats_path.write_text(json.dumps(
+            {"stats": {"minecraft:mined": {"minecraft:stone": 1}}}), encoding="utf-8")
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session.queue_modify_json("stats/player.json", ["stats", "minecraft:mined", "minecraft:stone"], 8)
+        session.queue_modify_json(
+            "stats/player.json", ["stats", "minecraft:mined", "minecraft:stone"], 8)
 
         assert session.get_queue_size() == 1
         assert session.commit(backup=True)
@@ -453,7 +488,8 @@ class TestOmniNbtEditing:
         updated = json.loads(stats_path.read_text(encoding="utf-8"))
         assert updated["stats"]["minecraft:mined"]["minecraft:stone"] == 8
 
-    def test_world_session_commits_nbt_add_and_delete_operations(self, tmp_path: Path):
+    def test_world_session_commits_nbt_add_and_delete_operations(
+            self, tmp_path: Path):
         import nbtlib
         from nbtlib import Compound, File, Int, String
         from nbtlib.tag import List
@@ -469,9 +505,15 @@ class TestOmniNbtEditing:
         level.save(world / "level.dat")
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session.queue_modify_nbt(Path("level.dat"), ["Data", "Rules", "Added"], String("ok"), operation="add")
-        session.queue_modify_nbt(Path("level.dat"), ["Data", "Rules", "Old"], None, operation="delete")
-        session.queue_modify_nbt(Path("level.dat"), ["Data", "Items", 1], Int(2), operation="add")
+        session.queue_modify_nbt(
+            Path("level.dat"), [
+                "Data", "Rules", "Added"], String("ok"), operation="add")
+        session.queue_modify_nbt(
+            Path("level.dat"), [
+                "Data", "Rules", "Old"], None, operation="delete")
+        session.queue_modify_nbt(
+            Path("level.dat"), [
+                "Data", "Items", 1], Int(2), operation="add")
 
         assert session.commit(backup=False)
         updated = nbtlib.load(world / "level.dat")
@@ -479,7 +521,8 @@ class TestOmniNbtEditing:
         assert "Old" not in updated["Data"]["Rules"]
         assert list(updated["Data"]["Items"]) == [Int(1), Int(2)]
 
-    def test_world_session_commits_json_add_and_delete_operations(self, tmp_path: Path):
+    def test_world_session_commits_json_add_and_delete_operations(
+            self, tmp_path: Path):
         import json
         from nbtlib import Compound, File, Int
         from core.omni.world_session import WorldSession
@@ -487,21 +530,27 @@ class TestOmniNbtEditing:
         world = tmp_path / "world"
         stats_dir = world / "stats"
         stats_dir.mkdir(parents=True)
-        File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})})).save(world / "level.dat")
+        File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})})).save(
+            world / "level.dat")
         stats_path = stats_dir / "player.json"
-        stats_path.write_text(json.dumps({"stats": {"old": 1}, "items": ["a"]}), encoding="utf-8")
+        stats_path.write_text(json.dumps(
+            {"stats": {"old": 1}, "items": ["a"]}), encoding="utf-8")
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session.queue_modify_json("stats/player.json", ["stats", "new"], 2, operation="add")
-        session.queue_modify_json("stats/player.json", ["stats", "old"], None, operation="delete")
-        session.queue_modify_json("stats/player.json", ["items", 1], "b", operation="add")
+        session.queue_modify_json(
+            "stats/player.json", ["stats", "new"], 2, operation="add")
+        session.queue_modify_json(
+            "stats/player.json", ["stats", "old"], None, operation="delete")
+        session.queue_modify_json(
+            "stats/player.json", ["items", 1], "b", operation="add")
 
         assert session.commit(backup=False)
         updated = json.loads(stats_path.read_text(encoding="utf-8"))
         assert updated["stats"] == {"new": 2}
         assert updated["items"] == ["a", "b"]
 
-    def test_world_session_serializes_chunk_record_with_length_and_zlib_type(self, tmp_path: Path):
+    def test_world_session_serializes_chunk_record_with_length_and_zlib_type(
+            self, tmp_path: Path):
         import zlib
         from nbt import nbt
         from core.omni.world_session import WorldSession
@@ -559,8 +608,12 @@ class TestOmniNbtEditing:
         index = (10 * 16 + 3) * 16 + 2
         bits = 4
         values_per_long = 64 // bits
-        data[index // values_per_long] |= 1 << ((index % values_per_long) * bits)
-        chunk = {"sections": [{"Y": 4, "block_states": {"palette": palette, "data": data}}]}
+        data[index //
+             values_per_long] |= 1 << ((index %
+                                        values_per_long) *
+                                       bits)
+        chunk = {"sections": [
+            {"Y": 4, "block_states": {"palette": palette, "data": data}}]}
 
         info = BlockDataService().get_block_at(chunk, 2, 74, 3)
 
@@ -639,10 +692,16 @@ class TestOmniNbtEditing:
         from app.ui.views.explorer.explorer_view import ExplorerView
 
         assert ExplorerView._world_coords_to_region_chunk(0, 0) == (0, 0, 0, 0)
-        assert ExplorerView._world_coords_to_region_chunk(511, 511) == (0, 0, 31, 31)
-        assert ExplorerView._world_coords_to_region_chunk(512, 512) == (1, 1, 0, 0)
-        assert ExplorerView._world_coords_to_region_chunk(-1, -1) == (-1, -1, 31, 31)
-        assert ExplorerView._world_coords_to_region_chunk(-512, -512) == (-1, -1, 0, 0)
+        assert ExplorerView._world_coords_to_region_chunk(
+            511, 511) == (
+            0, 0, 31, 31)
+        assert ExplorerView._world_coords_to_region_chunk(
+            512, 512) == (
+            1, 1, 0, 0)
+        assert ExplorerView._world_coords_to_region_chunk(
+            -1, -1) == (-1, -1, 31, 31)
+        assert ExplorerView._world_coords_to_region_chunk(
+            -512, -512) == (-1, -1, 0, 0)
 
     def test_explorer_formats_change_summary(self):
         from app.ui.views.explorer.explorer_view import ExplorerView
@@ -665,7 +724,8 @@ class TestOmniNbtEditing:
         from nbtlib import Float, Int
 
         assert ExplorerView._coerce_like_tag("20", Float(1.0)) == Float(20.0)
-        assert ExplorerView._coerce_like_tag("Float(60.0)", Float(1.0)) == Float(60.0)
+        assert ExplorerView._coerce_like_tag(
+            "Float(60.0)", Float(1.0)) == Float(60.0)
         assert ExplorerView._coerce_like_tag("12.0", Int(1)) == Int(12)
         assert ExplorerView._tag_display_value(Float(60.0)) == "60.0"
 
@@ -686,7 +746,8 @@ class TestOmniNbtEditing:
         bit_off = (target_flat % values_per_long) * bits
         data[long_idx] |= 2 << bit_off
 
-        chunk = {"sections": [{"Y": 4, "block_states": {"palette": palette, "data": data}}]}
+        chunk = {"sections": [
+            {"Y": 4, "block_states": {"palette": palette, "data": data}}]}
 
         svc = BlockDataService()
         info_before = svc.get_block_at(chunk, 2, 74, 3)
@@ -719,7 +780,8 @@ class TestOmniNbtEditing:
         bit_off = (target_flat % values_per_long) * bits
         data[long_idx] |= 1 << bit_off
 
-        chunk = {"sections": [{"Y": 4, "block_states": {"palette": palette, "data": data}}]}
+        chunk = {"sections": [
+            {"Y": 4, "block_states": {"palette": palette, "data": data}}]}
 
         svc = BlockDataService()
         result = svc.set_block_at(chunk, 3, 69, 7, "minecraft:diamond_block")
@@ -748,19 +810,23 @@ class TestOmniNbtEditing:
     def test_block_data_service_set_block_with_properties(self):
         from app.services.block_data_service import BlockDataService
 
-        palette = [
-            {"Name": "minecraft:air"},
-            {"Name": "minecraft:oak_stairs", "Properties": {"facing": "north", "half": "bottom"}},
-        ]
+        palette = [{"Name": "minecraft:air"},
+                   {"Name": "minecraft:oak_stairs",
+                    "Properties": {"facing": "north",
+                                   "half": "bottom"}},
+                   ]
         bits = 4
         values_per_long = 64 // bits
         num_longs = (4096 + values_per_long - 1) // values_per_long
         data = [0] * num_longs
 
-        chunk = {"sections": [{"Y": 0, "block_states": {"palette": palette, "data": data}}]}
+        chunk = {"sections": [
+            {"Y": 0, "block_states": {"palette": palette, "data": data}}]}
 
         svc = BlockDataService()
-        result = svc.set_block_at(chunk, 0, 0, 0, "minecraft:oak_stairs", {"facing": "south", "half": "top"})
+        result = svc.set_block_at(
+            chunk, 0, 0, 0, "minecraft:oak_stairs", {
+                "facing": "south", "half": "top"})
         assert result.success is True
         assert result.new_name == "minecraft:oak_stairs"
         assert len(palette) == 3
@@ -780,7 +846,8 @@ class TestOmniNbtEditing:
         num_longs = (4096 + values_per_long - 1) // values_per_long
         data = [0] * num_longs
 
-        chunk = {"sections": [{"Y": 0, "block_states": {"palette": palette, "data": data}}]}
+        chunk = {"sections": [
+            {"Y": 0, "block_states": {"palette": palette, "data": data}}]}
 
         svc = BlockDataService()
         result = svc.set_block_at(chunk, 0, 0, 0, "minecraft:air")

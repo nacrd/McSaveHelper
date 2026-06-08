@@ -25,7 +25,12 @@ def coerce_like_tag(raw: str, original: Any) -> Any:
         text = text[text.find("(") + 1:-1]
     if isinstance(original, (nbtlib.Float, nbtlib.Double)):
         return tag_type(float(text))
-    if isinstance(original, (nbtlib.Byte, nbtlib.Short, nbtlib.Int, nbtlib.Long)):
+    if isinstance(
+        original,
+        (nbtlib.Byte,
+         nbtlib.Short,
+         nbtlib.Int,
+         nbtlib.Long)):
         return tag_type(int(float(text)))
     try:
         return tag_type(text)
@@ -33,7 +38,8 @@ def coerce_like_tag(raw: str, original: Any) -> Any:
         return text
 
 
-def world_coords_to_region_chunk(world_x: int, world_z: int) -> Tuple[int, int, int, int]:
+def world_coords_to_region_chunk(
+        world_x: int, world_z: int) -> Tuple[int, int, int, int]:
     chunk_x = world_x // 16
     chunk_z = world_z // 16
     region_x = chunk_x // 32
@@ -58,7 +64,10 @@ def format_change_summary(index: int, change: Dict[str, Any]) -> str:
     new_text = format_diff_value(change["new_value"])
     target = change.get("target_label", "未知目标")
     kind = "JSON" if change.get("format") == "json" else "NBT"
-    return f"#{index + 1} [{kind}] {target}\n  {change['display_path']}\n  - {old_text}\n  + {new_text}"
+    return f"#{
+        index +
+        1} [{kind}] {target}\n  {
+        change['display_path']}\n  - {old_text}\n  + {new_text}"
 
 
 def _tag_value(value: Any) -> Any:
@@ -66,9 +75,16 @@ def _tag_value(value: Any) -> Any:
 
 
 def _is_mapping(value: Any) -> bool:
-    return isinstance(value, dict) or (
-        hasattr(value, "keys") and hasattr(value, "__getitem__") and type(value).__name__ in ("NBTFile", "TAG_Compound")
-    )
+    return isinstance(
+        value,
+        dict) or (
+        hasattr(
+            value,
+            "keys") and hasattr(
+                value,
+                "__getitem__") and type(value).__name__ in (
+                    "NBTFile",
+            "TAG_Compound"))
 
 
 def _is_list(value: Any) -> bool:
@@ -120,7 +136,12 @@ def extract_chunk_objects(chunk_data: Any) -> List[Dict[str, Any]]:
     entities = _get_first_mapping(chunk_data, ["Entities", "entities"])
     if _is_list(entities):
         for index, entity in enumerate(entities):
-            entity_id = str(_tag_value(_get_value(entity, "id", "unknown"))) if _is_mapping(entity) else "unknown"
+            entity_id = str(
+                _tag_value(
+                    _get_value(
+                        entity,
+                        "id",
+                        "unknown"))) if _is_mapping(entity) else "unknown"
             objects.append({
                 "icon": "🐾",
                 "title": f"实体 #{index + 1}: {entity_id}",
@@ -128,10 +149,16 @@ def extract_chunk_objects(chunk_data: Any) -> List[Dict[str, Any]]:
                 "data": entity,
             })
 
-    block_entities = _get_first_mapping(chunk_data, ["block_entities", "BlockEntities", "TileEntities"])
+    block_entities = _get_first_mapping(
+        chunk_data, ["block_entities", "BlockEntities", "TileEntities"])
     if _is_list(block_entities):
         for index, block_entity in enumerate(block_entities):
-            block_id = str(_tag_value(_get_value(block_entity, "id", "unknown"))) if _is_mapping(block_entity) else "unknown"
+            block_id = str(
+                _tag_value(
+                    _get_value(
+                        block_entity,
+                        "id",
+                        "unknown"))) if _is_mapping(block_entity) else "unknown"
             objects.append({
                 "icon": "📦",
                 "title": f"方块实体 #{index + 1}: {block_id}",
