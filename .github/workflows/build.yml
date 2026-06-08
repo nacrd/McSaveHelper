@@ -3,30 +3,34 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
-      - 'vauto'
+      - '[0-9]*'
+      - 'auto'
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号'
+        description: '版本号 (留空则基于最新版本自动+1)'
         required: false
         default: ''
 
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  # 构建作业
   build:
-    runs-on: windows-latest
+    runs-on: windows-2025 
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       create_release: ${{ steps.version.outputs.create_release }}
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0 
 
     - name: Generate version
       id: version
@@ -34,10 +38,10 @@ jobs:
       run: |
         function Get-NextVersion {
           param([string]$LatestTag)
-          $version = $LatestTag -replace '^v', ''
-          $parts = $version.Split('.')
+          $parts = $LatestTag.Split('.')
+          if ($parts.Count -lt 3) { return "0.0.1" }
           $parts[2] = [int]$parts[2] + 1
-          return "v$($parts -join '.')"
+          return $($parts -join '.')
         }
 
         $ref = "${{ github.ref }}"
@@ -45,22 +49,23 @@ jobs:
         $githubEventName = "${{ github.event_name }}"
         $inputVersion = "${{ github.event.inputs.version }}"
 
-        $tags = git tag --list 'v*' | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Sort-Object { [version]($_ -replace '^v', '') }
+        $tags = git tag --list | Where-Object { $_ -match '^v?\d+\.\d+\.\d+$' } | Sort-Object { [version]($_ -replace '^v', '') }
 
-        if ($tagName -eq "vauto" -or $githubEventName -eq "workflow_dispatch") {
-          if ($inputVersion -match '^v\d+\.\d+\.\d+$') {
+        if ($tagName -eq "auto" -or $githubEventName -eq "workflow_dispatch") {
+          if ($inputVersion -match '^\d+\.\d+\.\d+$') {
             $nextTag = $inputVersion
           } elseif ($tags) {
-            $latestTag = $tags[-1]
+            $latestTag = $tags[-1] -replace '^v', ''
             $nextTag = Get-NextVersion $latestTag
           } else {
-            $nextTag = "v0.0.1"
+            $nextTag = "0.0.1"
           }
-          Write-Host "版本: $nextTag"
+          Write-Host "最终生成的版本号: $nextTag"
           Write-Output "tag=$nextTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
           Write-Output "create_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-        } elseif ($tagName -match '^v\d+\.\d+\.\d+$') {
-          Write-Output "tag=$tagName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+        } elseif ($tagName -match '^v?\d+\.\d+\.\d+$') {
+          $pureTag = $tagName -replace '^v', ''
+          Write-Output "tag=$pureTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
           Write-Output "create_release=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         }
 
@@ -72,10 +77,10 @@ jobs:
         Set-Content -Path core/version.py -Value "APP_VERSION = `"$tag`"" -Encoding utf8
         Write-Host "core/version.py -> APP_VERSION = $tag"
 
-    - name: Delete vauto tag
-      if: github.ref == 'refs/tags/vauto'
+    - name: Delete auto tag
+      if: github.ref == 'refs/tags/auto'
       run: |
-        git push origin --delete vauto || true
+        git push origin --delete auto || true
 
     - name: Set up Python 3.14.3
       uses: actions/setup-python@v5
@@ -83,6 +88,14 @@ jobs:
         python-version: "3.14.3"
         architecture: "x64"
         cache: 'pip'
+
+    - name: Cache PyInstaller
+      uses: actions/cache@v4
+      with:
+        path: ~\AppData\Local\pyinstaller
+        key: ${{ runner.os }}-pyinstaller-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pyinstaller-
 
     - name: Install dependencies
       run: |
@@ -102,7 +115,7 @@ jobs:
       run: pyinstaller build-onefile.spec --noconfirm
 
     - name: Create portable package
-      run: Compress-Archive -Path dist/MCSaveHelper -DestinationPath MCSaveHelper-Windows-portable.zip
+      run: 7z a -tzip MCSaveHelper-Windows-portable.zip ./dist/MCSaveHelper
 
     - name: Rename onefile exe with version
       shell: pwsh
@@ -116,24 +129,21 @@ jobs:
       with:
         name: MCSaveHelper-Windows-portable
         path: MCSaveHelper-Windows-portable.zip
-        retention-days: 30
+        retention-days: 7
 
     - name: Upload onefile artifact
       uses: actions/upload-artifact@v4
       with:
         name: MCSaveHelper-Windows-onefile
         path: MCSaveHelper-*-Windows.exe
-        retention-days: 30
+        retention-days: 7
 
-  # 发布作业
   release:
     needs: build
-    if: needs.build.outputs.create_release == 'true' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: windows-latest
+    if: needs.build.outputs.create_release == 'true'
+    runs-on: ubuntu-latest 
 
     steps:
-    - uses: actions/checkout@v4
-
     - name: Download portable artifact
       uses: actions/download-artifact@v4
       with:
@@ -144,8 +154,8 @@ jobs:
       with:
         name: MCSaveHelper-Windows-onefile
 
-    - name: Create GitHub Release (auto tag)
-      if: needs.build.outputs.create_release == 'true' && !(startsWith(github.ref, 'refs/tags/v'))
+    - name: Create GitHub Release (auto tag / dispatch)
+      if: github.ref == 'refs/tags/auto' || github.event_name == 'workflow_dispatch'
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ needs.build.outputs.tag }}
@@ -155,7 +165,7 @@ jobs:
         generate_release_notes: true
 
     - name: Create GitHub Release (manual tag)
-      if: startsWith(github.ref, 'refs/tags/v') && github.ref != 'refs/tags/vauto'
+      if: startsWith(github.ref, 'refs/tags/') && github.ref != 'refs/tags/auto'
       uses: softprops/action-gh-release@v2
       with:
         files: |
