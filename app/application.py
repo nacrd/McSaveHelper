@@ -52,9 +52,6 @@ class Application:
         # 全局异常兜底
         page.on_error = self._on_page_error
 
-        # ─── 初始化 GUI 优化模块 ─────────────────
-        self._init_gui_optimizations()
-
         # ─── 初始化服务（逐个 try，失败降级） ─────
         try:
             self.i18n: I18nService = I18nService()
@@ -72,6 +69,9 @@ class Application:
             self.config._config = {}  # type: ignore
             self.config._migration = MigrationConfig()  # type: ignore
             self.config.save = lambda: None  # type: ignore
+
+        # ─── 初始化 GUI 优化模块（必须在 config 之后）─────────────────
+        self._init_gui_optimizations()
 
         try:
             self.migration: MigrationService = MigrationService(self.config)
@@ -149,7 +149,11 @@ class Application:
             self.notification_manager = NotificationManager(self.page)
             
             # 2. 根据配置启用性能监控
-            if self.config.ui_settings.get("enable_performance_monitor", False):
+            enable_perf = self.config.ui_settings.get("enable_performance_monitor", False)
+            print(f"[App] 性能监控配置: {enable_perf}")
+            
+            if enable_perf:
+                print("[App] 正在启用性能监控...")
                 perf_monitor.enable()
                 resource_monitor.start()
                 interval = float(self.config.ui_settings.get("performance_print_interval", 60))
@@ -157,6 +161,9 @@ class Application:
                 # 配置健康监控告警回调
                 health_monitor.set_alert_callback(self._on_health_alert)
                 self._start_heartbeat()
+                print("[App] 性能监控已启用")
+            else:
+                print("[App] 性能监控未启用（配置为关闭）")
             
             # 3. 注册键盘快捷键
             register_default_shortcuts(
@@ -259,9 +266,13 @@ class Application:
             return
         try:
             if alert.level == AlertLevel.CRITICAL:
-                self.page.run_task(lambda: self.notification_manager.show_error(alert.message, duration_ms=8000))
+                async def _show_error(message: str):
+                    self.notification_manager.show_error(message, duration_ms=8000)
+                self.page.run_task(_show_error, alert.message)
             else:
-                self.page.run_task(lambda: self.notification_manager.show_warning(alert.message, duration_ms=5000))
+                async def _show_warning(message: str):
+                    self.notification_manager.show_warning(message, duration_ms=5000)
+                self.page.run_task(_show_warning, alert.message)
         except Exception:
             pass
 
