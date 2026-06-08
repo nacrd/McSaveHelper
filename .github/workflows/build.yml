@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（留空自动递增）'
+        description: '版本号'
         required: false
         default: ''
 
