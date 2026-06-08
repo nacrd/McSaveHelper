@@ -16,10 +16,17 @@ class WorldInfoPanel(ft.Column):
     GAME_TYPE_MAP: Dict[int, str] = {0: "生存模式", 1: "创造模式", 2: "冒险模式", 3: "旁观模式"}
     DIFFICULTY_MAP: Dict[int, str] = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
 
-    def __init__(self, t_cb: Optional[Callable[..., str]] = None) -> None:
+    def __init__(
+        self,
+        t_cb: Optional[Callable[..., str]] = None,
+        on_backup_click: Optional[Callable] = None,
+        on_restore_click: Optional[Callable] = None,
+    ) -> None:
         super().__init__(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._t = t_cb or (lambda k, d="", **kw: d)
+        self._on_backup_click = on_backup_click
+        self._on_restore_click = on_restore_click
         
         # 美化的占位符
         self._placeholder = ft.Container(
@@ -175,6 +182,40 @@ class WorldInfoPanel(ft.Column):
             other_rows.append(self._row("🖥️ 服务器品牌", ", ".join(str(b) for b in world_info.server_brands)))
         if other_rows:
             self.controls.append(self._section_card("🔧 其他", other_rows))
+
+        # ── 7. 备份恢复 ──
+        backup_buttons = ft.Row([
+            ft.ElevatedButton(
+                "📦 创建备份",
+                icon=ft.Icons.BACKUP,
+                bgcolor=THEME.accent,
+                color=THEME.text_invert,
+                on_click=self._on_backup_click,
+            ),
+            ft.ElevatedButton(
+                "🔄 恢复备份",
+                icon=ft.Icons.RESTORE,
+                bgcolor=THEME.bg_card,
+                color=THEME.text_primary,
+                on_click=self._on_restore_click,
+            ),
+        ], spacing=12)
+        self.controls.append(
+            card(
+                ft.Column([
+                    ft.Text("🛡️ 备份与恢复", size=15, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                    ft.Divider(height=6, color=THEME.border_subtle),
+                    ft.Text(
+                        "创建存档备份以防数据丢失，或从之前的备份恢复",
+                        size=12,
+                        color=THEME.text_muted,
+                    ),
+                    ft.Container(height=8),
+                    backup_buttons,
+                ], spacing=6),
+                padding=14,
+            )
+        )
 
         if not self.controls:
             self.controls.append(

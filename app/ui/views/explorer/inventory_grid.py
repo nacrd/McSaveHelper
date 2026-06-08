@@ -1,11 +1,12 @@
-"""Inventory Grid component - Minecraft 风格物品栏，支持纹理图片显示"""
+"""Inventory Grid component - Minecraft 风格物品栏，支持纹理图片"""
 import flet as ft
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from app.ui.theme import THEME
 from app.ui.views.explorer.utils import safe_update
 from app.services.item_service import get_item_service, ItemInfo
 from app.services.texture_service import get_texture_service
+from app.services.item_icons import get_item_emoji
 
 
 class InventoryGrid(ft.Column):
@@ -24,9 +25,11 @@ class InventoryGrid(ft.Column):
     def __init__(self, slot_size: int = 48) -> None:
         super().__init__(spacing=0)
         self._slot_size = slot_size
-        self._img_size = int(slot_size * 0.65)
+        self._img_size = int(slot_size * 0.7)
         self._slots: Dict[int, ft.Container] = {}
+        self._slot_stacks: Dict[int, ft.Stack] = {}
         self._slot_images: Dict[int, ft.Image] = {}
+        self._slot_icons: Dict[int, ft.Text] = {}
         self._slot_count_texts: Dict[int, ft.Text] = {}
         self._slot_dur_texts: Dict[int, ft.Text] = {}
         self._slot_ench_texts: Dict[int, ft.Text] = {}
@@ -42,12 +45,20 @@ class InventoryGrid(ft.Column):
             )
 
         def make_slot(nbt_slot: int) -> ft.Container:
+            # 图片（真实纹理）
             img = ft.Image(
                 src="",
                 width=self._img_size,
                 height=self._img_size,
-                fit="contain",
+                fit=ft.BoxFit.CONTAIN,
                 visible=False,
+            )
+            # Emoji 图标（回退）
+            icon = ft.Text(
+                "",
+                size=24,
+                text_align=ft.TextAlign.CENTER,
+                visible=True,
             )
             count_text = ft.Text(
                 "", size=9, color="#ddd",
@@ -59,8 +70,16 @@ class InventoryGrid(ft.Column):
 
             stack = ft.Stack(
                 [
+                    # 真实纹理图片
                     ft.Container(
                         content=img,
+                        alignment=ft.alignment.Alignment(0, 0),
+                        width=slot_size,
+                        height=slot_size,
+                    ),
+                    # Emoji 图标回退
+                    ft.Container(
+                        content=icon,
                         alignment=ft.alignment.Alignment(0, 0),
                         width=slot_size,
                         height=slot_size,
@@ -101,7 +120,9 @@ class InventoryGrid(ft.Column):
                 content=stack,
             )
             self._slots[nbt_slot] = s
+            self._slot_stacks[nbt_slot] = stack
             self._slot_images[nbt_slot] = img
+            self._slot_icons[nbt_slot] = icon
             self._slot_count_texts[nbt_slot] = count_text
             self._slot_dur_texts[nbt_slot] = dur_text
             self._slot_ench_texts[nbt_slot] = ench_text
@@ -128,7 +149,9 @@ class InventoryGrid(ft.Column):
             s.bgcolor = self.SLOT_BG_EMPTY
             s.tooltip = None
             self._slot_images[nbt_slot].visible = False
-            self._slot_images[nbt_slot].src = ""
+            self._slot_images[nbt_slot].src = None
+            self._slot_icons[nbt_slot].value = ""
+            self._slot_icons[nbt_slot].visible = True
             self._slot_count_texts[nbt_slot].value = ""
             self._slot_dur_texts[nbt_slot].value = ""
             self._slot_ench_texts[nbt_slot].value = ""
@@ -145,13 +168,17 @@ class InventoryGrid(ft.Column):
                     continue
 
                 item_info = self._item_service.parse_item(item)
-                item_id = item_info.id
                 s.bgcolor = self.SLOT_BG_FILLED
                 s.tooltip = self._item_service.format_item_tooltip(item_info)
 
+                icon_text = self._slot_icons[si]
                 count_text = self._slot_count_texts[si]
                 dur_text = self._slot_dur_texts[si]
                 ench_text = self._slot_ench_texts[si]
+
+                # 设置 Emoji 图标作为回退
+                icon_text.value = get_item_emoji(item_info.id)
+                icon_text.visible = True
 
                 count_text.value = f"×{item_info.count}" if item_info.count > 1 else ""
 
@@ -172,28 +199,33 @@ class InventoryGrid(ft.Column):
                     ench_text.value = "✦" * min(len(item_info.enchantments), 3)
                     ench_text.color = self.ENCHANTMENT_COLOR
 
-                if item_id:
-                    item_ids_to_load[si] = item_id
+                if item_info.id:
+                    item_ids_to_load[si] = item_info.id
 
         except Exception:
             pass
 
         safe_update(self)
 
+        # 异步加载真实纹理
         if item_ids_to_load:
             self._load_textures_async(item_ids_to_load)
 
     def _load_textures_async(self, slot_item_map: Dict[int, str]) -> None:
+        """异步加载纹理，成功后隐藏 Emoji，显示图片"""
         def _on_loaded(item_id: str, uri: Optional[str]):
             if uri is None:
                 return
             for slot_idx, iid in slot_item_map.items():
                 if iid == item_id:
                     img = self._slot_images.get(slot_idx)
-                    if img is not None:
+                    icon = self._slot_icons.get(slot_idx)
+                    if img is not None and icon is not None:
                         img.src = uri
                         img.visible = True
+                        icon.visible = False  # 隐藏 Emoji
                         safe_update(img)
+                        safe_update(icon)
 
         unique_ids = list(set(slot_item_map.values()))
         self._texture_service.load_textures_async(unique_ids, on_loaded=_on_loaded)
