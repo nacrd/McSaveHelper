@@ -4,6 +4,16 @@ import time
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.utils import run_on_ui
+
+
+def _is_app_closing() -> bool:
+    """检查应用是否正在关闭"""
+    try:
+        from app.ui.utils import is_app_closing
+        return is_app_closing()
+    except Exception:
+        return False
 
 
 class FloatingLogPanel(ft.Container):
@@ -242,6 +252,11 @@ class FloatingLogPanel(ft.Container):
     def _collapse(self, e: ft.ControlEvent = None) -> None:
         """收起面板"""
         try:
+            # 清理定时器
+            if hasattr(self, '_flush_timer') and self._flush_timer is not None:
+                self._flush_timer.cancel()
+                self._flush_timer = None
+            
             self.visible = False
             self._expanded = False
             self._save_position()
@@ -261,6 +276,10 @@ class FloatingLogPanel(ft.Container):
 
     def log(self, message: str, level: str = "info") -> None:
         """添加日志消息（批量刷新，避免每行触发 UI 更新）"""
+        # 关闭时跳过日志更新
+        if _is_app_closing():
+            return
+        
         try:
             color_map = {
                 "info": THEME.text_primary,
@@ -281,36 +300,47 @@ class FloatingLogPanel(ft.Container):
                 )
             )
             # 限制日志行数
-            max_lines = 500
+            max_lines = 300  # 进一步降低最大行数
             while len(self._log_col.controls) > max_lines:
                 self._log_col.controls.pop(0)
             # 更新计数
             self._status_text.value = f"({len(self._log_col.controls)})"
             
-            # 批量刷新：使用节流避免每行都触发 UI 更新
-            now = time.monotonic()
-            last = getattr(self, '_last_log_update', 0.0)
-            if self.visible and (now - last) >= 0.2:
-                self._last_log_update = now
-                self.update()
-                if self._auto_scroll:
-                    self._log_col.scroll_to(index=-1)
-            elif self.visible and not hasattr(self, '_log_flush_scheduled'):
-                self._log_flush_scheduled = True
-                def _flush():
-                    try:
-                        if self.visible:
-                            self.update()
-                            if self._auto_scroll:
-                                self._log_col.scroll_to(index=-1)
-                    except Exception:
-                        pass
-                    self._log_flush_scheduled = False
-                    self._last_log_update = time.monotonic()
-                # 使用 threading.Timer 延迟刷新（Flet 环境下安全）
-                threading.Timer(0.2, _flush).start()
+            # 优化：使用单个定时器，避免创建多个 Timer
+            if self.visible:
+                now = time.monotonic()
+                last = getattr(self, '_last_log_update', 0.0)
+                
+                if (now - last) >= 0.3:  # 增加更新间隔到 0.3 秒
+                    self._last_log_update = now
+                    self._schedule_flush()
+                elif not hasattr(self, '_log_flush_scheduled') or not self._log_flush_scheduled:
+                    self._log_flush_scheduled = True
+                    self._schedule_flush()
         except Exception:
             pass
+    
+    def _schedule_flush(self) -> None:
+        """延迟刷新 UI，避免频繁更新"""
+        if not hasattr(self, '_flush_timer') or self._flush_timer is None:
+            def _flush_ui():
+                try:
+                    if self.visible:
+                        self.update()
+                        if self._auto_scroll:
+                            self._log_col.scroll_to(index=-1)
+                except Exception:
+                    pass
+                self._log_flush_scheduled = False
+                self._last_log_update = time.monotonic()
+                self._flush_timer = None
+
+            def _flush():
+                run_on_ui(self._page, _flush_ui)
+             
+            self._flush_timer = threading.Timer(0.3, _flush)
+            self._flush_timer.daemon = True
+            self._flush_timer.start()
 
     def set_visible(self, visible: bool) -> None:
         """设置可见性"""

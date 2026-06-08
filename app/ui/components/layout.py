@@ -66,6 +66,17 @@ def panel(content: ft.Control, padding: int = 10, bgcolor: str | None = None) ->
     )
 
 
+def section_header(title: str, subtitle: str = "") -> ft.Row:
+    """Create a compact section header with optional helper text."""
+    controls: List[ft.Control] = [
+        ft.Container(width=4, height=20, bgcolor=THEME.mc_grass),
+        ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+    ]
+    if subtitle:
+        controls.append(ft.Text(subtitle, size=12, color=THEME.text_muted))
+    return ft.Row(controls, spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+
 def segmented_tab_bar(
     tabs: Iterable[TabSpec],
     selected_index: int,

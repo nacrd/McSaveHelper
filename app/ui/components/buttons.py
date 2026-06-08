@@ -102,7 +102,7 @@ class McButton(ft.Container):
         """Handle click event with pressed animation"""
         if self._disabled:
             return
-        
+
         try:
             # Pressed state - darker color and inverted border
             self._is_pressed = True
@@ -114,17 +114,33 @@ class McButton(ft.Container):
                 right=ft.BorderSide(2, THEME.border_light),
                 bottom=ft.BorderSide(2, THEME.border_light),
             )
-            self.update()
-            
-            # Execute click handler
+            try:
+                self.update()
+            except Exception:
+                pass
+
+            # Execute click handler even if the visual update failed because the
+            # button is not mounted yet (common in unit tests and rebuilds).
             if self._on_click_handler:
                 self._on_click_handler(e)
-            
-            # Reset to normal state after brief delay
-            asyncio.create_task(self._reset_pressed_state())
+
+            # Reset to normal state after brief delay. Prefer Flet's page task
+            # scheduler because this handler can run without a raw asyncio loop.
+            self._schedule_reset_pressed_state()
         except Exception:
             pass
-    
+
+    def _schedule_reset_pressed_state(self) -> None:
+        try:
+            if self.page is not None:
+                self.page.run_task(self._reset_pressed_state)
+                return
+            asyncio.get_running_loop().create_task(self._reset_pressed_state())
+        except RuntimeError:
+            self._reset_pressed_state_sync()
+        except Exception:
+            pass
+
     async def _reset_pressed_state(self) -> None:
         """Reset button to normal state after pressed animation"""
         try:
@@ -140,6 +156,20 @@ class McButton(ft.Container):
             self.shadow = None  # Ensure shadow is removed when resetting
             if self.page:
                 self.update()
+        except Exception:
+            pass
+
+    def _reset_pressed_state_sync(self) -> None:
+        try:
+            self._is_pressed = False
+            self.bgcolor = self._bgcolor
+            self.border = ft.Border(
+                left=ft.BorderSide(2, THEME.border_light),
+                top=ft.BorderSide(2, THEME.border_light),
+                right=ft.BorderSide(2, THEME.border_dark),
+                bottom=ft.BorderSide(2, THEME.border_dark),
+            )
+            self.shadow = None
         except Exception:
             pass
     

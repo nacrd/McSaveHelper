@@ -400,56 +400,46 @@ def log_slow_operation(threshold_ms: float = 100):
 
 class ResourceUsageMonitor:
     """资源使用监控器
-    
+
     监控内存、CPU等系统资源使用情况，并可定时输出摘要到日志。
     """
-    
-    def __init__(self, sample_interval: float = 1.0, print_interval: float = 60.0):
+
+    def __init__(self, sample_interval: float = 2.0, print_interval: float = 120.0):
         self.sample_interval = sample_interval
         self.print_interval = print_interval
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._process = psutil.Process() if _PSUTIL_AVAILABLE else None
         self._last_print_time: float = 0.0
+        # 优化：添加采样计数器，降低高开销操作的频率
+        self._sample_count = 0
+        self._thread_check_interval = 10  # 每10次采样才检查一次线程阻塞
     
     def start(self) -> None:
         """开始监控"""
         if self._process is None:
-            print("[ResourceMonitor] 启动失败: psutil 不可用")
             return
         
         # 如果已经在运行且线程存活，不重复启动
         if self._running and self._thread and self._thread.is_alive():
-            print("[ResourceMonitor] 已在运行，跳过重复启动")
             return
         
         # 如果状态异常（标记为运行但线程不存活），先清理
         if self._running and (not self._thread or not self._thread.is_alive()):
-            print("[ResourceMonitor] 检测到异常状态，清理后重启")
             self._running = False
             self._thread = None
         
-        print("[ResourceMonitor] 正在启动监控线程...")
         self._running = True
         self._last_print_time = time.time()
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="ResourceMonitor")
         self._thread.start()
-        
-        # 等待线程真正启动
-        time.sleep(0.1)
-        if self._thread.is_alive():
-            print(f"[ResourceMonitor] ✓ 监控线程已启动 (TID: {self._thread.ident})")
-        else:
-            print("[ResourceMonitor] ✗ 监控线程启动失败")
     
     def stop(self) -> None:
         """停止监控"""
-        print("[ResourceMonitor] 正在停止监控...")
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         self._thread = None
-        print("[ResourceMonitor] 监控已停止")
     
     def set_print_interval(self, seconds: float) -> None:
         """设置定时打印间隔（秒）"""
@@ -457,7 +447,6 @@ class ResourceUsageMonitor:
     
     def _monitor_loop(self) -> None:
         """监控循环"""
-        print("[ResourceMonitor] 监控循环开始")
         try:
             # 首次调用 cpu_percent 初始化（不阻塞）
             if self._process:
@@ -482,18 +471,12 @@ class ResourceUsageMonitor:
                         self._last_print_time = now
                         self._print_log_summary()
                     
-                except Exception as e:
-                    print(f"[ResourceMonitor] 采样错误: {e}")
-                    import traceback
-                    traceback.print_exc()
+                except Exception:
+                    pass
                 
                 time.sleep(self.sample_interval)
-        except Exception as e:
-            print(f"[ResourceMonitor] 监控循环异常退出: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            print("[ResourceMonitor] 监控循环结束")
+        except Exception:
+            pass
     
     def _print_log_summary(self) -> None:
         """将性能摘要输出到日志"""
@@ -547,9 +530,9 @@ class HealthMonitor:
 
     def __init__(self) -> None:
         # ── 阈值配置 ──
-        self.cpu_warning_threshold: float = 85.0      # CPU 连续高于此值触发警告
-        self.cpu_critical_threshold: float = 95.0     # CPU 连续高于此值触发严重告警
-        self.cpu_sustained_samples: int = 5           # 连续采样次数
+        self.cpu_warning_threshold: float = 90.0      # CPU 连续高于此值触发警告
+        self.cpu_critical_threshold: float = 98.0     # CPU 连续高于此值触发严重告警
+        self.cpu_sustained_samples: int = 12          # 连续采样次数，避免短时扫描峰值误报
         self.memory_warning_mb: float = 1024.0        # 内存警告阈值（MB）
         self.memory_critical_mb: float = 2048.0       # 内存严重告警阈值（MB）
         self.hang_timeout: float = 15.0               # UI 心跳超时（秒）
@@ -584,7 +567,7 @@ class HealthMonitor:
             if self._hang_alerted:
                 self._hang_alerted = False
 
-    def check(self, cpu_percent: float, memory_mb: float) -> None:
+    def check(self, cpu_percent: float, memory_mb: float, check_threads: bool = True) -> None:
         """由 ResourceUsageMonitor 采样循环调用，检查各项指标。"""
         now = time.time()
 
@@ -602,7 +585,8 @@ class HealthMonitor:
         self._check_hang(now)
 
         # ── 线程阻塞检测 ──
-        self._check_thread_blocking(now)
+        if check_threads:
+            self._check_thread_blocking(now)
 
     def _check_cpu(self, cpu_percent: float) -> None:
         history = list(self._cpu_history)
@@ -685,20 +669,37 @@ class HealthMonitor:
             
             for thread_id, frame in frames.items():
                 current_threads.add(thread_id)
+                thread_name = self._get_thread_name(thread_id)
+                if thread_id == threading.get_ident() or self._is_exempt_thread(thread_name):
+                    self._thread_snapshots.pop(thread_id, None)
+                    self._blocked_threads.discard(thread_id)
+                    continue
                 
                 # 提取线程位置指纹：文件名:行号:函数名
                 location = f"{frame.f_code.co_filename}:{frame.f_lineno}:{frame.f_code.co_name}"
                 
                 # 检查是否为良性等待（time.sleep, threading.Event.wait 等）
                 is_benign_wait = self._is_benign_wait(frame)
-                
+                if is_benign_wait:
+                    # 队列消费者、Event.wait、sleep 等等待态是后台工作线程的正常空闲状态，
+                    # 不能按“位置长时间不变”判定为阻塞。持续刷新快照即可。
+                    self._thread_snapshots[thread_id] = {
+                        "location": location,
+                        "timestamp": now,
+                        "alerted": False,
+                        "name": thread_name,
+                        "benign": True,
+                    }
+                    self._blocked_threads.discard(thread_id)
+                    continue
+                 
                 # 如果是新线程或位置变化，更新快照
                 if thread_id not in self._thread_snapshots:
                     self._thread_snapshots[thread_id] = {
                         "location": location,
                         "timestamp": now,
                         "alerted": False,
-                        "name": self._get_thread_name(thread_id),
+                        "name": thread_name,
                         "benign": is_benign_wait,
                     }
                 else:
@@ -755,6 +756,22 @@ class HealthMonitor:
                 
         except Exception:
             pass  # 线程检测失败不影响其他监控
+
+    def _is_exempt_thread(self, thread_name: str) -> bool:
+        """判断线程是否为常驻/框架线程，不参与阻塞告警。"""
+        if not thread_name:
+            return False
+        exempt_exact = {
+            "ResourceMonitor",
+            "LogManager-Worker",
+        }
+        if thread_name in exempt_exact:
+            return True
+        exempt_prefixes = (
+            "asyncio_",
+            "ThreadPoolExecutor-",
+        )
+        return thread_name.startswith(exempt_prefixes)
 
     def _get_thread_name(self, thread_id: int) -> str:
         """获取线程名称"""

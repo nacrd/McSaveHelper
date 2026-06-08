@@ -14,6 +14,7 @@ from app.services.server_properties_service import (
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
 from app.ui.components.cards import card, section_title
 from app.ui.components.fields import text_field
+from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 
 if TYPE_CHECKING:
@@ -32,10 +33,15 @@ class ServerPropertiesView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(ft.Text("server.properties 编辑器", size=22, weight=ft.FontWeight.BOLD, color=THEME.text_primary))
+        self.controls.append(page_header(
+            "server.properties 编辑器",
+            ft.Text("读取、编辑并保存 Minecraft 服务器配置文件", size=12, color=THEME.text_muted),
+            icon="📋",
+        ))
         self._path_field = text_field(label="服务器根目录或 server.properties", hint_text="选择服务器根目录")
         self.controls.append(card(ft.Column([
-            ft.Row([self._path_field, btn_ghost("浏览", width=90, on_click=self._pick), btn_primary("读取", width=90, on_click=self._load)], spacing=10),
+            ft.Row([self._path_field, btn_ghost("浏览", width=90, on_click=self._pick)], spacing=10),
+            ft.Text("选择路径后，可通过顶栏“读取配置”加载 server.properties。", size=11, color=THEME.text_muted),
         ], spacing=10), padding=16))
         self._form = ft.Column(spacing=10)
         self.controls.append(card(ft.Column([section_title("配置项"), self._form, btn_success("保存", width=100, on_click=self._save)], spacing=10), padding=0))

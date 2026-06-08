@@ -9,6 +9,8 @@ from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, current_save_field
 from app.ui.components.cards import card, section_title
+from app.ui.components.layout import page_header
+from app.ui.utils import run_on_ui
 from app.services.map_export_service import MapExportService, PIL_AVAILABLE
 
 if TYPE_CHECKING:
@@ -143,41 +145,10 @@ class MapExportView(ft.Column):
 
     def _build_ui(self) -> None:
         """构建 UI"""
-        # 标题
-        header = ft.Row(
-            [
-                ft.Container(
-                    content=ft.Text("🗺️", size=28, font_family="monospace"),
-                    width=56,
-                    height=56,
-                    alignment=ft.Alignment(0, 0),
-                    bgcolor=THEME.mc_gold,
-                    border=ft.Border(
-                        left=ft.BorderSide(2, THEME.border_tertiary),
-                        top=ft.BorderSide(2, THEME.border_tertiary),
-                        right=ft.BorderSide(2, THEME.bg_secondary),
-                        bottom=ft.BorderSide(2, THEME.bg_secondary),
-                    ),
-                ),
-                ft.Column(
-                    [
-                        ft.Text(
-                            "地图导出",
-                            size=24,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
-                        ),
-                        ft.Text(
-                            "将存档地图导出为 PNG 图片（俯视图/地形图）",
-                            size=12,
-                            color=THEME.text_muted,
-                        ),
-                    ],
-                    spacing=4,
-                ),
-            ],
-            spacing=16,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        header = page_header(
+            "地图导出",
+            ft.Text("将存档地图导出为 PNG 图片（俯视图/地形图）", size=12, color=THEME.text_muted),
+            icon="🗺️",
         )
 
         # 配置卡片
@@ -288,30 +259,43 @@ class MapExportView(ft.Column):
             return
 
         # 启动导出线程
+        map_type = self._map_type_dropdown.value or "topview"
+        scale = int(self._scale_dropdown.value or "4")
         self._exporting = True
-        self._export_btn.disabled = True
-        self._export_btn.update()
+        self._set_export_controls_enabled(False)
         self._result_text.value = ""
         self._result_text.update()
 
         thread = threading.Thread(
             target=self._export_thread,
-            args=(Path(world_path), Path(output_path)),
+            args=(Path(world_path), Path(output_path), map_type, scale),
             daemon=True,
         )
         thread.start()
 
-    def _export_thread(self, world_path: Path, output_path: Path) -> None:
+    def _set_export_controls_enabled(self, enabled: bool) -> None:
+        self._select_output_btn.disabled = not enabled
+        self._export_btn.disabled = not enabled
+        self._map_type_dropdown.disabled = not enabled
+        self._scale_dropdown.disabled = not enabled
+        for control in (
+            self._select_output_btn,
+            self._export_btn,
+            self._map_type_dropdown,
+            self._scale_dropdown,
+        ):
+            try:
+                control.update()
+            except Exception:
+                pass
+
+    def _export_thread(self, world_path: Path, output_path: Path, map_type: str, scale: int) -> None:
         """导出线程"""
         try:
-            async def _start():
-                self.app.show_progress("正在导出地图...")
-            self.app.page.run_task(_start)
+            run_on_ui(self.app.page, self.app.show_progress, "正在导出地图...")
 
             def progress_callback(value: float, msg: str) -> None:
-                async def _progress(progress_value: float):
-                    self.app.update_progress_with_task("导出地图", progress_value)
-                self.app.page.run_task(_progress, value)
+                run_on_ui(self.app.page, self.app.update_progress_with_task, msg or "导出地图", value)
 
             def log_callback(msg: str, level: str) -> None:
                 pass
@@ -319,13 +303,13 @@ class MapExportView(ft.Column):
             results = self.service.export_map(
                 world_path=world_path,
                 output_path=output_path,
-                map_type=self._map_type_dropdown.value,
-                scale=int(self._scale_dropdown.value),
+                map_type=map_type,
+                scale=scale,
                 progress_callback=progress_callback,
                 log_callback=log_callback,
             )
 
-            async def _finish():
+            def _finish() -> None:
                 if results['success']:
                     result_text = "导出完成！\n\n"
                     result_text += f"✓ 输出文件: {results['output_path']}\n"
@@ -341,20 +325,18 @@ class MapExportView(ft.Column):
                     self.app.hide_progress()
                     self.app.error_dialog("错误", "地图导出失败")
                 self._exporting = False
-                self._export_btn.disabled = False
-                self._export_btn.update()
-            self.app.page.run_task(_finish)
+                self._set_export_controls_enabled(True)
+            run_on_ui(self.app.page, _finish)
 
         except Exception as ex:
-            async def _error(error: Exception):
+            def _error(error: Exception) -> None:
                 self._result_text.value = f"导出失败: {error}"
                 self._result_text.update()
                 self.app.hide_progress()
                 self.app.error_dialog("错误", f"导出失败: {error}")
                 self._exporting = False
-                self._export_btn.disabled = False
-                self._export_btn.update()
-            self.app.page.run_task(_error, ex)
+                self._set_export_controls_enabled(True)
+            run_on_ui(self.app.page, _error, ex)
 
     def on_save_selected(self, path: str) -> None:
         """统一入口设置当前存档回调"""

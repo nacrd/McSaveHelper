@@ -11,8 +11,8 @@ from app.ui.views.explorer.utils import safe_update
 class NBTTreeView(ft.Column):
     """NBT 树状视图 - 可展开/折叠的 NBT 数据浏览器"""
 
-    MAX_DEPTH = 20
-    MAX_CHILDREN = 500
+    MAX_DEPTH = 15  # 降低默认最大深度
+    MAX_CHILDREN = 100  # 大幅降低默认最大子节点数
 
     _TYPE_INFO = {
         "Compound":  ("📦", "Compound",  THEME.accent_light),
@@ -156,10 +156,12 @@ class NBTTreeView(ft.Column):
                 )
             else:
                 self.controls.extend(nodes)
-        except Exception:
-            self.controls.append(
-                ft.Text("解析 NBT 数据失败", size=13, color=THEME.error)
-            )
+        except Exception as e:
+            self.controls.append(ft.Column([
+                ft.Text("解析 NBT 数据失败", size=13, weight=ft.FontWeight.BOLD, color=THEME.error),
+                ft.Text(f"{type(e).__name__}: {str(e)}", size=11, color=THEME.text_secondary),
+                ft.Text("可能原因：NBT 数据格式不兼容或数据结构异常", size=11, color=THEME.text_muted),
+            ], spacing=4))
         safe_update(self)
 
     def _build_nodes(self, data: Any, path_prefix: str, depth: int) -> List:
@@ -211,7 +213,7 @@ class NBTTreeView(ft.Column):
                 ft.Text(subtitle, size=11, color=THEME.text_secondary),
             ]
             if self._editable:
-                title_controls.append(ft.Spacer())
+                title_controls.append(ft.Container(expand=True))
                 title_controls.append(ft.IconButton(
                     icon=ft.Icons.ADD,
                     tooltip="新增字段",
@@ -251,7 +253,7 @@ class NBTTreeView(ft.Column):
                 ft.Text(subtitle, size=11, color=THEME.text_secondary),
             ]
             if self._editable:
-                title_controls.append(ft.Spacer())
+                title_controls.append(ft.Container(expand=True))
                 title_controls.append(ft.IconButton(
                     icon=ft.Icons.ADD,
                     tooltip="新增列表项",
@@ -317,7 +319,7 @@ class NBTTreeView(ft.Column):
                 self._pill(f"字段 {stats['fields']}"),
                 self._pill(f"容器 {stats['containers']}"),
                 self._pill(f"值 {stats['values']}"),
-                ft.Spacer(),
+                ft.Container(expand=True),
                 ft.Text(f"{expand_state} · {mode}", size=11, color=THEME.text_muted),
             ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.Padding(left=10, right=10, top=8, bottom=8),

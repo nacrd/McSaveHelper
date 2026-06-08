@@ -12,6 +12,15 @@ import flet as ft
 from app.ui.theme import THEME
 
 
+def _is_closing() -> bool:
+    """检查应用是否正在关闭"""
+    try:
+        from app.ui.utils import is_app_closing
+        return is_app_closing()
+    except Exception:
+        return False
+
+
 class NotificationType(Enum):
     """通知类型"""
     SUCCESS = "success"
@@ -43,6 +52,10 @@ class NotificationManager:
             action_label: 操作按钮标签
             on_action: 操作按钮回调
         """
+        # 关闭时跳过通知
+        if _is_closing():
+            return
+        
         # 根据类型选择颜色
         color_map = {
             NotificationType.SUCCESS: THEME.success,
@@ -62,14 +75,17 @@ class NotificationManager:
             )
         
         # 显示 SnackBar
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(message, color="white"),
-            bgcolor=bgcolor,
-            duration=duration_ms,
-            action=action,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+        try:
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Text(message, color="white"),
+                bgcolor=bgcolor,
+                duration=duration_ms,
+                action=action,
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception:
+            pass
     
     def show_success(self, message: str, duration_ms: int = 3000) -> None:
         """显示成功消息"""
@@ -268,6 +284,10 @@ class Toast:
             duration_ms: 显示时长
             position: 位置
         """
+        # 关闭时跳过通知
+        if _is_closing():
+            return
+        
         # 图标映射
         icon_map = {
             NotificationType.SUCCESS: ft.Icons.CHECK_CIRCLE,
@@ -306,16 +326,19 @@ class Toast:
         # 添加到页面
         # 注意：Flet 可能需要使用 SnackBar 或 Overlay 实现
         # 这里展示概念性实现
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Row([
-                ft.Icon(icon, color=color, size=20),
-                ft.Text(message, color="white"),
-            ], spacing=10),
-            bgcolor="rgba(0, 0, 0, 0.85)",
-            duration=duration_ms,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+        try:
+            self.page.snack_bar = ft.SnackBar(
+                content=ft.Row([
+                    ft.Icon(icon, color=color, size=20),
+                    ft.Text(message, color="white"),
+                ], spacing=10),
+                bgcolor="rgba(0, 0, 0, 0.85)",
+                duration=duration_ms,
+            )
+            self.page.snack_bar.open = True
+            self.page.update()
+        except Exception:
+            pass
 
 
 class ProgressDialog:

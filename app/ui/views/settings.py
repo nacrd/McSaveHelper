@@ -6,6 +6,7 @@ from app.ui.theme import THEME
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.fields import text_field, checkbox, label
 from app.ui.components.cards import card, section_title
+from app.ui.components.layout import page_header
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -26,6 +27,11 @@ class SettingsView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
+        self.controls.append(page_header(
+            "设置",
+            ft.Text("管理通用选项、界面偏好、批量处理和清理规则", size=12, color=THEME.text_muted),
+            icon="⚙",
+        ))
         self._build_general_card()
         self._build_ui_card()
         self._build_batch_card()

@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, Dict, Optional
 
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
-from app.ui.components.cards import card, section_title
+from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
+from app.ui.components.layout import page_header
 from app.ui.components.uuid_table import UUIDMappingTable
 
 if TYPE_CHECKING:
@@ -29,13 +30,10 @@ class MappingsView(ft.Column):
     def _build(self) -> None:
         self.controls.clear()
 
-        self.controls.append(ft.Text(
-            self._t("mappings.title", "🔗 映射管理"),
-            size=22, weight=ft.FontWeight.BOLD, color=THEME.text_primary,
-        ))
-        self.controls.append(ft.Text(
-            "管理 UUID映射 和 物品映射，用于存档转换和存档浏览器。",
-            size=13, color=THEME.text_secondary,
+        self.controls.append(page_header(
+            self._t("mappings.title", "映射管理"),
+            ft.Text("管理 UUID 映射和物品映射，用于存档转换和存档浏览器。", size=12, color=THEME.text_muted),
+            icon="🔗",
         ))
 
         self._build_uuid_section()
@@ -94,9 +92,9 @@ class MappingsView(ft.Column):
         ))
 
         import_row = ft.Row([
-            btn_primary("导入语言文件", width=130, on_click=self._import_lang),
             btn_primary("导入 JSON", width=110, on_click=self._import_json),
             btn_ghost("导出 JSON", width=110, on_click=self._export_json),
+            ft.Text("语言文件导入已移至顶栏。", size=11, color=THEME.text_muted),
         ], spacing=8)
         s.controls.append(ft.Container(
             content=import_row,
@@ -135,9 +133,11 @@ class MappingsView(ft.Column):
     def _render_item_table(self, filter_text: str) -> None:
         mappings = self._item_service.get_custom_item_mappings()
         if not mappings:
-            self._item_table_container.content = ft.Text(
-                "暂无自定义物品映射。可通过导入文件或手动添加。",
-                size=12, color=THEME.text_muted,
+            self._item_table_container.content = placeholder(
+                icon="📦",
+                title="暂无自定义物品映射",
+                subtitle="可通过导入语言文件、导入 JSON 或手动添加映射",
+                height=120,
             )
             return
 
@@ -159,7 +159,12 @@ class MappingsView(ft.Column):
             ]))
 
         if not rows:
-            self._item_table_container.content = ft.Text("没有匹配的映射。", size=12, color=THEME.text_muted)
+            self._item_table_container.content = placeholder(
+                icon="🔍",
+                title="没有匹配的映射",
+                subtitle="尝试更换物品 ID 或显示名称关键词",
+                height=110,
+            )
             return
 
         self._item_table_container.content = ft.Container(
@@ -207,11 +212,13 @@ class MappingsView(ft.Column):
         self.update()
 
     def _delete_item_mapping(self, item_id: str) -> None:
-        if item_id in self._item_service._name_map:
-            del self._item_service._name_map[item_id]
+        removed = self._item_service.delete_item_mapping(item_id)
+        self._item_mapping_status.value = f"已删除: {item_id}" if removed else f"未找到自定义映射: {item_id}"
+        self._item_mapping_status.color = THEME.mc_grass if removed else THEME.warning
         self._render_item_table(self._item_search_field.value or "")
         try:
             self._item_table_container.update()
+            self._item_mapping_status.update()
         except RuntimeError:
             pass
 

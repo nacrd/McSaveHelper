@@ -81,7 +81,10 @@ def _patch_flet_api(ft) -> None:
     2. ft.ImageFit 改为 ft.BoxFit
     3. ft.Image 构造函数 src 参数必传
     4. ft.Dropdown 构造函数不接受 on_change
-    5. page.run_task() 要求 async 函数
+    5. ft.Spacer 已移除，用 ft.Container(expand=True) 替代
+    6. ft.border.all() 已弃用
+    7. page.set_clipboard() 已改为 page.set_clipboard_async()
+    8. page.run_task() 要求 async 函数
     """
     try:
         # 1. 修复 alignment 便捷属性
@@ -119,7 +122,37 @@ def _patch_flet_api(ft) -> None:
             return dropdown
         ft.Dropdown = _dropdown_wrapper
         
-        # 5. 包装 Page.run_task（自动转换为 async）
+        # 5. 兼容 Spacer（已移除，用 Container 替代）
+        if not hasattr(ft, 'Spacer'):
+            def _spacer_wrapper():
+                return ft.Container(expand=True)
+            ft.Spacer = _spacer_wrapper
+        
+        # 6. 修复 ft.border.all() API
+        if hasattr(ft, 'border') and not hasattr(ft.border, 'all'):
+            def _border_all(width, color):
+                """兼容旧版 ft.border.all() API"""
+                return ft.border.Border(
+                    left=ft.border.BorderSide(width, color),
+                    right=ft.border.BorderSide(width, color),
+                    top=ft.border.BorderSide(width, color),
+                    bottom=ft.border.BorderSide(width, color),
+                )
+            ft.border.all = _border_all
+        
+        # 7. 修复 Page.set_clipboard() API
+        _original_page_init = ft.Page.__init__
+        def _page_init_wrapper(self, *args, **kwargs):
+            _original_page_init(self, *args, **kwargs)
+            # 添加 set_clipboard 方法
+            if not hasattr(self, 'set_clipboard'):
+                def _set_clipboard(text):
+                    """兼容旧版 set_clipboard API"""
+                    self.set_clipboard_async(text)
+                self.set_clipboard = _set_clipboard
+        ft.Page.__init__ = _page_init_wrapper
+        
+        # 8. 包装 Page.run_task（自动转换为 async）
         import inspect
         
         _original_page_class = ft.Page

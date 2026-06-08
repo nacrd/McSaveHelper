@@ -1,17 +1,37 @@
-#!/usr/bin/env python
-"""测试按钮组件的 disabled 属性"""
-from app.ui.components.buttons import btn_primary, btn_ghost, McButton
+"""按钮组件测试。"""
+from app.ui.components.buttons import McButton, btn_ghost, btn_primary
 
-# 测试按钮创建
-btn = btn_primary("测试按钮")
-print(f"按钮类型: {type(btn)}")
-print(f"是否有 disabled 属性: {hasattr(btn, 'disabled')}")
 
-# 测试设置 disabled
-btn.disabled = True
-print(f"设置 disabled=True 成功，当前值: {btn.disabled}")
+def test_primary_button_disabled_state_updates_content():
+    btn = btn_primary("测试按钮")
 
-btn.disabled = False
-print(f"设置 disabled=False 成功，当前值: {btn.disabled}")
+    assert hasattr(btn, "disabled")
+    assert btn.disabled is False
 
-print("所有测试通过！")
+    btn.disabled = True
+    assert btn.disabled is True
+    assert btn.opacity == 0.5
+
+    btn.disabled = False
+    assert btn.disabled is False
+    assert btn.opacity == 1.0
+
+
+def test_button_text_and_click_handler_can_be_replaced():
+    btn = btn_ghost("旧文本")
+    called = []
+
+    btn.set_text("新文本")
+    btn.set_on_click(lambda e: called.append("clicked"))
+    btn._handle_click(None)
+
+    assert called == ["clicked"]
+    assert btn.disabled is False
+
+
+def test_button_reset_scheduling_is_safe_without_page_or_event_loop():
+    btn = McButton("测试", "#55FF55")
+    btn._is_pressed = True
+    btn._schedule_reset_pressed_state()
+
+    assert btn._is_pressed is False

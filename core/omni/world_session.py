@@ -215,8 +215,8 @@ class WorldSession:
         """读取 level.dat 并提取完整信息"""
         level_path = self.world_path / "level.dat"
         if not level_path.exists():
-            self._log("未找到 level.dat", "WARNING")
-            return
+            self._log("未找到 level.dat，这可能不是有效的 Minecraft 存档目录", "WARNING")
+            raise FileNotFoundError(f"未找到 level.dat: {level_path}")
         try:
             self._level_data = nbtlib.load(level_path)
             root = self._level_data
@@ -294,7 +294,8 @@ class WorldSession:
             )
             self._log(f"已加载存档信息：版本 {version} ({version_name})", "INFO")
         except Exception as e:
-            self._log(f"读取 level.dat 失败: {e}", "ERROR")
+            self._log(f"解析 level.dat 失败: {type(e).__name__}: {e}", "ERROR")
+            raise RuntimeError(f"NBT 解析失败 ({level_path.name}): {type(e).__name__}: {e}") from e
 
     def get_world_info(self) -> Optional[WorldInfo]:
         """返回已加载的世界信息"""

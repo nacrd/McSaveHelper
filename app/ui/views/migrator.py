@@ -7,6 +7,7 @@ from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, label, current_save_field
 from app.ui.components.cards import card, section_title
+from app.ui.components.layout import page_header
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -47,6 +48,11 @@ class MigratorView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
+        self.controls.append(page_header(
+            "存档转换",
+            ft.Text("跨版本迁移世界、玩家数据、UUID 和资源映射", size=12, color=THEME.text_muted),
+            icon="📦",
+        ))
         content = ft.Row(
             [self._build_left(), ft.Container(width=18), self._build_right()],
             expand=True,

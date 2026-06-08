@@ -9,6 +9,7 @@
 import re
 import time
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, List, Dict, Callable
 
@@ -27,7 +28,7 @@ from app.controllers.migration_controller import MigrationController
 
 from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.sidebar import Sidebar
-from app.ui.components.buttons import btn_primary
+from app.ui.components.buttons import btn_primary, btn_danger
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
 
 # GUI 优化模块
@@ -37,9 +38,19 @@ from app.ui.keyboard_shortcuts import (
     ModifierKey
 )
 from app.ui.performance import perf_monitor, resource_monitor, Timer, health_monitor, AlertLevel
+from app.ui.hang_detector import get_hang_detector
 from app.ui.feedback import ErrorReportDialog
 from app.ui.notifications import NotificationManager
 from app.ui.accessibility import validate_theme_accessibility
+
+
+@dataclass(frozen=True)
+class TopAction:
+    """Descriptor for a page-level top-bar action."""
+
+    label: str
+    handler: Callable[[ft.ControlEvent], None]
+    style: str = "primary"
 
 
 class Application:
@@ -48,6 +59,7 @@ class Application:
     def __init__(self, page: ft.Page) -> None:
         self.page: ft.Page = page
         self._current_dialog: Optional[ft.AlertDialog] = None
+        self._shutdown_started = False
 
         # 全局异常兜底
         page.on_error = self._on_page_error
@@ -118,6 +130,7 @@ class Application:
         )
         self._top_actions = ft.Row(
             spacing=8,
+            scroll=ft.ScrollMode.AUTO,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
         self._top_actions.visible = False
@@ -148,12 +161,15 @@ class Application:
             # 1. 初始化通知管理器
             self.notification_manager = NotificationManager(self.page)
             
-            # 2. 根据配置启用性能监控
+            # 2. 启用独立的卡死检测器（静默启用，输出到日志）
+            hang_detector = get_hang_detector()
+            hang_detector.enable()
+            self._start_hang_detector_heartbeat()
+            
+            # 3. 根据配置启用性能监控（可选）
             enable_perf = self.config.ui_settings.get("enable_performance_monitor", False)
-            print(f"[App] 性能监控配置: {enable_perf}")
             
             if enable_perf:
-                print("[App] 正在启用性能监控...")
                 perf_monitor.enable()
                 resource_monitor.start()
                 interval = float(self.config.ui_settings.get("performance_print_interval", 60))
@@ -161,11 +177,8 @@ class Application:
                 # 配置健康监控告警回调
                 health_monitor.set_alert_callback(self._on_health_alert)
                 self._start_heartbeat()
-                print("[App] 性能监控已启用")
-            else:
-                print("[App] 性能监控未启用（配置为关闭）")
             
-            # 3. 注册键盘快捷键
+            # 4. 注册键盘快捷键
             register_default_shortcuts(
                 on_save=self._shortcut_save_config,
                 on_help=self._shortcut_show_help,
@@ -262,6 +275,14 @@ class Application:
 
     def _on_health_alert(self, alert) -> None:
         """健康告警回调 — 通过通知系统提示用户"""
+        # 关闭时不显示告警通知
+        try:
+            from app.ui.utils import is_app_closing
+            if is_app_closing():
+                return
+        except Exception:
+            pass
+        
         if not self.notification_manager:
             return
         try:
@@ -287,6 +308,20 @@ class Application:
 
         self._heartbeat_active = True
         t = _threading.Thread(target=_beat_loop, daemon=True)
+        t.start()
+
+    def _start_hang_detector_heartbeat(self) -> None:
+        """启动独立的卡死检测器心跳线程（始终运行）"""
+        import threading as _threading
+
+        def _hang_beat_loop():
+            hang_detector = get_hang_detector()
+            while getattr(self, '_hang_detector_active', False):
+                hang_detector.ui_heartbeat()
+                _threading.Event().wait(2.0)  # 每 2 秒一次心跳
+
+        self._hang_detector_active = True
+        t = _threading.Thread(target=_hang_beat_loop, daemon=True, name="HangDetectorHeartbeat")
         t.start()
 
     # ════════════════════════════════════════════
@@ -357,6 +392,8 @@ class Application:
         page.window.title_bar_hidden = True
         page.window.title_bar_buttons_hidden = True
         page.window.resizable = True
+        page.window.prevent_close = True
+        page.window.on_event = self._on_window_event
         page.padding = 0
         page.window.width = 1100
         page.window.height = 820
@@ -702,10 +739,20 @@ class Application:
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
+        # WindowDragArea 负责系统级拖拽；GestureDetector 补齐部分 Windows/Flet
+        # 组合下双击标题栏不触发最大化/还原的问题。
+        title_drag_area = ft.WindowDragArea(
+            ft.GestureDetector(
+                content=title_content,
+                on_double_tap=self._toggle_maximize_window,
+            ),
+            maximizable=True,
+            expand=True,
+        )
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.WindowDragArea(title_content, maximizable=True, expand=True),
+                    title_drag_area,
                     self._build_window_controls(),
                 ],
                 spacing=12,
@@ -749,10 +796,11 @@ class Application:
 
     def _build_window_controls(self) -> ft.Row:
         """构建窗口控制按钮组"""
+        self._maximize_window_button = self._window_button("□", THEME.mc_stone, self._toggle_maximize_window)
         return ft.Row(
             [
                 self._window_button("—", THEME.mc_stone, self._minimize_window),
-                self._window_button("□", THEME.mc_stone, self._toggle_maximize_window),
+                self._maximize_window_button,
                 self._window_button("×", THEME.mc_redstone, self._close_window),
             ],
             spacing=6,
@@ -763,12 +811,111 @@ class Application:
         self.page.window.minimized = True
         self.page.window.update()
 
-    def _toggle_maximize_window(self, e: ft.ControlEvent) -> None:
-        self.page.window.maximized = not self.page.window.maximized
-        self.page.window.update()
+    def _toggle_maximize_window(self, e: Any = None) -> None:
+        """最大化/还原窗口。
+
+        自定义标题栏隐藏了系统标题按钮，因此显式实现 Windows 常见行为：
+        单击最大化按钮或双击标题栏都切换最大化状态。
+        """
+        try:
+            if getattr(self.page.window, "minimized", False):
+                self.page.window.minimized = False
+            self.page.window.maximized = not bool(getattr(self.page.window, "maximized", False))
+            self.page.window.update()
+            self._sync_maximize_button_state()
+        except Exception as ex:
+            logger.error(f"切换窗口最大化失败: {ex}", module="App")
+
+    def _sync_maximize_button_state(self) -> None:
+        """同步最大化按钮显示，贴近 Windows 的最大化/还原语义。"""
+        try:
+            btn = getattr(self, "_maximize_window_button", None)
+            if not btn or not isinstance(btn.content, ft.Text):
+                return
+            btn.content.value = "❐" if getattr(self.page.window, "maximized", False) else "□"
+            btn.tooltip = "还原" if getattr(self.page.window, "maximized", False) else "最大化"
+            btn.update()
+        except Exception:
+            pass
 
     def _close_window(self, e: ft.ControlEvent) -> None:
-        self.page.run_task(self.page.window.close)
+        """关闭窗口 - 清理资源后安全关闭"""
+        self._shutdown_app()
+
+    def _on_window_event(self, e) -> None:
+        """处理系统窗口事件，确保标题栏关闭也执行清理。"""
+        try:
+            event_type = getattr(e, "type", None)
+            if event_type == ft.WindowEventType.CLOSE or str(event_type).lower().endswith("close"):
+                self._shutdown_app()
+            elif str(event_type).lower().endswith(("maximize", "unmaximize", "restore", "resize")):
+                self._sync_maximize_button_state()
+        except Exception:
+            pass
+
+    def _shutdown_app(self) -> None:
+        """执行应用关闭流程。
+
+        Flet 0.85+ 的 window.close()/destroy() 是异步方法，不能在同步点击回调中
+        直接调用；统一通过 page.run_task 调度，并在必要时用进程级兜底避免残留。
+        """
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+
+        from app.ui.utils import set_app_closing
+        
+        # 1. 设置关闭标记，防止新的 UI 更新
+        set_app_closing(True)
+        
+        # 2. 停止性能监控
+        try:
+            perf_monitor.disable()
+            resource_monitor.stop()
+        except Exception:
+            pass
+        
+        # 3. 停止心跳线程
+        try:
+            self._heartbeat_active = False
+        except Exception:
+            pass
+
+        # 4. 关闭日志，释放文件句柄并停止日志线程
+        try:
+            logger.shutdown()
+        except Exception:
+            pass
+        
+        # 5. 调度异步销毁窗口
+        try:
+            async def _destroy_window():
+                try:
+                    self.page.window.prevent_close = False
+                    await self.page.window.destroy()
+                except Exception:
+                    try:
+                        await self.page.window.close()
+                    except Exception:
+                        pass
+
+            self.page.run_task(_destroy_window)
+        except Exception:
+            pass
+
+        # 6. 兜底退出：如果 Flet 运行循环没有结束，避免进程留在后台
+        try:
+            import os
+            import threading
+
+            def _force_exit() -> None:
+                os._exit(0)
+
+            timer = threading.Timer(2.0, _force_exit)
+            timer.daemon = True
+            timer.start()
+        except Exception:
+            pass
 
     def _build_top_bar(self) -> ft.Container:
         """构建顶部栏"""
@@ -860,28 +1007,31 @@ class Application:
     def _update_top_action(self, view_id: str, current_view: ft.Control) -> None:
         actions = self._get_top_actions(view_id, current_view)
         self._top_actions.controls.clear()
-        for text, handler in actions:
-            width = max(86, min(140, len(text) * 14 + 28))
+        for action in actions:
+            width = max(86, min(140, len(action.label) * 14 + 28))
+            builder = btn_danger if action.style == "danger" else btn_primary
             self._top_actions.controls.append(
-                btn_primary(text, on_click=handler, width=width, height=38)
+                builder(action.label, on_click=action.handler, width=width, height=38)
             )
         self._top_actions.visible = bool(actions)
 
-    def _get_top_actions(self, view_id: str, current_view: ft.Control) -> List[tuple[str, Callable[[ft.ControlEvent], None]]]:
+    def _get_top_actions(self, view_id: str, current_view: ft.Control) -> List[TopAction]:
         if view_id == "explorer":
             return [
-                ("开始统计", lambda e: current_view._analyze_world_stats(e)),
-                ("开始搜索", lambda e: current_view._start_entity_block_search(e)),
-                ("刷新区域图", lambda e: current_view._refresh_heatmap()),
-                ("导出 NBT", lambda e: current_view._export_nbt_json(e)),
+                TopAction("开始统计", lambda e: current_view._analyze_world_stats(e)),
+                TopAction("打开搜索", lambda e: current_view._start_entity_block_search(e)),
+                TopAction("刷新区域图", lambda e: current_view._refresh_heatmap()),
+                TopAction("暂存玩家", lambda e: current_view._stage_player_edit_form(e)),
+                TopAction("提交变更", lambda e: current_view._commit_nbt_changes(e)),
+                TopAction("丢弃暂存", lambda e: current_view._discard_nbt_changes(e), "danger"),
             ]
-        action_map: Dict[str, tuple[str, Callable[[ft.ControlEvent], None]]] = {
-            "migrator": ("开始转换", lambda e: self.start()),
-            "save_repair": ("检测存档", lambda e: current_view._start_detect(e)),
-            "map_export": ("开始导出", lambda e: current_view._start_export(e)),
-            "compare": ("开始对比", lambda e: current_view._compare(e)),
-            "mappings": ("导入语言文件", lambda e: current_view._import_lang(e)),
-            "server_properties": ("读取配置", lambda e: current_view._load(e)),
+        action_map: Dict[str, TopAction] = {
+            "migrator": TopAction("开始转换", lambda e: self.start()),
+            "save_repair": TopAction("检测存档", lambda e: current_view._start_detect(e)),
+            "map_export": TopAction("开始导出", lambda e: current_view._start_export(e)),
+            "compare": TopAction("开始对比", lambda e: current_view._compare(e)),
+            "mappings": TopAction("导入语言文件", lambda e: current_view._import_lang(e)),
+            "server_properties": TopAction("读取配置", lambda e: current_view._load(e)),
         }
         action = action_map.get(view_id)
         return [action] if action else []
@@ -1235,14 +1385,37 @@ class Application:
         # 构建内容
         content_list: List[ft.Control] = [ft.Text(message, color=THEME.text_secondary)]
         
+        # 存储完整错误信息用于复制
+        full_error_text = f"{title}\n\n{message}"
+        
         if include_details and exception:
             error_details = traceback.format_exc()
-            content_list.append(
-                ft.Container(
-                    content=ft.Text(error_details, size=11, color=THEME.text_muted),
-                    padding=ft.Padding(top=10, right=0, bottom=0, left=0),
-                )
+            full_error_text += f"\n\n详细信息：\n{error_details}"
+            
+            # 可滚动的错误详情容器
+            details_container = ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text("详细信息：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                        ft.Container(
+                            content=ft.Text(
+                                error_details,
+                                size=11,
+                                color=THEME.text_muted,
+                                selectable=True,
+                            ),
+                            bgcolor=THEME.bg_secondary,
+                            padding=8,
+                            border_radius=4,
+                        ),
+                    ],
+                    spacing=6,
+                    scroll=ft.ScrollMode.AUTO,
+                ),
+                padding=ft.Padding(top=10, right=0, bottom=0, left=0),
+                height=200,
             )
+            content_list.append(details_container)
         
         content = ft.Column(content_list, tight=True)
         
@@ -1259,14 +1432,57 @@ class Application:
             self.page.update()
             self._current_dialog = None
         
-        # 添加关闭按钮
-        d.actions = [
+        # 定义复制按钮的处理函数
+        def handle_copy(e):
+            try:
+                # 尝试使用 Flet 的 clipboard API
+                if hasattr(self.page, 'set_clipboard'):
+                    self.page.set_clipboard(full_error_text)
+                else:
+                    # 尝试使用 clipboard 属性
+                    self.page.clipboard = full_error_text
+                    self.page.update()
+                
+                # 显示复制成功提示
+                self.page.snack_bar = ft.SnackBar(
+                    content=ft.Text("错误信息已复制到剪贴板", color=THEME.text_primary),
+                    bgcolor=THEME.mc_grass,
+                    duration=2000,
+                )
+                self.page.snack_bar.open = True
+                self.page.update()
+            except Exception:
+                # 如果复制失败，显示错误提示
+                self.page.snack_bar = ft.SnackBar(
+                    content=ft.Text("复制失败，错误信息可手动选择复制", color=THEME.text_primary),
+                    bgcolor=THEME.warning,
+                    duration=3000,
+                )
+                self.page.snack_bar.open = True
+                self.page.update()
+        
+        # 添加按钮
+        actions = []
+        
+        # 如果有错误详情，添加复制按钮
+        if include_details and exception:
+            actions.append(
+                ft.TextButton(
+                    "📋 复制错误信息",
+                    style=ft.ButtonStyle(color=THEME.text_secondary),
+                    on_click=handle_copy,
+                )
+            )
+        
+        actions.append(
             ft.TextButton(
                 self._t("dialogs.ok", "确定"),
                 style=ft.ButtonStyle(color=color),
                 on_click=handle_ok,
             )
-        ]
+        )
+        
+        d.actions = actions
         
         self._current_dialog = d
         self.page.overlay.append(d)

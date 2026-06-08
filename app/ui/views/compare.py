@@ -7,9 +7,11 @@ import flet as ft
 
 from app.services.world_compare_service import CompareItem, get_world_compare_service
 from app.ui.components.buttons import btn_ghost, btn_primary
-from app.ui.components.cards import card, section_title
+from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
+from app.ui.components.layout import page_header
 from app.ui.theme import THEME
+from app.ui.utils import run_on_ui
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -21,18 +23,23 @@ class CompareView(ft.Column):
         self.expand = True
         self.app = app
         self._service = get_world_compare_service(log=app.log)
+        self._comparing = False
         self._build()
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(ft.Text("存档对比", size=22, weight=ft.FontWeight.BOLD, color=THEME.text_primary))
+        self.controls.append(page_header(
+            "存档对比",
+            ft.Text("比较两个世界的 level.dat、玩家数据和区域文件差异", size=12, color=THEME.text_muted),
+            icon="⚖",
+        ))
 
         self._left_field = current_save_field(label="基准存档", hint_text="请通过侧边栏「设置当前存档」设置基准存档")
         self._right_field = text_field(label="目标存档", hint_text="指定要对比的目标存档目录")
         picker = ft.Column([
             self._left_field,
             ft.Row([self._right_field, btn_ghost("浏览对比目标", width=120, on_click=lambda e: self._pick(self._right_field))], spacing=10),
-            btn_primary("开始对比", width=120, on_click=self._compare),
+            ft.Text("设置两份存档后，可通过顶栏“开始对比”执行。", size=11, color=THEME.text_muted),
         ], spacing=10)
         self.controls.append(card(picker, padding=16))
 
@@ -48,6 +55,9 @@ class CompareView(ft.Column):
 
     def _compare(self, e: ft.ControlEvent) -> None:
         try:
+            if self._comparing:
+                self.app.warn_dialog("提示", "对比正在进行中，请稍候。")
+                return
             left = Path(self._left_field.value or "")
             right = Path(self._right_field.value or "")
             if not (left / "level.dat").exists():
@@ -58,27 +68,31 @@ class CompareView(ft.Column):
                 return
             self._summary.value = "正在对比，请稍候..."
             self._result.controls.clear()
+            self._comparing = True
             self.update()
-            
+             
             def _run():
                 try:
                     result = self._service.compare_worlds(left, right)
-                    async def _update_ui():
+                    def _update_ui() -> None:
                         self._summary.value = f"变更项: {result.summary['changed']} / {sum(v for k, v in result.summary.items() if k != 'changed')}"
                         self._result.controls.extend([
                             self._group("WorldInfo 差异", result.world_info),
                             self._group("玩家数据差异", result.players),
                             self._group("区域文件差异", result.regions),
                         ])
+                        self._comparing = False
                         self.update()
-                    self.app.page.run_task(_update_ui)
+                    run_on_ui(self.app.page, _update_ui)
                 except Exception as ex:
-                    async def _handle_error(error: Exception):
+                    def _handle_error(error: Exception) -> None:
+                        self._comparing = False
                         self.app.handle_exception(error, title="存档对比失败")
-                    self.app.page.run_task(_handle_error, ex)
-            
+                    run_on_ui(self.app.page, _handle_error, ex)
+             
             threading.Thread(target=_run, daemon=True).start()
         except Exception as ex:
+            self._comparing = False
             self.app.handle_exception(ex, title="存档对比失败")
 
     def _group(self, title: str, items: List[CompareItem]) -> ft.Container:
@@ -96,7 +110,12 @@ class CompareView(ft.Column):
                 bgcolor=THEME.bg_secondary,
             ))
         if not rows:
-            rows.append(ft.Text("未发现差异", size=12, color=THEME.text_muted))
+            rows.append(placeholder(
+                icon="✓",
+                title="未发现差异",
+                subtitle="该分组中的两份存档数据一致",
+                height=110,
+            ))
         return card(ft.Column([ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary), *rows], spacing=8), padding=12)
 
     def on_save_selected(self, path: str) -> None:

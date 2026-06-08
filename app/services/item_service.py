@@ -507,6 +507,27 @@ class ItemService:
         if item_id and display_name:
             self._name_map[item_id.strip()] = display_name.strip()
 
+    def delete_item_mapping(self, item_id: str) -> bool:
+        """删除自定义物品名称映射。
+
+        内置 vanilla 名称不会被真正删除；如果用户覆盖了内置名称，删除时会
+        恢复为内置值。返回值表示是否移除了一个自定义映射。
+        """
+        item_id = item_id.strip()
+        if not item_id or item_id not in self._name_map:
+            return False
+
+        vanilla_name = _VANILLA_ITEM_NAMES.get(item_id)
+        current_name = self._name_map.get(item_id)
+        if vanilla_name == current_name:
+            return False
+
+        if vanilla_name is None:
+            del self._name_map[item_id]
+        else:
+            self._name_map[item_id] = vanilla_name
+        return True
+
     def get_custom_item_mappings(self) -> Dict[str, str]:
         return {k: v for k, v in self._name_map.items() if _VANILLA_ITEM_NAMES.get(k) != v}
 
