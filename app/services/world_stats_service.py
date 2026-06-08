@@ -8,6 +8,7 @@ import anvil
 import nbtlib
 
 from core.scanner import scan_all_regions
+from core.region_utils import parse_region_coords
 from core.types import LogCallback
 
 
@@ -48,6 +49,8 @@ class WorldStatistics:
 class WorldStatsService:
     """存档统计服务"""
 
+    AIR_BLOCKS = {"minecraft:air", "minecraft:cave_air", "minecraft:void_air", "air", "cave_air", "void_air"}
+
     def __init__(self, log: Optional[LogCallback] = None) -> None:
         self.log: LogCallback = log or _default_log
 
@@ -71,7 +74,9 @@ class WorldStatsService:
             
             for idx, region_path in enumerate(region_files):
                 try:
-                    coords = self._parse_region_coords(region_path)
+                    coords = parse_region_coords(region_path)
+                    if coords is None:
+                        raise ValueError(f"无效的区域文件名: {region_path.name}")
                     stats.region_sizes[coords] = region_path.stat().st_size
                     
                     region = anvil.Region.from_file(str(region_path))
@@ -163,7 +168,7 @@ class WorldStatsService:
                             palette = block_states.get('palette', [])
                             for block in palette:
                                 block_id = str(block.get('Name', ''))
-                                if block_id:
+                                if block_id and block_id not in self.AIR_BLOCKS:
                                     block_counter[block_id] += 1
                 
                 entities = data.get('entities', [])
@@ -184,15 +189,6 @@ class WorldStatsService:
             pass
         
         return block_counter, entity_counter
-
-    def _parse_region_coords(self, region_path: Path) -> Tuple[int, int]:
-        """从文件名解析区域坐标"""
-        name = region_path.stem
-        parts = name.split(".")
-        if len(parts) == 3 and parts[0] == "r":
-            return int(parts[1]), int(parts[2])
-        raise ValueError(f"无效的区域文件名: {region_path.name}")
-
 
 import threading
 

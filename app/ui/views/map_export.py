@@ -304,12 +304,14 @@ class MapExportView(ft.Column):
     def _export_thread(self, world_path: Path, output_path: Path) -> None:
         """导出线程"""
         try:
-            def _start():
+            async def _start():
                 self.app.show_progress("正在导出地图...")
             self.app.page.run_task(_start)
 
             def progress_callback(value: float, msg: str) -> None:
-                self.app.page.run_task(lambda: self.app.update_progress_with_task("导出地图", value))
+                async def _progress(progress_value: float):
+                    self.app.update_progress_with_task("导出地图", progress_value)
+                self.app.page.run_task(_progress, value)
 
             def log_callback(msg: str, level: str) -> None:
                 pass
@@ -323,7 +325,7 @@ class MapExportView(ft.Column):
                 log_callback=log_callback,
             )
 
-            def _finish():
+            async def _finish():
                 if results['success']:
                     result_text = "导出完成！\n\n"
                     result_text += f"✓ 输出文件: {results['output_path']}\n"
@@ -344,15 +346,15 @@ class MapExportView(ft.Column):
             self.app.page.run_task(_finish)
 
         except Exception as ex:
-            def _error():
-                self._result_text.value = f"导出失败: {ex}"
+            async def _error(error: Exception):
+                self._result_text.value = f"导出失败: {error}"
                 self._result_text.update()
                 self.app.hide_progress()
-                self.app.error_dialog("错误", f"导出失败: {ex}")
+                self.app.error_dialog("错误", f"导出失败: {error}")
                 self._exporting = False
                 self._export_btn.disabled = False
                 self._export_btn.update()
-            self.app.page.run_task(_error)
+            self.app.page.run_task(_error, ex)
 
     def on_save_selected(self, path: str) -> None:
         """统一入口设置当前存档回调"""

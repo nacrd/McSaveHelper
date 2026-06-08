@@ -1,11 +1,13 @@
 """配置服务 —— 统一管理持久化配置和运行时迁移参数"""
 import json
+import shutil
 import threading
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 from app.models.config import AppConfig, BatchSettings, UISettings, MigrationConfig
 from core.constants import MinecraftConstants
+from core.logger import logger
 
 
 class ConfigService:
@@ -52,13 +54,33 @@ class ConfigService:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     user = json.load(f)
+                if not isinstance(user, dict):
+                    raise ValueError("配置文件根节点必须是对象")
                 merged = self._merge(defaults, user)
                 self._config = merged
-            except Exception:
+            except json.JSONDecodeError as e:
+                self._backup_invalid_config(config_path)
+                logger.warning(f"配置文件格式无效，已恢复默认配置: {e}", module="ConfigService")
+                self._config = defaults
+            except OSError as e:
+                logger.warning(f"读取配置文件失败，已恢复默认配置: {e}", module="ConfigService")
+                self._config = defaults
+            except ValueError as e:
+                self._backup_invalid_config(config_path)
+                logger.warning(f"配置内容无效，已恢复默认配置: {e}", module="ConfigService")
                 self._config = defaults
         else:
             self._config = defaults
         self._auto_fix()
+
+    @staticmethod
+    def _backup_invalid_config(config_path: Path) -> None:
+        """备份无法解析的配置文件"""
+        backup_path = config_path.with_suffix(f"{config_path.suffix}.bak")
+        try:
+            shutil.copy2(config_path, backup_path)
+        except OSError as e:
+            logger.warning(f"备份无效配置文件失败: {e}", module="ConfigService")
 
     def save(self) -> None:
         """保存配置到磁盘（线程安全）"""

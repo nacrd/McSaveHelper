@@ -49,10 +49,19 @@ class WorldInfo:
 @dataclass
 class Action:
     """代表一个待执行的操作"""
-    type: str  # 'modify_nbt', 'delete_region', 'rename_player', 'custom'
+    type: str  # 'modify_nbt', 'delete_region', 'rename_player', 'custom', 'modify_chunk'
     target: Any  # 文件路径、坐标、UUID 等
     data: Any = None
     callback: Optional[Callable] = None
+
+
+@dataclass
+class ChunkTarget:
+    """区块编辑目标"""
+    region_path: Path  # 相对存档根目录的路径
+    chunk_x: int
+    chunk_z: int
+    full_chunk_data: Any  # 完整的区块 NBT 数据
 
 
 class WorldSession:
@@ -432,7 +441,13 @@ class WorldSession:
         self._loaded_regions[(x, z)] = path
         return path
 
-    def queue_modify_nbt(self, target: Union[Path, str], key_path: List[Union[str, int]], value: Any) -> None:
+    def queue_modify_nbt(
+        self,
+        target: Union[Path, str],
+        key_path: List[Union[str, int]],
+        value: Any,
+        operation: str = "set",
+    ) -> None:
         """
         队列化一个 NBT 修改操作。
 
@@ -458,12 +473,18 @@ class WorldSession:
         action = Action(
             type='modify_nbt',
             target=target,
-            data={'key_path': key_path, 'value': value},
+            data={'key_path': key_path, 'value': value, 'operation': operation},
         )
         self._action_queue.append(action)
-        self._log(f"已队列化 NBT 修改: {key_path} -> {value}", "QUEUE")
+        self._log(f"已队列化 NBT {operation}: {key_path} -> {value}", "QUEUE")
 
-    def queue_modify_json(self, target: Union[Path, str], key_path: List[Union[str, int]], value: Any) -> None:
+    def queue_modify_json(
+        self,
+        target: Union[Path, str],
+        key_path: List[Union[str, int]],
+        value: Any,
+        operation: str = "set",
+    ) -> None:
         if isinstance(target, str):
             target = Path(target)
         if isinstance(target, Path) and target.is_absolute():
@@ -474,10 +495,10 @@ class WorldSession:
         action = Action(
             type='modify_json',
             target=target,
-            data={'key_path': key_path, 'value': value},
+            data={'key_path': key_path, 'value': value, 'operation': operation},
         )
         self._action_queue.append(action)
-        self._log(f"已队列化 JSON 修改: {key_path} -> {value}", "QUEUE")
+        self._log(f"已队列化 JSON {operation}: {key_path} -> {value}", "QUEUE")
 
     def queue_delete_region(self, x: int, z: int) -> None:
         """
@@ -622,6 +643,8 @@ class WorldSession:
             self._execute_modify_nbt(action, target_world)
         elif action.type == 'modify_json':
             self._execute_modify_json(action, target_world)
+        elif action.type == 'modify_chunk':
+            self._execute_modify_chunk(action, target_world)
         elif action.type == 'delete_region':
             self._execute_delete_region(action, target_world)
         elif action.type == 'rename_player':
@@ -651,25 +674,11 @@ class WorldSession:
             raise ValueError(f"拒绝修改存档目录外的 NBT 文件: {target_path}") from exc
         key_path = action.data['key_path']
         value = action.data['value']
+        operation = action.data.get('operation', 'set')
 
         # 加载 NBT
         data = nbtlib.load(target_path)
-        # 递归查找目标键
-        node = data
-        for key in key_path[:-1]:
-            if isinstance(key, int) and isinstance(node, list):
-                node = node[key]
-            elif isinstance(node, dict) and key in node:
-                node = node[key]
-            else:
-                raise KeyError(f"键路径 {key_path} 不存在于 {target_path}")
-        last_key = key_path[-1]
-        if isinstance(last_key, int) and isinstance(node, list):
-            node[last_key] = value
-        elif isinstance(node, dict) and last_key in node:
-            node[last_key] = value
-        else:
-            raise KeyError(f"最终键 {last_key} 不存在")
+        self._apply_path_operation(data, key_path, value, operation, f"NBT 文件 {target_path}")
         # 保存
         data.save()
 
@@ -693,25 +702,63 @@ class WorldSession:
         target_path = self._resolve_world_file(action.target, target_world)
         key_path = action.data['key_path']
         value = action.data['value']
+        operation = action.data.get('operation', 'set')
         with open(target_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        node = data
-        for key in key_path[:-1]:
-            if isinstance(key, int) and isinstance(node, list):
-                node = node[key]
-            elif isinstance(node, dict) and key in node:
-                node = node[key]
-            else:
-                raise KeyError(f"JSON 路径 {key_path} 不存在于 {target_path}")
-        last_key = key_path[-1]
-        if isinstance(last_key, int) and isinstance(node, list):
-            node[last_key] = value
-        elif isinstance(node, dict) and last_key in node:
-            node[last_key] = value
-        else:
-            raise KeyError(f"JSON 最终键 {last_key} 不存在")
+        self._apply_path_operation(data, key_path, value, operation, f"JSON 文件 {target_path}")
         with open(target_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def _apply_path_operation(
+        self,
+        data: Any,
+        key_path: List[Union[str, int]],
+        value: Any,
+        operation: str,
+        context: str,
+    ) -> None:
+        if not key_path:
+            raise KeyError(f"{context} 的路径不能为空")
+        node = data
+        for key in key_path[:-1]:
+            if isinstance(key, int) and isinstance(node, list) and 0 <= key < len(node):
+                node = node[key]
+            elif isinstance(key, str) and isinstance(node, dict) and key in node:
+                node = node[key]
+            else:
+                raise KeyError(f"路径 {key_path} 不存在于 {context}")
+        last_key = key_path[-1]
+        if isinstance(last_key, int) and isinstance(node, list):
+            if operation == "add":
+                if last_key < 0 or last_key > len(node):
+                    raise IndexError(f"列表插入位置越界: {last_key}")
+                if last_key == len(node):
+                    node.append(value)
+                else:
+                    node.insert(last_key, value)
+            elif operation == "delete":
+                if last_key < 0 or last_key >= len(node):
+                    raise IndexError(f"列表删除位置越界: {last_key}")
+                del node[last_key]
+            else:
+                if last_key < 0 or last_key >= len(node):
+                    raise IndexError(f"列表修改位置越界: {last_key}")
+                node[last_key] = value
+        elif isinstance(last_key, str) and isinstance(node, dict):
+            if operation == "add":
+                if last_key in node:
+                    raise KeyError(f"字段已存在: {last_key}")
+                node[last_key] = value
+            elif operation == "delete":
+                if last_key not in node:
+                    raise KeyError(f"字段不存在: {last_key}")
+                del node[last_key]
+            else:
+                if last_key not in node:
+                    raise KeyError(f"字段不存在: {last_key}")
+                node[last_key] = value
+        else:
+            raise KeyError(f"路径 {key_path} 无法应用到 {context}")
 
     def _execute_delete_region(self, action: Action, target_world: Path) -> None:
         """删除区域文件"""
@@ -878,3 +925,200 @@ class WorldSession:
 
         self._log(f"发现 {len(dimensions)} 个维度", "SCAN")
         return dimensions
+
+    def create_backup(self, backup_name: Optional[str] = None) -> Optional[Path]:
+        """
+        创建当前存档的备份。
+
+        Args:
+            backup_name: 备份名称，若为 None 则使用时间戳
+
+        Returns:
+            备份文件夹路径，失败返回 None
+        """
+        import datetime
+        try:
+            if backup_name is None:
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_name = f"{self.world_path.name}_backup_{timestamp}"
+            backup_dir = self.world_path.parent / backup_name
+            if backup_dir.exists():
+                # 清理旧备份
+                try:
+                    shutil.rmtree(backup_dir)
+                except Exception as e:
+                    self._log(f"清理旧备份失败: {e}", "WARNING")
+                    # 尝试使用带后缀的名称
+                    i = 1
+                    while (self.world_path.parent / f"{backup_name}_{i}").exists():
+                        i += 1
+                    backup_dir = self.world_path.parent / f"{backup_name}_{i}"
+            shutil.copytree(self.world_path, backup_dir)
+            self._log(f"已创建备份: {backup_dir}", "BACKUP")
+            return backup_dir
+        except Exception as e:
+            self._log(f"创建备份失败: {e}", "ERROR")
+            return None
+
+    def restore_backup(self, backup_path: Path, replace_current: bool = False) -> bool:
+        """
+        从备份恢复存档。
+
+        Args:
+            backup_path: 备份文件夹路径
+            replace_current: 是否替换当前存档（危险操作）
+
+        Returns:
+            是否成功
+        """
+        try:
+            if not backup_path.exists() or not backup_path.is_dir():
+                self._log(f"备份不存在或不是目录: {backup_path}", "ERROR")
+                return False
+            if replace_current:
+                # 先备份当前存档
+                current_backup = self.create_backup(f"{self.world_path.name}_pre_restore")
+                if current_backup is None:
+                    self._log("无法在恢复前备份当前存档，取消恢复", "ERROR")
+                    return False
+                # 删除当前存档
+                shutil.rmtree(self.world_path)
+                # 从备份复制
+                shutil.copytree(backup_path, self.world_path)
+                self._log(f"已从备份恢复存档: {backup_path}", "RESTORE")
+                return True
+            else:
+                # 创建副本而不替换当前存档
+                dest_name = f"{self.world_path.name}_restored"
+                dest_path = self.world_path.parent / dest_name
+                i = 1
+                while dest_path.exists():
+                    dest_path = self.world_path.parent / f"{dest_name}_{i}"
+                    i += 1
+                shutil.copytree(backup_path, dest_path)
+                self._log(f"已将备份恢复到: {dest_path}", "RESTORE")
+                return True
+        except Exception as e:
+            self._log(f"恢复备份失败: {e}", "ERROR")
+            return False
+
+    def list_backups(self) -> List[Path]:
+        """
+        列出当前存档的所有备份。
+
+        Returns:
+            备份文件夹路径列表
+        """
+        backups = []
+        try:
+            parent_dir = self.world_path.parent
+            world_name = self.world_path.name
+            for item in parent_dir.iterdir():
+                if item.is_dir() and item.name.startswith(world_name) and ("backup" in item.name or "restored" in item.name):
+                    backups.append(item)
+            # 按修改时间排序，最新的在前
+            backups.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        except Exception as e:
+            self._log(f"列出备份失败: {e}", "ERROR")
+        return backups
+
+    def load_chunk_nbt(self, region_path: Path, chunk_x: int, chunk_z: int) -> Optional[Tuple[Any, Path]]:
+        """
+        加载指定区块的 NBT 数据
+        
+        Args:
+            region_path: 相对存档根目录的区域文件路径
+            chunk_x: 区块在区域内的 X 坐标 (0-31)
+            chunk_z: 区块在区域内的 Z 坐标 (0-31)
+        
+        Returns:
+            (区块数据, 绝对路径) 或 None
+        """
+        try:
+            abs_region_path = self.world_path / region_path
+            if not abs_region_path.exists():
+                self._log(f"区域文件不存在: {region_path}", "ERROR")
+                return None
+            
+            from anvil import Region
+            region = Region.from_file(str(abs_region_path))
+            chunk = region.get_chunk(chunk_x, chunk_z)
+            
+            if chunk is None or not hasattr(chunk, "data"):
+                self._log(f"区块数据不存在: {region_path} [{chunk_x}, {chunk_z}]", "WARNING")
+                return None
+            
+            self._log(f"已加载区块: {region_path} [{chunk_x}, {chunk_z}]", "INFO")
+            return chunk.data, abs_region_path
+        except Exception as e:
+            self._log(f"加载区块失败: {e}", "ERROR")
+            return None
+
+    def queue_modify_chunk(self, region_path: Path, chunk_x: int, chunk_z: int, full_chunk_data: Any) -> None:
+        """
+        队列化区块修改操作
+        
+        Args:
+            region_path: 相对存档根目录的区域文件路径
+            chunk_x: 区块在区域内的 X 坐标 (0-31)
+            chunk_z: 区块在区域内的 Z 坐标 (0-31)
+            full_chunk_data: 修改后的完整区块 NBT 数据
+        """
+        target = ChunkTarget(
+            region_path=region_path,
+            chunk_x=chunk_x,
+            chunk_z=chunk_z,
+            full_chunk_data=full_chunk_data
+        )
+        action = Action(
+            type="modify_chunk",
+            target=target,
+            data=None
+        )
+        self._action_queue.append(action)
+        self._log(f"已队列化区块修改: {region_path} [{chunk_x}, {chunk_z}]", "QUEUE")
+
+    def _execute_modify_chunk(self, action: Action, target_world: Path) -> None:
+        """执行区块修改操作"""
+        target = action.target
+        if not isinstance(target, ChunkTarget):
+            raise ValueError("无效的区块目标")
+        
+        abs_region_path = target_world / target.region_path
+        if not abs_region_path.exists():
+            raise ValueError(f"区域文件不存在: {target.region_path}")
+        
+        # 备份区域文件
+        from app.services.region_editor_service import get_region_editor_service
+        editor = get_region_editor_service(log=self.log)
+        editor._backup_region(abs_region_path, backup=True)
+        
+        # 写入区块
+        self._write_chunk(abs_region_path, target.chunk_x, target.chunk_z, target.full_chunk_data)
+        self._log(f"已写回区块: {target.region_path} [{target.chunk_x}, {target.chunk_z}]", "SAVE")
+
+    def _write_chunk(self, region_path: Path, chunk_x: int, chunk_z: int, chunk_data: Any) -> None:
+        """将区块数据写回区域文件"""
+        try:
+            from app.services.region_editor_service import get_region_editor_service
+            editor = get_region_editor_service(log=self.log)
+            import io
+            import zlib
+
+            buffer = io.BytesIO()
+            if hasattr(chunk_data, "write_file"):
+                chunk_data.write_file(buffer=buffer)
+            elif hasattr(chunk_data, "write"):
+                chunk_data.write(buffer)
+            elif hasattr(chunk_data, "save"):
+                chunk_data.save(buffer, gzipped=False)
+            else:
+                raise TypeError(f"不支持的区块 NBT 对象类型: {type(chunk_data).__name__}")
+            nbt_bytes = buffer.getvalue()
+            compressed = zlib.compress(nbt_bytes, 6)
+            length = len(compressed) + 1
+            chunk_record = length.to_bytes(4, "big") + b"\x02" + compressed
+            editor._write_chunk_record(region_path, chunk_x, chunk_z, chunk_record)
+        except Exception as e:
+            self._log(f"写回区块失败: {e}", "ERROR")
+            raise

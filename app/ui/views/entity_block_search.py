@@ -311,12 +311,14 @@ class EntityBlockSearchView(ft.Column):
     ) -> None:
         """搜索线程"""
         try:
-            def _start():
+            async def _start():
                 self.app.show_progress("正在搜索实体/方块...")
             self.app.page.run_task(_start)
 
             def progress_callback(value: float, msg: str) -> None:
-                self.app.page.run_task(lambda: self.app.update_progress_with_task("搜索中", value))
+                async def _progress(progress_value: float):
+                    self.app.update_progress_with_task("搜索中", progress_value)
+                self.app.page.run_task(_progress, value)
 
             def log_callback(msg: str, level: str) -> None:
                 pass
@@ -332,7 +334,7 @@ class EntityBlockSearchView(ft.Column):
 
             self._search_results = results
 
-            def _finish():
+            async def _finish():
                 self._update_results_table()
                 self.app.hide_progress()
                 if results:
@@ -347,13 +349,13 @@ class EntityBlockSearchView(ft.Column):
             self.app.page.run_task(_finish)
 
         except Exception as ex:
-            def _error():
+            async def _error(error: Exception):
                 self.app.hide_progress()
-                self.app.error_dialog("错误", f"搜索失败: {ex}")
+                self.app.error_dialog("错误", f"搜索失败: {error}")
                 self._searching = False
                 self._search_btn.disabled = False
                 self._search_btn.update()
-            self.app.page.run_task(_error)
+            self.app.page.run_task(_error, ex)
 
     def _update_results_table(self) -> None:
         """更新结果表格"""

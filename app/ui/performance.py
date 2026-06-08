@@ -415,28 +415,41 @@ class ResourceUsageMonitor:
     def start(self) -> None:
         """开始监控"""
         if self._process is None:
+            print("[ResourceMonitor] 启动失败: psutil 不可用")
             return
         
         # 如果已经在运行且线程存活，不重复启动
         if self._running and self._thread and self._thread.is_alive():
+            print("[ResourceMonitor] 已在运行，跳过重复启动")
             return
         
         # 如果状态异常（标记为运行但线程不存活），先清理
         if self._running and (not self._thread or not self._thread.is_alive()):
+            print("[ResourceMonitor] 检测到异常状态，清理后重启")
             self._running = False
             self._thread = None
         
+        print("[ResourceMonitor] 正在启动监控线程...")
         self._running = True
         self._last_print_time = time.time()
-        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="ResourceMonitor")
         self._thread.start()
+        
+        # 等待线程真正启动
+        time.sleep(0.1)
+        if self._thread.is_alive():
+            print(f"[ResourceMonitor] ✓ 监控线程已启动 (TID: {self._thread.ident})")
+        else:
+            print("[ResourceMonitor] ✗ 监控线程启动失败")
     
     def stop(self) -> None:
         """停止监控"""
+        print("[ResourceMonitor] 正在停止监控...")
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         self._thread = None
+        print("[ResourceMonitor] 监控已停止")
     
     def set_print_interval(self, seconds: float) -> None:
         """设置定时打印间隔（秒）"""
@@ -444,29 +457,43 @@ class ResourceUsageMonitor:
     
     def _monitor_loop(self) -> None:
         """监控循环"""
-        while self._running:
-            try:
-                # 记录内存使用
-                memory_mb = self._process.memory_info().rss / 1024 / 1024
-                perf_monitor.record("memory_usage", memory_mb, "MB")
-                
-                # 记录CPU使用率
-                cpu_percent = self._process.cpu_percent(interval=self.sample_interval)
-                perf_monitor.record("cpu_usage", cpu_percent, "%")
-                
-                # 健康检查（CPU 过载 / 内存压力 / UI 卡死）
-                health_monitor.check(cpu_percent, memory_mb)
-
-                # 定时打印摘要
-                now = time.time()
-                if self.print_interval > 0 and (now - self._last_print_time) >= self.print_interval:
-                    self._last_print_time = now
-                    self._print_log_summary()
-                
-            except Exception as e:
-                print(f"[ERROR] 资源监控失败: {e}")
+        print("[ResourceMonitor] 监控循环开始")
+        try:
+            # 首次调用 cpu_percent 初始化（不阻塞）
+            if self._process:
+                self._process.cpu_percent()
             
-            time.sleep(self.sample_interval)
+            while self._running:
+                try:
+                    # 记录内存使用
+                    memory_mb = self._process.memory_info().rss / 1024 / 1024
+                    perf_monitor.record("memory_usage", memory_mb, "MB")
+                    
+                    # 记录CPU使用率（非阻塞模式）
+                    cpu_percent = self._process.cpu_percent()
+                    perf_monitor.record("cpu_usage", cpu_percent, "%")
+                    
+                    # 健康检查（CPU 过载 / 内存压力 / UI 卡死 / 线程阻塞）
+                    health_monitor.check(cpu_percent, memory_mb)
+
+                    # 定时打印摘要
+                    now = time.time()
+                    if self.print_interval > 0 and (now - self._last_print_time) >= self.print_interval:
+                        self._last_print_time = now
+                        self._print_log_summary()
+                    
+                except Exception as e:
+                    print(f"[ResourceMonitor] 采样错误: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
+                time.sleep(self.sample_interval)
+        except Exception as e:
+            print(f"[ResourceMonitor] 监控循环异常退出: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            print("[ResourceMonitor] 监控循环结束")
     
     def _print_log_summary(self) -> None:
         """将性能摘要输出到日志"""

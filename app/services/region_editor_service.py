@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple, Callable, Dict, Any
 from dataclasses import dataclass
 
 from core.scanner import scan_all_regions
+from core.region_utils import parse_region_coords
 from core.types import LogCallback
 
 
@@ -47,7 +48,10 @@ class RegionEditorService:
         if not region_path.exists():
             return None
         try:
-            x, z = self._parse_region_coords(region_path)
+            coords = parse_region_coords(region_path)
+            if coords is None:
+                raise ValueError(f"无效的区域文件名: {region_path.name}")
+            x, z = coords
             size = region_path.stat().st_size
             chunk_count = self._count_chunks(region_path)
             return RegionInfo(x=x, z=z, path=region_path, size=size, chunk_count=chunk_count)
@@ -204,14 +208,6 @@ class RegionEditorService:
                 failed += 1
         
         return success, failed
-
-    def _parse_region_coords(self, region_path: Path) -> Tuple[int, int]:
-        """从文件名解析区域坐标"""
-        name = region_path.stem
-        parts = name.split(".")
-        if len(parts) == 3 and parts[0] == "r":
-            return int(parts[1]), int(parts[2])
-        raise ValueError(f"无效的区域文件名: {region_path.name}")
 
     def _count_chunks(self, region_path: Path) -> int:
         """计算区域文件中的区块数量"""

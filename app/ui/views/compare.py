@@ -63,7 +63,7 @@ class CompareView(ft.Column):
             def _run():
                 try:
                     result = self._service.compare_worlds(left, right)
-                    def _update_ui():
+                    async def _update_ui():
                         self._summary.value = f"变更项: {result.summary['changed']} / {sum(v for k, v in result.summary.items() if k != 'changed')}"
                         self._result.controls.extend([
                             self._group("WorldInfo 差异", result.world_info),
@@ -73,7 +73,9 @@ class CompareView(ft.Column):
                         self.update()
                     self.app.page.run_task(_update_ui)
                 except Exception as ex:
-                    self.app.page.run_task(lambda: self.app.handle_exception(ex, title="存档对比失败"))
+                    async def _handle_error(error: Exception):
+                        self.app.handle_exception(error, title="存档对比失败")
+                    self.app.page.run_task(_handle_error, ex)
             
             threading.Thread(target=_run, daemon=True).start()
         except Exception as ex:

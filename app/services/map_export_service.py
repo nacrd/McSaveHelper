@@ -4,21 +4,18 @@
 """
 import hashlib
 import io
-import re
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Tuple, List
 import traceback
 
 from core.logger import logger
+from core.region_utils import parse_region_coords, scan_region_dir
 
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
-
-_REGION_PATTERN = re.compile(r"r\.(-?\d+)\.(-?\d+)\.mca")
-
 
 class MapExportService:
     """地图导出服务"""
@@ -108,9 +105,7 @@ class MapExportService:
             if not region_dir.exists():
                 raise ValueError("未找到主世界 region 目录")
 
-            region_files = list(region_dir.glob("*.mca"))
-            region_files = [f for f in region_files if f.is_file() and _REGION_PATTERN.match(f.name)]
-            region_files = sorted(region_files)
+            region_files = scan_region_dir(region_dir)
 
             if not region_files:
                 raise ValueError("未找到区块文件")
@@ -180,10 +175,9 @@ class MapExportService:
         max_z = float('-inf')
         
         for region_file in region_files:
-            match = _REGION_PATTERN.match(region_file.name)
-            if match:
-                rx = int(match.group(1))
-                rz = int(match.group(2))
+            coords = parse_region_coords(region_file)
+            if coords is not None:
+                rx, rz = coords
                 min_x = min(min_x, rx)
                 max_x = max(max_x, rx)
                 min_z = min(min_z, rz)
@@ -265,12 +259,11 @@ class MapExportService:
                 
                 try:
                     # 解析区块坐标
-                    match = _REGION_PATTERN.match(region_file.name)
-                    if not match:
+                    coords = parse_region_coords(region_file)
+                    if coords is None:
                         continue
-                    
-                    rx = int(match.group(1))
-                    rz = int(match.group(2))
+
+                    rx, rz = coords
                     
                     # 读取区块
                     region = Region.from_file(str(region_file))

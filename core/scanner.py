@@ -1,9 +1,7 @@
 from pathlib import Path
 from typing import List
-import re
 
-
-_REGION_FILE_RE = re.compile(r"^r\.-?\d+\.-?\d+\.mca$")
+from core.region_utils import iter_region_dirs, scan_region_dir
 
 
 def scan_all_regions(world_path: Path) -> List[Path]:
@@ -23,51 +21,16 @@ def scan_all_regions(world_path: Path) -> List[Path]:
 
     with tracker.track("区域文件扫描", {"world": str(world_path)}):
         files: List[Path] = []
-        region_dirs: List[Path] = []
-
-        # 主世界 region
-        region_dirs.append(world_path / "region")
-
-        # DIM* 格式（旧版 / 模组维度，含 DIM-1、DIM1）
-        try:
-            for dim_dir in world_path.iterdir():
-                if dim_dir.is_dir() and dim_dir.name.startswith("DIM"):
-                    region_dirs.append(dim_dir / "region")
-        except OSError:
-            pass
-
-        # dimensions/namespace/name 格式（1.16+ 模组维度）
-        dimensions_base = world_path / "dimensions"
-        if dimensions_base.is_dir():
-            try:
-                for namespace_dir in dimensions_base.iterdir():
-                    if not namespace_dir.is_dir():
-                        continue
-                    try:
-                        for dim_dir in namespace_dir.iterdir():
-                            if dim_dir.is_dir():
-                                region_dirs.append(dim_dir / "region")
-                    except OSError:
-                        pass
-            except OSError:
-                pass
-
         total_bytes = 0
-        for region_dir in region_dirs:
-            if not region_dir.is_dir():
-                continue
-            try:
-                for f in region_dir.iterdir():
-                    if f.is_file() and _REGION_FILE_RE.match(f.name):
-                        files.append(f)
-                        try:
-                            total_bytes += f.stat().st_size
-                        except OSError:
-                            pass
-            except OSError:
-                pass
+        for region_dir in iter_region_dirs(world_path):
+            for f in scan_region_dir(region_dir):
+                files.append(f)
+                try:
+                    total_bytes += f.stat().st_size
+                except OSError:
+                    pass
 
-        files.sort(key=lambda p: p.name)
+        files.sort(key=lambda p: str(p))
         tracker.increment_files(len(files))
         tracker.increment_bytes(total_bytes)
 

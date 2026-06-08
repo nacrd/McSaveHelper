@@ -99,6 +99,22 @@ class TestConfigServiceConcurrency:
             
             ConfigService._instance = None
 
+    def test_invalid_config_is_backed_up(self):
+        """测试损坏配置会备份并回退默认值"""
+        from app.services.config_service import ConfigService
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = Path(tmpdir)
+            (config_dir / "config.json").write_text("{invalid json", encoding="utf-8")
+            ConfigService._instance = None
+
+            config = ConfigService(config_dir)
+
+            assert config.version_detection is True
+            assert (config_dir / "config.json.bak").exists()
+
+            ConfigService._instance = None
+
 
 class TestBatchProcessorConcurrency:
     """测试批量处理器的并发安全性"""
@@ -153,6 +169,45 @@ class TestSaveNbtResourceManagement:
             # 检查是否有遗留的临时文件
             temp_files = list(tmp_path.glob(".*.tmp"))
             assert len(temp_files) == 0, f"残留临时文件: {temp_files}"
+
+    def test_convert_world_reports_file_errors(self):
+        """测试世界转换会返回文件级错误"""
+        from core.converter import convert_world
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            world_path = Path(tmpdir)
+            (world_path / "level.dat").write_bytes(b"bad")
+
+            result = convert_world(world_path, world_path, target_platform="java", target_version=1)
+
+            assert result.success is False
+            assert bool(result) is False
+            assert len(result.errors) == 1
+
+    def test_migration_conversion_failure_is_visible(self, monkeypatch):
+        """测试迁移服务会暴露版本转换失败"""
+        from app.services.config_service import ConfigService
+        from app.services.migration_service import MigrationService
+        from core.converter import ConversionResult
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ConfigService._instance = None
+            service = MigrationService(ConfigService(Path(tmpdir) / "config"))
+            logs = []
+
+            def fake_convert_world(*args, **kwargs):
+                return ConversionResult(errors=["bad file"])
+
+            monkeypatch.setattr("core.converter.convert_world", fake_convert_world)
+
+            ok = service._apply_version_conversion(
+                Path(tmpdir), "java", "1", lambda msg, level: logs.append((msg, level))
+            )
+
+            assert ok is False
+            assert any(level == "ERROR" and "bad file" in msg for msg, level in logs)
+
+            ConfigService._instance = None
 
 
 class TestReplaceDirectoryTreeAtomicity:
@@ -398,6 +453,123 @@ class TestOmniNbtEditing:
         updated = json.loads(stats_path.read_text(encoding="utf-8"))
         assert updated["stats"]["minecraft:mined"]["minecraft:stone"] == 8
 
+    def test_world_session_commits_nbt_add_and_delete_operations(self, tmp_path: Path):
+        import nbtlib
+        from nbtlib import Compound, File, Int, String
+        from nbtlib.tag import List
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        world.mkdir()
+        level = File(Compound({"Data": Compound({
+            "Version": Compound({"Id": Int(1)}),
+            "Rules": Compound({"Old": String("remove")}),
+            "Items": List[Int]([Int(1)]),
+        })}))
+        level.save(world / "level.dat")
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_nbt(Path("level.dat"), ["Data", "Rules", "Added"], String("ok"), operation="add")
+        session.queue_modify_nbt(Path("level.dat"), ["Data", "Rules", "Old"], None, operation="delete")
+        session.queue_modify_nbt(Path("level.dat"), ["Data", "Items", 1], Int(2), operation="add")
+
+        assert session.commit(backup=False)
+        updated = nbtlib.load(world / "level.dat")
+        assert updated["Data"]["Rules"]["Added"] == String("ok")
+        assert "Old" not in updated["Data"]["Rules"]
+        assert list(updated["Data"]["Items"]) == [Int(1), Int(2)]
+
+    def test_world_session_commits_json_add_and_delete_operations(self, tmp_path: Path):
+        import json
+        from nbtlib import Compound, File, Int
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        stats_dir = world / "stats"
+        stats_dir.mkdir(parents=True)
+        File(Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})})).save(world / "level.dat")
+        stats_path = stats_dir / "player.json"
+        stats_path.write_text(json.dumps({"stats": {"old": 1}, "items": ["a"]}), encoding="utf-8")
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session.queue_modify_json("stats/player.json", ["stats", "new"], 2, operation="add")
+        session.queue_modify_json("stats/player.json", ["stats", "old"], None, operation="delete")
+        session.queue_modify_json("stats/player.json", ["items", 1], "b", operation="add")
+
+        assert session.commit(backup=False)
+        updated = json.loads(stats_path.read_text(encoding="utf-8"))
+        assert updated["stats"] == {"new": 2}
+        assert updated["items"] == ["a", "b"]
+
+    def test_world_session_serializes_chunk_record_with_length_and_zlib_type(self, tmp_path: Path):
+        import zlib
+        from nbt import nbt
+        from core.omni.world_session import WorldSession
+
+        world = tmp_path / "world"
+        world.mkdir()
+        region_path = world / "region" / "r.0.0.mca"
+        region_path.parent.mkdir(parents=True)
+        region_path.write_bytes(b"\x00" * 8192)
+
+        chunk = nbt.NBTFile()
+        chunk.name = ""
+        chunk.tags.append(nbt.TAG_Int(name="DataVersion", value=1))
+
+        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session._write_chunk(region_path, 0, 0, chunk)
+
+        raw = region_path.read_bytes()
+        loc = raw[:4]
+        offset = int.from_bytes(loc[:3], "big") * 4096
+        sectors = loc[3]
+        assert offset >= 8192
+        assert sectors >= 1
+        length = int.from_bytes(raw[offset:offset + 4], "big")
+        assert raw[offset + 4] == 2
+        compressed = raw[offset + 5:offset + 4 + length]
+        assert zlib.decompress(compressed)
+
+    def test_block_data_service_reads_single_palette_block_without_data(self):
+        from app.services.block_data_service import BlockDataService
+
+        chunk = {
+            "sections": [
+                {
+                    "Y": 4,
+                    "block_states": {
+                        "palette": [{"Name": "minecraft:stone"}],
+                    },
+                }
+            ]
+        }
+
+        info = BlockDataService().get_block_at(chunk, 8, 64, 8)
+
+        assert info is not None
+        assert info.name == "minecraft:stone"
+        assert info.section_y == 4
+        assert info.palette_index == 0
+
+    def test_block_data_service_decodes_compacted_palette_indices(self):
+        from app.services.block_data_service import BlockDataService
+
+        palette = [{"Name": "minecraft:air"}, {"Name": "minecraft:chest"}]
+        data = [0] * 256
+        index = (10 * 16 + 3) * 16 + 2
+        bits = 4
+        values_per_long = 64 // bits
+        data[index // values_per_long] |= 1 << ((index % values_per_long) * bits)
+        chunk = {"sections": [{"Y": 4, "block_states": {"palette": palette, "data": data}}]}
+
+        info = BlockDataService().get_block_at(chunk, 2, 74, 3)
+
+        assert info is not None
+        assert info.name == "minecraft:chest"
+        assert info.local_x == 2
+        assert info.local_y == 10
+        assert info.local_z == 3
+
     def test_nbt_tree_coerces_json_values(self):
         from app.ui.views.explorer.nbt_tree import NBTTreeView
 
@@ -414,6 +586,34 @@ class TestOmniNbtEditing:
 
         assert tree.get_modified_data() == {"Entities": []}
         assert tree._editable is False
+
+    def test_nbt_tree_expand_all_enables_full_display(self):
+        from app.ui.views.explorer.nbt_tree import NBTTreeView
+
+        tree = NBTTreeView()
+        tree.load_nbt({"Entities": [{"id": "minecraft:zombie"}]})
+        tree.expand_all()
+
+        assert tree._expand_all is True
+        assert tree._show_all_children is True
+
+        tree.collapse_all()
+
+        assert tree._expand_all is False
+        assert tree._collapse_all is True
+        assert tree._show_all_children is False
+
+    def test_nbt_tree_collects_overview_stats(self):
+        from app.ui.views.explorer.nbt_tree import NBTTreeView
+
+        stats = NBTTreeView()._collect_stats({
+            "Level": {
+                "DataVersion": 3953,
+                "Entities": [{"id": "minecraft:pig"}],
+            }
+        })
+
+        assert stats == {"fields": 5, "containers": 4, "values": 2}
 
     def test_explorer_extracts_chunk_entities_and_block_entities(self):
         from app.ui.views.explorer.explorer_view import ExplorerView
@@ -468,6 +668,125 @@ class TestOmniNbtEditing:
         assert ExplorerView._coerce_like_tag("Float(60.0)", Float(1.0)) == Float(60.0)
         assert ExplorerView._coerce_like_tag("12.0", Int(1)) == Int(12)
         assert ExplorerView._tag_display_value(Float(60.0)) == "60.0"
+
+    def test_block_data_service_set_block_replaces_in_palette(self):
+        from app.services.block_data_service import BlockDataService
+
+        palette = [
+            {"Name": "minecraft:air"},
+            {"Name": "minecraft:stone"},
+            {"Name": "minecraft:chest"},
+        ]
+        bits = 4
+        values_per_long = 64 // bits
+        num_longs = (4096 + values_per_long - 1) // values_per_long
+        data = [0] * num_longs
+        target_flat = (10 * 16 + 3) * 16 + 2
+        long_idx = target_flat // values_per_long
+        bit_off = (target_flat % values_per_long) * bits
+        data[long_idx] |= 2 << bit_off
+
+        chunk = {"sections": [{"Y": 4, "block_states": {"palette": palette, "data": data}}]}
+
+        svc = BlockDataService()
+        info_before = svc.get_block_at(chunk, 2, 74, 3)
+        assert info_before is not None
+        assert info_before.name == "minecraft:chest"
+
+        result = svc.set_block_at(chunk, 2, 74, 3, "minecraft:stone")
+        assert result.success is True
+        assert result.old_name == "minecraft:chest"
+        assert result.new_name == "minecraft:stone"
+        assert result.repacked is False
+
+        info_after = svc.get_block_at(chunk, 2, 74, 3)
+        assert info_after is not None
+        assert info_after.name == "minecraft:stone"
+
+    def test_block_data_service_set_block_adds_new_palette_entry(self):
+        from app.services.block_data_service import BlockDataService
+
+        palette = [
+            {"Name": "minecraft:air"},
+            {"Name": "minecraft:stone"},
+        ]
+        bits = 4
+        values_per_long = 64 // bits
+        num_longs = (4096 + values_per_long - 1) // values_per_long
+        data = [0] * num_longs
+        target_flat = (5 * 16 + 7) * 16 + 3
+        long_idx = target_flat // values_per_long
+        bit_off = (target_flat % values_per_long) * bits
+        data[long_idx] |= 1 << bit_off
+
+        chunk = {"sections": [{"Y": 4, "block_states": {"palette": palette, "data": data}}]}
+
+        svc = BlockDataService()
+        result = svc.set_block_at(chunk, 3, 69, 7, "minecraft:diamond_block")
+        assert result.success is True
+        assert result.old_name == "minecraft:stone"
+        assert result.new_name == "minecraft:diamond_block"
+        assert len(palette) == 3
+        assert result.repacked is False
+
+        info_after = svc.get_block_at(chunk, 3, 69, 7)
+        assert info_after is not None
+        assert info_after.name == "minecraft:diamond_block"
+
+    def test_block_data_service_encode_decode_roundtrip(self):
+        from app.services.block_data_service import BlockDataService
+
+        svc = BlockDataService()
+        for palette_size in [2, 16, 17, 256]:
+            indices = list(range(palette_size)) * (4096 // palette_size)
+            remainder = 4096 - len(indices)
+            indices.extend([0] * remainder)
+            encoded = svc._encode_all_indices(indices, palette_size)
+            decoded = svc._decode_all_indices(encoded, palette_size)
+            assert decoded == indices, f"Roundtrip failed for palette_size={palette_size}"
+
+    def test_block_data_service_set_block_with_properties(self):
+        from app.services.block_data_service import BlockDataService
+
+        palette = [
+            {"Name": "minecraft:air"},
+            {"Name": "minecraft:oak_stairs", "Properties": {"facing": "north", "half": "bottom"}},
+        ]
+        bits = 4
+        values_per_long = 64 // bits
+        num_longs = (4096 + values_per_long - 1) // values_per_long
+        data = [0] * num_longs
+
+        chunk = {"sections": [{"Y": 0, "block_states": {"palette": palette, "data": data}}]}
+
+        svc = BlockDataService()
+        result = svc.set_block_at(chunk, 0, 0, 0, "minecraft:oak_stairs", {"facing": "south", "half": "top"})
+        assert result.success is True
+        assert result.new_name == "minecraft:oak_stairs"
+        assert len(palette) == 3
+
+        info_after = svc.get_block_at(chunk, 0, 0, 0)
+        assert info_after is not None
+        assert info_after.name == "minecraft:oak_stairs"
+        assert info_after.properties.get("facing") == "south"
+        assert info_after.properties.get("half") == "top"
+
+    def test_block_data_service_set_block_same_block_noop(self):
+        from app.services.block_data_service import BlockDataService
+
+        palette = [{"Name": "minecraft:air"}, {"Name": "minecraft:stone"}]
+        bits = 4
+        values_per_long = 64 // bits
+        num_longs = (4096 + values_per_long - 1) // values_per_long
+        data = [0] * num_longs
+
+        chunk = {"sections": [{"Y": 0, "block_states": {"palette": palette, "data": data}}]}
+
+        svc = BlockDataService()
+        result = svc.set_block_at(chunk, 0, 0, 0, "minecraft:air")
+        assert result.success is True
+        assert "相同" in result.message
+        assert len(palette) == 2
 
 
 if __name__ == "__main__":

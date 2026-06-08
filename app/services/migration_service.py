@@ -137,7 +137,8 @@ class MigrationService:
                 )
 
             output_path = dest_path / world_name
-            self._apply_version_conversion(output_path, target_platform, target_version, log_cb)
+            if not self._apply_version_conversion(output_path, target_platform, target_version, log_cb):
+                raise RuntimeError("版本/平台转换失败，请查看日志获取详细信息")
         return str(output_path)
 
     def run_batch(
@@ -187,7 +188,10 @@ class MigrationService:
             if result.get("success"):
                 output_name = result.get("world_name")
                 if output_name:
-                    self._apply_version_conversion(dest_path / output_name, target_platform, target_version, log_cb)
+                    converted = self._apply_version_conversion(dest_path / output_name, target_platform, target_version, log_cb)
+                    if not converted:
+                        result["success"] = False
+                        result["error"] = "版本/平台转换失败，请查看日志获取详细信息"
         return results
 
     def _apply_version_conversion(
@@ -196,23 +200,45 @@ class MigrationService:
         target_platform: str,
         target_version: str,
         log_cb: LogCallback,
-    ) -> None:
+    ) -> bool:
         version_value = None
         if target_version.strip():
             try:
                 version_value = int(target_version.strip())
             except ValueError:
                 log_cb(f"目标版本 ID 无效，已跳过版本降级: {target_version}", "WARNING")
-                return
+                return True
 
         if target_platform == "java" and version_value is None:
-            return
+            return True
 
-        from core.converter import convert_world
+        from core.converter import ConversionError, convert_world
 
         log_cb(f"开始应用版本/平台转换: platform={target_platform}, version={version_value or 'keep'}", "CONVERT")
-        convert_world(world_path, world_path, target_platform=target_platform, target_version=version_value)
-        log_cb("版本/平台转换完成", "CONVERT")
+        try:
+            result = convert_world(world_path, world_path, target_platform=target_platform, target_version=version_value)
+        except ConversionError as e:
+            logger.error(f"版本/平台转换失败: {e}", module="MigrationService")
+            log_cb(f"版本/平台转换失败: {e}", "ERROR")
+            return False
+        except Exception as e:
+            logger.error(f"版本/平台转换发生未预期错误: {e}", module="MigrationService")
+            log_cb(f"版本/平台转换发生未预期错误: {e}", "ERROR")
+            return False
+
+        for warning in result.warnings:
+            log_cb(warning, "WARNING")
+
+        if not result.success:
+            for error in result.errors[:5]:
+                log_cb(error, "ERROR")
+            if len(result.errors) > 5:
+                log_cb(f"还有 {len(result.errors) - 5} 个转换错误未显示", "ERROR")
+            logger.error(f"版本/平台转换完成但存在 {len(result.errors)} 个错误", module="MigrationService")
+            return False
+
+        log_cb(f"版本/平台转换完成，已处理 {result.converted_files} 个文件", "CONVERT")
+        return True
 
     @staticmethod
     def open_folder(path: str) -> None:

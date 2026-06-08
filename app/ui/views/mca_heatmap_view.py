@@ -501,12 +501,6 @@ class McaHeatmapView(ft.Container):
         ]
     
     def _get_color(self, size: int, coord: Tuple[int, int]) -> str:
-        if self._display_mode == "size":
-            return self._get_size_color(size)
-        if self._display_mode == "generated":
-            return self._get_generated_color(coord)
-        if self._display_mode == "distance":
-            return self._get_distance_color(coord)
         if self._display_mode == "biome":
             return self._get_biome_color(coord)
         if self._display_mode == "structure":
@@ -548,43 +542,6 @@ class McaHeatmapView(ft.Container):
         if ratio < 0.92:
             return "#C63D2F"
         return "#8E24AA"
-
-    def _get_size_color(self, size: int) -> str:
-        if size >= 64 * 1024 * 1024:
-            return "#8E24AA"
-        if size >= 32 * 1024 * 1024:
-            return "#C63D2F"
-        if size >= 16 * 1024 * 1024:
-            return "#D9822B"
-        if size >= 8 * 1024 * 1024:
-            return "#C0A44A"
-        if size >= 2 * 1024 * 1024:
-            return "#689F38"
-        return "#2E7D32"
-
-    def _get_generated_color(self, coord: Tuple[int, int]) -> str:
-        x, z = coord
-        if x == 0 and z == 0:
-            return "#FFD54F"
-        if abs(x) <= 1 and abs(z) <= 1:
-            return "#66BB6A"
-        if abs(x) <= 4 and abs(z) <= 4:
-            return "#42A5F5"
-        if abs(x) <= 12 and abs(z) <= 12:
-            return "#AB47BC"
-        return "#78909C"
-
-    def _get_distance_color(self, coord: Tuple[int, int]) -> str:
-        distance = math.sqrt(coord[0] * coord[0] + coord[1] * coord[1])
-        if distance <= 1:
-            return "#FFD54F"
-        if distance <= 4:
-            return "#66BB6A"
-        if distance <= 10:
-            return "#29B6F6"
-        if distance <= 24:
-            return "#7E57C2"
-        return "#455A64"
 
     def _get_biome_color(self, coord: Tuple[int, int]) -> str:
         biome = str(self._heatmap_service.get_region_meta(coord).get("dominant_biome", "unknown")).lower()
@@ -629,55 +586,16 @@ class McaHeatmapView(ft.Container):
     def _get_mode_title(self) -> str:
         return {
             "activity": "活动热力",
-            "size": "文件大小",
-            "generated": "生成分布",
-            "distance": "距原点距离",
             "biome": "主要群系",
             "structure": "生成结构",
         }.get(self._display_mode, "区域视图")
 
     def _get_region_value_label(self, coord: Tuple[int, int], size: int) -> str:
-        if self._display_mode == "size":
-            return self._get_size_level(size)
-        if self._display_mode == "generated":
-            return self._get_generated_label(coord)
-        if self._display_mode == "distance":
-            return self._get_distance_label(coord)
         if self._display_mode == "biome":
             return self._get_biome_label(coord)
         if self._display_mode == "structure":
             return self._get_structure_label(coord)
         return self._get_activity_name(size)
-
-    def _get_size_level(self, size: int) -> str:
-        if size >= 64 * 1024 * 1024:
-            return "超大区域"
-        if size >= 32 * 1024 * 1024:
-            return "大型区域"
-        if size >= 16 * 1024 * 1024:
-            return "中大型区域"
-        if size >= 8 * 1024 * 1024:
-            return "中等区域"
-        if size >= 2 * 1024 * 1024:
-            return "小型区域"
-        return "很小区域"
-
-    def _get_generated_label(self, coord: Tuple[int, int]) -> str:
-        x, z = coord
-        if x == 0 and z == 0:
-            return "原点区域"
-        if abs(x) <= 1 and abs(z) <= 1:
-            return "出生点附近"
-        if abs(x) <= 4 and abs(z) <= 4:
-            return "近距离探索"
-        if abs(x) <= 12 and abs(z) <= 12:
-            return "中距离探索"
-        return "远距离探索"
-
-    def _get_distance_label(self, coord: Tuple[int, int]) -> str:
-        distance = math.sqrt(coord[0] * coord[0] + coord[1] * coord[1])
-        blocks = int(distance * 512)
-        return f"距原点约 {blocks} 方块"
 
     def _get_biome_label(self, coord: Tuple[int, int]) -> str:
         biome = self._heatmap_service.get_region_meta(coord).get("dominant_biome", "unknown")
@@ -857,7 +775,7 @@ class McaHeatmapView(ft.Container):
         return self._show_empty_regions
 
     def set_display_mode(self, mode: str) -> None:
-        if mode not in {"activity", "size", "generated", "distance", "biome", "structure"}:
+        if mode not in {"activity", "biome", "structure"}:
             return
         self._display_mode = mode
         self._rebuild_canvas()

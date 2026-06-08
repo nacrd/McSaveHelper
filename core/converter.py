@@ -7,6 +7,7 @@ import struct
 import os
 import tempfile
 import nbtlib
+from dataclasses import dataclass, field
 from nbtlib import File, Compound, Byte, Short, Int, Long, Float, Double, String, ByteArray, IntArray, List
 from typing import Union, Dict, Any, Optional, Tuple, List as TList
 from pathlib import Path
@@ -18,6 +19,21 @@ from .utils import replace_directory_tree
 class ConversionError(Exception):
     """转换过程中发生的错误"""
     pass
+
+
+@dataclass
+class ConversionResult:
+    """转换执行结果"""
+    converted_files: int = 0
+    errors: TList[str] = field(default_factory=list)
+    warnings: TList[str] = field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        return not self.errors
+
+    def __bool__(self) -> bool:
+        return self.success
 
 
 def detect_endian(file_path: Path) -> str:
@@ -263,7 +279,7 @@ class VersionDowngrader:
 
 def convert_world(src_path: Path, dst_path: Path,
                   target_platform: str = "java",
-                  target_version: Optional[int] = None) -> bool:
+                  target_version: Optional[int] = None) -> ConversionResult:
     """
     转换整个世界存档（高级接口）。
     
@@ -274,11 +290,12 @@ def convert_world(src_path: Path, dst_path: Path,
         target_version: 目标版本 ID（仅 Java 版有效）
     
     Returns:
-        成功返回 True，失败返回 False
+        ConversionResult: 转换结果，包含成功状态、已转换文件数和错误摘要
     """
     from core.performance import get_tracker
     from core.logger import logger as _logger
     tracker = get_tracker()
+    result = ConversionResult()
 
     with tracker.track("存档版本转换", {
         "src": str(src_path), "dst": str(dst_path),
@@ -319,8 +336,11 @@ def convert_world(src_path: Path, dst_path: Path,
                         
                         save_nbt(file_path, data, byteorder=target_byteorder)
                         tracker.increment_files(1)
+                        result.converted_files += 1
                     except Exception as e:
-                        _logger.warning(f"转换文件 {file_path} 时出错: {e}", module="Converter")
+                        message = f"转换文件 {file_path} 时出错: {e}"
+                        result.errors.append(message)
+                        _logger.warning(message, module="Converter")
                         tracker.increment_errors(1)
         
         # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
@@ -356,13 +376,18 @@ def convert_world(src_path: Path, dst_path: Path,
                         if region_modified and hasattr(region, "save"):
                             region.save(str(mca_path))
                             tracker.increment_files(1)
+                            result.converted_files += 1
                     except Exception as e:
-                        _logger.warning(f"转换区域文件 {mca_path} 时出错: {e}", module="Converter")
+                        message = f"转换区域文件 {mca_path} 时出错: {e}"
+                        result.errors.append(message)
+                        _logger.warning(message, module="Converter")
                         tracker.increment_errors(1)
             except ImportError:
-                _logger.warning("anvil-parser 未安装，跳过区域文件转换", module="Converter")
+                message = "anvil-parser 未安装，跳过区域文件转换"
+                result.warnings.append(message)
+                _logger.warning(message, module="Converter")
         
-    return True
+    return result
 
 
 if __name__ == "__main__":

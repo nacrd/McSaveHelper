@@ -89,11 +89,14 @@ class TextureService:
     def _init(self) -> None:
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._jar_cache_dir = Path.home() / ".mc_save_helper" / "jars"
+        self._jar_cache_dir.mkdir(parents=True, exist_ok=True)
         self._memory_cache: OrderedDict[str, Path] = OrderedDict()
         self._base64_cache: OrderedDict[str, str] = OrderedDict()
         self._minecraft_jar: Optional[Path] = None
         self._asset_index: Optional[Dict[str, str]] = None
         self._asset_index_loaded = False
+        self._jar_download_attempted = False
         self._lock = threading.Lock()
         self._tried_paths: Dict[str, str] = {}
 
@@ -285,7 +288,17 @@ class TextureService:
     def _find_or_get_jar(self) -> Optional[Path]:
         if self._minecraft_jar and self._minecraft_jar.exists():
             return self._minecraft_jar
+        
+        # 尝试从本地查找
         self._minecraft_jar = self.find_minecraft_jar()
+        if self._minecraft_jar:
+            return self._minecraft_jar
+        
+        # 尝试从缓存下载的 JAR
+        if not self._jar_download_attempted:
+            self._minecraft_jar = self._download_client_jar()
+            self._jar_download_attempted = True
+        
         return self._minecraft_jar
 
     def find_minecraft_jar(self) -> Optional[Path]:
@@ -317,6 +330,123 @@ class TextureService:
 
     def set_minecraft_jar(self, path: Path) -> None:
         self._minecraft_jar = path
+
+    def _download_client_jar(self) -> Optional[Path]:
+        """从 Mojang 官方下载客户端 JAR，并自动清理旧版本"""
+        try:
+            logger.info("开始下载 Minecraft 客户端 JAR...")
+            
+            # 0. 清理旧版本 JAR（保留最新的 1-2 个版本）
+            self._cleanup_old_jars(keep_count=1)
+            
+            # 1. 获取版本清单
+            resp = requests.get(_ASSET_INDEX_URL, timeout=_REQUEST_TIMEOUT)
+            if resp.status_code != 200:
+                logger.warning("无法获取版本清单")
+                return None
+            
+            manifest = resp.json()
+            latest_id = manifest.get("latest", {}).get("release")
+            if not latest_id:
+                logger.warning("无法获取最新版本 ID")
+                return None
+            
+            logger.info(f"最新版本: {latest_id}")
+            
+            # 2. 获取版本 URL
+            version_url = None
+            for v in manifest.get("versions", []):
+                if v.get("id") == latest_id:
+                    version_url = v.get("url")
+                    break
+            
+            if not version_url:
+                logger.warning("无法获取版本 URL")
+                return None
+            
+            # 3. 获取版本数据
+            resp2 = requests.get(version_url, timeout=_REQUEST_TIMEOUT)
+            if resp2.status_code != 200:
+                logger.warning("无法获取版本数据")
+                return None
+            
+            version_data = resp2.json()
+            client_info = version_data.get("downloads", {}).get("client")
+            if not client_info:
+                logger.warning("无法获取客户端下载信息")
+                return None
+            
+            jar_url = client_info.get("url")
+            jar_sha1 = client_info.get("sha1")
+            jar_size = client_info.get("size", 0)
+            
+            if not jar_url:
+                logger.warning("无法获取 JAR 下载 URL")
+                return None
+            
+            # 4. 检查缓存
+            jar_path = self._jar_cache_dir / f"minecraft-{latest_id}-client.jar"
+            if jar_path.exists():
+                # 验证 SHA1
+                import hashlib
+                with open(jar_path, "rb") as f:
+                    file_hash = hashlib.sha1(f.read()).hexdigest()
+                if file_hash == jar_sha1:
+                    logger.info(f"使用缓存的 JAR: {jar_path}")
+                    return jar_path
+                else:
+                    logger.warning("缓存的 JAR SHA1 校验失败，重新下载")
+                    jar_path.unlink()
+            
+            # 5. 下载 JAR
+            logger.info(f"开始下载 JAR ({jar_size / 1024 / 1024:.1f} MB)...")
+            resp3 = requests.get(jar_url, timeout=300, stream=True)
+            if resp3.status_code != 200:
+                logger.warning(f"下载失败: HTTP {resp3.status_code}")
+                return None
+            
+            # 流式写入文件
+            with open(jar_path, "wb") as f:
+                downloaded = 0
+                for chunk in resp3.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded % (1024 * 1024) == 0:  # 每 1MB 记录一次
+                            logger.debug(f"已下载: {downloaded / 1024 / 1024:.1f} MB")
+            
+            logger.info(f"JAR 下载完成: {jar_path}")
+            return jar_path
+            
+        except Exception as e:
+            logger.error(f"下载 JAR 失败: {e}")
+            return None
+
+    def _cleanup_old_jars(self, keep_count: int = 1) -> None:
+        """清理旧版本 JAR 文件，只保留最新的 N 个版本"""
+        try:
+            if not self._jar_cache_dir.exists():
+                return
+            
+            # 获取所有 JAR 文件
+            jar_files = list(self._jar_cache_dir.glob("minecraft-*-client.jar"))
+            if len(jar_files) <= keep_count:
+                return  # 文件数量未超过保留数量，无需清理
+            
+            # 按修改时间排序（最新的在前）
+            jar_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            
+            # 删除旧文件
+            for old_jar in jar_files[keep_count:]:
+                try:
+                    size_mb = old_jar.stat().st_size / 1024 / 1024
+                    old_jar.unlink()
+                    logger.info(f"已清理旧版本 JAR: {old_jar.name} ({size_mb:.1f} MB)")
+                except Exception as e:
+                    logger.warning(f"清理 JAR 失败 {old_jar.name}: {e}")
+            
+        except Exception as e:
+            logger.warning(f"清理旧 JAR 文件时出错: {e}")
 
     def _load_asset_index(self) -> None:
         try:
@@ -367,17 +497,48 @@ class TextureService:
         except Exception:
             self._asset_index_loaded = True
 
-    def clear_cache(self) -> None:
+    def clear_cache(self, clear_textures: bool = True, clear_jars: bool = False) -> None:
+        """清理缓存
+        
+        Args:
+            clear_textures: 是否清理纹理缓存（默认 True）
+            clear_jars: 是否清理 JAR 文件（默认 False，因为 JAR 较大且重新下载耗时）
+        """
         with self._lock:
             self._memory_cache.clear()
             self._base64_cache.clear()
             self._tried_paths.clear()
-        if self._cache_dir.exists():
-            for f in self._cache_dir.rglob("*.png"):
-                try:
-                    f.unlink()
-                except Exception:
-                    pass
+        
+        if clear_textures and self._cache_dir.exists():
+            try:
+                deleted_count = 0
+                for f in self._cache_dir.rglob("*.png"):
+                    try:
+                        f.unlink()
+                        deleted_count += 1
+                    except Exception:
+                        pass
+                if deleted_count > 0:
+                    logger.info(f"已清理 {deleted_count} 个纹理缓存文件")
+            except Exception as e:
+                logger.warning(f"清理纹理缓存失败: {e}")
+        
+        if clear_jars and self._jar_cache_dir.exists():
+            try:
+                deleted_count = 0
+                deleted_size = 0
+                for jar_file in self._jar_cache_dir.glob("*.jar"):
+                    try:
+                        size = jar_file.stat().st_size
+                        jar_file.unlink()
+                        deleted_count += 1
+                        deleted_size += size
+                    except Exception:
+                        pass
+                if deleted_count > 0:
+                    logger.info(f"已清理 {deleted_count} 个 JAR 文件 ({deleted_size / 1024 / 1024:.1f} MB)")
+            except Exception as e:
+                logger.warning(f"清理 JAR 缓存失败: {e}")
 
 
 def get_texture_service() -> TextureService:

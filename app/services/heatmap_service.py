@@ -5,12 +5,12 @@
 支持进度追踪和数据查询。
 """
 import asyncio
-import re
-import os
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Tuple, Optional
 from dataclasses import dataclass
+
+from core.region_utils import parse_region_coords, scan_region_dir
 
 
 @dataclass
@@ -34,8 +34,7 @@ class HeatmapService:
     """
     
     _instance: Optional['HeatmapService'] = None
-    _MCA_PATTERN = re.compile(r'^r\.(-?\d+)\.(-?\d+)$')
-    
+
     def __new__(cls) -> 'HeatmapService':
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -125,7 +124,7 @@ class HeatmapService:
             region_path = Path(region_dir)
             
             # 首先快速统计文件总数
-            mca_files = list(region_path.glob("r.*.*.mca"))
+            mca_files = scan_region_dir(region_path)
             self._total_count = len(mca_files)
             
             if self._total_count == 0:
@@ -135,7 +134,7 @@ class HeatmapService:
             
             for mca_file in mca_files:
                 try:
-                    coord = self._parse_mca_filename(mca_file.stem)
+                    coord = parse_region_coords(mca_file)
                     if coord is not None:
                         size = mca_file.stat().st_size
                         self._mca_data[coord] = size
@@ -158,25 +157,6 @@ class HeatmapService:
             self._is_scanning = False
             raise
     
-    def _parse_mca_filename(self, filename: str) -> Optional[Tuple[int, int]]:
-        """
-        解析 MCA 文件名获取坐标
-        
-        Args:
-            filename: 文件名（不含扩展名），如 "r.0.0"
-            
-        Returns:
-            (x, z) 坐标元组，或 None 如果解析失败
-        """
-        match = self._MCA_PATTERN.match(filename)
-        
-        if match:
-            x = int(match.group(1))
-            z = int(match.group(2))
-            return (x, z)
-        
-        return None
-
     def _scan_region_meta(self, region_file: Path) -> Dict[str, Any]:
         biomes: Counter[str] = Counter()
         structures: Counter[str] = Counter()
@@ -232,18 +212,18 @@ class HeatmapService:
     def _collect_biomes(self, data: Any, counter: Counter[str]) -> None:
         root = self._chunk_root(data)
         sections = self._first(root, "sections", "Sections")
-        if isinstance(sections, list):
-            for section in sections:
+        if self._is_sequence(sections):
+            for section in self._iter_values(sections):
                 biomes = self._first(section, "biomes", "Biomes")
-                palette = self._first(biomes, "palette", "Palette") if isinstance(biomes, dict) else None
-                if isinstance(palette, list):
-                    for biome in palette[:16]:
+                palette = self._first(biomes, "palette", "Palette") if self._is_mapping(biomes) else None
+                if self._is_sequence(palette):
+                    for biome in list(self._iter_values(palette))[:16]:
                         name = self._tag_text(biome)
                         if name:
                             counter[name] += 1
         legacy_biomes = self._first(root, "Biomes", "biomes")
-        if isinstance(legacy_biomes, list):
-            for biome in legacy_biomes[:64]:
+        if self._is_sequence(legacy_biomes):
+            for biome in list(self._iter_values(legacy_biomes))[:64]:
                 name = self._tag_text(biome)
                 if name:
                     counter[name] += 1
@@ -251,17 +231,17 @@ class HeatmapService:
     def _collect_structures(self, data: Any, counter: Counter[str], positions: list[Dict[str, Any]]) -> None:
         root = self._chunk_root(data)
         structures = self._first(root, "structures", "Structures")
-        starts = self._first(structures, "starts", "Starts") if isinstance(structures, dict) else None
-        if isinstance(starts, dict):
-            for name, value in starts.items():
+        starts = self._first(structures, "starts", "Starts") if self._is_mapping(structures) else None
+        if self._is_mapping(starts):
+            for name, value in self._items(starts):
                 if str(name).lower() not in {"references", "starts"} and value is not None:
                     counter[str(name)] += 1
                     pos = self._extract_structure_position(str(name), value)
                     if pos:
                         positions.append(pos)
-        refs = self._first(structures, "References", "references") if isinstance(structures, dict) else None
-        if isinstance(refs, dict):
-            for name, value in refs.items():
+        refs = self._first(structures, "References", "references") if self._is_mapping(structures) else None
+        if self._is_mapping(refs):
+            for name, value in self._items(refs):
                 try:
                     if len(value) > 0:
                         counter[str(name)] += 1
@@ -269,16 +249,16 @@ class HeatmapService:
                     counter[str(name)] += 1
 
     def _extract_structure_position(self, name: str, value: Any) -> Optional[Dict[str, Any]]:
-        if not isinstance(value, dict):
+        if not self._is_mapping(value):
             return None
         bb = self._first(value, "BB", "bb", "bounding_box")
         pos = self._position_from_bb(name, bb)
         if pos:
             return pos
         children = self._first(value, "Children", "children")
-        if isinstance(children, list):
-            for child in children:
-                if not isinstance(child, dict):
+        if self._is_sequence(children):
+            for child in self._iter_values(children):
+                if not self._is_mapping(child):
                     continue
                 pos = self._position_from_bb(name, self._first(child, "BB", "bb", "bounding_box"))
                 if pos:
@@ -296,6 +276,8 @@ class HeatmapService:
 
     def _position_from_bb(self, name: str, bb: Any) -> Optional[Dict[str, Any]]:
         raw = self._tag_value(bb)
+        if self._is_sequence(raw):
+            raw = list(self._iter_values(raw))
         if not isinstance(raw, list) or len(raw) < 6:
             return None
         try:
@@ -310,23 +292,63 @@ class HeatmapService:
             return None
 
     def _chunk_root(self, data: Any) -> Any:
-        if isinstance(data, dict) and isinstance(data.get("Level"), dict):
-            return data["Level"]
+        level = self._first(data, "Level")
+        if self._is_mapping(level):
+            return level
         return data
 
     def _first(self, data: Any, *keys: str) -> Any:
-        if not isinstance(data, dict):
+        if not self._is_mapping(data):
             return None
         for key in keys:
-            value = data.get(key)
+            value = self._get(data, key)
             if value is not None:
                 return value
         return None
+
+    def _is_mapping(self, value: Any) -> bool:
+        raw = self._tag_value(value)
+        return isinstance(raw, dict) or hasattr(raw, "get") or hasattr(raw, "items")
+
+    def _is_sequence(self, value: Any) -> bool:
+        raw = self._tag_value(value)
+        if isinstance(raw, (str, bytes, dict)):
+            return False
+        return isinstance(raw, (list, tuple)) or hasattr(raw, "__iter__")
+
+    def _get(self, data: Any, key: str) -> Any:
+        raw = self._tag_value(data)
+        try:
+            if hasattr(raw, "get"):
+                return raw.get(key)
+            return raw[key]
+        except Exception:
+            return None
+
+    def _items(self, data: Any) -> list[tuple[Any, Any]]:
+        raw = self._tag_value(data)
+        try:
+            if hasattr(raw, "items"):
+                return list(raw.items())
+        except Exception:
+            pass
+        return []
+
+    def _iter_values(self, data: Any) -> list[Any]:
+        raw = self._tag_value(data)
+        try:
+            return list(raw)
+        except Exception:
+            return []
 
     def _tag_text(self, value: Any) -> str:
         raw = getattr(value, "value", value)
         if isinstance(raw, bytes):
             return raw.decode("utf-8", errors="ignore")
+        if isinstance(raw, str):
+            return raw
+        if hasattr(value, "value") and raw is not None:
+            return str(raw)
         return str(raw) if raw is not None else ""
 
     def _tag_value(self, value: Any) -> Any:

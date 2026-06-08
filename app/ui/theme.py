@@ -33,6 +33,7 @@ class ThemeColors:
     text_secondary: str = "#AAAAAA"
     text_muted: str = "#707070"
     text_disabled: str = "#4A4A4A"
+    text_invert: str = "#000000"  # 反色文本（用于亮色背景按钮）
     
     # Terminal colors
     terminal_green: str = "#55FF55"
