@@ -1,0 +1,457 @@
+"""Window Manager - 窗口生命周期管理
+
+负责窗口的创建、最大化、最小化、关闭、大小调整和响应式布局。
+"""
+from typing import TYPE_CHECKING, Optional, Callable, Any
+from pathlib import Path
+import flet as ft
+
+from app.ui.theme import THEME, mc_border
+from core.logger import logger
+
+if TYPE_CHECKING:
+    from app.application import Application
+
+
+class WindowManager:
+    """窗口生命周期管理器
+
+    职责：
+    - 窗口基本设置（标题、图标、大小）
+    - 自定义标题栏构建
+    - 窗口控制按钮（最小化、最大化、关闭）
+    - 窗口大小调整和响应式布局
+    - 窗口事件处理
+    """
+
+    def __init__(self, app: "Application") -> None:
+        """初始化窗口管理器
+
+        Args:
+            app: 应用实例
+        """
+        self.app = app
+        self.page = app.page
+        self._shutdown_started = False
+        self._resize_timer: Optional[Any] = None
+        self._maximize_button: Optional[ft.Container] = None
+
+    def setup_window(self) -> None:
+        """设置窗口基本属性"""
+        page = self.page
+        page.title = self.app._t("app.title", "MCSaveHelper · 存档管理工具")
+        page.theme_mode = ft.ThemeMode.DARK
+        page.bgcolor = THEME.bg_primary
+        page.window.bgcolor = THEME.bg_primary
+        page.window.frameless = False
+        page.window.title_bar_hidden = True
+        page.window.title_bar_buttons_hidden = True
+        page.window.resizable = True
+        page.window.prevent_close = True
+        page.window.on_event = self._on_window_event
+        page.padding = 0
+        page.window.width = 1100
+        page.window.height = 820
+        page.window.min_width = 800
+        page.window.min_height = 600
+
+        # 添加窗口大小变化监听
+        try:
+            page.on_resize = self._on_window_resize
+        except Exception:
+            logger.warning("on_resize 事件不可用，跳过窗口大小监听", module="WindowManager")
+
+        # 设置图标
+        icon_path = self._resolve_icon_path()
+        if icon_path:
+            page.window.icon = icon_path
+
+    def build_title_bar(self) -> ft.Container:
+        """构建自定义窗口标题栏
+
+        Returns:
+            ft.Container: 标题栏容器
+        """
+        title_content = self._create_title_content()
+        title_drag_area = self._create_title_drag_area(title_content)
+
+        return ft.Container(
+            content=ft.Row(
+                [title_drag_area, self._build_window_controls()],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            height=44,
+            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
+            bgcolor=THEME.mc_wood,
+            border=ft.Border(
+                left=None, top=None, right=None,
+                bottom=ft.BorderSide(3, THEME.mc_grass),
+            ),
+        )
+
+    def _create_title_content(self) -> ft.Row:
+        """创建标题内容
+
+        Returns:
+            ft.Row: 标题内容行
+        """
+        return ft.Row(
+            [
+                ft.Container(
+                    content=ft.Text("⛏", size=16, color=THEME.mc_gold),
+                    width=32, height=28,
+                    alignment=ft.alignment.Alignment(0, 0),
+                    bgcolor=THEME.bg_secondary,
+                    border=mc_border(2),
+                ),
+                ft.Text(
+                    "MCSaveHelper  ▣ Minecraft Save Toolkit",
+                    size=13, color=THEME.text_primary,
+                    weight=ft.FontWeight.BOLD, font_family="monospace",
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _create_title_drag_area(self, content: ft.Control) -> ft.WindowDragArea:
+        """创建可拖拽标题区域
+
+        Args:
+            content: 标题内容
+
+        Returns:
+            ft.WindowDragArea: 可拖拽区域
+        """
+        return ft.WindowDragArea(
+            ft.GestureDetector(content=content, on_double_tap=self._toggle_maximize),
+            maximizable=True, expand=True,
+        )
+
+    def _build_window_controls(self) -> ft.Row:
+        """构建窗口控制按钮组
+
+        Returns:
+            ft.Row: 控制按钮行
+        """
+        self._maximize_button = self._create_window_button(
+            "□", THEME.mc_stone, self._toggle_maximize
+        )
+
+        return ft.Row(
+            [
+                self._create_window_button("—", THEME.mc_stone, self._minimize),
+                self._maximize_button,
+                self._create_window_button("×", THEME.mc_redstone, self._close),
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    def _create_window_button(
+        self,
+        text: str,
+        bgcolor: str,
+        on_click: Callable[[ft.ControlEvent], None],
+    ) -> ft.Container:
+        """创建窗口控制按钮
+
+        Args:
+            text: 按钮文本
+            bgcolor: 背景颜色
+            on_click: 点击回调
+
+        Returns:
+            ft.Container: 按钮容器
+        """
+        return ft.Container(
+            content=ft.Text(
+                text,
+                size=14,
+                color=THEME.text_primary,
+                weight=ft.FontWeight.BOLD,
+                font_family="monospace",
+                text_align=ft.TextAlign.CENTER,
+            ),
+            width=32,
+            height=28,
+            alignment=ft.alignment.Alignment(0, 0),
+            bgcolor=bgcolor,
+            border=mc_border(2),
+            on_click=on_click,
+            ink=True,
+        )
+
+    def _minimize(self, e: ft.ControlEvent) -> None:
+        """最小化窗口
+
+        Args:
+            e: 控制事件
+        """
+        self.page.window.minimized = True
+        self.page.window.update()
+
+    def _toggle_maximize(self, e: Any = None) -> None:
+        """切换最大化/还原窗口
+
+        Args:
+            e: 事件对象（可选）
+        """
+        try:
+            if getattr(self.page.window, "minimized", False):
+                self.page.window.minimized = False
+            self.page.window.maximized = not bool(
+                getattr(self.page.window, "maximized", False)
+            )
+            self.page.window.update()
+            self._sync_maximize_button_state()
+        except Exception as ex:
+            logger.error(f"切换窗口最大化失败: {ex}", module="WindowManager")
+
+    def _sync_maximize_button_state(self) -> None:
+        """同步最大化按钮显示状态"""
+        try:
+            if not self._maximize_button or not isinstance(
+                self._maximize_button.content, ft.Text
+            ):
+                return
+
+            is_maximized = getattr(self.page.window, "maximized", False)
+            self._maximize_button.content.value = "❐" if is_maximized else "□"
+            self._maximize_button.tooltip = "还原" if is_maximized else "最大化"
+            self._maximize_button.update()
+        except Exception:
+            pass
+
+    def _close(self, e: ft.ControlEvent) -> None:
+        """关闭窗口
+
+        Args:
+            e: 控制事件
+        """
+        self.shutdown()
+
+    def _on_window_event(self, e) -> None:
+        """处理系统窗口事件
+
+        Args:
+            e: 窗口事件
+        """
+        try:
+            event_type = getattr(e, "type", None)
+            if event_type == ft.WindowEventType.CLOSE or str(event_type).lower().endswith("close"):
+                self.shutdown()
+            elif str(event_type).lower().endswith(("maximize", "unmaximize", "restore", "resize")):
+                self._sync_maximize_button_state()
+        except Exception:
+            pass
+
+    def _on_window_resize(self, e) -> None:
+        """窗口大小变化时的响应（带防抖）
+
+        Args:
+            e: 窗口大小变化事件
+        """
+        try:
+            # 防抖：取消上次延迟更新
+            if self._resize_timer is not None:
+                self._resize_timer.cancel()
+
+            import threading
+            self._resize_timer = threading.Timer(0.15, self._apply_resize)
+            self._resize_timer.daemon = True
+            self._resize_timer.start()
+        except Exception as ex:
+            logger.error(f"窗口大小变化处理失败: {ex}", module="WindowManager")
+
+    def _apply_resize(self) -> None:
+        """实际执行窗口大小调整"""
+        try:
+            width = self.page.window.width
+            height = self.page.window.height
+
+            self.apply_responsive_layout(width, height)
+
+            self.page.update()
+
+            logger.debug(
+                f"窗口大小变化: {width}x{height}",
+                module="WindowManager"
+            )
+        except Exception as ex:
+            logger.error(f"窗口大小变化处理失败: {ex}", module="WindowManager")
+
+    def apply_responsive_layout(self, width: float, height: float) -> None:
+        """应用响应式布局
+
+        Args:
+            width: 窗口宽度
+            height: 窗口高度
+        """
+        compact = width < 980
+        roomy = width >= 1300
+
+        self._adjust_sidebar_width(compact, roomy)
+        self._adjust_spacing_and_padding(compact)
+        self._adjust_top_actions(compact)
+        self._notify_current_view_layout(compact)
+
+    def _adjust_sidebar_width(self, compact: bool, roomy: bool) -> None:
+        """调整侧边栏宽度
+
+        Args:
+            compact: 是否紧凑模式
+            roomy: 是否宽松模式
+        """
+        if hasattr(self.app, '_sidebar'):
+            self.app._sidebar.set_width(170 if compact else 230 if roomy else 205)
+
+    def _adjust_spacing_and_padding(self, compact: bool) -> None:
+        """调整间距和内边距
+
+        Args:
+            compact: 是否紧凑模式
+        """
+        if hasattr(self.app, '_main_row'):
+            self.app._main_row.spacing = 6 if compact else 12
+
+        if hasattr(self.app, '_shell'):
+            shell_pad = 6 if compact else 12
+            shell_margin = 4 if compact else 12
+            self.app._shell.padding = shell_pad
+            self.app._shell.margin = ft.Margin(
+                left=shell_margin, right=shell_margin, top=0, bottom=shell_margin
+            )
+
+        if hasattr(self.app, '_scrollable_content'):
+            self.app._scrollable_content.padding = 6 if compact else 14
+
+        if hasattr(self.app, '_content'):
+            self.app._content.padding = 8 if compact else 18
+
+    def _adjust_top_actions(self, compact: bool) -> None:
+        """调整顶部操作按钮
+
+        Args:
+            compact: 是否紧凑模式
+        """
+        if hasattr(self.app, '_top_actions'):
+            self.app._top_actions.spacing = 6 if compact else 8
+            for btn in self.app._top_actions.controls:
+                if hasattr(btn, 'height'):
+                    btn.height = 34 if compact else 38
+                if hasattr(btn, 'width') and compact:
+                    btn.width = min(getattr(btn, 'width', 120) or 120, 104)
+
+    def _notify_current_view_layout(self, compact: bool) -> None:
+        """通知当前视图布局变化
+
+        Args:
+            compact: 是否紧凑模式
+        """
+        current_view = (
+            self.app.views.get(self.app._sidebar.selected_id)
+            if hasattr(self.app, '_sidebar')
+            else None
+        )
+        if current_view and hasattr(current_view, 'set_compact_mode'):
+            current_view.set_compact_mode(compact)
+
+    def shutdown(self) -> None:
+        """执行应用关闭流程"""
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+
+        self._set_closing_flag()
+        self._stop_monitoring()
+        self._stop_heartbeats()
+        self._shutdown_logger()
+        self._destroy_window_async()
+        self._schedule_force_exit()
+
+    def _set_closing_flag(self) -> None:
+        """设置关闭标记"""
+        from app.ui.utils import set_app_closing
+        set_app_closing(True)
+
+    def _stop_monitoring(self) -> None:
+        """停止性能监控"""
+        try:
+            from app.ui.performance import perf_monitor, resource_monitor
+            perf_monitor.disable()
+            resource_monitor.stop()
+        except Exception:
+            pass
+
+    def _stop_heartbeats(self) -> None:
+        """停止心跳线程"""
+        try:
+            self.app._heartbeat_active = False
+            self.app._hang_detector_active = False
+        except Exception:
+            pass
+
+    def _shutdown_logger(self) -> None:
+        """关闭日志"""
+        try:
+            from core.logger import logger
+            logger.shutdown()
+        except Exception:
+            pass
+
+    def _destroy_window_async(self) -> None:
+        """异步销毁窗口"""
+        try:
+            async def _destroy_window():
+                try:
+                    self.page.window.prevent_close = False
+                    await self.page.window.destroy()
+                except Exception:
+                    try:
+                        await self.page.window.close()
+                    except Exception:
+                        pass
+
+            self.page.run_task(_destroy_window)
+        except Exception:
+            pass
+
+    def _schedule_force_exit(self) -> None:
+        """调度强制退出（兜底）"""
+        try:
+            import os
+            import threading
+
+            def _force_exit() -> None:
+                os._exit(0)
+
+            timer = threading.Timer(2.0, _force_exit)
+            timer.daemon = True
+            timer.start()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _resolve_icon_path() -> Optional[str]:
+        """解析应用图标路径
+
+        Returns:
+            Optional[str]: 图标路径，找不到则返回None
+        """
+        import sys
+        icon_name = "mcsavehelper_icon.ico"
+        candidates = []
+
+        if hasattr(sys, '_MEIPASS'):
+            candidates.append(Path(sys._MEIPASS) / icon_name)
+            candidates.append(Path(sys.executable).parent / icon_name)
+
+        candidates.append(Path(__file__).parent.parent.parent / icon_name)
+
+        for p in candidates:
+            if p.exists():
+                return str(p)
+
+        return None
