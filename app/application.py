@@ -28,6 +28,7 @@ from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.sidebar import Sidebar
 from app.ui.components.buttons import btn_primary, btn_danger
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
+from app.ui.icons import IconSet
 
 # GUI 优化模块
 from app.ui.keyboard_shortcuts import (
@@ -527,14 +528,14 @@ class Application:
         """构建应用主界面"""
         # 标签页定义
         self._tab_defs = [
-            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": "🗺"},
-            {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": "📦"},
-            {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": "🔧"},
-            {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": "🗺"},
-            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖"},
-            {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
-            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "📋"},
-            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙"},
+            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": IconSet.MAP},
+            {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": IconSet.PACKAGE},
+            {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": IconSet.BUILD},
+            {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": IconSet.EXPORT},
+            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": IconSet.BALANCE},
+            {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": IconSet.LINK},
+            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": IconSet.CLIPBOARD},
+            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": IconSet.SETTINGS},
         ]
         # 当前设置的存档上下文（统一入口）
         self._current_save_context: Optional[CurrentSaveContext] = None
@@ -741,7 +742,7 @@ class Application:
         title_content = ft.Row(
             [
                 ft.Container(
-                    content=ft.Text("⛏", size=16, color=THEME.mc_gold),
+                    content=ft.Icon(IconSet.PICKAXE, size=16, color=THEME.mc_gold),
                     width=32,
                     height=28,
                     alignment=ft.alignment.Alignment(0, 0),
@@ -791,40 +792,41 @@ class Application:
 
     def _window_button(
         self,
-        text: str,
+        icon_name: str,
         bgcolor: str,
         on_click: Callable[[ft.ControlEvent], None],
+        tooltip: str = "",
     ) -> ft.Container:
         """创建窗口控制按钮"""
         return ft.Container(
-            content=ft.Text(
-                text,
-                size=14,
+            content=ft.Icon(
+                icon_name,  # First positional parameter is 'icon'
+                size=16,
                 color=THEME.text_primary,
-                weight=ft.FontWeight.BOLD,
-                font_family="monospace",
-                text_align=ft.TextAlign.CENTER,
             ),
-            width=32,
-            height=28,
+            width=44,
+            height=32,
             alignment=ft.alignment.Alignment(0, 0),
             bgcolor=bgcolor,
             border=mc_border(2),
             on_click=on_click,
             ink=True,
+            tooltip=tooltip,
         )
 
     def _build_window_controls(self) -> ft.Row:
         """构建窗口控制按钮组"""
         self._maximize_window_button = self._window_button(
-            "□", THEME.mc_stone, self._toggle_maximize_window)
-        return ft.Row([self._window_button("—",
+            IconSet.MAXIMIZE, THEME.mc_stone, self._toggle_maximize_window, "最大化")
+        return ft.Row([self._window_button(IconSet.MINIMIZE,
                                            THEME.mc_stone,
-                                           self._minimize_window),
+                                           self._minimize_window,
+                                           "最小化"),
                        self._maximize_window_button,
-                       self._window_button("×",
+                       self._window_button(IconSet.CLOSE,
                                            THEME.mc_redstone,
-                                           self._close_window),
+                                           self._close_window,
+                                           "关闭"),
                        ],
                       spacing=6,
                       vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -854,12 +856,16 @@ class Application:
         """同步最大化按钮显示，贴近 Windows 的最大化/还原语义。"""
         try:
             btn = getattr(self, "_maximize_window_button", None)
-            if not btn or not isinstance(btn.content, ft.Text):
+            if not btn:
                 return
-            btn.content.value = "❐" if getattr(
-                self.page.window, "maximized", False) else "□"
-            btn.tooltip = "还原" if getattr(
-                self.page.window, "maximized", False) else "最大化"
+            is_maximized = getattr(self.page.window, "maximized", False)
+            # 重建按钮内容
+            btn.content = ft.Icon(
+                IconSet.RESTORE if is_maximized else IconSet.MAXIMIZE,
+                size=16,
+                color=THEME.text_primary,
+            )
+            btn.tooltip = "还原" if is_maximized else "最大化"
             btn.update()
         except Exception:
             pass
@@ -956,7 +962,7 @@ class Application:
                                 ft.Row(
                                     [
                                         ft.Container(
-                                            content=ft.Text("⛏", size=24, color=THEME.mc_gold),
+                                            content=ft.Icon(IconSet.PICKAXE, size=24, color=THEME.mc_gold),
                                             width=48,
                                             height=48,
                                             alignment=ft.alignment.Alignment(0, 0),

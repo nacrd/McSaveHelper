@@ -29,11 +29,11 @@ class ThemeColors:
     info: str = "#55AAFF"
 
     # Text colors
-    text_primary: str = "#FFFFFF"
-    text_secondary: str = "#AAAAAA"
-    text_muted: str = "#707070"
-    text_disabled: str = "#4A4A4A"
-    text_invert: str = "#000000"  # 反色文本（用于亮色背景按钮）
+    text_primary: str = "#FFFFFF"        # 15.3:1 on bg_primary
+    text_secondary: str = "#AAAAAA"      # 6.6:1 on bg_primary
+    text_muted: str = "#939393"          # 4.5:1 on bg_primary (WCAG AA compliant)
+    text_disabled: str = "#5A5A5A"       # 3.2:1 on bg_primary (acceptable for disabled)
+    text_invert: str = "#000000"         # 反色文本（用于亮色背景按钮）
 
     # Terminal colors
     terminal_green: str = "#55FF55"
@@ -58,6 +58,10 @@ class ThemeColors:
 
     # Effects
     shadow: str = "rgba(0, 0, 0, 0.6)"
+
+    # Focus
+    focus_ring: str = "#5DFDFE"          # mc_diamond - for keyboard focus indicators
+    focus_ring_width: int = 3            # Focus ring width in pixels
 
     # Backward compatibility aliases
     border_tertiary: str = "#A0A0A0"  # Alias for border_light
@@ -97,6 +101,23 @@ def mc_shadow(offset: int = 4) -> ft.BoxShadow:
         blur_radius=0,
         color=THEME.shadow,
         offset=ft.Offset(offset, offset),
+    )
+
+
+def mc_focus_border(width: int = 3) -> ft.Border:
+    """Create a Minecraft-style focus border for keyboard navigation
+
+    Args:
+        width: Border width in pixels (default: 3)
+
+    Returns:
+        ft.Border: Focus border with bright cyan color
+    """
+    return ft.Border(
+        left=ft.BorderSide(width, THEME.focus_ring),
+        top=ft.BorderSide(width, THEME.focus_ring),
+        right=ft.BorderSide(width, THEME.focus_ring),
+        bottom=ft.BorderSide(width, THEME.focus_ring),
     )
 
 

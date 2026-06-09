@@ -4,7 +4,7 @@ from typing import Optional, Callable, Any
 
 import flet as ft
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, mc_focus_border
 
 
 class McButton(ft.Container):
@@ -31,6 +31,7 @@ class McButton(ft.Container):
         self._text_color = text_color or THEME.text_primary
         self._disabled = False
         self._is_pressed = False
+        self._is_focused = False
 
         super().__init__(
             content=self._build_content(),

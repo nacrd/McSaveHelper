@@ -5,6 +5,7 @@ from typing import Callable, List, Dict, Any, Optional
 import flet as ft
 
 from app.ui.theme import THEME, mc_border
+from app.ui.icons import IconSet
 from core.version import APP_VERSION
 
 
@@ -27,7 +28,7 @@ class Sidebar(ft.Container):
         self._on_tab_select: Callable[[str], None] = on_tab_select
         self._on_tabs_reorder: Optional[Callable[[
             List[Dict[str, Any]]], None]] = on_tabs_reorder
-        # 保留 on_import_save 作为兼容回调；新 UI 语义为“设置当前存档”
+        # 保留 on_import_save 作为兼容回调；新 UI 语义为"设置当前存档"
         self._on_import_save: Optional[Callable[[], None]] = on_import_save
         self._on_set_current_save: Optional[Callable[[
         ], None]] = on_set_current_save
@@ -48,7 +49,7 @@ class Sidebar(ft.Container):
         )
         self._current_save_name = ft.Text(
             "未设置当前存档",
-            size=10,
+            size=11,
             color=THEME.text_muted,
             font_family="monospace",
             no_wrap=True,
@@ -63,16 +64,23 @@ class Sidebar(ft.Container):
             ft.Container(
                 content=ft.Column(
                     [
-                        ft.Text(
-                            "⛏ MCSaveHelper",
-                            size=16,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.mc_gold,
-                            font_family="monospace",
+                        ft.Row(
+                            [
+                                ft.Icon(IconSet.PICKAXE, size=16, color=THEME.mc_gold),
+                                ft.Text(
+                                    "MCSaveHelper",
+                                    size=16,
+                                    weight=ft.FontWeight.BOLD,
+                                    color=THEME.mc_gold,
+                                    font_family="monospace",
+                                ),
+                            ],
+                            spacing=6,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
                         ft.Text(
                             "Minecraft Save Toolkit",
-                            size=9,
+                            size=11,
                             color=THEME.text_muted,
                             font_family="monospace",
                         ),
@@ -81,7 +89,7 @@ class Sidebar(ft.Container):
                             content=ft.Container(
                                 content=ft.Row(
                                     [
-                                        ft.Text("💾", size=14),
+                                        ft.Icon(IconSet.SAVE, size=16, color=THEME.text_primary),
                                         ft.Text(
                                             "设置当前存档",
                                             size=11,
@@ -113,7 +121,7 @@ class Sidebar(ft.Container):
                                 [
                                     ft.Text(
                                         "最近存档",
-                                        size=10,
+                                        size=11,
                                         weight=ft.FontWeight.BOLD,
                                         color=THEME.text_secondary,
                                         font_family="monospace",
@@ -154,7 +162,7 @@ class Sidebar(ft.Container):
             ft.Container(
                 content=ft.Text(
                     f"{APP_VERSION}  ▣ stone edition",
-                    size=9,
+                    size=11,
                     color=THEME.text_muted,
                     font_family="monospace",
                 ),
@@ -187,15 +195,14 @@ class Sidebar(ft.Container):
     def _build_tab_button(self, tab: Dict[str, Any]) -> ft.Container:
         """构建单个标签按钮 with hover effects"""
         selected = tab["id"] == self._selected_id
-        icon = tab.get("icon", "▣")
+        icon_name = tab.get("icon", IconSet.GRID)  # Default icon
         label_text = tab.get("label", tab["id"])
 
         icon_slot = ft.Container(
-            content=ft.Text(
-                icon,
-                size=16,
+            content=ft.Icon(
+                icon_name,
+                size=20,
                 color=THEME.text_primary,
-                text_align=ft.TextAlign.CENTER,
             ),
             width=36,
             height=36,
@@ -206,7 +213,7 @@ class Sidebar(ft.Container):
 
         text_ctrl = ft.Text(
             label_text,
-            size=12,
+            size=13,
             color=THEME.text_primary if selected else THEME.text_secondary,
             weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500,
             font_family="monospace",
@@ -313,7 +320,7 @@ class Sidebar(ft.Container):
             self._recent_save_col.controls.append(
                 ft.Text(
                     "暂无最近存档",
-                    size=9,
+                    size=11,
                     color=THEME.text_muted,
                     font_family="monospace",
                 )
@@ -335,10 +342,10 @@ class Sidebar(ft.Container):
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Text("▣", size=9, color=THEME.mc_grass),
+                    ft.Icon(IconSet.FOLDER, size=12, color=THEME.mc_grass),
                     ft.Text(
                         save_name,
-                        size=9,
+                        size=11,
                         color=THEME.text_secondary,
                         font_family="monospace",
                         no_wrap=True,
