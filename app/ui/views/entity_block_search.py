@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 import flet as ft
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, current_save_field
 from app.ui.components.cards import placeholder
@@ -14,6 +15,8 @@ from app.services.entity_block_search_service import (
     EntityBlockSearchService,
     SearchResult,
 )
+from app.services.entity_block_search.constants import get_preset_options
+from app.services.entity_block_search.models import SearchCondition
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -47,7 +50,6 @@ class EntityBlockSearchView(ft.Column):
 
         self._init_controls()
         self._build_ui()
-        self._sync_target_source_ui(update=False)
 
     def _init_controls(self) -> None:
         """初始化所有控件"""
@@ -67,37 +69,18 @@ class EntityBlockSearchView(ft.Column):
             border_color=THEME.border_subtle,
             color=THEME.text_primary,
             width=250,
+            on_change=self._on_search_type_change,
+            on_select=self._on_search_type_change,
         )
-        self._search_type_dropdown.on_change = self._on_search_type_change
 
-        self._target_source_dropdown = ft.Dropdown(
-            label="目标来源",
-            options=[
-                ft.dropdown.Option("preset", "使用预设"),
-                ft.dropdown.Option("custom", "输入 ID"),
-            ],
-            value="preset",
-            bgcolor=THEME.bg_secondary,
-            border_color=THEME.border_subtle,
-            color=THEME.text_primary,
-            width=250,
-        )
-        self._target_source_dropdown.on_change = self._on_target_source_change
-
-        self._target_dropdown = ft.Dropdown(
-            label="实体类型",
-            options=self._get_entity_options(),
-            bgcolor=THEME.bg_secondary,
-            border_color=THEME.border_subtle,
-            color=THEME.text_primary,
+        self._target_field = text_field(
+            label="目标 ID",
+            hint_text="例如: villager、*shulker*、zombie,cow",
             width=250,
         )
 
-        self._custom_target_field = text_field(
-            label="自定义目标 ID",
-            hint_text="例如: minecraft:villager 或 villager",
-            width=250,
-        )
+        self._preset_chips = ft.Row(wrap=True, spacing=4)
+        self._update_presets()
 
         # 维度选择
         self._dim_overworld = checkbox("主世界", True)
@@ -132,7 +115,7 @@ class EntityBlockSearchView(ft.Column):
         header = page_header(
             "实体/方块搜索",
             ft.Text("按维度搜索实体、方块和容器，并查看命中详情", size=12, color=THEME.text_muted),
-            icon="🔍",
+            icon=IconSet.SEARCH,
         )
 
         # 三栏布局
@@ -157,22 +140,20 @@ class EntityBlockSearchView(ft.Column):
 
     def _build_left_panel(self) -> ft.Container:
         """构建左侧搜索条件面板"""
-        # 搜索条件
         criteria_section = ft.Column([
             ft.Text("🔍 搜索条件", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             self._world_path_field,
             self._search_type_dropdown,
-            self._target_source_dropdown,
-            self._target_dropdown,
-            self._custom_target_field,
+            self._target_field,
+            ft.Text("常用预设（点击填入）", size=10, color=THEME.text_muted),
+            self._preset_chips,
             ft.Text(
-                "提示：使用预设时会忽略自定义 ID",
+                "支持通配符 * 和逗号分隔多目标",
                 size=10,
                 color=THEME.text_muted,
             ),
         ], spacing=8)
 
-        # 维度选择
         dimension_section = ft.Column([
             ft.Divider(height=1, color=THEME.border_light),
             ft.Text("🌍 维度", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
@@ -181,7 +162,6 @@ class EntityBlockSearchView(ft.Column):
             self._dim_end,
         ], spacing=6)
 
-        # 搜索按钮
         action_section = ft.Column([
             ft.Divider(height=1, color=THEME.border_light),
             ft.Container(content=self._search_btn, expand=True),
@@ -207,14 +187,12 @@ class EntityBlockSearchView(ft.Column):
 
     def _build_center_panel(self) -> ft.Container:
         """构建中央搜索结果面板"""
-        # 顶部工具栏
         toolbar = ft.Row([
             ft.Text("搜索结果", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             ft.Container(expand=True),
             self._status_progress,
         ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
-        # 结果容器
         results_container = ft.Container(
             content=self._results_list,
             bgcolor=THEME.bg_secondary,
@@ -223,10 +201,9 @@ class EntityBlockSearchView(ft.Column):
             expand=True,
         )
 
-        # 初始占位符
         self._results_list.controls.append(
             placeholder(
-                icon="🔍",
+                icon=IconSet.SEARCH,
                 title="尚未搜索",
                 subtitle="设置搜索条件后点击「开始搜索」",
                 height=200,
@@ -252,22 +229,25 @@ class EntityBlockSearchView(ft.Column):
 
     def _build_right_panel(self) -> ft.Container:
         """构建右侧统计和帮助面板"""
-        # 搜索状态
         status_section = ft.Column([
             ft.Text("📊 搜索状态", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             self._status_title_text,
             self._status_summary_text,
         ], spacing=6)
 
-        # 帮助信息
         help_section = ft.Column([
             ft.Divider(height=1, color=THEME.border_light),
             ft.Text("ℹ️ 使用帮助", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             ft.Text(
                 "1. 选择搜索范围（实体/方块/容器）\n"
-                "2. 选择目标来源（预设/自定义）\n"
+                "2. 输入目标 ID\n"
                 "3. 选择要搜索的维度\n"
-                "4. 点击开始搜索",
+                "4. 点击开始搜索\n\n"
+                "目标 ID 示例：\n"
+                "• villager — 匹配村民\n"
+                "• *shulker* — 匹配所有潜影盒\n"
+                "• zombie,cow — 同时搜索多个目标\n"
+                "• * — 搜索所有",
                 size=11,
                 color=THEME.text_muted,
             ),
@@ -288,7 +268,7 @@ class EntityBlockSearchView(ft.Column):
             padding=12,
         )
 
-    # ==================== 以下是原有的方法（保留功能逻辑）====================
+    # ==================== 功能方法 ====================
 
     def on_save_selected(self, path: str) -> None:
         """当存档被选择时调用"""
@@ -296,81 +276,35 @@ class EntityBlockSearchView(ft.Column):
         if hasattr(self._world_path_field, 'update'):
             self._world_path_field.update()
 
-    def _get_entity_options(self) -> List[ft.dropdown.Option]:
-        """获取实体预设选项"""
-        entities = [
-            ("minecraft:villager", "村民"),
-            ("minecraft:zombie", "僵尸"),
-            ("minecraft:skeleton", "骷髅"),
-            ("minecraft:creeper", "苦力怕"),
-            ("minecraft:spider", "蜘蛛"),
-            ("minecraft:enderman", "末影人"),
-            ("minecraft:pig", "猪"),
-            ("minecraft:cow", "牛"),
-            ("minecraft:sheep", "羊"),
-            ("minecraft:chicken", "鸡"),
-        ]
-        return [ft.dropdown.Option(id, f"{name} ({id})")
-                for id, name in entities]
-
-    def _get_block_options(self) -> List[ft.dropdown.Option]:
-        """获取方块预设选项"""
-        blocks = [
-            ("minecraft:diamond_ore", "钻石矿石"),
-            ("minecraft:iron_ore", "铁矿石"),
-            ("minecraft:gold_ore", "金矿石"),
-            ("minecraft:coal_ore", "煤矿石"),
-            ("minecraft:emerald_ore", "绿宝石矿石"),
-            ("minecraft:ancient_debris", "远古残骸"),
-        ]
-        return [ft.dropdown.Option(id, f"{name} ({id})")
-                for id, name in blocks]
-
-    def _get_container_options(self) -> List[ft.dropdown.Option]:
-        """获取容器预设选项"""
-        containers = [
-            ("minecraft:chest", "箱子"),
-            ("minecraft:barrel", "木桶"),
-            ("minecraft:shulker_box", "潜影盒"),
-            ("minecraft:hopper", "漏斗"),
-            ("minecraft:furnace", "熔炉"),
-        ]
-        return [
-            ft.dropdown.Option(
-                id,
-                f"{name} ({id})") for id,
-            name in containers]
-
     def _on_search_type_change(self, e: Any) -> None:
-        """搜索类型改变时更新预设选项"""
-        search_type = self._search_type_dropdown.value
-        if search_type == "entity":
-            self._target_dropdown.label = "实体类型"
-            self._target_dropdown.options = self._get_entity_options()
-        elif search_type == "block":
-            self._target_dropdown.label = "方块类型"
-            self._target_dropdown.options = self._get_block_options()
-        elif search_type == "container":
-            self._target_dropdown.label = "容器类型"
-            self._target_dropdown.options = self._get_container_options()
+        """搜索范围改变时更新预设标签"""
+        self._update_presets()
+        self._preset_chips.update()
 
-        if self._target_dropdown.options:
-            self._target_dropdown.value = self._target_dropdown.options[0].key
-        self._target_dropdown.update()
+    def _update_presets(self) -> None:
+        """根据当前搜索范围刷新预设快捷标签"""
+        search_type = self._search_type_dropdown.value or "entity"
+        presets = get_preset_options(search_type)
+        self._preset_chips.controls.clear()
+        for preset_id, label in presets:
+            chip = ft.Container(
+                content=ft.Text(
+                    label, size=11, color=THEME.text_primary,
+                    no_wrap=True,
+                ),
+                bgcolor=THEME.bg_secondary,
+                border=ft.border.all(1, THEME.border_subtle),
+                border_radius=12,
+                padding=ft.Padding(left=8, right=8, top=3, bottom=3),
+                on_click=lambda e, pid=preset_id: self._fill_target(pid),
+                tooltip=preset_id,
+            )
+            self._preset_chips.controls.append(chip)
 
-    def _on_target_source_change(self, e: Any) -> None:
-        """目标来源改变时切换显示"""
-        self._sync_target_source_ui()
-
-    def _sync_target_source_ui(self, update: bool = True) -> None:
-        """同步目标来源 UI 显示"""
-        is_preset = self._target_source_dropdown.value == "preset"
-        self._target_dropdown.visible = is_preset
-        self._custom_target_field.visible = not is_preset
-
-        if update:
-            self._target_dropdown.update()
-            self._custom_target_field.update()
+    def _fill_target(self, preset_id: str) -> None:
+        """点击预设标签后填入目标 ID"""
+        self._target_field.value = preset_id
+        self._target_field.update()
 
     def _start_search(self, e: Any = None) -> None:
         """开始搜索"""
@@ -378,33 +312,32 @@ class EntityBlockSearchView(ft.Column):
             self.app.warn_dialog("搜索中", "当前正在搜索，请等待完成")
             return
 
-        # 验证输入
         world_path = self._world_path_field.value
         if not world_path:
             self.app.warn_dialog("提示", "请先设置当前存档")
             return
 
-        # 获取目标
-        if self._target_source_dropdown.value == "preset":
-            target = self._target_dropdown.value
-        else:
-            target = self._custom_target_field.value.strip()
-
+        target = (self._target_field.value or "").strip()
         if not target:
-            self.app.warn_dialog("提示", "请选择或输入目标 ID")
+            self.app.warn_dialog("提示", "请输入目标 ID")
             return
 
-        # 获取维度
-        dimensions = []
-        if self._dim_overworld.value:
-            dimensions.append("overworld")
-        if self._dim_nether.value:
-            dimensions.append("nether")
-        if self._dim_end.value:
-            dimensions.append("end")
+        dim_checks = {
+            self._dim_overworld: "overworld",
+            self._dim_nether: "nether",
+            self._dim_end: "end",
+        }
+        dimensions = [dim for checkbox, dim in dim_checks.items() if checkbox.value]
 
-        if not dimensions:
-            self.app.warn_dialog("提示", "请至少选择一个维度")
+        condition = SearchCondition(
+            search_type=self._search_type_dropdown.value,
+            target=target,
+            dimensions=dimensions,
+            world_path=Path(world_path),
+        )
+        errors = condition.validate()
+        if errors:
+            self.app.warn_dialog("提示", errors[0])
             return
 
         # 开始搜索
@@ -420,23 +353,20 @@ class EntityBlockSearchView(ft.Column):
 
         def _search():
             try:
-                search_type = self._search_type_dropdown.value
                 results = self.service.search(
-                    world_path=Path(world_path),
-                    search_type=search_type,
-                    target_id=target,
-                    dimensions=dimensions,
+                    world_path=condition.world_path,
+                    search_type=condition.search_type,
+                    target=condition.target,
+                    dimensions=condition.dimensions,
                 )
 
-                self._search_results = results
-                self._last_search_meta = {
-                    "type": search_type,
-                    "target": target,
-                    "dimensions": dimensions,
-                }
-
-                # 更新 UI
                 def _update_ui():
+                    self._search_results = results
+                    self._last_search_meta = {
+                        "type": condition.search_type,
+                        "target": condition.target,
+                        "dimensions": condition.dimensions,
+                    }
                     self._render_results()
                     self._status_title_text.value = "✅ 搜索完成"
                     self._status_title_text.color = THEME.mc_grass
@@ -449,10 +379,15 @@ class EntityBlockSearchView(ft.Column):
                     self._status_progress.update()
                     self._search_btn.update()
 
-                if hasattr(self.app.page, 'run_task'):
-                    self.app.page.run_task(_update_ui)
-                else:
-                    _update_ui()
+                try:
+                    if hasattr(self.app.page, 'run_task'):
+                        self.app.page.run_task(_update_ui)
+                    else:
+                        _update_ui()
+                except Exception:
+                    self._searching = False
+                    self._search_btn.disabled = False
+                    self._status_progress.visible = False
 
             except Exception as ex:
                 error_msg = str(ex)
@@ -485,7 +420,7 @@ class EntityBlockSearchView(ft.Column):
         if not self._search_results:
             self._results_list.controls.append(
                 placeholder(
-                    icon="🔍",
+                    icon=IconSet.SEARCH,
                     title="未找到结果",
                     subtitle="尝试修改搜索条件",
                     height=200,

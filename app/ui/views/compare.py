@@ -11,6 +11,7 @@ from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui
 
 if TYPE_CHECKING:
@@ -35,7 +36,7 @@ class CompareView(ft.Column):
                     "比较两个世界的 level.dat、玩家数据和区域文件差异",
                     size=12,
                     color=THEME.text_muted),
-                icon="⚖",
+                icon=IconSet.BALANCE,
             ))
 
         self._left_field = current_save_field(
@@ -131,7 +132,7 @@ class CompareView(ft.Column):
             ))
         if not rows:
             rows.append(placeholder(
-                icon="✓",
+                icon=IconSet.SUCCESS,
                 title="未发现差异",
                 subtitle="该分组中的两份存档数据一致",
                 height=110,

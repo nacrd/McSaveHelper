@@ -60,6 +60,10 @@ class IconSet:
     BLOCK = Icons.VIEW_IN_AR_OUTLINED
     ENTITY = Icons.PETS_OUTLINED
 
+    # Time
+    CLOCK = Icons.ACCESS_TIME_OUTLINED
+    HISTORY = Icons.HISTORY
+
 
 def icon(
     name: str,

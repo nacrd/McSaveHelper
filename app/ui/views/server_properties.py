@@ -13,6 +13,7 @@ from app.services.server_properties_service import (
 )
 from app.ui.components.buttons import btn_ghost, btn_success
 from app.ui.components.cards import card, section_title
+from app.ui.icons import IconSet
 from app.ui.components.fields import text_field
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
@@ -40,7 +41,7 @@ class ServerPropertiesView(ft.Column):
                     "读取、编辑并保存 Minecraft 服务器配置文件",
                     size=12,
                     color=THEME.text_muted),
-                icon="📋",
+                icon=IconSet.CLIPBOARD,
             ))
         self._path_field = text_field(
             label="服务器根目录或 server.properties",

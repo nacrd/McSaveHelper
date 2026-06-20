@@ -169,4 +169,7 @@ class NbtTreeEditor:
 
     def _close(self, dialog: ft.AlertDialog) -> None:
         dialog.open = False
+        # 从 overlay 中移除已关闭的对话框，避免内存泄漏
+        if dialog in self.owner.page.overlay:
+            self.owner.page.overlay.remove(dialog)
         self.owner.page.update()

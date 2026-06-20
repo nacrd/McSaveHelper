@@ -4,6 +4,7 @@ import flet as ft
 from typing import TYPE_CHECKING, Dict, Optional
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
@@ -39,7 +40,7 @@ class MappingsView(ft.Column):
                     "管理 UUID 映射和物品映射，用于存档转换和存档浏览器。",
                     size=12,
                     color=THEME.text_muted),
-                icon="🔗",
+                icon=IconSet.LINK,
             ))
 
         self._build_uuid_section()
@@ -155,7 +156,7 @@ class MappingsView(ft.Column):
         mappings = self._item_service.get_custom_item_mappings()
         if not mappings:
             self._item_table_container.content = placeholder(
-                icon="📦",
+                icon=IconSet.PACKAGE,
                 title="暂无自定义物品映射",
                 subtitle="可通过导入语言文件、导入 JSON 或手动添加映射",
                 height=120,
@@ -195,7 +196,7 @@ class MappingsView(ft.Column):
 
         if not rows:
             self._item_table_container.content = placeholder(
-                icon="🔍",
+                icon=IconSet.SEARCH,
                 title="没有匹配的映射",
                 subtitle="尝试更换物品 ID 或显示名称关键词",
                 height=110,

@@ -13,6 +13,7 @@ from anvil import Region
 from core.logger import logger
 from core.scanner import scan_all_regions
 from core.constants import MinecraftConstants
+from core.utils import find_player_data_dirs
 
 from .models import DetectReport, WorldInfo, IssueLevel, RepairIssue
 from .validation_utils import (
@@ -98,10 +99,11 @@ class WorldDetector:
         # 维度和区域文件
         self._detect_dimensions(world_path, info)
 
-        # 玩家数量
-        playerdata_dir = world_path / "playerdata"
-        if playerdata_dir.exists():
-            info.player_count = len(list(playerdata_dir.glob("*.dat")))
+        # 玩家数量（兼容 26.1 新旧路径）
+        info.player_count = 0
+        for playerdata_dir in find_player_data_dirs(world_path):
+            if playerdata_dir.exists():
+                info.player_count += len(list(playerdata_dir.glob("*.dat")))
 
         log(
             f"世界: {info.world_name}, 版本: {info.version_name}, "
@@ -139,7 +141,7 @@ class WorldDetector:
             log(f"无法读取 level.dat 基本信息: {e}", "WARNING")
 
     def _detect_dimensions(self, world_path: Path, info: WorldInfo) -> None:
-        """检测维度和区域文件"""
+        """检测维度和区域文件（兼容 Minecraft 26.1 新旧路径）"""
         region_files = scan_all_regions(world_path)
         info.region_count = len(region_files)
         dimensions: Set[str] = set()
@@ -153,10 +155,13 @@ class WorldDetector:
                 dimensions.add("minecraft:the_nether")
             elif len(parts) >= 3 and parts[0] == "DIM1":
                 dimensions.add("minecraft:the_end")
+            elif len(parts) >= 5 and parts[0] == "dimensions" and parts[1] == "minecraft":
+                # 26.1 新版路径: dimensions/minecraft/<dim>/region/...
+                dimensions.add(f"minecraft:{parts[2]}")
             elif "dimensions" in parts:
                 idx = parts.index("dimensions")
                 if idx + 2 < len(parts):
-                    dimensions.add(f"{parts[idx]}:{parts[idx + 1]}")
+                    dimensions.add(f"{parts[idx + 1]}:{parts[idx + 2]}")
 
         info.dimensions = sorted(dimensions)
 
@@ -257,13 +262,16 @@ class WorldDetector:
         report: DetectReport,
         log: Callable[[str, str], None],
     ) -> None:
-        """检测玩家数据"""
-        playerdata_dir = world_path / "playerdata"
-        if not playerdata_dir.exists():
-            log("playerdata 目录不存在", "INFO")
+        """检测玩家数据（兼容 Minecraft 26.1 新旧路径）"""
+        player_files: List[Path] = []
+        for playerdata_dir in find_player_data_dirs(world_path):
+            if playerdata_dir.exists():
+                player_files.extend(list(playerdata_dir.glob("*.dat")))
+
+        if not player_files:
+            log("玩家数据目录不存在", "INFO")
             return
 
-        player_files = list(playerdata_dir.glob("*.dat"))
         report.players_checked = len(player_files)
         log(f"找到 {len(player_files)} 个玩家数据文件", "INFO")
 

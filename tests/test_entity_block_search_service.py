@@ -1,4 +1,11 @@
-from app.services.entity_block_search_service import EntityBlockSearchService
+"""Tests for entity/block/container search service."""
+
+from pathlib import Path
+
+from app.services.entity_block_search.container_searcher import ContainerSearcher, extract_container_info
+from app.services.entity_block_search.entity_searcher import EntitySearcher
+from app.services.entity_block_search.models import SearchCondition, SearchResult, SearchSummary
+from app.services.entity_block_search.utils import get_dimension_region_files, matches_target
 
 
 class MockChunk:
@@ -6,8 +13,93 @@ class MockChunk:
         self.data = data
 
 
-def test_search_containers_in_chunk_extracts_items():
-    service = EntityBlockSearchService()
+# ==================== matches_target 测试 ====================
+
+def test_matches_target_wildcard():
+    assert matches_target("minecraft:villager", "*")
+    assert matches_target("anything", "*")
+
+
+def test_matches_target_exact():
+    assert matches_target("minecraft:villager", "minecraft:villager")
+    assert not matches_target("minecraft:zombie", "minecraft:villager")
+
+
+def test_matches_target_suffix():
+    assert matches_target("minecraft:villager", "villager")
+    assert not matches_target("minecraft:zombie", "villager")
+
+
+def test_matches_target_comma_separated():
+    assert matches_target("minecraft:villager", "villager,cow")
+    assert matches_target("minecraft:cow", "villager,cow")
+    assert not matches_target("minecraft:pig", "villager,cow")
+
+
+def test_matches_target_glob():
+    assert matches_target("minecraft:white_shulker_box", "*shulker*")
+    assert matches_target("minecraft:chest", "*chest*")
+    assert not matches_target("minecraft:chest", "*shulker*")
+    assert matches_target("minecraft:diamond_ore", "minecraft:*_ore")
+
+
+# ==================== 实体搜索测试 ====================
+
+def test_entity_search_chunk_modern_key():
+    results = []
+    summary = SearchSummary()
+    searcher = EntitySearcher(results, summary)
+    chunk = MockChunk({
+        "entities": [{"id": "minecraft:zombie", "Pos": [1.5, 64.0, -2.5]}],
+    })
+    searcher.search_chunk(chunk, "zombie", "overworld")
+    assert len(results) == 1
+    assert results[0].name == "minecraft:zombie"
+    assert results[0].position == (1, 64, -2)
+    assert results[0].x == 1
+    assert results[0].y == 64
+    assert results[0].z == -2
+    assert results[0].target_id == "minecraft:zombie"
+
+
+def test_entity_search_chunk_legacy_key():
+    results = []
+    summary = SearchSummary()
+    searcher = EntitySearcher(results, summary)
+    chunk = MockChunk({
+        "Level": {
+            "Entities": [{"id": "minecraft:pig", "Pos": [3.0, 65.0, 4.0]}],
+        },
+    })
+    searcher.search_chunk(chunk, "minecraft:pig", "overworld")
+    assert len(results) == 1
+    assert results[0].name == "minecraft:pig"
+    assert results[0].position == (3, 65, 4)
+
+
+def test_entity_search_multi_target():
+    results = []
+    summary = SearchSummary()
+    searcher = EntitySearcher(results, summary)
+    chunk = MockChunk({
+        "entities": [
+            {"id": "minecraft:zombie", "Pos": [1.0, 64.0, 2.0]},
+            {"id": "minecraft:cow", "Pos": [3.0, 64.0, 4.0]},
+            {"id": "minecraft:pig", "Pos": [5.0, 64.0, 6.0]},
+        ],
+    })
+    searcher.search_chunk(chunk, "zombie,cow", "overworld")
+    assert len(results) == 2
+    assert results[0].name == "minecraft:zombie"
+    assert results[1].name == "minecraft:cow"
+
+
+# ==================== 容器搜索测试 ====================
+
+def test_container_search_chunk_extracts_items():
+    results = []
+    summary = SearchSummary()
+    searcher = ContainerSearcher(results, summary)
     chunk = MockChunk({
         "block_entities": [
             {
@@ -29,11 +121,9 @@ def test_search_containers_in_chunk_extracts_items():
             },
         ],
     })
-
-    service._search_containers_in_chunk(chunk, "minecraft:chest", "overworld")
-
-    assert len(service.results) == 1
-    result = service.results[0]
+    searcher.search_chunk(chunk, "minecraft:chest", "overworld")
+    assert len(results) == 1
+    result = results[0]
     assert result.result_type == "container"
     assert result.name == "minecraft:chest"
     assert result.position == (10, 64, -3)
@@ -42,8 +132,10 @@ def test_search_containers_in_chunk_extracts_items():
     assert "minecraft:apple x2" in result.extra_info["items"]
 
 
-def test_search_containers_supports_all_target_and_legacy_keys():
-    service = EntityBlockSearchService()
+def test_container_search_wildcard_and_legacy_key():
+    results = []
+    summary = SearchSummary()
+    searcher = ContainerSearcher(results, summary)
     chunk = MockChunk({
         "Level": {
             "TileEntities": [
@@ -52,18 +144,32 @@ def test_search_containers_supports_all_target_and_legacy_keys():
             ],
         },
     })
-
-    service._search_containers_in_chunk(chunk, "*", "overworld")
-
-    assert [result.name for result in service.results] == [
-        "minecraft:barrel",
-        "minecraft:hopper",
-    ]
-    assert service.results[0].extra_info["items"] == "空"
+    searcher.search_chunk(chunk, "*", "overworld")
+    assert [r.name for r in results] == ["minecraft:barrel", "minecraft:hopper"]
+    assert results[0].extra_info["items"] == "空"
 
 
-def test_get_container_info_at_returns_matching_block_entity_items():
-    service = EntityBlockSearchService()
+def test_container_search_glob_pattern():
+    results = []
+    summary = SearchSummary()
+    searcher = ContainerSearcher(results, summary)
+    chunk = MockChunk({
+        "block_entities": [
+            {"id": "minecraft:white_shulker_box", "x": 0, "y": 0, "z": 0, "Items": []},
+            {"id": "minecraft:chest", "x": 1, "y": 0, "z": 0, "Items": []},
+            {"id": "minecraft:orange_shulker_box", "x": 2, "y": 0, "z": 0, "Items": []},
+        ],
+    })
+    searcher.search_chunk(chunk, "*shulker*", "overworld")
+    assert len(results) == 2
+    assert results[0].name == "minecraft:white_shulker_box"
+    assert results[1].name == "minecraft:orange_shulker_box"
+
+
+def test_container_info_at_returns_matching_items():
+    results = []
+    summary = SearchSummary()
+    searcher = ContainerSearcher(results, summary)
     chunk = MockChunk({
         "BlockEntities": [
             {
@@ -75,38 +181,15 @@ def test_get_container_info_at_returns_matching_block_entity_items():
             }
         ],
     })
-
-    info = service._get_container_info_at(chunk, 7, 70, 8)
-
+    info = searcher.get_container_info_at(chunk, 7, 70, 8)
     assert info["item_count"] == 1
     assert info["items"] == "minecraft:iron_ingot x16"
-    assert service._get_container_info_at(chunk, 0, 70, 8) == {}
+    assert searcher.get_container_info_at(chunk, 0, 70, 8) == {}
 
 
-def test_search_entities_reads_modern_and_legacy_keys():
-    service = EntityBlockSearchService()
-    modern_chunk = MockChunk({
-        "entities": [{"id": "minecraft:zombie", "Pos": [1.5, 64.0, -2.5]}],
-    })
-    legacy_chunk = MockChunk({
-        "Level": {
-            "Entities": [{"id": "minecraft:pig", "Pos": [3.0, 65.0, 4.0]}],
-        },
-    })
+# ==================== 维度路径测试 ====================
 
-    service._search_entities_in_chunk(modern_chunk, "zombie", "overworld")
-    service._search_entities_in_chunk(
-        legacy_chunk, "minecraft:pig", "overworld")
-
-    assert [result.name for result in service.results] == [
-        "minecraft:zombie",
-        "minecraft:pig",
-    ]
-    assert service.results[0].position == (1, 64, -2)
-    assert service.results[1].position == (3, 65, 4)
-
-
-def test_dimension_region_files_do_not_scan_other_dimensions(tmp_path):
+def test_dimension_region_files_do_not_cross_dimensions(tmp_path):
     world = tmp_path / "world"
     overworld_region = world / "region"
     nether_region = world / "DIM-1" / "region"
@@ -118,27 +201,86 @@ def test_dimension_region_files_do_not_scan_other_dimensions(tmp_path):
     (nether_region / "r.1.0.mca").write_bytes(b"")
     (end_region / "r.2.0.mca").write_bytes(b"")
 
-    service = EntityBlockSearchService()
-
-    assert service._get_dimension_region_files(world, "overworld") == [
+    assert get_dimension_region_files(world, "overworld") == [
         overworld_region / "r.0.0.mca"]
-    assert service._get_dimension_region_files(world, "nether") == [
+    assert get_dimension_region_files(world, "nether") == [
         nether_region / "r.1.0.mca"]
-    assert service._get_dimension_region_files(
-        world, "end") == [end_region / "r.2.0.mca"]
+    assert get_dimension_region_files(world, "end") == [
+        end_region / "r.2.0.mca"]
 
 
-def test_result_limit_helper_stops_at_max_results():
-    service = EntityBlockSearchService()
-    service.MAX_RESULTS = 1
-    chunk = MockChunk({
-        "block_entities": [
-            {"id": "minecraft:barrel", "x": 1, "y": 2, "z": 3, "Items": []},
-            {"id": "minecraft:hopper", "x": 4, "y": 5, "z": 6, "Items": []},
-        ],
-    })
+# ==================== SearchCondition 测试 ====================
 
-    service._search_containers_in_chunk(chunk, "*", "overworld")
+def test_search_condition_validate_valid(tmp_path):
+    (tmp_path / "region").mkdir()
+    condition = SearchCondition(
+        search_type="entity",
+        target="zombie",
+        dimensions=["overworld", "nether"],
+        world_path=tmp_path,
+    )
+    errors = condition.validate()
+    assert errors == []
+    assert condition.dimensions == ["overworld", "nether"]
 
-    assert len(service.results) == 1
-    assert service._is_result_limit_reached() is True
+
+def test_search_condition_validate_invalid_type(tmp_path):
+    (tmp_path / "region").mkdir()
+    condition = SearchCondition(
+        search_type="invalid",
+        target="zombie",
+        dimensions=["overworld"],
+        world_path=tmp_path,
+    )
+    errors = condition.validate()
+    assert any("搜索类型" in e for e in errors)
+
+
+def test_search_condition_validate_no_dimensions(tmp_path):
+    (tmp_path / "region").mkdir()
+    condition = SearchCondition(
+        search_type="entity",
+        target="zombie",
+        dimensions=[],
+        world_path=tmp_path,
+    )
+    errors = condition.validate()
+    assert any("维度" in e for e in errors)
+
+
+def test_search_condition_validate_nonexistent_path():
+    condition = SearchCondition(
+        search_type="entity",
+        target="zombie",
+        dimensions=["overworld"],
+        world_path=Path("/nonexistent/path"),
+    )
+    errors = condition.validate()
+    assert any("不存在" in e for e in errors)
+
+
+# ==================== SearchResult 属性测试 ====================
+
+def test_search_result_properties():
+    result = SearchResult("entity", "minecraft:zombie", (10, 64, -20), "overworld")
+    assert result.x == 10
+    assert result.y == 64
+    assert result.z == -20
+    assert result.target_id == "minecraft:zombie"
+    assert result.position_str == "(10, 64, -20)"
+
+
+def test_extract_container_info_empty():
+    info = extract_container_info({"Items": []})
+    assert info["item_count"] == 0
+    assert info["items"] == "空"
+
+
+def test_extract_container_info_with_custom_name():
+    entity = {
+        "Items": [{"id": "minecraft:diamond", "Count": 1}],
+        "CustomName": '{"text":"My Chest"}',
+    }
+    info = extract_container_info(entity)
+    assert info["item_count"] == 1
+    assert "custom_name" in info

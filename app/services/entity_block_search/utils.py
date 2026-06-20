@@ -1,5 +1,6 @@
 """Shared helpers for NBT-like search data."""
 
+import fnmatch
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -15,7 +16,24 @@ def tag_to_str(value: Any) -> str:
 
 
 def matches_target(name: str, target: str) -> bool:
-    return target == "*" or name == target or name.endswith(f":{target}")
+    """匹配名称与目标规格。
+
+    支持:
+    - "*" 匹配所有
+    - 精确匹配: "minecraft:villager"
+    - 后缀匹配: "villager" 匹配 "minecraft:villager"
+    - 逗号分隔多目标: "villager,cow,pig"
+    - glob 通配符: "*shulker*", "minecraft:*_ore"
+    """
+    if target == "*":
+        return True
+    if "," in target:
+        return any(matches_target(name, t.strip()) for t in target.split(",") if t.strip())
+    if name == target or name.endswith(f":{target}"):
+        return True
+    if "*" in target or "?" in target or "[" in target:
+        return fnmatch.fnmatch(name, target)
+    return False
 
 
 def get_block_name(block: Any) -> str:
@@ -75,10 +93,17 @@ def get_block_entity_position(block_entity: Any) -> Optional[Tuple[int, int, int
 
 
 def _dimension_candidates(world_path: Path, dimension: str) -> List[Path]:
+    """返回维度的候选路径列表（26.1 新版路径优先，向后兼容旧版）"""
     if dimension == "nether":
-        return [world_path / "DIM-1", world_path / "dimensions" / "minecraft" / "the_nether"]
+        return [
+            world_path / "dimensions" / "minecraft" / "the_nether",  # 26.1 新版
+            world_path / "DIM-1",  # 旧版
+        ]
     if dimension == "end":
-        return [world_path / "DIM1", world_path / "dimensions" / "minecraft" / "the_end"]
+        return [
+            world_path / "dimensions" / "minecraft" / "the_end",  # 26.1 新版
+            world_path / "DIM1",  # 旧版
+        ]
     return []
 
 

@@ -30,7 +30,7 @@ def _write_header(f, summary: SearchSummary, total: int) -> None:
 def _write_result(f, idx: int, result: SearchResult) -> None:
     f.write(f"{idx}. {result.name}\n")
     f.write(f"   类型: {result.result_type}\n")
-    f.write(f"   位置: X={result.position[0]}, Y={result.position[1]}, Z={result.position[2]}\n")
+    f.write(f"   位置: X={result.x}, Y={result.y}, Z={result.z}\n")
     f.write(f"   维度: {result.dimension}\n")
     if result.extra_info:
         f.write("   额外信息:\n")

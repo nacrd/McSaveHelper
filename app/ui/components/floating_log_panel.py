@@ -58,7 +58,7 @@ class FloatingLogPanel(ft.Container):
         self._status_text = ft.Text(
             "",
             size=10,
-            color=THEME.text_muted,
+            color=THEME.text_secondary,
         )
 
         # 自动滚动开关
@@ -66,7 +66,7 @@ class FloatingLogPanel(ft.Container):
             content=ft.Icon(
                 ft.Icons.VERTICAL_ALIGN_BOTTOM,
                 size=14,
-                color=THEME.terminal_green if self._auto_scroll else THEME.text_muted,
+                color=THEME.terminal_green if self._auto_scroll else THEME.text_secondary,
             ),
             on_click=self._toggle_auto_scroll,
             padding=4,
@@ -79,7 +79,7 @@ class FloatingLogPanel(ft.Container):
             content=ft.Icon(
                 ft.Icons.DELETE_OUTLINE,
                 size=14,
-                color=THEME.text_muted),
+                color=THEME.text_secondary),
             on_click=self._clear,
             padding=4,
             border_radius=4,
@@ -95,14 +95,20 @@ class FloatingLogPanel(ft.Container):
             tooltip="收起",
         )
 
-        # 标题栏（可拖拽）
+        # 标题栏（可拖拽）- Modernized
         header_content = ft.Row(
             [
+                ft.Icon(
+                    ft.Icons.ARTICLE_OUTLINED,
+                    size=16,
+                    color=THEME.mc_gold,
+                ),
                 ft.Text(
-                    f"📜 {title}",
+                    title,
                     size=12,
                     color=THEME.mc_gold,
-                    weight=ft.FontWeight.BOLD),
+                    weight=ft.FontWeight.BOLD,
+                ),
                 self._status_text,
                 ft.Container(
                     expand=True),
@@ -115,9 +121,10 @@ class FloatingLogPanel(ft.Container):
         )
         header = ft.Container(
             content=header_content,
-            height=36,
-            padding=ft.Padding(left=10, right=6, top=4, bottom=4),
+            height=38,
+            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
             bgcolor=THEME.mc_coal,
+            border_radius=ft.BorderRadius(top_left=8, top_right=8, bottom_left=0, bottom_right=0),
         )
 
         # 用手势检测器包装标题栏
@@ -128,15 +135,15 @@ class FloatingLogPanel(ft.Container):
             on_pan_end=self._on_pan_end,
         )
 
-        # 日志容器（带内边距）
+        # 日志容器（带内边距）- Modernized
         log_container = ft.Container(
             content=self._log_col,
-            padding=ft.Padding(left=10, right=10, top=6, bottom=10),
+            padding=ft.Padding(left=12, right=12, top=8, bottom=12),
             bgcolor=THEME.bg_primary,
             expand=True,
         )
 
-        # 整体面板
+        # 整体面板 - Modernized with border_radius
         super().__init__(
             content=ft.Column(
                 [
@@ -150,6 +157,7 @@ class FloatingLogPanel(ft.Container):
             height=self.DEFAULT_HEIGHT,
             bgcolor=THEME.bg_card,
             border=mc_border(),
+            border_radius=8,
             shadow=mc_shadow(6),
             visible=False,
             left=self._offset_left,

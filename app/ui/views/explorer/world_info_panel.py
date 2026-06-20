@@ -4,6 +4,7 @@ import datetime
 from typing import Callable, Dict, List, Optional
 
 from app.ui.theme import THEME, mc_border
+from app.ui.icons import IconSet
 from app.ui.components.cards import card, placeholder
 
 from core.omni.world_session import WorldInfo
@@ -64,7 +65,7 @@ class WorldInfoPanel(ft.Column):
         if world_info is None:
             self.controls.append(
                 placeholder(
-                    icon="⚠️",
+                    icon=IconSet.WARNING,
                     title="未找到存档信息",
                     subtitle="该目录可能不是有效的 Minecraft 世界存档",
                     height=200,

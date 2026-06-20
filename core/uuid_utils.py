@@ -10,6 +10,7 @@ import requests
 
 from core.types import LogCallback
 from core.constants import MinecraftConstants
+from core.utils import find_player_data_dirs
 
 
 def get_offline_uuid_str(name: str) -> str:
@@ -185,8 +186,11 @@ def build_mappings(
     Returns:
         UUID 映射列表
     """
-    pd = world_path / "playerdata"
-    if not pd.exists():
+    pd_dirs = find_player_data_dirs(world_path)
+    all_dat_files = []
+    for pd in pd_dirs:
+        all_dat_files.extend(pd.glob("*.dat"))
+    if not all_dat_files:
         return []
     maps: List[Tuple[List[int], List[int], str,
                      str, Tuple[int, int], Tuple[int, int]]] = []
@@ -198,7 +202,7 @@ def build_mappings(
     if custom_mappings:
         log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
 
-    for f in pd.glob("*.dat"):
+    for f in all_dat_files:
         old_u = f.stem
         if old_u in new_uuids:
             continue
@@ -242,7 +246,7 @@ def build_mappings(
         else:
             log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
 
-    # 处理手动输入但不在playerdata中的玩家
+    # 处理手动输入但不在玩家数据目录中的玩家
     if manual_names:
         for name in manual_names:
             if name not in processed_names:  # 检查是否已经处理过

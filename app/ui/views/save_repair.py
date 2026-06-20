@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, List
 import flet as ft
 
 from app.ui.theme import THEME, mc_border
+from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import checkbox, current_save_field
 from app.ui.components.cards import card, section_title
@@ -101,7 +102,7 @@ class SaveRepairView(ft.Column):
                 "检测存档状态、修复损坏的区块、玩家数据、level.dat",
                 size=12,
                 color=THEME.text_muted),
-            icon="🔧",
+            icon=IconSet.BUILD,
         )
 
         config_card = card(

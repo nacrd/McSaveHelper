@@ -49,8 +49,15 @@ def parse_path(path: str) -> List[Union[str, int]]:
             if current:
                 parts.append(current)
                 current = ""
-            end = path.index("]", i)
-            parts.append(int(path[i + 1:end]))
+            end = path.find("]", i)
+            if end == -1:
+                # 缺少闭合 ]，将剩余部分作为文本处理
+                current = path[i:]
+                break
+            index_str = path[i + 1:end]
+            if not index_str.strip():
+                raise ValueError(f"NBT 路径索引为空: {path}")
+            parts.append(int(index_str))
             i = end + 1
             continue
         current += ch

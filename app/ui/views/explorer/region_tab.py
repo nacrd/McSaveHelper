@@ -446,7 +446,7 @@ class RegionTabMixin:
             safe_update(self._region_file_field)
             safe_update(self._chunk_x_field)
             safe_update(self._chunk_z_field)
-            self._switch_tab(4)
+            self._switch_tab(5)  # NBT 标签页索引
         except Exception as ex:
             self.app.handle_exception(ex, title="填入区域文件失败")
 

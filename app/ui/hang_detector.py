@@ -241,7 +241,7 @@ class HangDetector:
         """记录警告到日志系统"""
         try:
             from core.logger import logger
-            logger.warning(f"[卡死检测] {message}", module="HangDetector")
+            logger.warning(f"{message}", module="HangDetector")
         except Exception:
             # 如果日志系统不可用，静默失败
             pass

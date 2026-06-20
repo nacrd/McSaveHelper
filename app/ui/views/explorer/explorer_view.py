@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional, List, Dict, Tuple, Union
 from pathlib import Path
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_bar
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ class ExplorerView(
         self._world_label = ft.Text(
             "未设置当前存档", size=12, color=THEME.text_muted,
         )
-        toolbar = page_header("存档浏览器", self._world_label, icon="🧭")
+        toolbar = page_header("存档浏览器", self._world_label, icon=IconSet.EXPLORE)
 
         # 标签页容器 - 优化：使用懒加载
         self._tab_world_info = ft.Container()
@@ -100,13 +101,7 @@ class ExplorerView(
 
         self._tab_bar, self._tab_labels_row, self._tab_buttons, self._tab_labels_widgets = segmented_tab_bar(
             [
-                TabSpec(
-                    "存档信息", "🌍"), TabSpec(
-                    "玩家", "🧍"), TabSpec(
-                    "区域", "🧱"), TabSpec(
-                        "统计", "📊"), TabSpec(
-                            "搜索", "🔍"), TabSpec(
-                                "NBT", "📜"), ], selected_index=0, on_select=self._switch_tab, )
+                TabSpec("存档信息", IconSet.EARTH), TabSpec("玩家", IconSet.PERSON), TabSpec("区域", IconSet.GRID), TabSpec("统计", IconSet.STATS), TabSpec("搜索", IconSet.SEARCH), TabSpec("NBT", IconSet.DOCUMENT), ], selected_index=0, on_select=self._switch_tab, )
         self._content_box = panel(
             content=self._tabs_content[0],
             padding=10,
@@ -185,7 +180,7 @@ class ExplorerView(
                 left=10, right=10, top=10, bottom=10)
             if hasattr(self, '_player_left_panel'):
                 self._player_left_panel.width = 300 if compact else 340
-            if hasattr(self, '_region_left_panel'):
+            if hasattr(self, '_region_side_panel'):
                 self._region_side_panel.width = 320 if compact else 360
                 self._region_side_panel.height = 280 if compact else 320
             if self._heatmap is not None and hasattr(
@@ -193,8 +188,8 @@ class ExplorerView(
                 self._heatmap.resize_map(
                     340 if compact else 420, 220 if compact else 260)
             safe_update(self)
-        except Exception:
-            pass
+        except Exception as ex:
+            self.app.handle_exception(ex, title="设置紧凑模式失败")
 
     def _build_search_tab(self) -> None:
         self._entity_block_search_view = EntityBlockSearchView(

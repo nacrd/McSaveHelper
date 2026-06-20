@@ -5,7 +5,10 @@ from typing import Dict, List, Optional
 from .cleaner import clean_world
 from .pure_cleaner import purge_mod_blocks_and_entities
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
-from .utils import safe_destination_world, update_server_properties, replace_directory_tree
+from .utils import (
+    safe_destination_world, update_server_properties, replace_directory_tree,
+    find_player_data_dirs, get_write_player_data_dir,
+)
 from .types import LogCallback
 
 
@@ -52,9 +55,8 @@ def run_fast(
         names_to_process.update(manual_names)
         log(f"使用手动输入的玩家名: {', '.join(manual_names)}", "MANUAL")
 
-    # 扫描 playerdata 目录，尝试识别其他玩家
-    pd = dest_world / "playerdata"
-    if pd.exists():
+    # 扫描玩家数据目录（兼容 26.1 新旧路径），尝试识别其他玩家
+    for pd in find_player_data_dirs(dest_world):
         files = list(pd.glob("*.dat"))
         for f in files:
             uuid_old = f.stem
@@ -70,6 +72,9 @@ def run_fast(
     # 4. 为每个玩家名生成双副本
     dual_count = 0
     if names_to_process:
+        # 根据存档格式决定写入目录
+        pd = get_write_player_data_dir(dest_world)
+
         for name in names_to_process:
             offline_uuid = get_offline_uuid_str(name)
             online_uuid = None
@@ -79,8 +84,8 @@ def run_fast(
                     templates_by_name.setdefault(
                         official_name, templates_by_name[name])
 
-            # 确保 playerdata 目录存在
-            pd.mkdir(exist_ok=True)
+            # 确保玩家数据目录存在
+            pd.mkdir(exist_ok=True, parents=True)
 
             # 生成离线副本（如果还没有）
             offline_file = pd / f"{offline_uuid}.dat"
@@ -91,7 +96,7 @@ def run_fast(
                     dual_count += 1
                     log(f"生成离线副本: {offline_uuid}.dat (玩家 {name})", "INFO")
                 else:
-                    log(f"警告: playerdata 目录为空，无法为 {name} 创建离线副本", "WARN")
+                    log(f"警告: 玩家数据目录为空，无法为 {name} 创建离线副本", "WARN")
 
             # 生成正版副本（如果获取到了正版UUID）
             if online_uuid:

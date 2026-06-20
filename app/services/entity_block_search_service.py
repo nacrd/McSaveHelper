@@ -17,7 +17,7 @@ from .entity_block_search.constants import (
 from .entity_block_search.container_searcher import ContainerSearcher
 from .entity_block_search.entity_searcher import EntitySearcher
 from .entity_block_search.exporter import export_results_to_text as export_text
-from .entity_block_search.models import SearchResult, SearchSummary
+from .entity_block_search.models import SearchResult, SearchCondition, SearchSummary
 
 
 class EntityBlockSearchService:
@@ -54,9 +54,32 @@ class EntityBlockSearchService:
             logger.error(traceback.format_exc(), module="EntityBlockSearch")
         return self.results
 
+    def search_condition(
+        self,
+        condition: SearchCondition,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        log_callback: Optional[Callable[[str, str], None]] = None,
+    ) -> List[SearchResult]:
+        """使用 SearchCondition 对象执行搜索。"""
+        errors = condition.validate()
+        if errors:
+            raise ValueError("; ".join(errors))
+        return self.search(
+            world_path=condition.world_path,
+            search_type=condition.search_type,
+            target=condition.target,
+            dimensions=condition.dimensions,
+            progress_callback=progress_callback,
+            log_callback=log_callback,
+        )
+
     def export_results_to_text(self, output_path: Path, results: Optional[List[SearchResult]] = None) -> None:
         """将搜索结果导出为文本文件。"""
         export_text(output_path, self.summary, self.results, results)
+
+    def export_results(self, results: List[SearchResult], output_path: Path) -> None:
+        """导出搜索结果（匹配视图调用签名）。"""
+        self.export_results_to_text(output_path, results)
 
     def _run_search(self, world_path: Path, search_type: str, target: str, dimensions: List[str], log: Callable[[str, str], None], progress: Callable[[float, str], None]) -> None:
         from core.performance import get_tracker
@@ -127,4 +150,4 @@ class EntityBlockSearchService:
         return len(self.results) >= self.MAX_RESULTS
 
 
-__all__ = ["EntityBlockSearchService", "SearchResult", "SearchSummary"]
+__all__ = ["EntityBlockSearchService", "SearchResult", "SearchCondition", "SearchSummary"]

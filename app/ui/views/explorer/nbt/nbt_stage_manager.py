@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple, Union
 import flet as ft
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.cards import placeholder
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.explorer_helpers import format_stage_value
@@ -88,8 +89,8 @@ class NbtStageManager:
             self.ctx._nbt_stage_status.color = THEME.warning if count else THEME.text_muted
             self.render_stage_list()
             safe_update(self.ctx._nbt_stage_status)
-        except Exception:
-            pass
+        except Exception as ex:
+            self.ctx.app.handle_exception(ex, title="更新暂存区状态失败")
 
     def render_stage_list(self) -> None:
         """渲染暂存区变更列表"""
@@ -98,7 +99,7 @@ class NbtStageManager:
             if not self.ctx._staged_nbt_changes:
                 self.ctx._nbt_stage_list.controls.append(
                     placeholder(
-                        icon="📋",
+                        icon=IconSet.CLIPBOARD,
                         title="暂无暂存变更",
                         subtitle="对 NBT 树中的字段进行编辑后，变更会暂存在此处等待提交",
                         height=120,
@@ -174,8 +175,8 @@ class NbtStageManager:
                         border_radius=6,
                     ))
             safe_update(self.ctx._nbt_stage_list)
-        except Exception:
-            pass
+        except Exception as ex:
+            self.ctx.app.handle_exception(ex, title="渲染暂存区列表失败")
 
     # ==================== 查询方法 ====================
 

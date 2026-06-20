@@ -48,7 +48,7 @@ if "!NEED_CREATE!"=="1" (
 :: 3. Activate and install dependencies
 call "%VENV_DIR%\Scripts\activate.bat"
 echo [3/4] Installing dependencies...
-pip install -r requirements.txt
+pip install -r requirements.txt --quiet
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies.
     pause

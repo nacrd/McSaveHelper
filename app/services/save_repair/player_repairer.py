@@ -11,6 +11,7 @@ import nbtlib
 from nbtlib import Compound, String, Float, Int, List as NbtList, Double
 
 from .models import RepairReport, IssueLevel, RepairIssue
+from core.utils import find_player_data_dirs
 
 
 # 玩家数据必需字段列表
@@ -64,13 +65,16 @@ class PlayerRepairer:
         report: RepairReport,
         log: Callable[[str, str], None],
     ) -> None:
-        """修复玩家数据"""
-        playerdata_dir = world_path / "playerdata"
-        if not playerdata_dir.exists():
-            log("playerdata 目录不存在", "WARNING")
+        """修复玩家数据（兼容 Minecraft 26.1 新旧路径）"""
+        player_files: List[Path] = []
+        for playerdata_dir in find_player_data_dirs(world_path):
+            if playerdata_dir.exists():
+                player_files.extend(list(playerdata_dir.glob("*.dat")))
+
+        if not player_files:
+            log("玩家数据目录不存在", "WARNING")
             return
 
-        player_files = list(playerdata_dir.glob("*.dat"))
         log(f"找到 {len(player_files)} 个玩家数据文件", "INFO")
 
         for player_file in player_files:

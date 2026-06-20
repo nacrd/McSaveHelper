@@ -3,6 +3,7 @@ import flet as ft
 from typing import TYPE_CHECKING
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.fields import text_field, checkbox, label
 from app.ui.components.cards import card, section_title
@@ -30,7 +31,7 @@ class SettingsView(ft.Column):
         self.controls.append(page_header(
             "设置",
             ft.Text("管理通用选项、界面偏好、批量处理和清理规则", size=12, color=THEME.text_muted),
-            icon="⚙",
+            icon=IconSet.SETTINGS,
         ))
         self._build_general_card()
         self._build_ui_card()

@@ -1,11 +1,13 @@
 """NBT Tree View component."""
 
+import logging
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import flet as ft
 
 from app.ui.components.cards import placeholder
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.views.explorer.utils import safe_update
 from .editor import NbtTreeEditor
 from .exporter import export_json as export_nbt_json
@@ -13,6 +15,8 @@ from .parser import is_list_node, is_mapping_node, mapping_items
 from .renderer import NbtTreeRenderer
 from .search import collect_matches
 from .type_info import MAX_CHILDREN, MAX_DEPTH, TYPE_INFO
+
+logger = logging.getLogger(__name__)
 
 
 class NBTTreeView(ft.Column):
@@ -33,7 +37,7 @@ class NBTTreeView(ft.Column):
         self._show_all_children = False
         self._on_stage_change = on_stage_change
         self._editable = True
-        self._placeholder = placeholder(icon="📜", title="NBT 数据未加载", subtitle="请通过上方数据源选择玩家或 level.dat，或输入区块坐标加载", height=180)
+        self._placeholder = placeholder(icon=IconSet.DOCUMENT, title="NBT 数据未加载", subtitle="请通过上方数据源选择玩家或 level.dat，或输入区块坐标加载", height=180)
         self.controls.append(self._placeholder)
         self._editor = NbtTreeEditor(self, on_stage_change)
         self._renderer = NbtTreeRenderer({"edit": self._open_edit_dialog, "add": self._open_add_field_dialog, "delete": self._confirm_delete})
@@ -116,8 +120,8 @@ class NBTTreeView(ft.Column):
                 stats["values"] += 1
         try:
             visit(data)
-        except Exception:
-            pass
+        except Exception as ex:
+            logger.debug("NBT 统计收集异常: %s", ex)
         return stats
 
     def _state(self) -> Dict[str, Any]:

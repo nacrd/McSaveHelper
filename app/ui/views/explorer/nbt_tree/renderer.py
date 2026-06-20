@@ -1,5 +1,6 @@
 """Rendering helpers for NBT tree controls."""
 
+import logging
 from typing import Any, Callable, Dict, List, Set
 
 import flet as ft
@@ -14,6 +15,8 @@ from .parser import (
     mapping_items,
 )
 from .type_info import MAX_CHILDREN, MAX_DEPTH, TYPE_INFO
+
+logger = logging.getLogger(__name__)
 
 
 class NbtTreeRenderer:
@@ -30,8 +33,8 @@ class NbtTreeRenderer:
                 return self._build_mapping_nodes(data, path_prefix, depth, state)
             if is_list_node(data):
                 return self._build_list_nodes(data, path_prefix, depth, state)
-        except Exception:
-            pass
+        except Exception as ex:
+            logger.debug("NBT 树渲染异常: %s", ex)
         return []
 
     def build_node(self, key: str, value: Any, path: str, depth: int, state: Dict[str, Any]) -> ft.Control:

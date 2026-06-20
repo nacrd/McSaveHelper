@@ -6,6 +6,7 @@ from typing import Callable, Iterable, List, NamedTuple
 import flet as ft
 
 from app.ui.theme import THEME, mc_border
+from app.ui.icons import IconSet
 
 
 class TabSpec(NamedTuple):
@@ -18,14 +19,13 @@ class TabSpec(NamedTuple):
 def page_header(
     title: str,
     subtitle: ft.Control,
-    icon: str = "▣",
+    icon: str = IconSet.SETTINGS,
     actions: ft.Control | None = None,
 ) -> ft.Container:
     """Create the shared page title bar used by full-page views."""
-    return ft.Container(content=ft.Row([ft.Row([ft.Text(icon,
+    return ft.Container(content=ft.Row([ft.Row([ft.Icon(icon,
                                                         size=26,
-                                                        color=THEME.mc_gold,
-                                                        font_family="monospace"),
+                                                        color=THEME.mc_gold),
                                                 ft.Column([ft.Text(title,
                                                                    size=22,
                                                                    weight=ft.FontWeight.BOLD,
@@ -104,7 +104,7 @@ def segmented_tab_bar(
         button = ft.Container(
             content=ft.Column(
                 [
-                    ft.Text(tab.icon, size=20, text_align=ft.TextAlign.CENTER),
+                    ft.Icon(tab.icon, size=20),
                     label,
                 ],
                 spacing=2,

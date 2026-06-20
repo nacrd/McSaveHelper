@@ -1,5 +1,7 @@
 """Common constants for entity/block/container search."""
 
+from typing import Dict, List, Tuple
+
 COMMON_ENTITIES = [
     "minecraft:villager", "minecraft:creeper", "minecraft:zombie", "minecraft:skeleton",
     "minecraft:spider", "minecraft:enderman", "minecraft:cow", "minecraft:pig",
@@ -30,3 +32,45 @@ COMMON_CONTAINERS = [
 MAX_RESULTS = 10000
 VALID_SEARCH_TYPES = {"entity", "block", "container"}
 VALID_DIMENSIONS = {"overworld", "nether", "end"}
+
+# UI 预设列表（带中文标签）
+ENTITY_PRESETS: List[Tuple[str, str]] = [
+    ("minecraft:villager", "村民"),
+    ("minecraft:zombie", "僵尸"),
+    ("minecraft:skeleton", "骷髅"),
+    ("minecraft:creeper", "苦力怕"),
+    ("minecraft:spider", "蜘蛛"),
+    ("minecraft:enderman", "末影人"),
+    ("minecraft:pig", "猪"),
+    ("minecraft:cow", "牛"),
+    ("minecraft:sheep", "羊"),
+    ("minecraft:chicken", "鸡"),
+]
+
+BLOCK_PRESETS: List[Tuple[str, str]] = [
+    ("minecraft:diamond_ore", "钻石矿石"),
+    ("minecraft:iron_ore", "铁矿石"),
+    ("minecraft:gold_ore", "金矿石"),
+    ("minecraft:coal_ore", "煤矿石"),
+    ("minecraft:emerald_ore", "绿宝石矿石"),
+    ("minecraft:ancient_debris", "远古残骸"),
+]
+
+CONTAINER_PRESETS: List[Tuple[str, str]] = [
+    ("minecraft:chest", "箱子"),
+    ("minecraft:barrel", "木桶"),
+    ("minecraft:shulker_box", "潜影盒"),
+    ("minecraft:hopper", "漏斗"),
+    ("minecraft:furnace", "熔炉"),
+]
+
+PRESETS: Dict[str, List[Tuple[str, str]]] = {
+    "entity": ENTITY_PRESETS,
+    "block": BLOCK_PRESETS,
+    "container": CONTAINER_PRESETS,
+}
+
+
+def get_preset_options(search_type: str) -> List[Tuple[str, str]]:
+    """返回指定搜索类型的预设列表。"""
+    return PRESETS.get(search_type, [])

@@ -2,13 +2,25 @@
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
+from flet import Icons
+from app.ui.icons import IconSet
 
 
 def card(
     content: ft.Control,
     padding: int = 20,
 ) -> ft.Container:
-    """Create a Minecraft-style card with beveled borders and shadow"""
+    """Create a Minecraft-style card with beveled borders and shadow
+
+    Modernized with rounded corners and better styling.
+
+    Args:
+        content: Card content
+        padding: Padding around content (default: 20)
+
+    Returns:
+        ft.Container: Card container
+    """
     inner = content
     if not isinstance(content, ft.Container):
         inner = ft.Container(content=content, padding=padding)
@@ -16,23 +28,33 @@ def card(
         content=inner,
         bgcolor=THEME.bg_card,
         border=mc_border(),
-        border_radius=0,
+        border_radius=8,
         shadow=mc_shadow(),
+        animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
     )
 
 
 def section_title(text: str, icon: str = "▣") -> ft.Container:
-    """Create a section title with Minecraft-style decorations"""
+    """Create a section title with Minecraft-style decorations
+
+    Args:
+        text: Section title text
+        icon: Decorative icon (default: "▣")
+
+    Returns:
+        ft.Container: Section title container
+    """
     return ft.Container(
         content=ft.Row(
             [
                 ft.Container(
                     content=ft.Text(icon, size=14, color=THEME.text_primary),
-                    width=24,
-                    height=24,
+                    width=26,
+                    height=26,
                     alignment=ft.alignment.Alignment(0, 0),
                     bgcolor=THEME.mc_grass,
                     border=mc_border(1),
+                    border_radius=4,
                 ),
                 ft.Text(
                     text,
@@ -50,7 +72,7 @@ def section_title(text: str, icon: str = "▣") -> ft.Container:
 
 
 def placeholder(
-    icon: str = "📭",
+    icon: str = Icons.MAIL_OUTLINE,
     title: str = "暂无内容",
     subtitle: str = "请加载数据后查看",
     height: int = 150,
@@ -58,7 +80,7 @@ def placeholder(
     """创建美化的空状态占位符
 
     Args:
-        icon: 显示的图标（emoji）
+        icon: 显示的图标
         title: 主标题
         subtitle: 副标题说明
         height: 容器高度
@@ -69,8 +91,8 @@ def placeholder(
     return ft.Container(
         content=ft.Column(
             controls=[
-                ft.Text(icon, size=48, text_align=ft.TextAlign.CENTER),
-                ft.Container(height=8),
+                ft.Icon(icon, size=48, color=THEME.text_secondary),
+                ft.Container(height=10),
                 ft.Text(
                     title,
                     size=16,
@@ -78,7 +100,7 @@ def placeholder(
                     color=THEME.text_secondary,
                     text_align=ft.TextAlign.CENTER,
                 ),
-                ft.Container(height=4),
+                ft.Container(height=6),
                 ft.Text(
                     subtitle,
                     size=13,
@@ -92,5 +114,7 @@ def placeholder(
         padding=ft.Padding(left=20, right=20, top=30, bottom=30),
         bgcolor=THEME.bg_card,
         border=mc_border(1),
+        border_radius=8,
         height=height,
+        alignment=ft.alignment.Alignment(0, 0),
     )

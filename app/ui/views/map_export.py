@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import flet as ft
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, current_save_field
 from app.ui.components.cards import card, section_title
@@ -152,7 +153,7 @@ class MapExportView(ft.Column):
                 "将存档地图导出为 PNG 图片（俯视图/地形图）",
                 size=12,
                 color=THEME.text_muted),
-            icon="🗺️",
+            icon=IconSet.EXPORT,
         )
 
         # 配置卡片
@@ -264,7 +265,13 @@ class MapExportView(ft.Column):
 
         # 启动导出线程
         map_type = self._map_type_dropdown.value or "topview"
-        scale = int(self._scale_dropdown.value or "4")
+        try:
+            scale = int(self._scale_dropdown.value or "4")
+            if scale not in [1, 2, 4, 8]:
+                scale = 4
+        except (ValueError, TypeError):
+            scale = 4
+            self.app.warn_dialog("提示", "缩放比例无效，使用默认值 1:4")
         self._exporting = True
         self._set_export_controls_enabled(False)
         self._result_text.value = ""

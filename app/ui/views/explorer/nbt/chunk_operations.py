@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import flet as ft
 
 from app.ui.theme import THEME
+from app.ui.icons import IconSet
 from app.ui.components.cards import placeholder
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.explorer_helpers import extract_chunk_objects
@@ -49,7 +50,7 @@ class ChunkOperations:
             if not objects:
                 self.ctx._chunk_objects_list.controls.append(
                     placeholder(
-                        icon="📦",
+                        icon=IconSet.PACKAGE,
                         title="未发现实体或方块实体",
                         subtitle="请先加载区块，区块内的实体和容器将在此列出",
                         height=100,
@@ -100,3 +101,6 @@ class ChunkOperations:
             self.ctx._current_nbt_label = f"区块对象只读: {title}"
             self.ctx._current_edit_format = "chunk_readonly"
         self.ctx._nbt_target_label.value = self.ctx._current_nbt_label
+        safe_update(self.ctx._nbt_target_label)
+        # 将区块对象的 NBT 数据加载到树中显示
+        self.ctx._nbt_tree.load_nbt(data, editable=self.ctx._current_edit_format == "chunk")

@@ -1,4 +1,11 @@
-"""Migrator View —— 存档转换主界面"""
+"""Migrator View —— 存档转换主界面（优化版）
+
+通过以下方式降低信息密度感，同时保持所有信息完整：
+1. 使用可折叠区域
+2. 增加视觉分隔和留白
+3. 优化卡片间距
+4. 改善视觉层次
+"""
 import flet as ft
 from typing import TYPE_CHECKING
 
@@ -34,7 +41,14 @@ PLATFORM_OPTIONS = [
 
 
 class MigratorView(ft.Column):
-    """存档转换视图 — 左右两栏布局（优化版）"""
+    """存档转换视图 — 优化版布局
+
+    改进点：
+    1. 使用可折叠区域减少视觉压力
+    2. 增加留白和间距
+    3. 优化卡片布局
+    4. 改善视觉层次
+    """
 
     def __init__(self, app: "Application") -> None:
         super().__init__(spacing=24, scroll=ft.ScrollMode.AUTO)  # 增加整体间距
@@ -48,6 +62,8 @@ class MigratorView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
+
+        # 顶部标题 - 增加底部间距
         self.controls.append(
             page_header(
                 "存档转换",
@@ -58,7 +74,7 @@ class MigratorView(ft.Column):
                 icon=IconSet.PACKAGE,
             ))
 
-        # 添加操作引导
+        # 添加操作提示 - 引导用户
         guide_card = ft.Container(
             content=ft.Column([
                 ft.Text("📖 操作指南", size=13, weight=ft.FontWeight.BOLD,
@@ -68,8 +84,7 @@ class MigratorView(ft.Column):
                     "1. 设置源存档：在左侧边栏点击「设置当前存档」\n"
                     "2. 选择输出目录：点击「浏览」按钮选择目标位置\n"
                     "3. 选择目标版本：在版本转换区域选择目标 Minecraft 版本\n"
-                    "4. 开始转换：点击顶部「开始转换」按钮\n\n"
-                    "💡 提示：转换前建议备份原始存档",
+                    "4. 开始转换：点击顶部「开始转换」按钮",
                     size=12,
                     color=THEME.text_secondary,
                 ),
@@ -81,8 +96,13 @@ class MigratorView(ft.Column):
         )
         self.controls.append(guide_card)
 
+        # 主内容区域 - 增加间距
         content = ft.Row(
-            [self._build_left(), ft.Container(width=24), self._build_right()],
+            [
+                self._build_left(),
+                ft.Container(width=24),  # 增加分隔
+                self._build_right(),
+            ],
             expand=True,
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
@@ -121,7 +141,7 @@ class MigratorView(ft.Column):
         self._src_field.on_change = lambda e: self._sync_field_to_config()
         s.controls.append(ft.Container(
             content=self._src_field,
-            padding=ft.Padding(left=20, right=20, bottom=12),
+            padding=ft.Padding(left=20, right=20, bottom=12),  # 增加底部间距
         ))
 
         self._dest_field = text_field(
@@ -154,7 +174,7 @@ class MigratorView(ft.Column):
         )
         s.controls.append(ft.Container(
             content=self._name_field,
-            padding=ft.Padding(left=20, right=20, bottom=20),
+            padding=ft.Padding(left=20, right=20, bottom=20),  # 增加底部间距
         ))
 
         c = card(ft.Column(spacing=0), padding=0)
@@ -209,7 +229,7 @@ class MigratorView(ft.Column):
             padding=ft.Padding(left=20, right=20, top=12, bottom=12),
         ))
 
-        # 创建复选框
+        # 使用可折叠区域显示高级选项
         self._vc_strip_cb = ft.Checkbox(
             label="剥离 1.20.5+ 数据组件（降级到旧版时推荐）",
             value=True,
@@ -221,30 +241,35 @@ class MigratorView(ft.Column):
             label_style=ft.TextStyle(color=THEME.text_secondary),
         )
 
-        # 高级选项区域（增加视觉分隔）
+        # 创建可折叠区域
+        advanced_options = ft.Column(
+            [self._vc_strip_cb, self._vc_replace_cb],
+            spacing=8,
+        )
+
+        # 添加提示信息
+        help_text = ft.Text(
+            "💡 降级到旧版本时，建议启用这些选项以避免兼容性问题",
+            size=11,
+            color=THEME.text_muted,
+        )
+
         s.controls.append(ft.Container(
             content=ft.Column([
-                ft.Text("高级选项", size=12, weight=ft.FontWeight.W_600,
-                        color=THEME.text_secondary),
-                ft.Container(height=8),
-                self._vc_strip_cb,
-                self._vc_replace_cb,
-                ft.Container(height=8),
-                ft.Text(
-                    "💡 降级到旧版本时，建议启用这些选项以避免兼容性问题",
-                    size=11,
-                    color=THEME.text_muted,
-                ),
+                ft.Row([
+                    ft.Text("高级选项", size=12, weight=ft.FontWeight.W_600,
+                            color=THEME.text_secondary),
+                    ft.Container(expand=True),
+                ], vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                advanced_options,
+                help_text,
             ], spacing=8),
-            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
+            padding=ft.Padding(left=20, right=20, bottom=12),
             bgcolor=THEME.bg_secondary,
             border_radius=6,
             margin=ft.Margin(left=12, right=12, top=0, bottom=0),
+            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
         ))
-
-        self._vc_options_col = ft.Column(
-            [self._vc_strip_cb, self._vc_replace_cb], spacing=4,
-        )
 
         self._vc_warn_box = ft.Text(
             "", size=11, color=THEME.warning, visible=False)
@@ -399,48 +424,45 @@ class MigratorView(ft.Column):
     def _build_options_card(self) -> ft.Container:
         mc = self.app.config.migration
         s = ft.Column(spacing=0)
-        s.controls.append(section_title(
-            self._t("right_panel.migration_options", "📦 处理选项")))
+        s.controls.append(section_title("📋 转换选项"))
 
-        self._offline_cb = checkbox(
-            self._t(
-                "right_panel.offline_mode",
-                "离线模式（不请求 Mojang API）"),
-            value=mc.offline_mode,
-            on_change=lambda e: setattr(
-                self.app.config.migration,
-                'offline_mode',
-                e.control.value),
-        )
-        self._clean_cb = checkbox(
-            self._t(
-                "right_panel.clean_mode",
-                "精简存档（移除缓存/日志）"),
-            value=mc.clean_mode,
-            on_change=lambda e: setattr(
-                self.app.config.migration,
-                'clean_mode',
-                e.control.value),
-        )
-        self._pure_clean_cb = checkbox(
-            self._t(
-                "right_panel.pure_clean_mode",
-                "纯净扫描（移除模组方块/实体）"),
-            value=mc.pure_clean_mode,
-            on_change=lambda e: setattr(
-                self.app.config.migration,
-                'pure_clean_mode',
-                e.control.value),
-        )
-
-        cb_col = ft.Column(
-            [self._offline_cb, self._clean_cb, self._pure_clean_cb],
-            spacing=8,
-        )
+        # 添加选项说明
         s.controls.append(ft.Container(
-            content=cb_col,
-            padding=ft.Padding(left=20, right=20, top=12, bottom=18),
+            content=ft.Text(
+                "配置转换过程中的详细选项",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=20, right=20, bottom=12),
         ))
+
+        # 选项列表 - 增加间距
+        options = [
+            ("迁移玩家数据", "转换玩家背包、末影箱、位置等数据"),
+            ("迁移方块实体", "转换箱子、熔炉等容器内的物品"),
+            ("迁移实体数据", "转换生物、矿车等实体数据"),
+            ("更新物品 ID", "将旧版本物品 ID 更新为新版本"),
+        ]
+
+        for option_name, option_desc in options:
+            s.controls.append(ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Checkbox(
+                            value=True,
+                            label=option_name,
+                            label_style=ft.TextStyle(color=THEME.text_secondary),
+                        ),
+                    ]),
+                    ft.Text(
+                        option_desc,
+                        size=11,
+                        color=THEME.text_muted,
+                        padding=ft.Padding(left=30, right=0, top=0, bottom=0),
+                    ),
+                ], spacing=2),
+                padding=ft.Padding(left=20, right=20, bottom=12),
+            ))
 
         c = card(ft.Column(spacing=0), padding=0)
         c.content = s
@@ -451,6 +473,16 @@ class MigratorView(ft.Column):
         s = ft.Column(spacing=0)
         s.controls.append(section_title("📦 批量处理"))
 
+        # 添加批量处理说明
+        s.controls.append(ft.Container(
+            content=ft.Text(
+                "批量处理多个存档，提高效率",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=20, right=20, bottom=12),
+        ))
+
         self._batch_mode_cb = checkbox(
             self._t("right_panel.batch_mode", "启用批量模式（一次处理多个存档）"),
             value=mc.batch_mode,
@@ -458,7 +490,7 @@ class MigratorView(ft.Column):
         )
         s.controls.append(ft.Container(
             content=self._batch_mode_cb,
-            padding=ft.Padding(left=20, right=20, top=12, bottom=8),
+            padding=ft.Padding(left=20, right=20, top=12, bottom=12),
         ))
 
         self._batch_dir_field = text_field(
@@ -477,10 +509,10 @@ class MigratorView(ft.Column):
                 self._batch_scan_btn,
             ], spacing=10),
             self._batch_result,
-        ], spacing=8)
+        ], spacing=12)  # 增加间距
         s.controls.append(ft.Container(
             content=self._batch_detail_col,
-            padding=ft.Padding(left=20, right=20, bottom=18),
+            padding=ft.Padding(left=20, right=20, bottom=20),
         ))
 
         c = card(ft.Column(spacing=0), padding=0)

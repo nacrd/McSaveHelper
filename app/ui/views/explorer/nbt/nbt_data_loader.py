@@ -273,7 +273,45 @@ class NbtDataLoader:
 
     def load_chunk_from_world_coords(self, e: Any = None) -> None:
         """根据世界坐标定位并加载区块"""
-        self.fill_chunk_from_world_coords(e)
+        try:
+            world_x = int(
+                float(
+                    (self.ctx._world_x_field.value or "0").strip()))
+            world_z = int(
+                float(
+                    (self.ctx._world_z_field.value or "0").strip()))
+            region_x, region_z, chunk_x, chunk_z = self.ctx._world_coords_to_region_chunk(
+                world_x, world_z)
+
+            # 确定维度路径
+            if hasattr(
+                    self.ctx,
+                    "_current_dimension") and self.ctx._current_dimension:
+                dim_name = self.ctx._current_dimension
+                if dim_name == "overworld":
+                    region_path = "region"
+                elif dim_name == "the_nether":
+                    region_path = "DIM-1/region"
+                elif dim_name == "the_end":
+                    region_path = "DIM1/region"
+                else:
+                    region_path = f"dimensions/{dim_name}/region"
+            else:
+                region_path = "region"
+
+            self.ctx._region_file_field.value = f"{region_path}/r.{region_x}.{region_z}.mca"
+            self.ctx._chunk_x_field.value = str(chunk_x)
+            self.ctx._chunk_z_field.value = str(chunk_z)
+            safe_update(self.ctx._region_file_field)
+            safe_update(self.ctx._chunk_x_field)
+            safe_update(self.ctx._chunk_z_field)
+        except ValueError:
+            self.ctx.app.warn_dialog("提示", "世界坐标必须是数字。")
+            return
+        except Exception as ex:
+            self.ctx.app.handle_exception(ex, title="填入区块坐标失败")
+            return
+
         self.load_chunk_nbt(e)
 
     # ==================== 重新加载 ====================
@@ -307,5 +345,7 @@ class NbtDataLoader:
                 success = self.ctx._nbt_tree.export_json(path)
                 if success:
                     self.ctx.app.info_dialog("成功", f"已导出到: {path}")
+                else:
+                    self.ctx.app.warn_dialog("导出失败", "导出 JSON 文件失败，请检查文件路径和权限。")
         except Exception as ex:
             self.ctx.app.handle_exception(ex, title="导出 JSON 失败")

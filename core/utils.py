@@ -1,16 +1,125 @@
 """通用工具函数
 
-提供项目中常用的工具函数，目前主要包含 server.properties 的更新功能。
+提供项目中常用的工具函数，目前主要包含 server.properties 的更新功能
+以及 Minecraft 26.1 存档路径兼容辅助函数。
 """
 
 from pathlib import Path
 import re
 import shutil
+from typing import List
 
 from .types import LogCallback
 
 
 _INVALID_WORLD_NAME_CHARS = re.compile(r"[\\/\r\n]")
+
+
+# ══════════════════════════════════════════════════════════
+#  Minecraft 26.1 存档路径兼容辅助函数
+# ══════════════════════════════════════════════════════════
+
+def find_player_data_dirs(world_path: Path) -> List[Path]:
+    """返回所有可能的玩家数据目录（新版 26.1 优先，向后兼容旧版）
+
+    新版路径: <world>/players/data/
+    旧版路径: <world>/playerdata/
+
+    Args:
+        world_path: 世界存档根目录
+
+    Returns:
+        存在的玩家数据目录列表（新版在前）
+    """
+    dirs: List[Path] = []
+    new_dir = world_path / "players" / "data"
+    old_dir = world_path / "playerdata"
+    if new_dir.is_dir():
+        dirs.append(new_dir)
+    if old_dir.is_dir():
+        dirs.append(old_dir)
+    # 如果都不存在，返回旧路径作为默认（兼容新存档首次写入场景）
+    return dirs if dirs else [old_dir]
+
+
+def find_stats_dirs(world_path: Path) -> List[Path]:
+    """返回所有可能的统计数据目录（新版 26.1 优先，向后兼容旧版）
+
+    新版路径: <world>/players/stats/
+    旧版路径: <world>/stats/
+    """
+    dirs: List[Path] = []
+    new_dir = world_path / "players" / "stats"
+    old_dir = world_path / "stats"
+    if new_dir.is_dir():
+        dirs.append(new_dir)
+    if old_dir.is_dir():
+        dirs.append(old_dir)
+    return dirs if dirs else [old_dir]
+
+
+def find_advancements_dirs(world_path: Path) -> List[Path]:
+    """返回所有可能的进度数据目录（新版 26.1 优先，向后兼容旧版）
+
+    新版路径: <world>/players/advancements/
+    旧版路径: <world>/advancements/
+    """
+    dirs: List[Path] = []
+    new_dir = world_path / "players" / "advancements"
+    old_dir = world_path / "advancements"
+    if new_dir.is_dir():
+        dirs.append(new_dir)
+    if old_dir.is_dir():
+        dirs.append(old_dir)
+    return dirs if dirs else [old_dir]
+
+
+def find_data_dirs(world_path: Path) -> List[Path]:
+    """返回所有可能的世界数据目录（新版 26.1 优先，向后兼容旧版）
+
+    新版路径: <world>/data/minecraft/（命名空间子目录）
+    旧版路径: <world>/data/
+    """
+    dirs: List[Path] = []
+    new_dir = world_path / "data" / "minecraft"
+    old_dir = world_path / "data"
+    if new_dir.is_dir():
+        dirs.append(new_dir)
+    if old_dir.is_dir():
+        dirs.append(old_dir)
+    return dirs if dirs else [old_dir]
+
+
+def is_mc26_format(world_path: Path) -> bool:
+    """判断存档是否为 Minecraft 26.1+ 新版格式
+
+    通过检查 players/data 目录是否存在来判断。
+    """
+    return (world_path / "players" / "data").is_dir()
+
+
+def get_write_player_data_dir(world_path: Path) -> Path:
+    """获取写入玩家数据的目标目录
+
+    如果存档是 26.1 格式，返回新路径；否则返回旧路径。
+    """
+    if is_mc26_format(world_path):
+        return world_path / "players" / "data"
+    return world_path / "playerdata"
+
+
+def get_write_stats_dir(world_path: Path) -> Path:
+    """获取写入统计数据的目标目录"""
+    if is_mc26_format(world_path):
+        return world_path / "players" / "stats"
+    return world_path / "stats"
+
+
+def get_write_advancements_dir(world_path: Path) -> Path:
+    """获取写入进度数据的目标目录"""
+    if is_mc26_format(world_path):
+        return world_path / "players" / "advancements"
+    return world_path / "advancements"
 
 
 def validate_world_name(world_name: str) -> str:

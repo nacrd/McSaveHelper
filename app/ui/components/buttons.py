@@ -8,7 +8,10 @@ from app.ui.theme import THEME, mc_focus_border
 
 
 class McButton(ft.Container):
-    """Minecraft-style button that supports disabled state with hover/pressed animations"""
+    """Minecraft-style button that supports disabled state with hover/pressed animations
+
+    Modernized with better styling and rounded corners while keeping Minecraft feel.
+    """
 
     def __init__(
         self,
@@ -16,7 +19,7 @@ class McButton(ft.Container):
         bgcolor: str,
         on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
         width: Optional[int] = None,
-        height: int = 40,
+        height: int = 42,
         icon: Optional[str] = None,
         text_color: Optional[str] = None,
     ) -> None:
@@ -44,10 +47,12 @@ class McButton(ft.Container):
                 right=ft.BorderSide(2, THEME.border_dark),
                 bottom=ft.BorderSide(2, THEME.border_dark),
             ),
+            border_radius=6,
             alignment=ft.alignment.Alignment(0, 0),
             on_click=self._handle_click,  # type: ignore[arg-type]
             on_hover=self._handle_hover,  # type: ignore[arg-type]
             ink=True,
+            animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
         )
 
     def _adjust_brightness(self, color: str, factor: float) -> str:
@@ -224,11 +229,24 @@ def _mc_button(
     bgcolor: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 40,
+    height: int = 42,
     icon: Optional[str] = None,
     text_color: Optional[str] = None,
 ) -> McButton:
-    """Create a Minecraft-style button with beveled borders"""
+    """Create a Minecraft-style button with beveled borders
+
+    Args:
+        text: Button text
+        bgcolor: Background color
+        on_click: Click handler
+        width: Button width (optional)
+        height: Button height (default: 42)
+        icon: Icon name (optional)
+        text_color: Text color (optional)
+
+    Returns:
+        McButton: Configured button
+    """
     return McButton(text, bgcolor, on_click, width, height, icon, text_color)
 
 
@@ -236,10 +254,21 @@ def btn_primary(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 40,
+    height: int = 42,
     icon: Optional[str] = None,
 ) -> ft.Container:
-    """Primary button - grass green"""
+    """Primary button - grass green
+
+    Args:
+        text: Button text
+        on_click: Click handler
+        width: Button width (optional)
+        height: Button height (default: 42)
+        icon: Icon name (optional)
+
+    Returns:
+        ft.Container: Primary button
+    """
     return _mc_button(text, THEME.mc_grass, on_click, width, height, icon)
 
 
@@ -247,9 +276,19 @@ def btn_ghost(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 40,
+    height: int = 42,
 ) -> ft.Container:
-    """Secondary button - stone gray"""
+    """Secondary button - stone gray
+
+    Args:
+        text: Button text
+        on_click: Click handler
+        width: Button width (optional)
+        height: Button height (default: 42)
+
+    Returns:
+        ft.Container: Secondary button
+    """
     return _mc_button(text, THEME.mc_stone, on_click, width,
                       height, text_color=THEME.text_primary)
 
@@ -258,9 +297,19 @@ def btn_success(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 40,
+    height: int = 42,
 ) -> ft.Container:
-    """Success button - emerald green"""
+    """Success button - emerald green
+
+    Args:
+        text: Button text
+        on_click: Click handler
+        width: Button width (optional)
+        height: Button height (default: 42)
+
+    Returns:
+        ft.Container: Success button
+    """
     return _mc_button(text, THEME.mc_emerald, on_click, width, height)
 
 
@@ -268,7 +317,17 @@ def btn_danger(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 40,
+    height: int = 42,
 ) -> ft.Container:
-    """Danger button - redstone red"""
+    """Danger button - redstone red
+
+    Args:
+        text: Button text
+        on_click: Click handler
+        width: Button width (optional)
+        height: Button height (default: 42)
+
+    Returns:
+        ft.Container: Danger button
+    """
     return _mc_button(text, THEME.mc_redstone, on_click, width, height)

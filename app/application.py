@@ -25,6 +25,7 @@ from app.services.i18n_service import I18nService
 from app.controllers.migration_controller import MigrationController
 
 from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.icons import IconSet
 from app.ui.sidebar import Sidebar
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
 
@@ -69,14 +70,20 @@ class Application:
         # ─── 同步配置到迁移参数 ─────────────────────
         self._sync_config_to_migration()
 
+        # ─── 初始化存档上下文（在构建 UI 之前）──────
+        self.save_context_manager.initialize()
+
         # ─── 构建 UI ────────────────────────────────
         self._build_ui()
 
         # ─── 初始化日志 ─────────────────────────────
         self._init_logging()
 
-        # ─── 初始化存档上下文 ───────────────────────
-        self.save_context_manager.initialize()
+        # ─── 更新侧边栏最近存档 ─────────────────────
+        if hasattr(self, '_sidebar'):
+            self._sidebar.set_recent_saves(
+                self.save_context_manager.get_recent_saves()
+            )
 
         # ─── 切换到默认视图 ─────────────────────────
         self.view_manager.switch_view("explorer")
@@ -147,30 +154,31 @@ class Application:
     # ════════════════════════════════════════════
 
     def _build_ui(self) -> None:
-        """构建应用主界面"""
+        """构建应用主界面 - Modernized Minecraft aesthetic"""
         # 标签页定义
         self._tab_defs = [
-            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": "🗺"},
-            {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": "📦"},
-            {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": "🔧"},
-            {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": "🗺"},
-            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": "⚖"},
-            {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": "🔗"},
-            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": "📋"},
-            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": "⚙"},
+            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": IconSet.MAP},
+            {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": IconSet.PACKAGE},
+            {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": IconSet.BUILD},
+            {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": IconSet.EXPORT},
+            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": IconSet.BALANCE},
+            {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": IconSet.LINK},
+            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": IconSet.CLIPBOARD},
+            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": IconSet.SETTINGS},
         ]
 
-        # 创建内容容器
+        # 创建内容容器 - Enhanced with better styling
         self._content: ft.Container = ft.Container(
-            padding=18,
+            padding=20,
             bgcolor=THEME.bg_card,
             border=mc_border(3),
+            border_radius=8,
             expand=True,
         )
 
         # 创建顶部操作按钮容器
         self._top_actions = ft.Row(
-            spacing=8,
+            spacing=10,
             scroll=ft.ScrollMode.AUTO,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
@@ -191,10 +199,10 @@ class Application:
         # 构建顶部栏
         top_bar = self._build_top_bar()
 
-        # 可滚动内容区域
+        # 可滚动内容区域 - Enhanced padding
         self._scrollable_content = ft.Container(
             content=self._content,
-            padding=14,
+            padding=16,
             expand=True,
         )
 
@@ -231,19 +239,19 @@ class Application:
             expand=True,
         )
 
-        # 主行
+        # 主行 - Enhanced spacing
         self._main_row = ft.Row(
             [self._sidebar, right_panel],
-            spacing=12,
+            spacing=14,
             vertical_alignment=ft.CrossAxisAlignment.START,
             expand=True,
         )
 
-        # 外壳
+        # 外壳 - Modernized with subtle gradient effect
         self._shell = ft.Container(
             content=self._main_row,
-            padding=12,
-            margin=ft.Margin(left=12, right=12, top=0, bottom=12),
+            padding=14,
+            margin=ft.Margin(left=14, right=14, top=0, bottom=14),
             bgcolor=THEME.bg_primary,
             border=ft.Border(
                 left=ft.BorderSide(4, THEME.border_light),
@@ -251,17 +259,19 @@ class Application:
                 right=ft.BorderSide(4, THEME.border_dark),
                 bottom=ft.BorderSide(4, THEME.border_dark),
             ),
+            border_radius=10,
             shadow=mc_shadow(6),
             expand=True,
         )
 
-        # 底部进度条
+        # 底部进度条 - Enhanced styling
         progress_container = self.progress_manager.create_progress_ui()
         bottom_bar = ft.Container(
             content=ft.Container(
                 content=progress_container,
-                padding=ft.Padding(left=18, right=18, top=8, bottom=8),
+                padding=ft.Padding(left=20, right=20, top=10, bottom=10),
                 bgcolor=THEME.mc_wood,
+                border_radius=6,
             ),
             bgcolor=THEME.mc_wood,
             border=ft.Border(
@@ -270,9 +280,11 @@ class Application:
                 right=ft.BorderSide(3, THEME.border_dark),
                 bottom=ft.BorderSide(3, THEME.border_dark),
             ),
+            border_radius=8,
+            margin=ft.Margin(left=14, right=14, top=0, bottom=14),
         )
 
-        # 应用框架
+        # 应用框架 - Enhanced layout
         app_frame = ft.Column(
             [self.window_manager.build_title_bar(), self._shell, bottom_bar],
             spacing=0,
@@ -282,7 +294,7 @@ class Application:
         self.page.add(app_frame)
 
     def _build_top_bar(self) -> ft.Container:
-        """构建顶部栏
+        """构建顶部栏 - Modernized Minecraft aesthetic
 
         Returns:
             ft.Container: 顶部栏容器
@@ -290,19 +302,31 @@ class Application:
         return ft.Container(
             content=ft.Column(
                 [
-                    ft.Container(height=6, bgcolor=THEME.mc_grass),
+                    # Grass strip (Minecraft signature)
+                    ft.Container(
+                        height=6,
+                        bgcolor=THEME.mc_grass,
+                        border_radius=ft.BorderRadius(top_left=8, top_right=8, bottom_left=0, bottom_right=0),
+                    ),
+                    # Main header content
                     ft.Container(
                         content=ft.Row(
                             [
+                                # App identity
                                 ft.Row(
                                     [
                                         ft.Container(
-                                            content=ft.Text("⛏", size=24, color=THEME.mc_gold),
+                                            content=ft.Icon(
+                                                IconSet.PICKAXE,
+                                                size=24,
+                                                color=THEME.mc_gold,
+                                            ),
                                             width=48,
                                             height=48,
                                             alignment=ft.alignment.Alignment(0, 0),
                                             bgcolor=THEME.bg_secondary,
-                                            border=mc_border(),
+                                            border=mc_border(2),
+                                            border_radius=8,
                                         ),
                                         ft.Column(
                                             [
@@ -320,12 +344,13 @@ class Application:
                                                     font_family="monospace",
                                                 ),
                                             ],
-                                            spacing=2,
+                                            spacing=3,
                                         ),
                                     ],
-                                    spacing=12,
+                                    spacing=14,
                                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                                 ),
+                                # Action buttons
                                 ft.Row(
                                     [self._top_actions],
                                     spacing=15,
@@ -335,7 +360,7 @@ class Application:
                             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                        padding=ft.Padding(left=18, right=18, top=12, bottom=12),
+                        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
                         bgcolor=THEME.mc_wood,
                     ),
                 ],
@@ -343,6 +368,7 @@ class Application:
             ),
             bgcolor=THEME.mc_wood,
             border=mc_border(3),
+            border_radius=8,
         )
 
     def _on_tabs_reorder(self, tabs: list) -> None:
@@ -601,6 +627,23 @@ class Application:
     # ════════════════════════════════════════════
     #  迁移入口（向后兼容）
     # ════════════════════════════════════════════
+
+    def set_start_button_enabled(self, enabled: bool) -> None:
+        """设置开始转换按钮的启用状态
+
+        Args:
+            enabled: 是否启用
+        """
+        try:
+            # 查找迁移视图中的开始按钮
+            if "migrator" in self.view_manager.views:
+                migrator_view = self.view_manager.views["migrator"]
+                # 如果视图有 _start_btn 属性，更新其状态
+                if hasattr(migrator_view, '_start_btn'):
+                    migrator_view._start_btn.disabled = not enabled
+                    migrator_view._start_btn.update()
+        except Exception:
+            pass
 
     def start(self) -> None:
         """开始转换按钮回调"""

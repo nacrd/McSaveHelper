@@ -9,7 +9,11 @@ from .nbt_utils import patch_nbt
 from .scanner import scan_all_regions
 from .uuid_utils import build_mappings, load_usercache
 from .worker import process_regions_parallel
-from .utils import safe_destination_world, update_server_properties, replace_directory_tree
+from .utils import (
+    safe_destination_world, update_server_properties, replace_directory_tree,
+    find_player_data_dirs, find_stats_dirs, find_advancements_dirs, find_data_dirs,
+    get_write_player_data_dir, get_write_stats_dir, get_write_advancements_dir,
+)
 from .types import LogCallback, ProgressCallback, UUIDMapping
 
 
@@ -65,15 +69,22 @@ def run_full(
     l_c = process_nbt_file(dest_world / "level.dat", mappings, log)
     log(f"level.dat 修改 {l_c} 处", "INFO")
 
-    data_dir = dest_world / "data"
-    if data_dir.exists():
+    for data_dir in find_data_dirs(dest_world):
         for df in data_dir.glob("*.dat"):
             process_nbt_file(df, mappings, log)
 
-    # 4. 物理重命名
+    # 4. 物理重命名（兼容 26.1 新旧路径）
     log("重命名玩家文件...", "FILE")
-    for folder in ["playerdata", "stats", "advancements"]:
-        f_path = dest_world / folder
+    # 收集所有需要重命名的目录（新+旧）
+    rename_folders: List[Path] = []
+    for find_fn in [find_player_data_dirs, find_stats_dirs, find_advancements_dirs]:
+        rename_folders.extend(find_fn(dest_world))
+    # 去重
+    seen_folders: set = set()
+    for f_path in rename_folders:
+        if f_path in seen_folders:
+            continue
+        seen_folders.add(f_path)
         if f_path.exists():
             for m in mappings:
                 old_u, new_u = m[2], m[3]

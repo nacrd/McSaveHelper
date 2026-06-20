@@ -1,11 +1,13 @@
 """
 WorldScanner - 存档文件扫描器
 负责扫描存档目录结构，收集文件路径和元数据
+支持 Minecraft 26.1 新版路径格式（向后兼容旧版）
 """
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Set, Callable
 from ..scanner import scan_all_regions
+from ..utils import find_player_data_dirs, find_data_dirs
 
 
 class WorldScanner:
@@ -34,20 +36,24 @@ class WorldScanner:
         }
 
     def _scan_players(self) -> Dict[str, Path]:
-        """扫描玩家数据文件
+        """扫描玩家数据文件（兼容 Minecraft 26.1 新旧路径）
+
+        新版路径: players/data/*.dat
+        旧版路径: playerdata/*.dat
 
         Returns:
             UUID -> 文件路径的映射（UUID 已规范化为无连字符小写）
         """
         player_files = {}
-        playerdata_dir = self.world_path / "playerdata"
 
-        if playerdata_dir.is_dir():
+        for playerdata_dir in find_player_data_dirs(self.world_path):
             try:
                 for f in playerdata_dir.iterdir():
                     if f.is_file() and f.suffix == ".dat":
                         uuid = self._normalize_uuid(f.stem)
-                        player_files[uuid] = f
+                        # 新版路径优先，不覆盖已有的
+                        if uuid not in player_files:
+                            player_files[uuid] = f
             except OSError:
                 pass
 
@@ -78,17 +84,23 @@ class WorldScanner:
         return region_files
 
     def _scan_data(self) -> List[Path]:
-        """扫描 data 目录
+        """扫描 data 目录（兼容 Minecraft 26.1 新旧路径）
+
+        新版路径: data/minecraft/*.dat
+        旧版路径: data/*.dat
 
         Returns:
             数据文件路径列表
         """
         data_files = []
-        data_dir = self.world_path / "data"
+        seen_names: Set[str] = set()
 
-        if data_dir.is_dir():
+        for data_dir in find_data_dirs(self.world_path):
             try:
-                data_files = list(data_dir.glob("*.dat"))
+                for f in data_dir.glob("*.dat"):
+                    if f.name not in seen_names:
+                        data_files.append(f)
+                        seen_names.add(f.name)
             except OSError:
                 pass
 
@@ -170,7 +182,7 @@ class WorldScanner:
         return candidate_paths
 
     def scan_dimensions(self, region_files: Dict[Tuple[int, int], Path]) -> List[Dict[str, str]]:
-        """扫描存档中所有可用的维度目录
+        """扫描存档中所有可用的维度目录（兼容 Minecraft 26.1 新旧路径）
 
         Args:
             region_files: 区域文件映射（来自 _scan_regions）
@@ -187,45 +199,75 @@ class WorldScanner:
         def _has_regions(region_dir: Path) -> bool:
             return region_dir in region_parent_dirs
 
-        # 扫描原版维度
-        vanilla_dims = [
-            ("overworld", "🌍 主世界", self.world_path / "region"),
-            ("nether", "🔥 下界", self.world_path / "DIM-1" / "region"),
-            ("end", "🌌 末地", self.world_path / "DIM1" / "region"),
-        ]
+        # 新版 (26.1) 维度路径映射：命名空间维度名 -> (显示名)
+        new_dim_display = {
+            "the_nether": "🔥 下界",
+            "the_end": "🌌 末地",
+            "overworld": "🌍 主世界",
+        }
 
-        for dim_id, dim_name, region_dir in vanilla_dims:
-            if _has_regions(region_dir):
-                dimensions.append({"id": dim_id, "name": dim_name, "region_dir": str(region_dir)})
-                seen.add(dim_id)
+        # 扫描新版维度路径 dimensions/minecraft/<dim>/region
+        mc_dims_base = self.world_path / "dimensions" / "minecraft"
+        if mc_dims_base.is_dir():
+            try:
+                for dim_dir in mc_dims_base.iterdir():
+                    if not dim_dir.is_dir():
+                        continue
+                    region_dir = dim_dir / "region"
+                    if not _has_regions(region_dir):
+                        continue
+                    dim_name_str = dim_dir.name
+                    dim_id = f"minecraft:{dim_name_str}"
+                    if dim_id in seen:
+                        continue
+                    display_name = new_dim_display.get(dim_name_str, f"📦 minecraft:{dim_name_str}")
+                    dimensions.append({"id": dim_id, "name": display_name, "region_dir": str(region_dir)})
+                    seen.add(dim_id)
+            except OSError:
+                pass
 
-        # DIM* 格式（旧版模组维度）
+        # 扫描主世界 region（始终为 overworld）
+        overworld_region = self.world_path / "region"
+        if "overworld" not in seen and _has_regions(overworld_region):
+            dimensions.append({"id": "overworld", "name": "🌍 主世界", "region_dir": str(overworld_region)})
+            seen.add("overworld")
+
+        # 旧版 DIM* 格式（DIM-1、DIM1 及模组维度），仅在新版路径未覆盖时添加
+        old_to_new = {"DIM-1": "minecraft:the_nether", "DIM1": "minecraft:the_end"}
         try:
             for dim_dir in self.world_path.iterdir():
                 if not dim_dir.is_dir() or not dim_dir.name.startswith("DIM"):
                     continue
-                if dim_dir.name in ("DIM-1", "DIM1"):
-                    continue
+                new_dim_id = old_to_new.get(dim_dir.name)
+                if new_dim_id and new_dim_id in seen:
+                    continue  # 新版路径已存在，跳过
 
                 region_dir = dim_dir / "region"
-                dim_id = dim_dir.name.lower()
+                dim_id = new_dim_id or dim_dir.name.lower()
 
                 if dim_id not in seen and _has_regions(region_dir):
-                    dimensions.append({
-                        "id": dim_id,
-                        "name": f"📦 {dim_dir.name}",
-                        "region_dir": str(region_dir),
-                    })
+                    display_name = new_dim_display.get(
+                        dim_dir.name, f"📦 {dim_dir.name}"
+                    )
+                    # 对 DIM-1 和 DIM1 使用对应显示名
+                    if dim_dir.name == "DIM-1":
+                        display_name = "🔥 下界"
+                    elif dim_dir.name == "DIM1":
+                        display_name = "🌌 末地"
+                    dimensions.append({"id": dim_id, "name": display_name, "region_dir": str(region_dir)})
                     seen.add(dim_id)
         except OSError:
             pass
 
-        # dimensions/{namespace}/{name} 格式（1.16+ 模组维度）
+        # dimensions/{namespace}/{name} 格式（非 minecraft 命名空间的模组维度）
         dimensions_base = self.world_path / "dimensions"
         if dimensions_base.is_dir():
             try:
                 for namespace_dir in dimensions_base.iterdir():
                     if not namespace_dir.is_dir():
+                        continue
+                    # minecraft 命名空间已在上面处理过
+                    if namespace_dir.name == "minecraft":
                         continue
                     try:
                         for dim_dir in namespace_dir.iterdir():
@@ -244,13 +286,6 @@ class WorldScanner:
                                 continue
 
                             display_name = f"📦 {namespace}:{dim_name_str}"
-                            if namespace == "minecraft":
-                                vanilla_map = {
-                                    "overworld": "🌍 主世界",
-                                    "the_nether": "🔥 下界",
-                                    "the_end": "🌌 末地",
-                                }
-                                display_name = vanilla_map.get(dim_name_str, display_name)
 
                             dimensions.append({
                                 "id": dim_id,

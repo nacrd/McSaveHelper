@@ -1,34 +1,21 @@
 """Block search implementation."""
 
-from pathlib import Path
-from typing import Any, Callable, List
+from typing import Any, List
 
-from .constants import MAX_RESULTS
+from .base_searcher import BaseSearcher
 from .container_searcher import ContainerSearcher
-from .models import SearchResult, SearchSummary
-from .utils import get_block_name, get_dimension_region_files, get_section_range, matches_target, tag_to_str
+from .models import SearchResult
+from .utils import get_block_name, get_section_range, matches_target, tag_to_str
 
 
-class BlockSearcher:
-    """Searches blocks in region chunks."""
+class BlockSearcher(BaseSearcher):
+    """搜索区域区块中的方块。"""
 
-    def __init__(self, results: List[SearchResult], summary: SearchSummary) -> None:
-        self.results = results
-        self.summary = summary
+    progress_label = "区块文件"
+
+    def __init__(self, results: List[SearchResult], summary: Any) -> None:
+        super().__init__(results, summary)
         self.container_helper = ContainerSearcher(results, summary)
-
-    def search_dimension(self, world_path: Path, dimension: str, target: str, log: Callable[[str, str], None], progress: Callable[[float, str], None]) -> None:
-        try:
-            region_files = get_dimension_region_files(world_path, dimension)
-            if not region_files:
-                log(f"维度 {dimension} 没有区块文件", "WARNING")
-                return
-            log(f"在 {dimension} 中找到 {len(region_files)} 个区块文件", "INFO")
-            self._scan_regions(region_files, dimension, target, log, progress)
-        except ImportError:
-            log("anvil-parser2 未安装，无法搜索方块", "ERROR")
-        except Exception as e:
-            log(f"搜索维度 {dimension} 失败: {e}", "ERROR")
 
     def search_chunk(self, chunk: Any, target: str, dimension: str) -> None:
         try:
@@ -39,32 +26,6 @@ class BlockSearcher:
                 self._scan_section(chunk, target, dimension, section_y)
         except Exception:
             pass
-
-    def _scan_regions(self, region_files: List[Path], dimension: str, target: str, log: Callable[[str, str], None], progress: Callable[[float, str], None]) -> None:
-        from anvil import Region
-        total = len(region_files)
-        for idx, region_file in enumerate(region_files):
-            if self._limit_reached():
-                return
-            progress(idx / total, f"搜索区块文件 {idx + 1}/{total}")
-            self.summary.scanned_regions += 1
-            try:
-                self._scan_region(Region.from_file(str(region_file)), target, dimension)
-            except Exception as e:
-                log(f"读取区块文件 {region_file.name} 失败: {e}", "WARNING")
-
-    def _scan_region(self, region: Any, target: str, dimension: str) -> None:
-        for cx in range(32):
-            for cz in range(32):
-                if self._limit_reached():
-                    return
-                try:
-                    chunk = region.get_chunk(cx, cz)
-                    if chunk is not None:
-                        self.summary.scanned_chunks += 1
-                        self.search_chunk(chunk, target, dimension)
-                except Exception:
-                    self.summary.skipped_chunks += 1
 
     def _matching_sections(self, chunk: Any, target: str) -> List[int]:
         target_block = self._target_block(target)
@@ -118,6 +79,3 @@ class BlockSearcher:
         block_name = get_block_name(block)
         block_id = tag_to_str(getattr(block, "id", ""))
         return matches_target(block_name, target) or matches_target(block_id, target)
-
-    def _limit_reached(self) -> bool:
-        return len(self.results) >= MAX_RESULTS

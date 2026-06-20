@@ -16,7 +16,23 @@ def text_field(
     password: bool = False,
     read_only: bool = False,
 ) -> ft.TextField:
-    """Create a Minecraft-style text field"""
+    """Create a Minecraft-style text field
+
+    Modernized with rounded corners and better styling.
+
+    Args:
+        value: Initial value
+        label: Field label
+        hint_text: Placeholder text
+        expand: Whether to expand horizontally
+        width: Fixed width (overrides expand)
+        on_change: Change handler
+        password: Password field mode
+        read_only: Read-only mode
+
+    Returns:
+        ft.TextField: Configured text field
+    """
     tf = ft.TextField(
         value=value,
         label=label,
@@ -30,11 +46,11 @@ def text_field(
         text_size=13,
         color=THEME.text_primary,
         bgcolor=THEME.bg_secondary,
-        border_radius=0,
+        border_radius=6,
         cursor_color=THEME.mc_diamond,
         label_style=ft.TextStyle(color=THEME.text_secondary, size=12),
         hint_style=ft.TextStyle(color=THEME.text_muted, size=12),
-        content_padding=ft.Padding(left=12, right=12, top=8, bottom=8),
+        content_padding=ft.Padding(left=14, right=14, top=10, bottom=10),
     )
     tf.expand = expand
     return tf
@@ -45,6 +61,16 @@ def current_save_field(
     hint_text: str = "请通过侧边栏「设置当前存档」设置存档目录",
     value: str = "",
 ) -> ft.TextField:
+    """Create a read-only field for displaying current save path
+
+    Args:
+        label: Field label
+        hint_text: Placeholder text
+        value: Initial value
+
+    Returns:
+        ft.TextField: Read-only text field
+    """
     return text_field(
         value=value,
         label=label,
@@ -58,7 +84,16 @@ def checkbox(
     value: bool = False,
     on_change: Optional[Callable[[ft.ControlEvent], Any]] = None,
 ) -> ft.Checkbox:
-    """Create a Minecraft-style checkbox"""
+    """Create a Minecraft-style checkbox
+
+    Args:
+        label: Checkbox label
+        value: Initial value
+        on_change: Change handler
+
+    Returns:
+        ft.Checkbox: Configured checkbox
+    """
     return ft.Checkbox(
         label=label,
         value=value,
@@ -70,7 +105,15 @@ def checkbox(
 
 
 def label(text: str, icon: str = "") -> ft.Text:
-    """Create a field label with optional icon"""
+    """Create a field label with optional icon
+
+    Args:
+        text: Label text
+        icon: Optional icon prefix
+
+    Returns:
+        ft.Text: Styled label
+    """
     display_text = f"{icon} {text}" if icon else text
     return ft.Text(
         display_text,
