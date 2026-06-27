@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from app.ui.theme import THEME, mc_border
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox, label, current_save_field
+from app.ui.components.fields import text_field, checkbox, label, current_save_field, dropdown
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
 
@@ -196,30 +196,20 @@ class MigratorView(ft.Column):
             padding=ft.Padding(left=20, right=20, bottom=12),
         ))
 
-        self._vc_platform_dd = ft.Dropdown(
-            options=[
-                ft.dropdown.Option(
-                    k,
-                    v) for k,
-                v in PLATFORM_OPTIONS],
+        self._vc_platform_dd = dropdown(
+            options=[ft.dropdown.Option(k, v) for k, v in PLATFORM_OPTIONS],
             value=mc.target_platform or "java",
             width=150,
-            border_color=THEME.border_standard,
-            text_size=13,
-            on_select=lambda e: setattr(
-                self.app.config.migration,
-                "target_platform",
-                e.control.value),
+            on_change=lambda e: setattr(
+                self.app.config.migration, "target_platform", e.control.value),
         )
-        self._vc_version_dd = ft.Dropdown(
+        self._vc_version_dd = dropdown(
             options=[ft.dropdown.Option(
                 str(ver), f"{name} (ID: {ver}){'  — ' + note if note else ''}"
             ) for name, ver, note in VERSION_OPTIONS],
             value=mc.target_version or str(VERSION_OPTIONS[0][1]),
             width=280,
-            border_color=THEME.border_standard,
-            text_size=13,
-            on_select=self._on_version_change,
+            on_change=self._on_version_change,
         )
         s.controls.append(ft.Container(
             content=ft.Row([

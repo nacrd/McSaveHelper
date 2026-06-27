@@ -4,6 +4,7 @@ import time
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui
 
 
@@ -86,9 +87,9 @@ class FloatingLogPanel(ft.Container):
             tooltip="清除日志",
         )
 
-        # 关闭按钮
+        # 关闭按钮 — Material Icon 代替 "×" 文字
         self._close_btn = ft.Container(
-            content=ft.Text("×", size=18, color=THEME.text_secondary),
+            content=ft.Icon(IconSet.CLOSE, size=16, color=THEME.text_secondary),
             on_click=self._collapse,
             padding=4,
             border_radius=4,
@@ -397,9 +398,9 @@ class FloatingLogButton(ft.Container):
         # 加载保存的位置
         self._load_position()
 
-        # 按钮容器
+        # 按钮容器 — Material Icon 代替 emoji
         self._button = ft.Container(
-            content=ft.Text("📜", size=20),
+            content=ft.Icon(IconSet.DOCUMENT, size=22, color=THEME.mc_gold),
             width=48,
             height=48,
             bgcolor=THEME.mc_coal,
@@ -494,11 +495,12 @@ class FloatingLogButton(ft.Container):
         try:
             if self._floating_panel.is_visible:
                 self._floating_panel.set_visible(False)
-                self._button.content = ft.Text("📜", size=20)
+                self._button.content = ft.Icon(
+                    IconSet.DOCUMENT, size=22, color=THEME.mc_gold)
             else:
                 self._floating_panel.set_visible(True)
-                self._button.content = ft.Text(
-                    "×", size=18, color=THEME.mc_redstone)
+                self._button.content = ft.Icon(
+                    IconSet.CLOSE, size=20, color=THEME.mc_redstone)
             self._button.update()
             if self._on_click_handler:
                 self._on_click_handler()
@@ -517,10 +519,11 @@ class FloatingLogButton(ft.Container):
         """更新图标"""
         try:
             if expanded:
-                self._button.content = ft.Text(
-                    "×", size=18, color=THEME.mc_redstone)
+                self._button.content = ft.Icon(
+                    IconSet.CLOSE, size=20, color=THEME.mc_redstone)
             else:
-                self._button.content = ft.Text("📜", size=20)
+                self._button.content = ft.Icon(
+                    IconSet.DOCUMENT, size=22, color=THEME.mc_gold)
             self._button.update()
         except Exception:
             pass

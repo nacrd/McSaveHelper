@@ -13,12 +13,27 @@
     "completed": "Completed",
     "failed": "Failed",
     "batch_completed": "Batch processing completed",
-    "batch_failed": "Batch processing failed"
+    "batch_failed": "Batch processing failed",
+    "start_stats": "Start Analysis",
+    "open_search": "Open Search",
+    "refresh_heatmap": "Refresh Heatmap",
+    "stage_player": "Stage Player",
+    "commit_changes": "Commit Changes",
+    "discard_changes": "Discard Changes",
+    "detect_save": "Detect Save",
+    "start_export": "Start Export",
+    "start_compare": "Start Compare",
+    "import_lang": "Import Lang File",
+    "read_config": "Read Config"
   },
   "sidebar": {
     "migrator": "Batch Migration",
     "explorer": "Save Explorer",
+    "compare": "Save Compare",
+    "save_repair": "Save Repair",
+    "map_export": "Map Export",
     "mappings": "Mapping Manager",
+    "server_properties": "Server Config",
     "settings": "Settings"
   },
   "log_panel": {
@@ -133,7 +148,8 @@
       "title": "UI Settings",
       "theme": "Theme",
       "language": "Language",
-      "auto_clear_log": "Auto Clear Old Logs"
+      "auto_clear_log": "Auto Clear Old Logs",
+      "sidebar_mode": "Sidebar Mode"
     },
     "batch": {
       "title": "Batch Processing",

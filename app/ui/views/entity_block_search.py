@@ -8,7 +8,7 @@ import flet as ft
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox, current_save_field
+from app.ui.components.fields import text_field, checkbox, current_save_field, dropdown
 from app.ui.components.cards import placeholder
 from app.ui.components.layout import page_header
 from app.services.entity_block_search_service import (
@@ -57,20 +57,16 @@ class EntityBlockSearchView(ft.Column):
             hint_text="请通过侧边栏「设置当前存档」设置要搜索的当前存档目录",
         )
 
-        self._search_type_dropdown = ft.Dropdown(
+        self._search_type_dropdown = dropdown(
             label="搜索范围",
             options=[
-                ft.dropdown.Option("entity", "🐾 实体"),
-                ft.dropdown.Option("block", "🧱 方块"),
-                ft.dropdown.Option("container", "📦 容器"),
+                ft.dropdown.Option("entity", "实体"),
+                ft.dropdown.Option("block", "方块"),
+                ft.dropdown.Option("container", "容器"),
             ],
             value="entity",
-            bgcolor=THEME.bg_secondary,
-            border_color=THEME.border_subtle,
-            color=THEME.text_primary,
             width=250,
             on_change=self._on_search_type_change,
-            on_select=self._on_search_type_change,
         )
 
         self._target_field = text_field(

@@ -1,5 +1,5 @@
 """Minecraft-style input field components"""
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, List, Union
 
 import flet as ft
 
@@ -122,3 +122,60 @@ def label(text: str, icon: str = "") -> ft.Text:
         color=THEME.mc_gold,
         font_family="monospace",
     )
+
+
+def dropdown(
+    options: Union[List[str], List[ft.dropdown.Option]],
+    value: Optional[str] = None,
+    label: Optional[str] = None,
+    hint_text: Optional[str] = None,
+    on_change: Optional[Callable[[ft.ControlEvent], Any]] = None,
+    expand: bool = True,
+    width: Optional[int] = None,
+    text_size: int = 13,
+    border_radius: int = 6,
+) -> ft.Dropdown:
+    """Create a Minecraft-styled dropdown with consistent theme colors.
+
+    Args:
+        options: List of strings or ft.dropdown.Option objects
+        value: Currently selected value
+        label: Dropdown label
+        hint_text: Placeholder text when nothing selected
+        on_change: Change handler
+        expand: Whether to expand horizontally
+        width: Fixed width (overrides expand)
+        text_size: Text size in pixels
+        border_radius: Border radius in pixels
+
+    Returns:
+        ft.Dropdown: Themed dropdown control
+    """
+    # Normalize string options to ft.dropdown.Option
+    normalized: List[ft.dropdown.Option] = []
+    for opt in options:
+        if isinstance(opt, str):
+            normalized.append(ft.dropdown.Option(opt))
+        else:
+            normalized.append(opt)
+
+    dd = ft.Dropdown(
+        options=normalized,
+        value=value,
+        label=label,
+        hint_text=hint_text,
+        on_change=on_change,
+        bgcolor=THEME.bg_secondary,
+        border_color=THEME.border_standard,
+        focused_border_color=THEME.mc_diamond,
+        color=THEME.text_primary,
+        text_size=text_size,
+        border_radius=border_radius,
+        label_style=ft.TextStyle(color=THEME.text_secondary, size=12),
+        hint_style=ft.TextStyle(color=THEME.text_muted, size=12),
+        content_padding=ft.Padding(left=14, right=14, top=10, bottom=10),
+    )
+    dd.expand = expand
+    if width is not None:
+        dd.width = width
+    return dd

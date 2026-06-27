@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional, Callable, Any
 from pathlib import Path
 import flet as ft
 
-from app.ui.theme import THEME, mc_border
+from app.ui.theme import THEME, mc_border, get_theme_manager
 from core.logger import logger
 
 if TYPE_CHECKING:
@@ -66,6 +66,20 @@ class WindowManager:
         if icon_path:
             page.window.icon = icon_path
 
+        # 监听主题变化
+        get_theme_manager().register_listener(self._on_theme_changed)
+
+    def _on_theme_changed(self, mode: str) -> None:
+        """主题切换时更新窗口颜色"""
+        try:
+            self.page.bgcolor = THEME.bg_primary
+            self.page.window.bgcolor = THEME.bg_primary
+            self.page.theme_mode = (
+                ft.ThemeMode.LIGHT if mode == "light" else ft.ThemeMode.DARK
+            )
+        except Exception:
+            pass
+
     def build_title_bar(self) -> ft.Container:
         """构建自定义窗口标题栏
 
@@ -106,7 +120,7 @@ class WindowManager:
                     border=mc_border(2),
                 ),
                 ft.Text(
-                    "MCSaveHelper  ▣ Minecraft Save Toolkit",
+                    self.app._t("app.title_bar", "MCSaveHelper ▣ Minecraft Save Toolkit"),
                     size=13, color=THEME.text_primary,
                     weight=ft.FontWeight.BOLD, font_family="monospace",
                 ),
@@ -298,14 +312,24 @@ class WindowManager:
         self._notify_current_view_layout(compact)
 
     def _adjust_sidebar_width(self, compact: bool, roomy: bool) -> None:
-        """调整侧边栏宽度
+        """调整侧边栏宽度 / 折叠状态
+
+        窗口 < 800px 时自动收窄侧边栏，
+        >= 800px 时恢复用户设置的展开状态。
 
         Args:
-            compact: 是否紧凑模式
-            roomy: 是否宽松模式
+            compact: 是否紧凑模式（窗口 < 980px）
+            roomy: 是否宽松模式（窗口 >= 1300px）
         """
-        if hasattr(self.app, '_sidebar'):
-            self.app._sidebar.set_width(170 if compact else 230 if roomy else 205)
+        if not hasattr(self.app, '_sidebar'):
+            return
+        sidebar = self.app._sidebar
+        # 极窄窗口：自动收窄
+        if compact and (self.page.window.width or 0) < 800:
+            sidebar.set_collapsed(True)
+        else:
+            sidebar.set_collapsed(False)
+            sidebar.set_width(230 if roomy else 205)
 
     def _adjust_spacing_and_padding(self, compact: bool) -> None:
         """调整间距和内边距

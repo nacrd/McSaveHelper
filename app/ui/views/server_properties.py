@@ -14,7 +14,7 @@ from app.services.server_properties_service import (
 from app.ui.components.buttons import btn_ghost, btn_success
 from app.ui.components.cards import card, section_title
 from app.ui.icons import IconSet
-from app.ui.components.fields import text_field
+from app.ui.components.fields import text_field, dropdown
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 
@@ -82,12 +82,11 @@ class ServerPropertiesView(ft.Column):
                     label_style=ft.TextStyle(
                         color=THEME.text_secondary))
             elif key in ENUM_PROPERTIES:
-                control = ft.Dropdown(
-                    options=[
-                        ft.dropdown.Option(v) for v in ENUM_PROPERTIES[key]],
+                control = dropdown(
+                    options=[ft.dropdown.Option(v) for v in ENUM_PROPERTIES[key]],
                     value=value,
                     width=220,
-                    border_color=THEME.border_standard)
+                )
             else:
                 control = text_field(
                     value=str(value),

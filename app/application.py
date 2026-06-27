@@ -24,7 +24,7 @@ from app.services.migration_service import MigrationService
 from app.services.i18n_service import I18nService
 from app.controllers.migration_controller import MigrationController
 
-from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.theme import THEME, mc_border, mc_shadow, get_theme_manager
 from app.ui.icons import IconSet
 from app.ui.sidebar import Sidebar
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
@@ -57,6 +57,9 @@ class Application:
 
         # ─── 初始化服务 ─────────────────────────────
         self._init_services()
+
+        # ─── 初始化主题 ─────────────────────────────
+        self._init_theme()
 
         # ─── 初始化管理器 ───────────────────────────
         self._init_managers()
@@ -123,6 +126,15 @@ class Application:
         except Exception as e:
             print(f"[WARN] UUIDService 初始化失败: {e}")
             self.uuid = UUIDService.__new__(UUIDService)  # type: ignore
+
+    def _init_theme(self) -> None:
+        """从配置初始化主题模式"""
+        try:
+            saved_theme = self.config.ui_settings.get("theme", "dark")
+            manager = get_theme_manager()
+            manager.set_mode(saved_theme)
+        except Exception:
+            pass  # 默认暗色主题
 
     def _init_managers(self) -> None:
         """初始化所有管理器"""

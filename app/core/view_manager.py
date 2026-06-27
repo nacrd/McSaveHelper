@@ -146,30 +146,31 @@ class ViewManager:
         Returns:
             List[TopAction]: 操作按钮列表
         """
+        _t = self.app._t
         if view_id == "explorer":
             return [
                 TopAction(
-                    "开始统计",
+                    _t("top_bar.start_stats", "开始统计"),
                     lambda e: current_view._analyze_world_stats(e)
                 ),
                 TopAction(
-                    "打开搜索",
+                    _t("top_bar.open_search", "打开搜索"),
                     lambda e: current_view._start_entity_block_search(e)
                 ),
                 TopAction(
-                    "刷新区域图",
+                    _t("top_bar.refresh_heatmap", "刷新区域图"),
                     lambda e: current_view._refresh_heatmap()
                 ),
                 TopAction(
-                    "暂存玩家",
+                    _t("top_bar.stage_player", "暂存玩家"),
                     lambda e: current_view._stage_player_edit_form(e)
                 ),
                 TopAction(
-                    "提交变更",
+                    _t("top_bar.commit_changes", "提交变更"),
                     lambda e: current_view._commit_nbt_changes(e)
                 ),
                 TopAction(
-                    "丢弃暂存",
+                    _t("top_bar.discard_changes", "丢弃暂存"),
                     lambda e: current_view._discard_nbt_changes(e),
                     "danger"
                 ),
@@ -177,27 +178,27 @@ class ViewManager:
 
         action_map: Dict[str, TopAction] = {
             "migrator": TopAction(
-                "开始转换",
+                _t("top_bar.start_conversion", "开始转换"),
                 lambda e: self.app.start()
             ),
             "save_repair": TopAction(
-                "检测存档",
+                _t("top_bar.detect_save", "检测存档"),
                 lambda e: current_view._start_detect(e)
             ),
             "map_export": TopAction(
-                "开始导出",
+                _t("top_bar.start_export", "开始导出"),
                 lambda e: current_view._start_export(e)
             ),
             "compare": TopAction(
-                "开始对比",
+                _t("top_bar.start_compare", "开始对比"),
                 lambda e: current_view._compare(e)
             ),
             "mappings": TopAction(
-                "导入语言文件",
+                _t("top_bar.import_lang", "导入语言文件"),
                 lambda e: current_view._import_lang(e)
             ),
             "server_properties": TopAction(
-                "读取配置",
+                _t("top_bar.read_config", "读取配置"),
                 lambda e: current_view._load(e)
             ),
         }

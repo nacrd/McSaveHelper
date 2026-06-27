@@ -13,11 +13,24 @@
     "completed": "已完成",
     "failed": "失败",
     "batch_completed": "批量处理完成",
-    "batch_failed": "批量处理失败"
+    "batch_failed": "批量处理失败",
+    "start_stats": "开始统计",
+    "open_search": "打开搜索",
+    "refresh_heatmap": "刷新区域图",
+    "stage_player": "暂存玩家",
+    "commit_changes": "提交变更",
+    "discard_changes": "丢弃暂存",
+    "detect_save": "检测存档",
+    "start_export": "开始导出",
+    "start_compare": "开始对比",
+    "import_lang": "导入语言文件",
+    "read_config": "读取配置"
   },
   "sidebar": {
     "migrator": "存档转换",
     "explorer": "存档浏览器",
+    "save_repair": "存档修复",
+    "map_export": "地图导出",
     "compare": "存档对比",
     "mappings": "映射管理",
     "server_properties": "服务器配置",
@@ -135,7 +148,8 @@
       "title": "界面设置",
       "theme": "主题",
       "language": "语言",
-      "auto_clear_log": "自动清除旧日志"
+      "auto_clear_log": "自动清除旧日志",
+      "sidebar_mode": "侧边栏模式"
     },
     "batch": {
       "title": "批量处理",

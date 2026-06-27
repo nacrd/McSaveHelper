@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
-from app.ui.components.fields import text_field, checkbox, label
+from app.ui.components.fields import text_field, checkbox, label, dropdown
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
 
@@ -95,13 +95,15 @@ class SettingsView(ft.Column):
         s = ft.Column(spacing=0)
         s.controls.append(section_title(self._t("settings.ui.title", "界面设置")))
 
-        self._theme_dropdown = ft.Dropdown(
-            options=[ft.dropdown.Option("dark"), ft.dropdown.Option("light")],
+        self._theme_dropdown = dropdown(
+            options=[
+                ft.dropdown.Option("dark", "暗色"),
+                ft.dropdown.Option("light", "浅色"),
+            ],
             value=cfg.theme,
-            width=120, border_color=THEME.border_standard, text_size=13,
+            width=120,
+            on_change=lambda e: self._on_theme_change(e.control.value),
         )
-        self._theme_dropdown.on_change = lambda e: self._on_theme_change(
-            e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
@@ -110,17 +112,37 @@ class SettingsView(ft.Column):
             padding=ft.Padding(left=20, right=20, bottom=10, top=10),
         ))
 
-        self._lang_dropdown = ft.Dropdown(
-            options=[ft.dropdown.Option("zh_CN"), ft.dropdown.Option("en_US")],
+        self._lang_dropdown = dropdown(
+            options=[
+                ft.dropdown.Option("zh_CN", "简体中文"),
+                ft.dropdown.Option("en_US", "English"),
+            ],
             value=cfg.language,
-            width=120, border_color=THEME.border_standard, text_size=13,
+            width=120,
+            on_change=lambda e: self._on_language_change(e.control.value),
         )
-        self._lang_dropdown.on_change = lambda e: self._on_language_change(
-            e.control.value)
         s.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.language", "语言")),
                 self._lang_dropdown,
+            ], spacing=4),
+            padding=ft.Padding(left=20, right=20, bottom=10),
+        ))
+
+        self._sidebar_mode_dropdown = dropdown(
+            options=[
+                ft.dropdown.Option("expanded", "展开"),
+                ft.dropdown.Option("collapsed", "收窄"),
+                ft.dropdown.Option("auto", "自动"),
+            ],
+            value=cfg.ui_settings.get("sidebar_mode", "auto"),
+            width=120,
+            on_change=lambda e: self._on_sidebar_mode_change(e.control.value),
+        )
+        s.controls.append(ft.Container(
+            content=ft.Column([
+                label(self._t("settings.ui.sidebar_mode", "侧边栏模式")),
+                self._sidebar_mode_dropdown,
             ], spacing=4),
             padding=ft.Padding(left=20, right=20, bottom=10),
         ))
@@ -339,10 +361,32 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _on_theme_change(self, theme: str) -> None:
+        from app.ui.theme import get_theme_manager
         self.app.config._config["ui_settings"]["theme"] = theme
-        self.app.page.theme_mode = ft.ThemeMode.LIGHT if theme == "light" else ft.ThemeMode.DARK
+        get_theme_manager().set_mode(theme)
         self._persist()
-        self.app.page.update()
+        try:
+            self.app.page.bgcolor = THEME.bg_primary
+            self.app.page.window.bgcolor = THEME.bg_primary
+            self.app.page.theme_mode = (
+                ft.ThemeMode.LIGHT if theme == "light" else ft.ThemeMode.DARK
+            )
+            self.app.page.update()
+        except Exception:
+            pass
+
+    def _on_sidebar_mode_change(self, mode: str) -> None:
+        self.app.config._config["ui_settings"]["sidebar_mode"] = mode
+        self._persist()
+        try:
+            if hasattr(self.app, '_sidebar'):
+                if mode == "collapsed":
+                    self.app._sidebar.set_collapsed(True)
+                elif mode == "expanded":
+                    self.app._sidebar.set_collapsed(False)
+                # "auto" — let the window manager handle it
+        except Exception:
+            pass
 
     def _on_language_change(self, lang: str) -> None:
         self.app.config.language = lang

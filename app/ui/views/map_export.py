@@ -8,7 +8,7 @@ import flet as ft
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, current_save_field
+from app.ui.components.fields import text_field, current_save_field, dropdown
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
 from app.ui.utils import run_on_ui
@@ -48,19 +48,16 @@ class MapExportView(ft.Column):
         )
         self._output_path_field.read_only = True
 
-        self._map_type_dropdown = ft.Dropdown(
+        self._map_type_dropdown = dropdown(
             label="地图类型",
             options=[
                 ft.dropdown.Option("topview", "俯视图"),
                 ft.dropdown.Option("terrain", "地形图（高度着色）"),
             ],
             value="topview",
-            bgcolor=THEME.bg_secondary,
-            border_color=THEME.border_subtle,
-            color=THEME.text_primary,
         )
 
-        self._scale_dropdown = ft.Dropdown(
+        self._scale_dropdown = dropdown(
             label="缩放比例",
             options=[
                 ft.dropdown.Option("1", "1:1（原始大小）"),
@@ -69,9 +66,6 @@ class MapExportView(ft.Column):
                 ft.dropdown.Option("8", "1:8（缩小八分之一）"),
             ],
             value="4",
-            bgcolor=THEME.bg_secondary,
-            border_color=THEME.border_subtle,
-            color=THEME.text_primary,
         )
 
         # 结果显示
