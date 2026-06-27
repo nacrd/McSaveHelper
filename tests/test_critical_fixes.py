@@ -345,17 +345,17 @@ class TestMigrationControllerPublicMethods:
 
 class TestOmniNbtEditing:
     def test_nbt_tree_parses_paths_and_coerces_values(self):
-        from app.ui.views.explorer.nbt_tree import NBTTreeView
+        from app.ui.views.explorer.nbt_tree.parser import parse_path, coerce_value
         from nbtlib import Int, String
         from nbtlib.tag import IntArray
 
-        assert NBTTreeView._parse_path("Inventory[0].Count") == [
+        assert parse_path("Inventory[0].Count") == [
             "Inventory", 0, "Count"]
-        assert NBTTreeView._coerce_value("64", Int(1), "Int") == Int(64)
-        assert NBTTreeView._coerce_value(
+        assert coerce_value("64", Int(1), "Int") == Int(64)
+        assert coerce_value(
             "diamond", String("stone"), "String") == String("diamond")
         assert list(
-            NBTTreeView._coerce_value(
+            coerce_value(
                 "[1, 2, 3]", IntArray(
                     [0]), "IntArray")) == [
                 1, 2, 3]
@@ -549,6 +549,7 @@ class TestOmniNbtEditing:
             self, tmp_path: Path):
         import zlib
         from nbt import nbt
+        from nbtlib import Compound, File, Int
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -557,12 +558,16 @@ class TestOmniNbtEditing:
         region_path.parent.mkdir(parents=True)
         region_path.write_bytes(b"\x00" * 8192)
 
+        level = File(
+            Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
+        level.save(world / "level.dat")
+
         chunk = nbt.NBTFile()
         chunk.name = ""
         chunk.tags.append(nbt.TAG_Int(name="DataVersion", value=1))
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
-        session._write_chunk(region_path, 0, 0, chunk)
+        session._executor._write_chunk(region_path, 0, 0, chunk)
 
         raw = region_path.read_bytes()
         loc = raw[:4]
@@ -620,12 +625,12 @@ class TestOmniNbtEditing:
         assert info.local_z == 3
 
     def test_nbt_tree_coerces_json_values(self):
-        from app.ui.views.explorer.nbt_tree import NBTTreeView
+        from app.ui.views.explorer.nbt_tree.parser import coerce_value
 
-        assert NBTTreeView._coerce_value("42", 1, "int") == 42
-        assert NBTTreeView._coerce_value("3.5", 1.0, "float") == 3.5
-        assert NBTTreeView._coerce_value("false", True, "bool") is False
-        assert NBTTreeView._coerce_value("null", None, "NoneType") is None
+        assert coerce_value("42", 1, "int") == 42
+        assert coerce_value("3.5", 1.0, "float") == 3.5
+        assert coerce_value("false", True, "bool") is False
+        assert coerce_value("null", None, "NoneType") is None
 
     def test_nbt_tree_can_load_readonly_data(self):
         from app.ui.views.explorer.nbt_tree import NBTTreeView
@@ -665,7 +670,7 @@ class TestOmniNbtEditing:
         assert stats == {"fields": 5, "containers": 4, "values": 2}
 
     def test_explorer_extracts_chunk_entities_and_block_entities(self):
-        from app.ui.views.explorer.explorer_view import ExplorerView
+        from app.ui.views.explorer.explorer_helpers import extract_chunk_objects
 
         chunk_data = {
             "Entities": [
@@ -676,7 +681,7 @@ class TestOmniNbtEditing:
             ],
         }
 
-        objects = ExplorerView._extract_chunk_objects(chunk_data)
+        objects = extract_chunk_objects(chunk_data)
 
         assert len(objects) == 2
         assert objects[0]["title"] == "实体 #1: minecraft:zombie"
@@ -700,9 +705,9 @@ class TestOmniNbtEditing:
             -512, -512) == (-1, -1, 0, 0)
 
     def test_explorer_formats_change_summary(self):
-        from app.ui.views.explorer.explorer_view import ExplorerView
+        from app.ui.views.explorer.explorer_helpers import format_change_summary
 
-        summary = ExplorerView._format_change_summary(0, {
+        summary = format_change_summary(0, {
             "target_label": "玩家 NBT: test",
             "format": "json",
             "display_path": "stats.minecraft:mined.minecraft:stone",
