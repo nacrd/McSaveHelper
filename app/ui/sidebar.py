@@ -67,6 +67,16 @@ class Sidebar(ft.Container):
         )
         self._recent_save_col: ft.Column = ft.Column(spacing=6)
 
+        # ─── Recent saves expand/collapse state ───
+        self._recent_expanded: bool = False
+        self._recent_arrow: ft.Text = ft.Text(
+            "▶", size=10, color=THEME.text_secondary, font_family="monospace",
+        )
+        self._recent_body: ft.Container = ft.Container(
+            content=self._recent_save_col,
+            visible=self._recent_expanded,
+        )
+
         # ─── Mutable sub-components ───
         self._current_save_name = ft.Text(
             "未设置当前存档",
@@ -265,23 +275,30 @@ class Sidebar(ft.Container):
                     ft.Container(
                         content=ft.Column(
                             [
-                                ft.Row(
-                                    [
-                                        ft.Icon(
-                                            IconSet.CLOCK, size=12, color=THEME.text_secondary,
-                                        ),
-                                        ft.Text(
-                                            "最近存档",
-                                            size=11,
-                                            weight=ft.FontWeight.W_600,
-                                            color=THEME.text_primary,
-                                            font_family="monospace",
-                                        ),
-                                    ],
-                                    spacing=6,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ft.Container(
+                                    content=ft.Row(
+                                        [
+                                            ft.Icon(
+                                                IconSet.CLOCK, size=12, color=THEME.text_secondary,
+                                            ),
+                                            ft.Text(
+                                                "最近存档",
+                                                size=11,
+                                                weight=ft.FontWeight.W_600,
+                                                color=THEME.text_primary,
+                                                font_family="monospace",
+                                            ),
+                                            ft.Container(expand=True),
+                                            self._recent_arrow,
+                                        ],
+                                        spacing=6,
+                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                    ),
+                                    ink=True,
+                                    border_radius=4,
+                                    on_click=self._toggle_recent,
                                 ),
-                                self._recent_save_col,
+                                self._recent_body,
                             ],
                             spacing=8,
                         ),
@@ -668,10 +685,39 @@ class Sidebar(ft.Container):
             animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
         )
 
+    # ════════════════════════════════════════════
+    #  Recent saves expand/collapse
+    # ════════════════════════════════════════════
+
+    def _toggle_recent(self, e: ft.ControlEvent = None) -> None:
+        """Toggle the recent saves section expanded/collapsed."""
+        self._recent_expanded = not self._recent_expanded
+        self._recent_body.visible = self._recent_expanded
+        self._recent_arrow.value = "▼" if self._recent_expanded else "▶"
+        try:
+            self._recent_body.update()
+            self._recent_arrow.update()
+        except Exception:
+            pass
+
+    def _expand_recent(self) -> None:
+        """Expand the recent saves section if currently collapsed."""
+        if self._recent_expanded:
+            return
+        self._recent_expanded = True
+        self._recent_body.visible = True
+        self._recent_arrow.value = "▼"
+        try:
+            self._recent_body.update()
+            self._recent_arrow.update()
+        except Exception:
+            pass
+
     def _safe_select_recent_save(self, save_id: str) -> None:
         """Safe callback for recent save click."""
         if not save_id:
             return
+        self._expand_recent()
         try:
             if self._on_recent_save_select:
                 self._on_recent_save_select(save_id)
@@ -718,6 +764,7 @@ class Sidebar(ft.Container):
                 self._current_save_name.value = name
                 self._current_save_name.color = THEME.mc_gold
                 self._current_save_name.tooltip = path or name
+                self._expand_recent()
             else:
                 self._current_save_name.value = "未设置当前存档"
                 self._current_save_name.color = THEME.text_muted

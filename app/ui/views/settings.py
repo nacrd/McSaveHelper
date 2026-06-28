@@ -1,20 +1,121 @@
-"""Settings View —— 应用配置界面"""
-import flet as ft
-from typing import TYPE_CHECKING
+"""Settings View —— 应用配置界面
 
-from app.ui.theme import THEME
+每个设置分区支持点击标题栏展开/收起，减少纵向占用。
+"""
+import flet as ft
+from typing import TYPE_CHECKING, List
+
+from app.ui.theme import THEME, mc_border
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.fields import text_field, checkbox, label, dropdown
-from app.ui.components.cards import card, section_title
+from app.ui.components.cards import card
 from app.ui.components.layout import page_header
 
 if TYPE_CHECKING:
     from app.application import Application
 
 
+def _collapsible_section(
+    title: str,
+    content: ft.Control,
+    expanded: bool = False,
+) -> ft.Container:
+    """Wrap a section content in a collapsible card.
+
+    点击标题栏切换展开/收起；收起时仅显示标题行，节省纵向空间。
+
+    Args:
+        title: Section title text
+        content: Section body (a ft.Column or any control)
+        expanded: Initial state
+
+    Returns:
+        ft.Container: Complete collapsible card
+    """
+    # Arrow indicator
+    arrow = ft.Icon(
+        ft.Icons.KEYBOARD_ARROW_DOWN if expanded else ft.Icons.KEYBOARD_ARROW_RIGHT,
+        size=18,
+        color=THEME.text_secondary,
+    )
+
+    # Title bar row
+    title_row = ft.Row(
+        [
+            ft.Container(
+                content=ft.Text("▣", size=13, color=THEME.text_primary),
+                width=24, height=24,
+                alignment=ft.alignment.Alignment(0, 0),
+                bgcolor=THEME.mc_grass,
+                border_radius=4,
+                border=mc_border(1),
+            ),
+            ft.Text(
+                title,
+                size=14,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.text_primary,
+                font_family="monospace",
+                expand=True,
+            ),
+            arrow,
+        ],
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+    title_bar = ft.Container(
+        content=title_row,
+        padding=ft.Padding(left=16, right=16, top=12, bottom=12),
+        ink=True,
+        border_radius=6,
+    )
+
+    # Content wrapper — hidden when collapsed
+    body_wrapper = ft.Container(
+        content=content,
+        padding=ft.Padding(left=4, right=4, top=0, bottom=4),
+        animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        animate_size=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+    )
+
+    # Track expanded state on the body container
+    body_wrapper.visible = expanded
+    body_wrapper.opacity = 1.0 if expanded else 0.0
+
+    def _toggle(e: ft.ControlEvent = None) -> None:
+        is_visible = body_wrapper.visible
+        body_wrapper.visible = not is_visible
+        body_wrapper.opacity = 0.0 if is_visible else 1.0
+        arrow.name = (
+            ft.Icons.KEYBOARD_ARROW_DOWN if not is_visible
+            else ft.Icons.KEYBOARD_ARROW_RIGHT
+        )
+        body_wrapper.update()
+        arrow.update()
+
+    title_bar.on_click = _toggle
+
+    card_container = ft.Container(
+        content=ft.Column(
+            [title_bar, body_wrapper],
+            spacing=0,
+        ),
+        bgcolor=THEME.bg_card,
+        border=mc_border(),
+        border_radius=8,
+    )
+
+    return ft.Container(
+        content=card_container,
+        padding=ft.Padding(bottom=12),
+    )
+
+
 class SettingsView(ft.Column):
-    """配置设置视图"""
+    """配置设置视图（可折叠分区）"""
 
     def __init__(self, app: "Application") -> None:
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
@@ -43,57 +144,42 @@ class SettingsView(ft.Column):
 
     def _build_general_card(self) -> None:
         cfg = self.app.config
-        s = ft.Column(spacing=0)
-        s.controls.append(
-            section_title(
-                self._t(
-                    "settings.general.title",
-                    "通用设置")))
+        body = ft.Column(spacing=0)
 
         self._version_var = checkbox(
-            self._t(
-                "settings.general.version_detection",
-                "启用版本自动检测"),
+            self._t("settings.general.version_detection", "启用版本自动检测"),
             value=cfg.version_detection,
-            on_change=lambda e: self._on_version_detection_change(
-                e.control.value),
+            on_change=lambda e: self._on_version_detection_change(e.control.value),
         )
-        s.controls.append(
-            ft.Container(
-                content=self._version_var,
-                padding=ft.Padding(
-                    left=20,
-                    right=20,
-                    top=10)))
+        body.controls.append(ft.Container(
+            content=self._version_var,
+            padding=ft.Padding(left=16, right=16, top=10),
+        ))
 
         self._api_timeout_field = text_field(
-            value=str(
-                cfg.api_timeout),
-            width=100,
-            expand=False,
-            on_change=lambda e: self._on_api_timeout_change(e))
-        s.controls.append(ft.Container(
+            value=str(cfg.api_timeout),
+            width=100, expand=False,
+            on_change=lambda e: self._on_api_timeout_change(e),
+        )
+        body.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.general.api_timeout", "API 超时 (秒)")),
                 self._api_timeout_field,
             ], spacing=4),
-            padding=ft.Padding(left=20, right=20, bottom=20, top=10),
+            padding=ft.Padding(left=16, right=16, bottom=16, top=10),
         ))
 
-        c = card(ft.Column(spacing=0), padding=0)
-        c.content = s
-        self.controls.append(
-            ft.Container(
-                content=c,
-                padding=ft.Padding(
-                    bottom=16)))
+        self.controls.append(_collapsible_section(
+            self._t("settings.general.title", "通用设置"),
+            body,
+            expanded=True,  # 默认展开
+        ))
 
     # ─── 界面设置 ───────────────────────────────
 
     def _build_ui_card(self) -> None:
         cfg = self.app.config
-        s = ft.Column(spacing=0)
-        s.controls.append(section_title(self._t("settings.ui.title", "界面设置")))
+        body = ft.Column(spacing=0)
 
         self._theme_dropdown = dropdown(
             options=[
@@ -104,12 +190,12 @@ class SettingsView(ft.Column):
             width=120,
             on_change=lambda e: self._on_theme_change(e.control.value),
         )
-        s.controls.append(ft.Container(
+        body.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
                 self._theme_dropdown,
             ], spacing=4),
-            padding=ft.Padding(left=20, right=20, bottom=10, top=10),
+            padding=ft.Padding(left=16, right=16, bottom=8, top=10),
         ))
 
         self._lang_dropdown = dropdown(
@@ -121,12 +207,12 @@ class SettingsView(ft.Column):
             width=120,
             on_change=lambda e: self._on_language_change(e.control.value),
         )
-        s.controls.append(ft.Container(
+        body.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.language", "语言")),
                 self._lang_dropdown,
             ], spacing=4),
-            padding=ft.Padding(left=20, right=20, bottom=10),
+            padding=ft.Padding(left=16, right=16, bottom=8),
         ))
 
         self._sidebar_mode_dropdown = dropdown(
@@ -139,12 +225,12 @@ class SettingsView(ft.Column):
             width=120,
             on_change=lambda e: self._on_sidebar_mode_change(e.control.value),
         )
-        s.controls.append(ft.Container(
+        body.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.sidebar_mode", "侧边栏模式")),
                 self._sidebar_mode_dropdown,
             ], spacing=4),
-            padding=ft.Padding(left=20, right=20, bottom=10),
+            padding=ft.Padding(left=16, right=16, bottom=8),
         ))
 
         self._auto_clear_var = checkbox(
@@ -152,159 +238,127 @@ class SettingsView(ft.Column):
             value=cfg.ui_settings.get("auto_clear_log", False),
             on_change=lambda e: self._on_auto_clear_change(e.control.value),
         )
-        s.controls.append(
-            ft.Container(
-                content=self._auto_clear_var,
-                padding=ft.Padding(
-                    left=20,
-                    right=20,
-                    bottom=10)))
+        body.controls.append(ft.Container(
+            content=self._auto_clear_var,
+            padding=ft.Padding(left=16, right=16, bottom=8),
+        ))
 
         self._show_log_panel_var = checkbox(
             self._t("settings.ui.show_log_panel", "显示悬浮日志面板"),
             value=cfg.ui_settings.get("show_log_panel", True),
             on_change=lambda e: self._on_show_log_panel_change(e.control.value),
         )
-        s.controls.append(
-            ft.Container(
-                content=self._show_log_panel_var,
-                padding=ft.Padding(
-                    left=20,
-                    right=20,
-                    bottom=10)))
+        body.controls.append(ft.Container(
+            content=self._show_log_panel_var,
+            padding=ft.Padding(left=16, right=16, bottom=8),
+        ))
 
         self._perf_monitor_var = checkbox(
             self._t("settings.ui.enable_performance_monitor", "启用性能监控"),
             value=cfg.ui_settings.get("enable_performance_monitor", False),
             on_change=lambda e: self._on_perf_monitor_change(e.control.value),
         )
-        s.controls.append(
-            ft.Container(
-                content=self._perf_monitor_var,
-                padding=ft.Padding(
-                    left=20,
-                    right=20,
-                    bottom=10)))
+        body.controls.append(ft.Container(
+            content=self._perf_monitor_var,
+            padding=ft.Padding(left=16, right=16, bottom=8),
+        ))
 
         self._perf_print_interval_field = text_field(
             value=str(cfg.ui_settings.get("performance_print_interval", 60)),
             width=100, expand=False,
             on_change=lambda e: self._on_perf_interval_change(e),
         )
-        s.controls.append(ft.Container(
+        body.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.ui.performance_print_interval", "性能日志打印间隔 (秒)")),
                 self._perf_print_interval_field,
             ], spacing=4),
-            padding=ft.Padding(left=20, right=20, bottom=20, top=0),
+            padding=ft.Padding(left=16, right=16, bottom=16, top=0),
         ))
 
-        c = card(ft.Column(spacing=0), padding=0)
-        c.content = s
-        self.controls.append(
-            ft.Container(
-                content=c,
-                padding=ft.Padding(
-                    bottom=16)))
+        self.controls.append(_collapsible_section(
+            self._t("settings.ui.title", "界面设置"),
+            body,
+            expanded=True,
+        ))
 
     # ─── 批量处理 ───────────────────────────────
 
     def _build_batch_card(self) -> None:
         cfg = self.app.config
-        s = ft.Column(spacing=0)
-        s.controls.append(
-            section_title(
-                self._t(
-                    "settings.batch.title",
-                    "批量处理")))
+        body = ft.Column(spacing=0)
 
         self._max_concurrent_field = text_field(
-            value=str(
-                cfg.max_concurrent),
-            width=100,
-            expand=False,
-            on_change=lambda e: self._on_max_concurrent_change(e))
-        s.controls.append(ft.Container(
+            value=str(cfg.max_concurrent),
+            width=100, expand=False,
+            on_change=lambda e: self._on_max_concurrent_change(e),
+        )
+        body.controls.append(ft.Container(
             content=ft.Column([
                 label(self._t("settings.batch.max_concurrent", "最大并发处理数 (1‑16)")),
                 self._max_concurrent_field,
             ], spacing=4),
-            padding=ft.Padding(left=20, right=20, bottom=10, top=10),
+            padding=ft.Padding(left=16, right=16, bottom=8, top=10),
         ))
 
         self._preserve_var = checkbox(
-            self._t(
-                "settings.batch.preserve_structure",
-                "保留原始文件结构"),
-            value=cfg.batch_processing.get(
-                "preserve_structure",
-                True),
-            on_change=lambda e: self._on_preserve_structure_change(
-                e.control.value),
+            self._t("settings.batch.preserve_structure", "保留原始文件结构"),
+            value=cfg.batch_processing.get("preserve_structure", True),
+            on_change=lambda e: self._on_preserve_structure_change(e.control.value),
         )
-        s.controls.append(
-            ft.Container(
-                content=self._preserve_var,
-                padding=ft.Padding(
-                    left=20,
-                    right=20,
-                    bottom=20)))
+        body.controls.append(ft.Container(
+            content=self._preserve_var,
+            padding=ft.Padding(left=16, right=16, bottom=16),
+        ))
 
-        c = card(ft.Column(spacing=0), padding=0)
-        c.content = s
-        self.controls.append(
-            ft.Container(
-                content=c,
-                padding=ft.Padding(
-                    bottom=16)))
+        self.controls.append(_collapsible_section(
+            self._t("settings.batch.title", "批量处理"),
+            body,
+            expanded=False,  # 默认收起
+        ))
 
     # ─── 清理模式 ───────────────────────────────
 
     def _build_cleanup_card(self) -> None:
         cfg = self.app.config
-        s = ft.Column(spacing=0)
-        s.controls.append(
-            section_title(
-                self._t(
-                    "settings.cleanup.title",
-                    "清理模式")))
+        body = ft.Column(spacing=0)
 
-        s.controls.append(ft.Container(
+        body.controls.append(ft.Container(
             content=ft.Text(
                 self._t("settings.cleanup.description",
                         "转换完成后自动删除的文件/目录模式（每行一个，支持通配符）"),
                 size=12, color=THEME.text_muted,
             ),
-            padding=ft.Padding(left=20, right=20, bottom=10, top=10),
+            padding=ft.Padding(left=16, right=16, bottom=8, top=10),
         ))
 
         patterns = cfg.cleanup_patterns
         self._cleanup_field = ft.TextField(
             value="\n".join(patterns) if isinstance(patterns, list) else "",
-            multiline=True, min_lines=4, max_lines=8,
+            multiline=True, min_lines=3, max_lines=6,
             border_color=THEME.border_standard, text_size=13,
-            bgcolor="rgba(255,255,255,0.02)", border_radius=6,
+            bgcolor=THEME.bg_secondary, border_radius=6,
             on_blur=lambda e: self._on_cleanup_blur(),
         )
-        s.controls.append(ft.Container(content=self._cleanup_field,
-                                       padding=ft.Padding(left=20, right=20)))
+        body.controls.append(ft.Container(
+            content=self._cleanup_field,
+            padding=ft.Padding(left=16, right=16),
+        ))
 
-        s.controls.append(ft.Container(
+        body.controls.append(ft.Container(
             content=btn_ghost(
                 self._t("settings.cleanup.restore_defaults", "恢复默认"),
                 width=120, height=32,
                 on_click=lambda e: self._restore_default_cleanup(),
             ),
-            padding=ft.Padding(left=20, right=20, bottom=20, top=10),
+            padding=ft.Padding(left=16, right=16, bottom=16, top=8),
         ))
 
-        c = card(ft.Column(spacing=0), padding=0)
-        c.content = s
-        self.controls.append(
-            ft.Container(
-                content=c,
-                padding=ft.Padding(
-                    bottom=16)))
+        self.controls.append(_collapsible_section(
+            self._t("settings.cleanup.title", "清理模式"),
+            body,
+            expanded=False,
+        ))
 
     # ─── 操作按钮 ───────────────────────────────
 
@@ -321,12 +375,9 @@ class SettingsView(ft.Column):
             ),
         ], spacing=10)
         c = card(ft.Column(spacing=0), padding=0)
-        c.content = ft.Container(content=btn_row, padding=20)
+        c.content = ft.Container(content=btn_row, padding=16)
         self.controls.append(
-            ft.Container(
-                content=c,
-                padding=ft.Padding(
-                    bottom=24)))
+            ft.Container(content=c, padding=ft.Padding(bottom=24)))
 
     # ─── 回调（即时生效 + 自动保存）──────────────
 
@@ -348,8 +399,7 @@ class SettingsView(ft.Column):
         c._config["batch_processing"]["max_concurrent"] = int(
             self._max_concurrent_field.value or "2")
         try:
-            c._config["api_timeout"] = int(
-                self._api_timeout_field.value or "10")
+            c._config["api_timeout"] = int(self._api_timeout_field.value or "10")
         except ValueError:
             pass
         c.cleanup_patterns = [
@@ -384,7 +434,6 @@ class SettingsView(ft.Column):
                     self.app._sidebar.set_collapsed(True)
                 elif mode == "expanded":
                     self.app._sidebar.set_collapsed(False)
-                # "auto" — let the window manager handle it
         except Exception:
             pass
 
@@ -405,11 +454,7 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _on_show_log_panel_change(self, value: bool) -> None:
-        if hasattr(
-                self.app,
-                'floating_log_panel') and hasattr(
-                self.app,
-                '_log_fab'):
+        if hasattr(self.app, 'floating_log_panel') and hasattr(self.app, '_log_fab'):
             self.app._log_fab.set_visible(value)
             self.app.floating_log_panel.set_visible(False)
         self._persist()
@@ -420,9 +465,7 @@ class SettingsView(ft.Column):
             perf_monitor.enable()
             resource_monitor.start()
             try:
-                interval = max(
-                    5.0, float(
-                        self._perf_print_interval_field.value or "60"))
+                interval = max(5.0, float(self._perf_print_interval_field.value or "60"))
             except ValueError:
                 interval = 60.0
             resource_monitor.set_print_interval(interval)
