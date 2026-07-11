@@ -1,3 +1,22 @@
+## 2026-07-11 (process chunk LRU for LOD upgrades)
+
+### Changes
+- Process-level LRU of decoded ChunkBlocks (path+mtime+cx+cz), max 2500
+- Progressive 16->32->64->128 reuses already-decoded chunks
+- Faster PNG putdata + compress_level=1
+
+### Bench r.0.0.mca (no disk cache)
+| tile | cold | after lower LOD |
+|------|------|-----------------|
+| 16 | ~93ms | ~79ms |
+| 32 | ~374ms | ~308ms |
+| 64 | ~824ms | ~663ms |
+| 128 | ~1476ms | **~389ms** |
+
+Disk cache still ~1ms when hit.
+
+---
+
 ## 2026-07-11 (faster topview: subsample + parallel decode)
 
 ### Changes

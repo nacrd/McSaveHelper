@@ -160,7 +160,8 @@ def render_region_topview(
 
     if use_disk_cache:
         try:
-            from core.mca.tile_cache import load_tile, store_tile
+            from core.mca.tile_cache import load_tile
+
             cached = load_tile(region_path, tile_size)
             if cached:
                 return cached
@@ -182,15 +183,17 @@ def render_region_topview(
         return None
 
     image = Image.new("RGB", (tile_size, tile_size), color=(40, 55, 45))
-    pixels = image.load()
-    for pz, row in enumerate(grid):
-        for px, color in enumerate(row):
-            pixels[px, pz] = color
+    try:
+        image.putdata([c for row in grid for c in row])
+    except Exception:
+        pixels = image.load()
+        for pz, row in enumerate(grid):
+            for px, color in enumerate(row):
+                pixels[px, pz] = color
 
     buf = io.BytesIO()
     try:
-        # optimize=False: faster encode for progressive map tiles
-        image.save(buf, format="PNG", optimize=False)
+        image.save(buf, format="PNG", optimize=False, compress_level=1)
         png = buf.getvalue()
     except Exception:
         return None
@@ -200,6 +203,7 @@ def render_region_topview(
     if use_disk_cache and png:
         try:
             from core.mca.tile_cache import store_tile
+
             store_tile(region_path, tile_size, png)
         except Exception:
             pass

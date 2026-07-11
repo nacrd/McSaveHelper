@@ -6,19 +6,20 @@ Stored under ~/.mc_save_helper/topview_tiles/ as raw PNG files.
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import threading
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 PathLike = Union[str, Path]
 
-# Bump when sampling/color/heightmap logic changes so stale tiles are ignored.
-ALGO_VERSION = "v5-chunk-subsample"
+ALGO_VERSION = "v6-chunk-lru"
 
 _CACHE_DIR: Optional[Path] = None
 _LOCK = threading.Lock()
 _MAX_FILES = 4000
+_LADDER: Sequence[int] = (16, 32, 64, 128)
 
 
 def cache_dir() -> Path:
@@ -75,8 +76,33 @@ def store_tile(region_path: PathLike, tile_size: int, png: bytes) -> None:
             pass
 
 
+def upscale_cached_tile(region_path: PathLike, tile_size: int) -> Optional[bytes]:
+    """Nearest-neighbor upscale of a lower-res cached tile (not stored as hi-res)."""
+    tile_size = int(tile_size)
+    path = Path(region_path)
+    src_png = None
+    for s in reversed(_LADDER):
+        if s >= tile_size:
+            continue
+        raw = load_tile(path, s)
+        if raw:
+            src_png = raw
+            break
+    if not src_png:
+        return None
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(src_png)) as im:
+            out = im.resize((tile_size, tile_size), Image.Resampling.NEAREST)
+            buf = io.BytesIO()
+            out.save(buf, format="PNG", optimize=False, compress_level=1)
+            return buf.getvalue()
+    except Exception:
+        return None
+
+
 def _maybe_prune() -> None:
-    """Best-effort: if too many files, delete oldest half."""
     try:
         root = cache_dir()
         files = [p for p in root.glob("*.png") if p.is_file()]
