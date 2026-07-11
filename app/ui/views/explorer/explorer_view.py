@@ -1,4 +1,4 @@
-﻿"""Explorer View - 存档浏览器主视图"""
+"""Explorer View - 存档浏览器主视图"""
 import threading
 import flet as ft
 from typing import TYPE_CHECKING, Any, Optional, List, Dict, Tuple, Union
@@ -101,7 +101,7 @@ class ExplorerView(
 
         self._tab_bar, self._tab_labels_row, self._tab_buttons, self._tab_labels_widgets = segmented_tab_bar(
             [
-                TabSpec("存档信息", IconSet.EARTH), TabSpec("玩家", IconSet.PERSON), TabSpec("区域", IconSet.GRID), TabSpec("统计", IconSet.STATS), TabSpec("搜索", IconSet.SEARCH), TabSpec("NBT", IconSet.DOCUMENT), ], selected_index=0, on_select=self._switch_tab, )
+                TabSpec("存档信息", IconSet.EARTH), TabSpec("玩家", IconSet.PERSON), TabSpec("地图", IconSet.GRID), TabSpec("统计", IconSet.STATS), TabSpec("搜索", IconSet.SEARCH), TabSpec("NBT", IconSet.DOCUMENT), ], selected_index=0, on_select=self._switch_tab, )
         self._content_box = panel(
             content=self._tabs_content[0],
             padding=10,

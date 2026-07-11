@@ -1,0 +1,557 @@
+"""MCA region map view — minimal interactive map display.
+
+Draws region files (r.x.z.mca) as a colored grid on Flet Canvas.
+Supports pan, zoom, click-to-select, and progressive scan updates.
+"""
+from __future__ import annotations
+
+import asyncio
+import math
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import flet as ft
+
+try:
+    import flet.canvas as cv
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("flet.canvas is not available in this Flet version") from exc
+
+from app.services.heatmap_service import HeatmapService, get_heatmap_service
+from app.ui.utils import format_size
+from app.ui.views.explorer.map.color_schemes import (
+    get_activity_color,
+    get_activity_icon,
+    get_mode_title,
+    get_region_value_label,
+)
+
+MapSelectionCallback = Callable[
+    [Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Any]]], None
+]
+
+
+class McaMapView(ft.Container):
+    """Minimal MCA region map (activity-colored grid)."""
+
+    BACKGROUND_COLOR = "#162016"
+    EMPTY_REGION_COLOR = "#263426"
+    ORIGIN_COLOR = "#7CB34288"
+    CELL_SIZE = 32
+    CELL_GAP = 2
+
+    def __init__(
+        self,
+        heatmap_service: Optional[HeatmapService] = None,
+        on_selection_changed: Optional[MapSelectionCallback] = None,
+        width: int = 700,
+        height: int = 450,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+
+        self._service = heatmap_service or get_heatmap_service()
+        self._on_selection_changed = on_selection_changed
+
+        self._offset_x = 0.0
+        self._offset_y = 0.0
+        self._scale = 1.0
+        self._show_coordinates = True
+        self._show_empty_regions = False
+        self._display_mode = "activity"
+        self._detail_level = "region"
+
+        self._selected_cell: Optional[Tuple[int, int]] = None
+        self._current_data: Dict[Tuple[int, int], int] = {}
+        self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
+        self._cached_stats: Optional[Dict[str, Any]] = None
+
+        self._last_x = 0.0
+        self._last_y = 0.0
+        self._needs_initial_draw = True
+        self._update_task: Optional[asyncio.Task[Any]] = None
+        self._last_drawn_count = -1
+
+        self._rebuild_pending = False
+        self._rebuild_timer: Optional[threading.Timer] = None
+        self._last_rebuild_ts = 0.0
+        self._min_rebuild_interval = 1.0 / 60.0
+
+        self.width = width
+        self.height = height
+        self.bgcolor = self.BACKGROUND_COLOR
+        self.border_radius = 0
+
+        self._canvas = cv.Canvas(
+            width=width,
+            height=height,
+            shapes=self._empty_shapes(),
+        )
+        self._gesture = ft.GestureDetector(
+            on_pan_start=self._on_pan_start,
+            on_pan_update=self._on_pan_update,
+            on_tap=self._on_tap,
+            on_scroll=self._on_scroll,
+            width=width,
+            height=height,
+        )
+        self.content = ft.Stack([self._canvas, self._gesture])
+
+    # ------------------------------------------------------------------ UI helpers
+    def _empty_shapes(self) -> List[cv.Shape]:
+        return [
+            cv.Rect(
+                0,
+                0,
+                self.width or 800,
+                self.height or 600,
+                paint=ft.Paint(color=self.BACKGROUND_COLOR),
+            )
+        ]
+
+    def _schedule_rebuild(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self._last_rebuild_ts
+        if elapsed >= self._min_rebuild_interval and not self._rebuild_pending:
+            self._last_rebuild_ts = now
+            self._rebuild_canvas()
+            return
+        if self._rebuild_pending:
+            return
+        self._rebuild_pending = True
+        delay = max(0.0, self._min_rebuild_interval - elapsed)
+
+        def _fire() -> None:
+            self._rebuild_pending = False
+            self._last_rebuild_ts = time.monotonic()
+            try:
+                self._rebuild_canvas()
+            except Exception:
+                pass
+
+        try:
+            if self._rebuild_timer is not None:
+                self._rebuild_timer.cancel()
+        except Exception:
+            pass
+        self._rebuild_timer = threading.Timer(delay, _fire)
+        self._rebuild_timer.daemon = True
+        self._rebuild_timer.start()
+
+    # ------------------------------------------------------------------ gestures
+    def _on_pan_start(self, e: ft.DragStartEvent) -> None:
+        self._last_x = e.local_position.x
+        self._last_y = e.local_position.y
+
+    def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
+        dx = e.local_position.x - self._last_x
+        dy = e.local_position.y - self._last_y
+        self._offset_x += dx
+        self._offset_y += dy
+        self._last_x = e.local_position.x
+        self._last_y = e.local_position.y
+        self._schedule_rebuild()
+
+    def _on_tap(self, e: ft.TapEvent) -> None:
+        tap_x = e.local_position.x
+        tap_y = e.local_position.y
+        for coord, bounds in self._cell_bounds.items():
+            bx, by, bw, bh = bounds
+            if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+                if coord not in self._current_data:
+                    break
+                self._selected_cell = coord
+                size = self._current_data[coord]
+                if self._on_selection_changed:
+                    self._on_selection_changed(coord, size, {"level": "region"})
+                self._rebuild_canvas()
+                break
+
+    def _on_scroll(self, e: ft.ScrollEvent) -> None:
+        scroll_delta = getattr(e, "scroll_delta", None)
+        delta_y = (
+            getattr(scroll_delta, "y", 0)
+            if scroll_delta is not None
+            else getattr(e, "delta_y", 0)
+        )
+        if not delta_y:
+            return
+        zoom_factor = 1.1 if delta_y < 0 else 0.9
+        new_scale = max(0.1, min(10.0, self._scale * zoom_factor))
+        if new_scale == self._scale:
+            return
+        pointer_x = getattr(
+            getattr(e, "local_position", None),
+            "x",
+            (self.width or 800) / 2,
+        )
+        pointer_y = getattr(
+            getattr(e, "local_position", None),
+            "y",
+            (self.height or 600) / 2,
+        )
+        world_x = (pointer_x - self._offset_x) / self._scale
+        world_y = (pointer_y - self._offset_y) / self._scale
+        self._scale = new_scale
+        self._offset_x = pointer_x - world_x * self._scale
+        self._offset_y = pointer_y - world_y * self._scale
+        self._schedule_rebuild()
+
+    # ------------------------------------------------------------------ draw
+    def _rebuild_canvas(self) -> None:
+        self._current_data = self._service.get_all_data()
+        self._cached_stats = self._service.get_statistics()
+        shapes: List[cv.Shape] = list(self._empty_shapes())
+        view_w = self.width or 800
+        view_h = self.height or 600
+
+        if not self._current_data:
+            shapes.append(
+                cv.Text(
+                    x=view_w / 2 - 90,
+                    y=view_h / 2 - 30,
+                    value="🗺️",
+                    style=ft.TextStyle(size=48, color="#888888"),
+                )
+            )
+            shapes.append(
+                cv.Text(
+                    x=view_w / 2 - 95,
+                    y=view_h / 2 + 30,
+                    value="设置当前存档后显示区域地图",
+                    style=ft.TextStyle(size=16, color="#CCCCCC"),
+                )
+            )
+            shapes.extend(self._build_info_overlay())
+            self._apply_shapes(shapes)
+            return
+
+        coords = list(self._current_data.keys())
+        min_x = min(c[0] for c in coords)
+        max_x = max(c[0] for c in coords)
+        min_z = min(c[1] for c in coords)
+        max_z = max(c[1] for c in coords)
+
+        cell_pitch = self.CELL_SIZE + self.CELL_GAP
+        world_w = (max_x - min_x + 1) * cell_pitch
+        world_h = (max_z - min_z + 1) * cell_pitch
+
+        if self._scale == 1.0 and self._offset_x == 0 and self._offset_y == 0:
+            scale_x = view_w / world_w * 0.78
+            scale_y = view_h / world_h * 0.78
+            self._scale = max(0.35, min(scale_x, scale_y, 3.0))
+            self._offset_x = (view_w - world_w * self._scale) / 2
+            self._offset_y = (view_h - world_h * self._scale) / 2
+
+        self._cell_bounds.clear()
+        origin_x = self._offset_x
+        origin_y = self._offset_y
+        shapes.extend(self._build_origin_marker(origin_x, origin_y))
+
+        margin = cell_pitch
+        pitch_scaled = cell_pitch * self._scale
+        vis_min_x = int(math.floor((0 - margin - self._offset_x) / pitch_scaled))
+        vis_max_x = int(math.ceil((view_w + margin - self._offset_x) / pitch_scaled))
+        vis_min_z = int(math.floor((0 - margin - self._offset_y) / pitch_scaled))
+        vis_max_z = int(math.ceil((view_h + margin - self._offset_y) / pitch_scaled))
+        draw_min_x = max(min_x, vis_min_x)
+        draw_max_x = min(max_x, vis_max_x)
+        draw_min_z = max(min_z, vis_min_z)
+        draw_max_z = min(max_z, vis_max_z)
+
+        for z in range(draw_min_z, draw_max_z + 1):
+            for x in range(draw_min_x, draw_max_x + 1):
+                screen_x = x * cell_pitch * self._scale + self._offset_x
+                screen_y = z * cell_pitch * self._scale + self._offset_y
+                cell_size = self.CELL_SIZE * self._scale
+                if (
+                    screen_x + cell_size < 0
+                    or screen_x > view_w
+                    or screen_y + cell_size < 0
+                    or screen_y > view_h
+                ):
+                    continue
+
+                coord = (x, z)
+                self._cell_bounds[coord] = (screen_x, screen_y, cell_size, cell_size)
+                if coord in self._current_data:
+                    size = self._current_data[coord]
+                    color = get_activity_color(size, self._cached_stats or {})
+                    shapes.extend(
+                        self._build_region_cell(
+                            screen_x, screen_y, cell_size, color, coord, size
+                        )
+                    )
+                elif self._show_empty_regions:
+                    shapes.append(
+                        cv.Rect(
+                            screen_x,
+                            screen_y,
+                            cell_size,
+                            cell_size,
+                            paint=ft.Paint(
+                                color=self.EMPTY_REGION_COLOR,
+                                style=ft.PaintingStyle.STROKE,
+                                stroke_width=0.5,
+                            ),
+                        )
+                    )
+
+        shapes.extend(self._build_info_overlay())
+        self._apply_shapes(shapes)
+        self._needs_initial_draw = False
+
+    def _apply_shapes(self, shapes: List[cv.Shape]) -> None:
+        self._canvas.shapes = shapes
+        try:
+            self._canvas.update()
+        except RuntimeError:
+            pass
+
+    def _build_region_cell(
+        self,
+        x: float,
+        y: float,
+        size: float,
+        color: str,
+        coord: Tuple[int, int],
+        file_size: int,
+    ) -> List[cv.Shape]:
+        shapes: List[cv.Shape] = [
+            cv.Rect(x, y, size, size, paint=ft.Paint(color=color))
+        ]
+        selected = coord == self._selected_cell
+        shapes.append(
+            cv.Rect(
+                x,
+                y,
+                size,
+                size,
+                paint=ft.Paint(
+                    color="#FFD54F" if selected else "#00000055",
+                    style=ft.PaintingStyle.STROKE,
+                    stroke_width=3 if selected else 1,
+                ),
+            )
+        )
+        if self._show_coordinates and size >= 18:
+            shapes.append(
+                cv.Text(
+                    x=x + 4,
+                    y=y + 5,
+                    value=f"{coord[0]},{coord[1]}",
+                    style=ft.TextStyle(size=9 if size < 42 else 10, color="#F5F5DC"),
+                )
+            )
+        if size >= 30:
+            shapes.append(
+                cv.Text(
+                    x=x + 5,
+                    y=y + size - 17,
+                    value=get_activity_icon(file_size, self._cached_stats or {}),
+                    style=ft.TextStyle(size=12, color="#F5F5DC"),
+                )
+            )
+        return shapes
+
+    def _build_origin_marker(self, x: float, y: float) -> List[cv.Shape]:
+        width = self.width or 800
+        height = self.height or 600
+        return [
+            cv.Rect(x, 0, 2, height, paint=ft.Paint(color=self.ORIGIN_COLOR)),
+            cv.Rect(0, y, width, 2, paint=ft.Paint(color=self.ORIGIN_COLOR)),
+        ]
+
+    def _build_info_overlay(self) -> List[cv.Shape]:
+        shapes: List[cv.Shape] = []
+        width = self.width or 800
+        height = self.height or 600
+        title = f"{get_mode_title(self._display_mode)} · 缩放 {self._scale:.1f}x"
+        shapes.append(cv.Rect(10, 10, 200, 26, paint=ft.Paint(color="#00000099")))
+        shapes.append(
+            cv.Text(
+                x=15,
+                y=15,
+                value=title,
+                style=ft.TextStyle(size=12, color="#D7CCC8"),
+            )
+        )
+        shapes.append(cv.Rect(10, 42, 200, 24, paint=ft.Paint(color="#00000066")))
+        shapes.append(
+            cv.Text(
+                x=15,
+                y=47,
+                value="拖拽平移 · 滚轮缩放 · 点击区域",
+                style=ft.TextStyle(size=11, color="#A5D6A7"),
+            )
+        )
+
+        if self._service.is_scanning:
+            progress = self._service.scan_progress
+            shapes.append(
+                cv.Rect(10, height - 34, 120, 24, paint=ft.Paint(color="#00000088"))
+            )
+            shapes.append(
+                cv.Text(
+                    x=15,
+                    y=height - 29,
+                    value=f"扫描中: {int(progress * 100)}%",
+                    style=ft.TextStyle(size=12, color="#64B5F6"),
+                )
+            )
+
+        if self._selected_cell:
+            coord = self._selected_cell
+            size = self._current_data.get(coord, 0)
+            meta = self._service.get_region_meta(coord)
+            label = get_region_value_label(
+                self._display_mode, coord, size, meta, self._cached_stats or {}
+            )
+            info = f"r.{coord[0]}.{coord[1]}.mca · {format_size(size)} · {label}"
+            text_w = len(info) * 7 + 20
+            shapes.append(
+                cv.Rect(
+                    width - text_w - 10,
+                    10,
+                    text_w,
+                    24,
+                    paint=ft.Paint(color="#00000088"),
+                )
+            )
+            shapes.append(
+                cv.Text(
+                    x=width - text_w - 5,
+                    y=15,
+                    value=info,
+                    style=ft.TextStyle(size=12, color="#64B5F6"),
+                )
+            )
+        return shapes
+
+    # ------------------------------------------------------------------ lifecycle / scan
+    async def _update_loop(self) -> None:
+        while self._service.is_scanning:
+            count = self._service.progress_info.scanned_files
+            if count != self._last_drawn_count:
+                self._last_drawn_count = count
+                self._rebuild_canvas()
+            await asyncio.sleep(0.2)
+        self._last_drawn_count = -1
+        self._rebuild_canvas()
+        if self._on_selection_changed:
+            self._on_selection_changed(None, None, None)
+
+    def did_mount(self) -> None:
+        super().did_mount()
+        if self._needs_initial_draw:
+            self._rebuild_canvas()
+        if self._service.is_scanning:
+            self._start_update_loop()
+
+    def did_unmount(self) -> None:
+        super_did_unmount = getattr(super(), "did_unmount", None)
+        if super_did_unmount:
+            super_did_unmount()
+        self._stop_update_loop()
+
+    def _schedule_task(self, coro: Any) -> Optional[asyncio.Task[Any]]:
+        try:
+            return asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+
+            def _run_in_thread() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(coro)
+                finally:
+                    loop.close()
+
+            threading.Thread(target=_run_in_thread, daemon=True).start()
+            return None
+
+    def _start_update_loop(self) -> None:
+        if self._update_task is None or self._update_task.done():
+            self._update_task = self._schedule_task(self._update_loop())
+
+    def _stop_update_loop(self) -> None:
+        if self._update_task and not self._update_task.done():
+            self._update_task.cancel()
+
+    # ------------------------------------------------------------------ public API (region_tab)
+    def start_scan(self, region_dir: str) -> None:
+        self._schedule_task(self._service.start_silent_scan(region_dir))
+        self._start_update_loop()
+
+    def refresh(self) -> None:
+        self._scale = 1.0
+        self._offset_x = 0
+        self._offset_y = 0
+        self._rebuild_canvas()
+
+    def reset_view(self) -> None:
+        self._scale = 1.0
+        self._offset_x = 0
+        self._offset_y = 0
+        self._selected_cell = None
+        self._rebuild_canvas()
+
+    def resize_map(self, width: int, height: int) -> None:
+        if self.width == width and self.height == height:
+            return
+        self.width = width
+        self.height = height
+        self._canvas.width = width
+        self._canvas.height = height
+        self._gesture.width = width
+        self._gesture.height = height
+        self._scale = 1.0
+        self._offset_x = 0
+        self._offset_y = 0
+        self._rebuild_canvas()
+
+    def toggle_coordinates(self) -> bool:
+        self._show_coordinates = not self._show_coordinates
+        self._rebuild_canvas()
+        return self._show_coordinates
+
+    def toggle_empty_regions(self) -> bool:
+        self._show_empty_regions = not self._show_empty_regions
+        self._rebuild_canvas()
+        return self._show_empty_regions
+
+    def set_display_mode(self, mode: str) -> None:
+        # v1: activity-only rendering; still accept mode for future layers
+        if mode not in {"activity", "biome", "structure"}:
+            return
+        self._display_mode = mode
+        self._rebuild_canvas()
+
+    def get_display_mode(self) -> str:
+        return self._display_mode
+
+    def set_detail_level(self, level: str) -> None:
+        # v1: region-level only
+        if level not in {"auto", "region", "chunk"}:
+            return
+        self._detail_level = "region"
+        self._rebuild_canvas()
+
+    def get_detail_level(self) -> str:
+        return self._detail_level
+
+    def zoom_in(self) -> None:
+        self._scale = min(10.0, self._scale * 1.2)
+        self._rebuild_canvas()
+
+    def zoom_out(self) -> None:
+        self._scale = max(0.1, self._scale * 0.8)
+        self._rebuild_canvas()
+
+    def get_selected_cell(self) -> Optional[Tuple[int, int]]:
+        return self._selected_cell
+
+
+# Backward-compatible alias used by older imports
+McaHeatmapView = McaMapView
