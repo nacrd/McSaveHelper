@@ -53,7 +53,7 @@ class RegionTabMixin:
             )
 
         self._region_help_text = ft.Text(
-            "1 格 = 1 个 r.x.z.mca · 俯视 128px · 点击区域局部放大",
+            "单击放大区域 · 双击区块级 · 右键返回总览 · 坐标随缩放变为游戏坐标",
             size=11,
             color=THEME.text_muted,
             no_wrap=True,
@@ -568,12 +568,28 @@ class RegionTabMixin:
         block_x1 = region_x * 512 + 511
         block_z0 = region_z * 512
         block_z1 = region_z * 512 + 511
-        self._region_status_text.value = (
-            f"区域 ({region_x}, {region_z})\n"
-            f"r.{region_x}.{region_z}.mca\n"
-            f"区块 X{chunk_x0}~{chunk_x1} Z{chunk_z0}~{chunk_z1}\n"
-            f"方块 X{block_x0}~{block_x1} Z{block_z0}~{block_z1}"
-        )
+        if detail and detail.get("level") == "chunk":
+            chunk = detail.get("chunk_coord")
+            br = detail.get("block_range", "")
+            if chunk:
+                self._region_status_text.value = (
+                    f"区块 ({chunk[0]}, {chunk[1]})\n"
+                    f"所属 r.{region_x}.{region_z}.mca\n"
+                    f"方块 {br}"
+                )
+            else:
+                self._region_status_text.value = (
+                    f"区域 ({region_x}, {region_z}) · 区块级\n"
+                    f"r.{region_x}.{region_z}.mca\n"
+                    f"方块 {detail.get('block_range', self._region_status_text.value)}"
+                )
+        else:
+            self._region_status_text.value = (
+                f"区域 ({region_x}, {region_z})\n"
+                f"r.{region_x}.{region_z}.mca\n"
+                f"区块 X{chunk_x0}~{chunk_x1} Z{chunk_z0}~{chunk_z1}\n"
+                f"方块 X{block_x0}~{block_x1} Z{block_z0}~{block_z1}"
+            )
         self._region_status_text.color = THEME.accent_light
         safe_update(self._region_status_text)
 

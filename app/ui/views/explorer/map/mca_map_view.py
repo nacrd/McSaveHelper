@@ -72,8 +72,11 @@ class McaMapView(ft.Container):
         self._use_topview = True
 
         self._selected_cell: Optional[Tuple[int, int]] = None
+        self._selected_chunk: Optional[Tuple[int, int]] = None  # world chunk (cx, cz)
+        self._view_level: str = "world"  # world | region | chunk
         self._current_data: Dict[Tuple[int, int], int] = {}
         self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
+        self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         # base64 cache for canvas Image.src (derived from service PNG bytes)
         self._tile_src_cache: Dict[Tuple[int, int], str] = {}
@@ -120,6 +123,8 @@ class McaMapView(ft.Container):
             on_pan_start=self._on_pan_start,
             on_pan_update=self._on_pan_update,
             on_tap=self._on_tap,
+            on_double_tap=self._on_double_tap,
+            on_secondary_tap=self._on_secondary_tap,
             on_scroll=self._on_scroll,
             width=width,
             height=height,
@@ -252,18 +257,160 @@ class McaMapView(ft.Container):
     def _on_tap(self, e: ft.TapEvent) -> None:
         tap_x = e.local_position.x
         tap_y = e.local_position.y
+
+        # Chunk-level selection when deeply zoomed into a region.
+        if self._view_level == "chunk" and self._chunk_bounds:
+            for chunk_coord, bounds in self._chunk_bounds.items():
+                bx, by, bw, bh = bounds
+                if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+                    self._selected_chunk = chunk_coord
+                    region = (chunk_coord[0] // 32, chunk_coord[1] // 32)
+                    self._selected_cell = region
+                    size = self._current_data.get(region, 0)
+                    if self._on_selection_changed:
+                        self._on_selection_changed(
+                            region,
+                            size,
+                            {
+                                "level": "chunk",
+                                "chunk_coord": chunk_coord,
+                                "block_range": self._chunk_block_range(chunk_coord),
+                            },
+                        )
+                    self._request_rebuild()
+                    return
+
         for coord, bounds in self._cell_bounds.items():
             bx, by, bw, bh = bounds
             if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
                 if coord not in self._current_data:
                     break
                 self._selected_cell = coord
+                self._selected_chunk = None
                 size = self._current_data[coord]
                 if self._on_selection_changed:
-                    self._on_selection_changed(coord, size, {"level": "region"})
-                # Local zoom into the clicked region + request hi-res tile.
-                self._focus_region(coord, animate=True)
+                    self._on_selection_changed(
+                        coord,
+                        size,
+                        {
+                            "level": "region",
+                            "block_range": self._region_block_range(coord),
+                        },
+                    )
+                # Single click: local zoom into the region (not full chunk level).
+                self._focus_region(coord, animate=True, target_fill=0.72)
+                self._view_level = "region"
                 break
+
+    def _on_double_tap(self, e: Any) -> None:
+        """Double-click: zoom to chunk level inside the hit region."""
+        tap_x = getattr(getattr(e, "local_position", None), "x", None)
+        tap_y = getattr(getattr(e, "local_position", None), "y", None)
+        if tap_x is None or tap_y is None:
+            # Some Flet versions only provide local_x/local_y on double tap.
+            tap_x = getattr(e, "local_x", (self.width or 800) / 2)
+            tap_y = getattr(e, "local_y", (self.height or 600) / 2)
+
+        hit = self._hit_region(float(tap_x), float(tap_y))
+        if hit is None:
+            # If already focused on a region, deepen into chunk level there.
+            if self._selected_cell is not None:
+                hit = self._selected_cell
+            else:
+                return
+
+        self._selected_cell = hit
+        self._selected_chunk = None
+        size = self._current_data.get(hit, 0)
+        if self._on_selection_changed:
+            self._on_selection_changed(
+                hit,
+                size,
+                {
+                    "level": "chunk",
+                    "block_range": self._region_block_range(hit),
+                },
+            )
+        # Stronger zoom so one region fills almost the whole view → chunk grid readable.
+        self._focus_region(hit, animate=True, target_fill=0.92)
+        self._view_level = "chunk"
+        # Ensure hi-res tile for chunk inspection.
+        if self._use_topview:
+            try:
+                self._service.request_topview_tiles(
+                    [hit],
+                    tile_size=DETAIL_TILE_SIZE,
+                    force=True,
+                    priority=True,
+                )
+            except TypeError:
+                self._service.request_topview_tiles([hit], tile_size=DETAIL_TILE_SIZE)
+
+    def _on_secondary_tap(self, e: Any) -> None:
+        """Right-click: step back overview (chunk→region→world)."""
+        if self._view_level == "chunk":
+            self._view_level = "region"
+            self._selected_chunk = None
+            if self._selected_cell is not None:
+                self._focus_region(self._selected_cell, animate=True, target_fill=0.55)
+            else:
+                self.fit_to_view(padding=0.82)
+            if self._on_selection_changed and self._selected_cell is not None:
+                size = self._current_data.get(self._selected_cell, 0)
+                self._on_selection_changed(
+                    self._selected_cell,
+                    size,
+                    {
+                        "level": "region",
+                        "block_range": self._region_block_range(self._selected_cell),
+                    },
+                )
+            return
+
+        # region / world → full overview
+        self._view_level = "world"
+        self._selected_chunk = None
+        # Keep selected region highlight, but zoom out to whole map.
+        self.fit_to_view(padding=0.82)
+        if self._on_selection_changed:
+            # Clear side-panel detail to overview status.
+            self._on_selection_changed(None, None, {"level": "world"})
+
+    def _hit_region(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
+        for coord, bounds in self._cell_bounds.items():
+            bx, by, bw, bh = bounds
+            if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+                if coord in self._current_data:
+                    return coord
+        return None
+
+    def _region_block_range(self, coord: Tuple[int, int]) -> str:
+        rx, rz = coord
+        return f"X {rx * 512}~{rx * 512 + 511}, Z {rz * 512}~{rz * 512 + 511}"
+
+    def _chunk_block_range(self, chunk_coord: Tuple[int, int]) -> str:
+        cx, cz = chunk_coord
+        return f"X {cx * 16}~{cx * 16 + 15}, Z {cz * 16}~{cz * 16 + 15}"
+
+    def _coord_label_for_region(self, coord: Tuple[int, int], cell_size: float) -> str:
+        """Progressively reveal real game coordinates as the user zooms in.
+
+        - far: region index ``rx,rz``
+        - mid: block range of the region (two lines when space allows)
+        - near/chunk: center block coords (actual game X/Z)
+        """
+        rx, rz = coord
+        if self._view_level == "chunk" or self._scale >= 6.0 or cell_size >= 180:
+            bx = rx * 512 + 256
+            bz = rz * 512 + 256
+            return f"{bx}, {bz}"
+        if self._scale >= 2.4 or cell_size >= 70:
+            x0, x1 = rx * 512, rx * 512 + 511
+            z0, z1 = rz * 512, rz * 512 + 511
+            if cell_size >= 90:
+                return f"X{x0}~{x1}\nZ{z0}~{z1}"
+            return f"{x0}~{x1}"
+        return f"{rx},{rz}"
 
     def _focus_region(
         self,
@@ -282,7 +429,7 @@ class McaMapView(ft.Container):
         cell_pitch = float(self.CELL_SIZE + self.CELL_GAP)
         # Desired on-screen size of one region cell.
         desired = min(view_w, view_h) * max(0.35, min(0.95, target_fill))
-        target_scale = max(0.35, min(12.0, desired / self.CELL_SIZE))
+        target_scale = max(0.35, min(18.0, desired / self.CELL_SIZE))
 
         # World-space center of the region cell.
         world_cx = (coord[0] + 0.5) * cell_pitch
@@ -395,6 +542,7 @@ class McaMapView(ft.Container):
             self._offset_y = view_h / 2.0 - center_z * cell_pitch * self._scale
 
         self._cell_bounds.clear()
+        self._chunk_bounds.clear()
         origin_x = self._offset_x
         origin_y = self._offset_y
         shapes.extend(self._build_origin_marker(origin_x, origin_y))
@@ -438,6 +586,17 @@ class McaMapView(ft.Container):
                             screen_x, screen_y, cell_size, color, coord, size
                         )
                     )
+                    # Chunk grid when deeply zoomed / chunk view level.
+                    if (
+                        self._view_level == "chunk"
+                        or self._scale >= 6.5
+                        or cell_size >= 160
+                    ):
+                        shapes.extend(
+                            self._build_chunk_grid(
+                                screen_x, screen_y, cell_size, coord
+                            )
+                        )
                     if self._use_topview and not self._service.has_topview_tile(coord):
                         missing.append(coord)
                 elif self._show_empty_regions:
@@ -538,17 +697,107 @@ class McaMapView(ft.Container):
             )
         )
         if self._show_coordinates and size >= 22:
+            label = self._coord_label_for_region(coord, size)
+            # Multi-line for mid/near ranges when space allows.
+            if "\n" in label:
+                for i, line in enumerate(label.split("\n")[:2]):
+                    shapes.append(
+                        cv.Text(
+                            x=x + 4,
+                            y=y + 4 + i * 12,
+                            value=line,
+                            style=ft.TextStyle(
+                                size=9 if size < 70 else 10,
+                                color="#FFFFFF" if tile_src else "#F5F5DC",
+                            ),
+                        )
+                    )
+            else:
+                shapes.append(
+                    cv.Text(
+                        x=x + 4,
+                        y=y + 5,
+                        value=label,
+                        style=ft.TextStyle(
+                            size=9 if size < 70 else 11,
+                            color="#FFFFFF" if tile_src else "#F5F5DC",
+                        ),
+                    )
+                )
+        return shapes
+
+    def _build_chunk_grid(
+        self,
+        x: float,
+        y: float,
+        size: float,
+        region_coord: Tuple[int, int],
+    ) -> List[cv.Shape]:
+        """Draw 32×32 chunk mesh inside a region when zoomed in enough."""
+        shapes: List[cv.Shape] = []
+        chunk_size = size / 32.0
+        if chunk_size < 2.5:
+            return shapes
+        rx, rz = region_coord
+        line_color = "#00000066" if chunk_size >= 4 else "#00000040"
+        # Grid lines (skip outer edge; region border already drawn).
+        for i in range(1, 32):
+            pos = i * chunk_size
             shapes.append(
-                cv.Text(
-                    x=x + 4,
-                    y=y + 5,
-                    value=f"{coord[0]},{coord[1]}",
-                    style=ft.TextStyle(
-                        size=9 if size < 42 else 10,
-                        color="#FFFFFF" if tile_src else "#F5F5DC",
-                    ),
+                cv.Line(
+                    x + pos,
+                    y,
+                    x + pos,
+                    y + size,
+                    paint=ft.Paint(color=line_color, stroke_width=0.6),
                 )
             )
+            shapes.append(
+                cv.Line(
+                    x,
+                    y + pos,
+                    x + size,
+                    y + pos,
+                    paint=ft.Paint(color=line_color, stroke_width=0.6),
+                )
+            )
+        # Hit bounds for every chunk; labels only when large enough.
+        for local_z in range(32):
+            for local_x in range(32):
+                cx = rx * 32 + local_x
+                cz = rz * 32 + local_z
+                bx = x + local_x * chunk_size
+                by = y + local_z * chunk_size
+                self._chunk_bounds[(cx, cz)] = (bx, by, chunk_size, chunk_size)
+                if self._show_coordinates and chunk_size >= 14:
+                    # Game block coords of chunk origin.
+                    shapes.append(
+                        cv.Text(
+                            x=bx + 1,
+                            y=by + 1,
+                            value=f"{cx * 16},{cz * 16}",
+                            style=ft.TextStyle(size=8, color="#FFECB3"),
+                        )
+                    )
+        # Highlight selected chunk.
+        if self._selected_chunk is not None:
+            scx, scz = self._selected_chunk
+            if scx // 32 == rx and scz // 32 == rz:
+                lx = scx - rx * 32
+                lz = scz - rz * 32
+                shapes.append(
+                    cv.Rect(
+                        x + lx * chunk_size,
+                        y + lz * chunk_size,
+                        chunk_size,
+                        chunk_size,
+                        paint=ft.Paint(
+                            color="#FFD54F",
+                            style=ft.PaintingStyle.STROKE,
+                            stroke_width=max(1.5, min(3.0, chunk_size / 3)),
+                        ),
+                    )
+                )
         return shapes
 
     def _build_origin_marker(self, x: float, y: float) -> List[cv.Shape]:
@@ -563,8 +812,8 @@ class McaMapView(ft.Container):
         shapes: List[cv.Shape] = []
         width = self.width or 800
         height = self.height or 600
-        title = f"{get_mode_title(self._display_mode)} · 缩放 {self._scale:.1f}x"
-        shapes.append(cv.Rect(10, 10, 200, 26, paint=ft.Paint(color="#00000099")))
+        title = f"{get_mode_title(self._display_mode)} · {self._view_level_title()} · {self._scale:.1f}x"
+        shapes.append(cv.Rect(10, 10, 240, 26, paint=ft.Paint(color="#00000099")))
         shapes.append(
             cv.Text(
                 x=15,
@@ -573,12 +822,12 @@ class McaMapView(ft.Container):
                 style=ft.TextStyle(size=12, color="#D7CCC8"),
             )
         )
-        shapes.append(cv.Rect(10, 42, 200, 24, paint=ft.Paint(color="#00000066")))
+        shapes.append(cv.Rect(10, 42, 250, 24, paint=ft.Paint(color="#00000066")))
         shapes.append(
             cv.Text(
                 x=15,
                 y=47,
-                value="拖拽平移 · 滚轮缩放 · 点击区域",
+                value="拖拽平移 · 滚轮缩放 · 双击区块级 · 右键总览",
                 style=ft.TextStyle(size=11, color="#A5D6A7"),
             )
         )
@@ -600,11 +849,18 @@ class McaMapView(ft.Container):
         if self._selected_cell:
             coord = self._selected_cell
             size = self._current_data.get(coord, 0)
-            meta = self._service.get_region_meta(coord)
-            info = get_region_value_label(
-                self._display_mode, coord, size, meta, self._cached_stats or {}
-            )
-            text_w = max(120, len(info) * 7 + 20)
+            if self._selected_chunk is not None:
+                cx, cz = self._selected_chunk
+                info = (
+                    f"区块 ({cx},{cz}) · "
+                    f"{self._chunk_block_range(self._selected_chunk)}"
+                )
+            else:
+                info = (
+                    f"r.{coord[0]}.{coord[1]}.mca · "
+                    f"{self._region_block_range(coord)}"
+                )
+            text_w = max(140, len(info) * 7 + 20)
             shapes.append(
                 cv.Rect(
                     width - text_w - 10,
@@ -623,6 +879,13 @@ class McaMapView(ft.Container):
                 )
             )
         return shapes
+
+    def _view_level_title(self) -> str:
+        return {
+            "world": "世界",
+            "region": "区域",
+            "chunk": "区块",
+        }.get(self._view_level, "世界")
 
     # ------------------------------------------------------------------ lifecycle / scan
     async def _update_loop(self) -> None:
@@ -729,6 +992,8 @@ class McaMapView(ft.Container):
         self._offset_x = 0
         self._offset_y = 0
         self._selected_cell = None
+        self._selected_chunk = None
+        self._view_level = "world"
         self._request_rebuild()
 
     def fit_to_view(self, padding: float = 0.86) -> None:
@@ -817,14 +1082,27 @@ class McaMapView(ft.Container):
         return self._display_mode
 
     def set_detail_level(self, level: str) -> None:
-        # v1: region-level only
-        if level not in {"auto", "region", "chunk"}:
+        if level not in {"auto", "region", "chunk", "world"}:
             return
-        self._detail_level = "region"
-        self._request_rebuild()
+        if level == "auto":
+            return
+        self._detail_level = level
+        self._view_level = "chunk" if level == "chunk" else (
+            "region" if level == "region" else "world"
+        )
+        if self._view_level == "world":
+            self._selected_chunk = None
+            self.fit_to_view()
+        elif self._view_level == "region" and self._selected_cell is not None:
+            self._selected_chunk = None
+            self._focus_region(self._selected_cell, animate=True, target_fill=0.72)
+        elif self._view_level == "chunk" and self._selected_cell is not None:
+            self._focus_region(self._selected_cell, animate=True, target_fill=0.92)
+        else:
+            self._request_rebuild()
 
     def get_detail_level(self) -> str:
-        return self._detail_level
+        return self._view_level
 
     def zoom_in(self) -> None:
         cx = (self.width or 800) / 2
