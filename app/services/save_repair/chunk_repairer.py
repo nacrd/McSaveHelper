@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable, Tuple, Any, List
 
 import nbtlib
-from anvil import Region
+from core.mca import NativeRegion as Region
 
 from core.scanner import scan_all_regions
 

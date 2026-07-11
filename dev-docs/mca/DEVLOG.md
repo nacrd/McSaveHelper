@@ -1,3 +1,28 @@
+## 2026-07-11 (Phase 4 write path)
+
+### Added
+
+- core/mca/writer.py: WritableRegion (load/mutate/delete/save atomic)
+- delete_chunk_entries for header-only chunk resets
+- tests/test_mca_writer.py
+
+### Migrated
+
+- worker / pure_cleaner / converter write-backs
+- region_editor reads + delete_chunks
+- save_repair detector/chunk_repairer -> NativeRegion
+
+### Validation
+
+- 21 mca unit tests passed
+- example_saves r.0.0.mca: open 1024 chunks -> WritableRegion save 1024 + .bak
+
+### Note
+
+Production code has zero anvil imports. Optional anvil only in scripts/bench_mca.py for compare.
+
+---
+
 ## 2026-07-11 (fix pan: translate shapes, no rebuild)
 
 Pan with only ~4 cells still lagged because each pan_update rebuilt the whole

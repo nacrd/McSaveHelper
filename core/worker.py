@@ -3,8 +3,6 @@ from pathlib import Path
 from typing import List, Optional, Callable, Tuple
 
 import nbtlib
-import anvil
-
 from .nbt_utils import patch_nbt
 from .types import UUIDMapping, LogCallback
 
@@ -23,19 +21,15 @@ def process_region_file(
         (文件路径, 修改次数, 错误信息)
     """
     try:
-        region = anvil.Region.from_file(str(file_path))   # 修正1：使用 anvil.Region
+        from core.mca import WritableRegion
+        region = WritableRegion.open(file_path)
         changes = 0
-        for x in range(32):
-            for z in range(32):
-                chunk = region.get_chunk(x, z)
-                if chunk:
-                    data = chunk if isinstance(
-                        chunk, nbtlib.tag.Compound) else chunk.data
-                    if data:
-                        _, c = patch_nbt(data, mappings)
-                        changes += c
+        for x, z, data in region.iter_chunks():
+            if data:
+                _, c = patch_nbt(data, mappings)
+                changes += c
         if changes > 0:
-            region.save(str(file_path))  # type: ignore[attr-defined]
+            region.save(file_path, backup=True)
         return str(file_path), changes, None
     except Exception as e:
         return str(file_path), -1, str(e)

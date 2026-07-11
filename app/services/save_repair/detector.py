@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Optional, List, Tuple, Set, Any
 
 import nbtlib
-from anvil import Region
+from core.mca import NativeRegion as Region
 
 from core.logger import logger
 from core.scanner import scan_all_regions

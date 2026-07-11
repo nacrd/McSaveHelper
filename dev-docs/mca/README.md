@@ -12,6 +12,7 @@
 | [PHASE0_1_CHECKLIST.md](./PHASE0_1_CHECKLIST.md) | Phase 0/1 任务清单 |
 | [PHASE2_CHECKLIST.md](./PHASE2_CHECKLIST.md) | Phase 2 任务清单 |
 | [PHASE3_CHECKLIST.md](./PHASE3_CHECKLIST.md) | Phase 3 只读迁移 |
+| [PHASE4_CHECKLIST.md](./PHASE4_CHECKLIST.md) | Phase 4 写回 |
 
 ## 代码位置
 

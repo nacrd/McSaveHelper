@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import nbtlib
-import anvil
-
 from .scanner import scan_all_regions
 from .types import LogCallback
 
@@ -27,24 +25,21 @@ def _process_one_region(
         (文件名, 扫描区块数, 替换方块数, 移除实体数, 错误信息|None)
     """
     try:
-        region = anvil.Region.from_file(str(region_file))
+        from core.mca import WritableRegion
+        region = WritableRegion.open(region_file)
         region_changes = 0
         chunks = 0
         blocks_replaced = 0
         entities_removed = 0
-        for x in range(32):
-            for z in range(32):
-                chunk = region.get_chunk(x, z)
-                if chunk is None:
-                    continue
-                chunks += 1
-                br, er = _purge_mod_data_in_chunk(chunk)
-                blocks_replaced += br
-                entities_removed += er
-                if br > 0 or er > 0:
-                    region_changes += 1
+        for x, z, data in region.iter_chunks():
+            chunks += 1
+            br, er = _purge_mod_data_in_chunk(data)
+            blocks_replaced += br
+            entities_removed += er
+            if br > 0 or er > 0:
+                region_changes += 1
         if region_changes > 0:
-            region.save(str(region_file))  # type: ignore[attr-defined]
+            region.save(region_file, backup=True)
         return region_file.name, chunks, blocks_replaced, entities_removed, None
     except Exception as e:
         return region_file.name, 0, 0, 0, str(e)
