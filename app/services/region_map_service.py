@@ -1,5 +1,5 @@
 """
-存档区域地图后台扫描服务 (HeatmapService)
+存档区域地图后台扫描服务 (RegionMapService)
 
 提供异步、非阻塞的区域文件扫描能力，
 支持进度追踪和数据查询。
@@ -24,7 +24,7 @@ class ScanProgress:
     error: Optional[str] = None
 
 
-class HeatmapService:
+class RegionMapService:
     """
     存档区域地图后台扫描服务（单例模式）
 
@@ -34,9 +34,9 @@ class HeatmapService:
     - 提供进度查询接口
     """
 
-    _instance: Optional['HeatmapService'] = None
+    _instance: Optional['RegionMapService'] = None
 
-    def __new__(cls) -> 'HeatmapService':
+    def __new__(cls) -> 'RegionMapService':
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._init()
@@ -466,14 +466,14 @@ class HeatmapService:
 
 
 # 全局单例实例
-_heatmap_service_instance: Optional[HeatmapService] = None
-_heatmap_service_lock = threading.Lock()
+_region_map_service_instance: Optional[RegionMapService] = None
+_region_map_service_lock = threading.Lock()
 
 
-def get_heatmap_service() -> HeatmapService:
+def get_region_map_service() -> RegionMapService:
     """获取区域地图服务单例（线程安全）"""
-    global _heatmap_service_instance
-    with _heatmap_service_lock:
-        if _heatmap_service_instance is None:
-            _heatmap_service_instance = HeatmapService()
-    return _heatmap_service_instance
+    global _region_map_service_instance
+    with _region_map_service_lock:
+        if _region_map_service_instance is None:
+            _region_map_service_instance = RegionMapService()
+    return _region_map_service_instance

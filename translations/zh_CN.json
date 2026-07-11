@@ -16,7 +16,6 @@
     "batch_failed": "批量处理失败",
     "start_stats": "开始统计",
     "open_search": "打开搜索",
-    "refresh_heatmap": "刷新区域图",
     "stage_player": "暂存玩家",
     "commit_changes": "提交变更",
     "discard_changes": "丢弃暂存",
@@ -24,7 +23,8 @@
     "start_export": "开始导出",
     "start_compare": "开始对比",
     "import_lang": "导入语言文件",
-    "read_config": "读取配置"
+    "read_config": "读取配置",
+    "refresh_map": "刷新地图"
   },
   "sidebar": {
     "migrator": "存档转换",
@@ -106,10 +106,7 @@
     "air": "氧气",
     "dimension": "维度",
     "position": "坐标",
-    "region_heatmap": "区域热力图（根据文件大小着色）",
-    "refresh_heatmap": "刷新热力图",
     "clear_selection": "清空选择",
-    "heatmap_hint": "点击单元格选择区域，再次点击取消选择",
     "nbt_viewer": "NBT 树状查看器（支持搜索与编辑）",
     "search": "搜索：",
     "search_hint": "输入键名或值...",
@@ -120,12 +117,15 @@
     "load_first": "请先加载存档",
     "imported_cache": "已导入 {count} 个玩家名称映射",
     "import_fail": "导入失败: {error}",
-    "heatmap_refreshed": "热力图已刷新",
     "player_loaded": "已加载玩家 {uuid} 的数据",
     "player_load_fail": "无法加载玩家 {uuid} 的数据",
     "session_loaded": "已加载存档，发现 {count} 个玩家",
     "unknown_player": "未知玩家",
-    "world_label": "存档"
+    "world_label": "存档",
+    "region_map": "区域地图（根据文件大小着色）",
+    "refresh_map": "刷新地图",
+    "map_hint": "点击单元格选择区域，再次点击取消选择",
+    "map_refreshed": "地图已刷新"
   },
   "mappings": {
     "title": "UUID映射管理",
