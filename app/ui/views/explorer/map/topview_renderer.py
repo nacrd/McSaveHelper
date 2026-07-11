@@ -1,8 +1,7 @@
 """Top-down (bird's-eye) region tile renderer for the map display.
 
 Renders one r.x.z.mca region into a small PNG suitable for Canvas tiles.
-Samples surface blocks (highest non-air) with a step so 512×512 blocks
-become TILE_SIZE×TILE_SIZE pixels without allocating a full-resolution image.
+Uses native core.mca (heightmap + palette) instead of anvil-parser.
 """
 from __future__ import annotations
 
@@ -101,12 +100,10 @@ BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {
 }
 
 
-def _color_for_block(block: Any) -> Tuple[int, int, int]:
+def _color_for_block_name(name: str) -> Tuple[int, int, int]:
     try:
-        name = block.name() if hasattr(block, "name") else str(getattr(block, "id", block))
         if name in BLOCK_COLORS:
             return BLOCK_COLORS[name]
-        # Prefix-based fallbacks
         if "leaves" in name:
             return (0, 100, 0)
         if "log" in name or "wood" in name:
@@ -135,52 +132,20 @@ def _color_for_block(block: Any) -> Tuple[int, int, int]:
         return (128, 128, 128)
 
 
-def _highest_non_air_y(chunk: Any, x: int, z: int) -> Optional[int]:
+def _color_for_block(block: Any) -> Tuple[int, int, int]:
+    """Back-compat for callers that still pass anvil Block-like objects."""
     try:
-        try:
-            from anvil.chunk import _section_height_range
-
-            section_range = _section_height_range(chunk.version)
-        except Exception:
-            section_range = range(-4, 20)
-
-        for section_y in reversed(list(section_range)):
-            try:
-                palette = chunk.get_palette(section_y)
-                if palette is None:
-                    continue
-                has_non_air = any(
-                    p is not None and not str(getattr(p, "id", "")).endswith("air")
-                    for p in palette
-                )
-                if not has_non_air:
-                    continue
-            except Exception:
-                continue
-
-            y_start = section_y * 16
-            for y in range(y_start + 15, y_start - 1, -1):
-                try:
-                    block = chunk.get_block(x, y, z)
-                    if block is not None and not str(getattr(block, "id", "")).endswith(
-                        "air"
-                    ):
-                        return y
-                except Exception:
-                    continue
-        return None
+        name = block.name() if hasattr(block, "name") else str(getattr(block, "id", block))
+        return _color_for_block_name(str(name))
     except Exception:
-        return None
+        return (128, 128, 128)
 
 
 def render_region_topview(
     region_file: Path | str,
     tile_size: int = DEFAULT_TILE_SIZE,
 ) -> Optional[bytes]:
-    """Render one MCA region to PNG bytes (RGB).
-
-    Returns None if Pillow / anvil is unavailable or the file cannot be read.
-    """
+    """Render one MCA region to PNG bytes (RGB) via core.mca."""
     if not PIL_AVAILABLE:
         return None
 
@@ -189,58 +154,31 @@ def render_region_topview(
         return None
 
     tile_size = max(8, min(256, int(tile_size)))
-    # 1 region = 512 blocks edge
-    step = max(1, 512 // tile_size)
 
     try:
-        from anvil import Region
+        from core.mca.surface import sample_region_surface_colors
 
-        region = Region.from_file(str(region_path))
+        grid = sample_region_surface_colors(
+            region_path,
+            tile_size=tile_size,
+            color_for_block=_color_for_block_name,
+        )
     except Exception:
+        return None
+
+    if grid is None:
         return None
 
     image = Image.new("RGB", (tile_size, tile_size), color=(40, 55, 45))
     pixels = image.load()
-
-    # Cache decoded chunks: tile_size samples hit only a few of the 32×32 chunks,
-    # but without caching we re-parse the same chunk for every sample inside it.
-    chunk_cache: Dict[Tuple[int, int], Any] = {}
-
-    def _get_chunk(cx: int, cz: int) -> Any:
-        key = (cx, cz)
-        if key in chunk_cache:
-            return chunk_cache[key]
-        try:
-            chunk = region.get_chunk(cx, cz)
-        except Exception:
-            chunk = None
-        chunk_cache[key] = chunk
-        return chunk
-
-    # Map pixel (px, pz) → world-local block in region [0, 512).
-    for pz in range(tile_size):
-        for px in range(tile_size):
-            bx = min(511, px * step + step // 2)
-            bz = min(511, pz * step + step // 2)
-            cx, lx = divmod(bx, 16)
-            cz, lz = divmod(bz, 16)
-            chunk = _get_chunk(cx, cz)
-            if chunk is None:
-                pixels[px, pz] = (45, 60, 50)
-                continue
-            try:
-                y = _highest_non_air_y(chunk, lx, lz)
-                if y is None:
-                    pixels[px, pz] = (64, 164, 223)  # treat empty column as water/sky-ish
-                    continue
-                block = chunk.get_block(lx, y, lz)
-                pixels[px, pz] = _color_for_block(block)
-            except Exception:
-                pixels[px, pz] = (100, 100, 100)
+    for pz, row in enumerate(grid):
+        for px, color in enumerate(row):
+            pixels[px, pz] = color
 
     buf = io.BytesIO()
     try:
-        image.save(buf, format="PNG", optimize=True)
+        # optimize=False: faster encode for progressive map tiles
+        image.save(buf, format="PNG", optimize=False)
         return buf.getvalue()
     except Exception:
         return None
