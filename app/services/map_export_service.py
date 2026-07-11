@@ -375,26 +375,36 @@ class MapExportService:
     def _get_highest_block_y(self, chunk: Any, x: int,
                              z: int) -> Optional[int]:
         try:
-            try:
-                from anvil.chunk import _section_height_range
-                section_range = _section_height_range(chunk.version)
-            except Exception:
-                section_range = range(-4, 20)
-
-            for section_y in reversed(section_range):
+            # section 级非空气缓存：同一 chunk 的 256 像素共享 palette 扫描结果
+            cache_attr = "_mcsh_non_air_sections"
+            non_air_sections = getattr(chunk, cache_attr, None)
+            if non_air_sections is None:
                 try:
-                    palette = chunk.get_palette(section_y)
-                    if palette is None:
-                        continue
-                    has_non_air = any(
-                        p is not None and not p.id.endswith("air")
-                        for p in palette
-                    )
-                    if not has_non_air:
-                        continue
+                    from anvil.chunk import _section_height_range
+                    section_range = _section_height_range(chunk.version)
                 except Exception:
-                    continue
+                    section_range = range(-4, 20)
 
+                non_air_sections = []
+                for section_y in reversed(list(section_range)):
+                    try:
+                        palette = chunk.get_palette(section_y)
+                        if palette is None:
+                            continue
+                        has_non_air = any(
+                            p is not None and not p.id.endswith("air")
+                            for p in palette
+                        )
+                        if has_non_air:
+                            non_air_sections.append(section_y)
+                    except Exception:
+                        continue
+                try:
+                    setattr(chunk, cache_attr, non_air_sections)
+                except Exception:
+                    pass  # chunk 可能不允许 setattr，退化到本调用内使用
+
+            for section_y in non_air_sections:
                 y_start = section_y * 16
                 for y in range(y_start + 15, y_start - 1, -1):
                     try:

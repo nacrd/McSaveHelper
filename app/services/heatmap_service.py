@@ -12,6 +12,7 @@ from typing import Any, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 from core.region_utils import parse_region_coords, scan_region_dir
+from core.perf_timing import PerfTimer
 
 
 @dataclass
@@ -52,6 +53,13 @@ class HeatmapService:
         self._scanned_count: int = 0
         self._total_count: int = 0
         self._error: Optional[str] = None
+        # 统计/快照缓存：仅数据变化时重算，避免 _update_loop 每 0.2s 全量遍历
+        self._stats_dirty: bool = True
+        self._cached_stats: Optional[Dict[str, Any]] = None
+        self._cached_data_snapshot: Optional[Dict[Tuple[int, int], int]] = None
+        self._cached_snapshot_count: int = -1
+        # anvil 扫描并发写保护（asyncio.to_thread 后多线程写 _mca_data）
+        self._data_lock = threading.Lock()
 
     @property
     def is_scanning(self) -> bool:
@@ -81,13 +89,24 @@ class HeatmapService:
         Returns:
             Dict[Tuple[int, int], int]: 坐标到文件大小的映射
         """
-        return self._mca_data.copy()
+        with self._data_lock:
+            # 扫描期间 _scanned_count 未变则复用快照，避免每帧 .copy()
+            if (self._cached_data_snapshot is not None
+                    and self._cached_snapshot_count == self._scanned_count
+                    and not self._stats_dirty):
+                return self._cached_data_snapshot
+            snapshot = self._mca_data.copy()
+            self._cached_data_snapshot = snapshot
+            self._cached_snapshot_count = self._scanned_count
+            return snapshot
 
     def get_region_meta(self, coord: Tuple[int, int]) -> Dict[str, Any]:
-        return dict(self._region_meta.get(coord, {}))
+        with self._data_lock:
+            return dict(self._region_meta.get(coord, {}))
 
     def get_all_region_meta(self) -> Dict[Tuple[int, int], Dict[str, Any]]:
-        return {coord: dict(meta) for coord, meta in self._region_meta.items()}
+        with self._data_lock:
+            return {coord: dict(meta) for coord, meta in self._region_meta.items()}
 
     def get_data_snapshot(self) -> Dict[Tuple[int, int], int]:
         """
@@ -103,6 +122,16 @@ class HeatmapService:
         self._total_count = 0
         self._scan_progress = 0.0
         self._error = None
+        self._stats_dirty = True
+        self._cached_stats = None
+        self._cached_data_snapshot = None
+        self._cached_snapshot_count = -1
+
+    def _mark_data_dirty(self) -> None:
+        """标记数据变更，下次 get_statistics/get_all_data 时重算。"""
+        self._stats_dirty = True
+        self._cached_data_snapshot = None
+        self._cached_snapshot_count = -1
 
     async def start_silent_scan(
             self,
@@ -141,21 +170,30 @@ class HeatmapService:
                     coord = parse_region_coords(mca_file)
                     if coord is not None:
                         size = mca_file.stat().st_size
-                        self._mca_data[coord] = size
-                        self._region_meta[coord] = self._scan_region_meta(
-                            mca_file)
+                        # anvil 同步解析丢进线程池，await 期间 UI loop 可处理事件
+                        meta = await asyncio.to_thread(
+                            self._scan_region_meta, mca_file)
+                        with self._data_lock:
+                            self._mca_data[coord] = size
+                            self._region_meta[coord] = meta
+                            self._mark_data_dirty()
 
-                    self._scanned_count += 1
+                    with self._data_lock:
+                        self._scanned_count += 1
+                        if self._total_count > 0:
+                            self._scan_progress = (
+                                self._scanned_count / self._total_count)
 
                     if self._scanned_count % batch_size == 0:
-                        self._scan_progress = self._scanned_count / self._total_count
                         await asyncio.sleep(0)
                 except Exception:
                     continue
 
             # 最终更新
-            self._scan_progress = 1.0
-            self._is_scanning = False
+            with self._data_lock:
+                self._scan_progress = 1.0
+                self._is_scanning = False
+                self._mark_data_dirty()
 
         except Exception as e:
             self._error = str(e)
@@ -167,43 +205,44 @@ class HeatmapService:
         structures: Counter[str] = Counter()
         structure_positions: list[Dict[str, Any]] = []
         chunk_count = 0
-        try:
-            import anvil
-            region = anvil.Region.from_file(str(region_file))
-            sample_points = [(0, 0), (0, 16), (16, 0), (16, 16),
-                             (8, 8), (8, 24), (24, 8), (24, 24)]
-            for cx, cz in sample_points:
-                try:
-                    chunk = region.get_chunk(cx, cz)
-                    if chunk is None or not hasattr(chunk, "data"):
+        with PerfTimer("heatmap._scan_region_meta"):
+            try:
+                import anvil
+                region = anvil.Region.from_file(str(region_file))
+                sample_points = [(0, 0), (0, 16), (16, 0), (16, 16),
+                                 (8, 8), (8, 24), (24, 8), (24, 24)]
+                for cx, cz in sample_points:
+                    try:
+                        chunk = region.get_chunk(cx, cz)
+                        if chunk is None or not hasattr(chunk, "data"):
+                            continue
+                        chunk_count += 1
+                        data = chunk.data
+                        self._collect_biomes(data, biomes)
+                        self._collect_structures(
+                            data, structures, structure_positions)
+                    except Exception:
                         continue
-                    chunk_count += 1
-                    data = chunk.data
-                    self._collect_biomes(data, biomes)
-                    self._collect_structures(
-                        data, structures, structure_positions)
-                except Exception:
-                    continue
-            if not biomes and not structures:
-                for cx in range(0, 32, 4):
-                    for cz in range(0, 32, 4):
+                if not biomes and not structures:
+                    for cx in range(0, 32, 4):
+                        for cz in range(0, 32, 4):
+                            if chunk_count >= 16:
+                                break
+                            try:
+                                chunk = region.get_chunk(cx, cz)
+                                if chunk is None or not hasattr(chunk, "data"):
+                                    continue
+                                chunk_count += 1
+                                data = chunk.data
+                                self._collect_biomes(data, biomes)
+                                self._collect_structures(
+                                    data, structures, structure_positions)
+                            except Exception:
+                                continue
                         if chunk_count >= 16:
                             break
-                        try:
-                            chunk = region.get_chunk(cx, cz)
-                            if chunk is None or not hasattr(chunk, "data"):
-                                continue
-                            chunk_count += 1
-                            data = chunk.data
-                            self._collect_biomes(data, biomes)
-                            self._collect_structures(
-                                data, structures, structure_positions)
-                        except Exception:
-                            continue
-                    if chunk_count >= 16:
-                        break
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         dominant_biome = biomes.most_common(1)[0][0] if biomes else "unknown"
         dominant_structure = structures.most_common(
@@ -420,49 +459,59 @@ class HeatmapService:
 
     def get_statistics(self) -> Dict[str, Any]:
         """
-        获取扫描统计信息（单次遍历，避免多次迭代）
+        获取扫描统计信息（带缓存，仅数据变化时重算）
 
         Returns:
             包含统计数据的字典
         """
-        if not self._mca_data:
-            return {
-                "total_regions": 0,
-                "total_size": 0,
-                "avg_size": 0,
-                "min_size": 0,
-                "max_size": 0,
-                "min_coord": None,
-                "max_coord": None
+        with self._data_lock:
+            if not self._stats_dirty and self._cached_stats is not None:
+                return self._cached_stats
+
+            if not self._mca_data:
+                empty = {
+                    "total_regions": 0,
+                    "total_size": 0,
+                    "avg_size": 0,
+                    "min_size": 0,
+                    "max_size": 0,
+                    "min_coord": None,
+                    "max_coord": None
+                }
+                self._cached_stats = empty
+                self._stats_dirty = False
+                return empty
+
+            total_size = 0
+            min_size = float('inf')
+            max_size = 0
+            min_coord = None
+            max_coord = None
+
+            for coord, size in self._mca_data.items():
+                total_size += size
+                if size < min_size:
+                    min_size = size
+                if size > max_size:
+                    max_size = size
+                if min_coord is None or coord < min_coord:
+                    min_coord = coord
+                if max_coord is None or coord > max_coord:
+                    max_coord = coord
+
+            count = len(self._mca_data)
+            stats = {
+                "total_regions": count,
+                "total_size": total_size,
+                "avg_size": total_size // count if count else 0,
+                "min_size": min_size,
+                "max_size": max_size,
+                "min_coord": min_coord,
+                "max_coord": max_coord,
             }
-
-        total_size = 0
-        min_size = float('inf')
-        max_size = 0
-        min_coord = None
-        max_coord = None
-
-        for coord, size in self._mca_data.items():
-            total_size += size
-            if size < min_size:
-                min_size = size
-            if size > max_size:
-                max_size = size
-            if min_coord is None or coord < min_coord:
-                min_coord = coord
-            if max_coord is None or coord > max_coord:
-                max_coord = coord
-
-        count = len(self._mca_data)
-        return {
-            "total_regions": count,
-            "total_size": total_size,
-            "avg_size": total_size // count if count else 0,
-            "min_size": min_size,
-            "max_size": max_size,
-            "min_coord": min_coord,
-            "max_coord": max_coord,
-        }
+            self._cached_stats = stats
+            self._stats_dirty = False
+            return stats
 
 
 # 全局单例实例
