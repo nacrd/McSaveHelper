@@ -9,6 +9,7 @@ from typing import List, Union, Any, Optional, Callable
 import nbtlib
 from .models import Action, ChunkTarget
 from ..utils import replace_directory_tree
+from ..perf_timing import PerfTimer
 
 
 class ActionExecutor:
@@ -42,7 +43,8 @@ class ActionExecutor:
             try:
                 if backup_dir.exists():
                     shutil.rmtree(backup_dir)
-                shutil.copytree(self.world_path, backup_dir)
+                with PerfTimer("action_executor.backup"):
+                    shutil.copytree(self.world_path, backup_dir)
                 self._log(f"已备份原存档到 {backup_dir}", "BACKUP")
             except Exception as e:
                 self._log(f"备份失败: {e}", "ERROR")
@@ -51,7 +53,8 @@ class ActionExecutor:
         # 2. 克隆（如果目标路径与源路径不同）
         if dest_path != self.world_path:
             try:
-                replace_directory_tree(self.world_path, dest_path)
+                with PerfTimer("action_executor.clone"):
+                    replace_directory_tree(self.world_path, dest_path)
                 self._log(f"已克隆存档到 {dest_path}", "CLONE")
             except Exception as e:
                 self._log(f"克隆失败: {e}", "ERROR")
@@ -62,13 +65,14 @@ class ActionExecutor:
 
         # 3. 执行队列中的操作
         success = True
-        for idx, action in enumerate(actions):
-            try:
-                self._execute_action(action, target_world)
-                self._log(f"操作 {idx+1}/{len(actions)} 执行成功", "ACTION")
-            except Exception as e:
-                self._log(f"操作 {idx+1} 执行失败: {e}", "ERROR")
-                success = False
+        with PerfTimer("action_executor.execute_queue"):
+            for idx, action in enumerate(actions):
+                try:
+                    self._execute_action(action, target_world)
+                    self._log(f"操作 {idx+1}/{len(actions)} 执行成功", "ACTION")
+                except Exception as e:
+                    self._log(f"操作 {idx+1} 执行失败: {e}", "ERROR")
+                    success = False
 
         if success:
             self._log("所有操作已提交", "COMMIT")
