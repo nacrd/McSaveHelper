@@ -129,8 +129,16 @@ class HangDetector:
                 # 获取线程名称
                 thread_name = self._get_thread_name(thread_id)
 
-                # 跳过守护线程和监控线程
-                if "Daemon" in thread_name or "Monitor" in thread_name or "Detector" in thread_name:
+                # 跳过守护线程、监控线程、以及预期会长时间跑 CPU/IO 的 worker
+                skip_names = (
+                    "Daemon",
+                    "Monitor",
+                    "Detector",
+                    "topview",
+                    "HangDetector",
+                    "LogManager",
+                )
+                if any(token in thread_name for token in skip_names):
                     continue
 
                 # 提取位置指纹
@@ -139,8 +147,12 @@ class HangDetector:
                     frame.f_lineno}:{
                     frame.f_code.co_name}"
 
-                # 检查是否为良性等待
-                is_benign = self._is_benign_wait(frame)
+                # Idle wait (event loop, queue.get, thread-pool worker park, etc.)
+                # stays on the same stack forever — never treat that as a hang.
+                if self._is_benign_wait(frame):
+                    self._thread_snapshots.pop(thread_id, None)
+                    self._blocked_threads.discard(thread_id)
+                    continue
 
                 if thread_id not in self._thread_snapshots:
                     self._thread_snapshots[thread_id] = {
@@ -161,8 +173,7 @@ class HangDetector:
                     else:
                         # 位置未变，检查超时
                         elapsed = now - snapshot["timestamp"]
-                        threshold = self._thread_block_threshold * \
-                            2 if is_benign else self._thread_block_threshold
+                        threshold = self._thread_block_threshold
 
                         if elapsed >= threshold and not snapshot["alerted"]:
                             # 提取堆栈
@@ -205,29 +216,54 @@ class HangDetector:
         return f"Thread-{thread_id}"
 
     def _is_benign_wait(self, frame) -> bool:
-        """判断是否为良性等待"""
+        """判断是否为良性等待（空闲阻塞，不是卡死）。"""
         try:
             f = frame
             depth = 0
-            while f is not None and depth < 10:
+            while f is not None and depth < 12:
                 func_name = f.f_code.co_name
-                file_name = f.f_code.co_filename
+                file_name = f.f_code.co_filename.replace("\\", "/")
+                lower = file_name.lower()
 
+                # Generic parking points
                 if func_name in (
-                    'sleep',
-                    'wait',
-                    'join',
-                    'select',
-                    'poll',
-                    'recv',
-                        'accept'):
+                    "sleep",
+                    "wait",
+                    "_wait",
+                    "join",
+                    "select",
+                    "poll",
+                    "_poll",
+                    "recv",
+                    "accept",
+                    "get",
+                    "put",
+                    "_worker",
+                    "_run_once",
+                    "run_forever",
+                    "run_until_complete",
+                ):
                     return True
 
-                if 'threading.py' in file_name and func_name in (
-                        'wait', '_wait'):
+                if "threading.py" in lower and func_name in ("wait", "_wait"):
                     return True
 
-                if 'queue.py' in file_name and func_name in ('get', 'put'):
+                if "queue.py" in lower and func_name in ("get", "put"):
+                    return True
+
+                if "asyncio" in lower and func_name in (
+                        "select", "_poll", "_run_once", "run_forever",
+                        "run_until_complete"):
+                    return True
+
+                if "concurrent" in lower and "futures" in lower and func_name in (
+                        "_worker", "wait", "result"):
+                    return True
+
+                if "selectors.py" in lower and func_name in ("select", "_select"):
+                    return True
+
+                if "windows_events.py" in lower and func_name in ("_poll", "select"):
                     return True
 
                 f = f.f_back

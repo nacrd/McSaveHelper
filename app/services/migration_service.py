@@ -5,13 +5,15 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from core.fast_mode import run_fast
-from core.full_mode import run_full
 from core.batch_processor import BatchProcessor, scan_worlds_directory
 from core.logger import logger
 from core.types import LogCallback, ProgressCallback
 from core.i18n import t
 from app.services.config_service import ConfigService
+
+# run_fast / run_full 延迟导入：它们经 core.full_mode 顶层 `import nbtlib`
+# 触发重型 NBT 库加载，启动期不需要。在实际调用 migrate 时才导入。
+# （参照项目内 anvil/Pillow 已有的函数内延迟导入先例。）
 
 
 class MigrationService:
@@ -116,6 +118,9 @@ class MigrationService:
 
         from core.performance import get_tracker
         tracker = get_tracker()
+        # 延迟导入：nbtlib 重库，仅迁移时需要
+        from core.fast_mode import run_fast
+        from core.full_mode import run_full
         with tracker.track("存档迁移", {"name": world_name, "mode": mode}):
             if mode == "fast":
                 run_fast(

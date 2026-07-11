@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -27,6 +27,44 @@ class SetBlockResult:
 
 
 class BlockDataService:
+    """方块读写服务。
+
+    性能：对同一 section 的 block_states 缓存 decoded indices，
+    set_block_at 批量编辑时避免每次 O(4096) decode/encode。
+    section 对象被替换或 repack 时自动失效。
+    """
+
+    def __init__(self) -> None:
+        # key: id(block_states) → (indices, palette_size, dirty)
+        self._indices_cache: Dict[int, Tuple[List[int], int, bool]] = {}
+
+    def clear_cache(self) -> None:
+        """清空索引缓存（chunk 替换/重载时调用）。"""
+        self._indices_cache.clear()
+
+    def flush_dirty_caches(self) -> None:
+        """把所有 dirty 的缓存写回（当前 set_block_at 已即时回写，此方法预留）。"""
+        self._indices_cache.clear()
+
+    def _get_cached_indices(
+            self, data: Any, palette_size: int, block_states: Any) -> List[int]:
+        """取/建 decoded indices 缓存。"""
+        cache_key = id(block_states) if block_states is not None else id(data)
+        cached = self._indices_cache.get(cache_key)
+        if cached is not None:
+            indices, cached_size, _dirty = cached
+            if cached_size == palette_size:
+                return indices
+        if data is None or palette_size <= 1:
+            indices = [0] * 4096
+        else:
+            indices = self._decode_all_indices(data, palette_size)
+        self._indices_cache[cache_key] = (indices, palette_size, False)
+        return indices
+
+    def _invalidate_cache(self, block_states: Any) -> None:
+        if block_states is not None:
+            self._indices_cache.pop(id(block_states), None)
     def get_block_at(
             self,
             chunk_data: Any,
@@ -138,14 +176,15 @@ class BlockDataService:
         new_bits = max(4, (new_palette_size - 1).bit_length()
                        ) if new_palette_size > 1 else 4
         repacked = new_bits != old_bits
-        if data is None or old_palette_size <= 1:
-            all_indices = [0] * 4096
-        else:
-            all_indices = self._decode_all_indices(data, old_palette_size)
+        # 用缓存的 decoded indices，批量编辑同一 section 时避免重复 O(4096) 解码
+        all_indices = self._get_cached_indices(data, old_palette_size, block_states)
         target_flat = (local_y * 16 + local_z) * 16 + local_x
         all_indices[target_flat] = new_palette_index
         new_data = self._encode_all_indices(all_indices, new_palette_size)
         self._set_block_states_data(block_states, new_data)
+        # 写回后更新缓存（palette_size 可能变化；repack 时 bits 变了但 indices 仍有效）
+        self._indices_cache[id(block_states)] = (
+            all_indices, new_palette_size, False)
         return SetBlockResult(
             success=True,
             old_name=old_name,

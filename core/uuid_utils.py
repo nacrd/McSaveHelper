@@ -6,11 +6,23 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import requests
-
 from core.types import LogCallback
 from core.constants import MinecraftConstants
 from core.utils import find_player_data_dirs
+
+# requests 延迟导入：仅联网查询 Mojang API 时需要（启动期不联网），
+# 避免启动时拉入 requests + urllib3 + idna 等重库。
+# （参照项目内 anvil/Pillow 已有的函数内延迟导入先例。）
+requests = None  # type: ignore
+
+
+def _ensure_requests():
+    """惰性导入 requests，仅首次联网时执行。"""
+    global requests
+    if requests is None:
+        import requests as _requests  # type: ignore
+        requests = _requests
+    return requests
 
 
 def get_offline_uuid_str(name: str) -> str:
@@ -83,7 +95,7 @@ def get_online_uuid(
         log_callback(f"正在查询正版UUID: {name} ...", "API")
     try:
         url = f"{MinecraftConstants.MOJANG_PROFILE_URL}{name}"
-        r = requests.get(url, timeout=5)
+        r = _ensure_requests().get(url, timeout=5)
         if r.status_code == 200:
             data = r.json()
             raw = data['id']
@@ -122,7 +134,7 @@ def get_name_from_uuid(
             uuid.replace(
                 '-',
                 '')}"
-        r = requests.get(url, timeout=5)
+        r = _ensure_requests().get(url, timeout=5)
         time.sleep(0.3)
         if r.status_code == 200:
             name = r.json().get("name")

@@ -35,8 +35,8 @@ class RegionTabMixin:
             self._map_view = McaMapView(
                 map_service=self._map_service,
                 on_selection_changed=self._on_region_selected,
-                width=420,
-                height=260,
+                width=900,
+                height=560,
             )
             map_view = self._map_view
         except Exception:
@@ -53,21 +53,21 @@ class RegionTabMixin:
             )
 
         self._region_help_text = ft.Text(
-            "1 格 = 1 个 r.x.z.mca 区域文件（512×512 方块）。绿色表示该区域已生成。",
+            "滚轮缩放自动切层级 · 双击深入区块/区块内 · 右键逐级返回 · 坐标随缩放变为游戏坐标",
             size=11,
             color=THEME.text_muted,
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
 
-        # Keep display-mode state for side-panel detail text; map v1 is presence-only.
-        self._region_display_mode = "activity"
+        # Keep display-mode state for side-panel detail text.
+        self._region_display_mode = "topview"
         self._region_display_mode_dropdown = ft.Dropdown(
             label="显示方式",
-            value="activity",
+            value="topview",
             width=150,
             options=[
-                ft.dropdown.Option("activity", "区域地图"),
+                ft.dropdown.Option("topview", "方块俯视"),
             ],
             on_select=self._change_region_display_mode,
             border_color=THEME.border_light,
@@ -77,91 +77,392 @@ class RegionTabMixin:
         )
 
         self._map_coord_btn = btn_ghost(
-            "隐藏坐标", width=112, on_click=lambda e: self._toggle_map_coordinates())
+            "隐藏坐标", width=88, on_click=lambda e: self._toggle_map_coordinates())
         self._map_empty_btn = btn_ghost(
-            "显示空格", width=112, on_click=lambda e: self._toggle_map_empty_regions())
+            "显示空格", width=88, on_click=lambda e: self._toggle_map_empty_regions())
+        self._map_fullscreen_btn = btn_ghost(
+            "⛶ 全屏", width=88, on_click=lambda e: self._toggle_map_fullscreen())
+        self._map_fullscreen = False
+        self._map_fs_overlay: Optional[ft.Container] = None
+        self._map_fs_body: Optional[ft.Container] = None
+        self._map_inline_parent: Optional[ft.Container] = None
+        self._map_pre_fs_size: Optional[Tuple[int, int]] = None
 
         self._region_stats_text = ft.Text(
-            "等待设置当前存档...", size=12, color=THEME.text_muted)
+            "等待设置当前存档...", size=11, color=THEME.text_muted)
         self._region_status_text = ft.Text(
-            "👆 点击方块查看详情", size=13, color=THEME.text_secondary)
+            "👆 点击方块查看详情", size=12, color=THEME.text_secondary)
 
-        action_row = ft.Column([
-            ft.Row([
-                btn_primary("🔄 刷新", width=100, on_click=lambda e: self._refresh_map()),
-                btn_ghost("🔍 放大", width=90, on_click=lambda e: self._map_zoom_in()),
-            ], spacing=8),
-            ft.Row([
-                btn_ghost("🔍 缩小", width=90, on_click=lambda e: self._map_zoom_out()),
-                btn_ghost("🏠 重置", width=90, on_click=lambda e: self._map_reset_view()),
-            ], spacing=8),
-            ft.Row([
-                btn_ghost("填入 NBT", width=112, on_click=self._fill_selected_region_for_nbt),
-                btn_danger("删除区域", width=112, on_click=self._delete_selected_region),
-            ], spacing=8),
-        ], spacing=8)
+        action_row = ft.Row([
+            btn_ghost("填入 NBT", width=100, on_click=self._fill_selected_region_for_nbt),
+            btn_danger("删除区域", width=100, on_click=self._delete_selected_region),
+        ], spacing=6)
 
         view_option_row = ft.Row(
-            [self._map_coord_btn, self._map_empty_btn], spacing=8)
-        map_card = card(ft.Container(
+            [self._map_coord_btn, self._map_empty_btn, self._map_fullscreen_btn],
+            spacing=6,
+        )
+        toolbar = card(ft.Row([
+            dimension_row,
+            self._region_display_mode_dropdown,
+            btn_primary("🔄 刷新", width=84, on_click=lambda e: self._refresh_map()),
+            btn_ghost("🔍+", width=52, on_click=lambda e: self._map_zoom_in()),
+            btn_ghost("🔍−", width=52, on_click=lambda e: self._map_zoom_out()),
+            btn_ghost("🏠", width=52, on_click=lambda e: self._map_reset_view()),
+            view_option_row,
+            self._region_help_text,
+        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True), padding=8)
+        self._region_toolbar = toolbar
+
+        self._map_host = ft.Container(
             content=map_view,
             bgcolor=THEME.bg_secondary,
             border=mc_border(2),
             border_radius=0,
-            padding=4,
+            padding=2,
+            expand=True,
             alignment=ft.alignment.Alignment(0, 0),
-        ), padding=6)
+        )
+        map_card = card(self._map_host, padding=4)
+        map_card.expand = True
+        self._region_map_card = map_card
 
         stats_card = card(ft.Column([
-            ft.Text("📊 地图概况", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            ft.Text("📊 概况", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             self._region_stats_text,
-        ], spacing=6), padding=10)
+        ], spacing=4), padding=8)
 
         selection_card = card(ft.Column([
-            ft.Text("👆 点击详情", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            ft.Text("👆 选中", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             self._region_status_text,
-        ], spacing=6), padding=10)
+        ], spacing=4), padding=8)
 
         self._region_legend_container = ft.Container(
             content=self._create_region_legend_content())
-        legend = card(self._region_legend_container, padding=10)
+        legend = card(self._region_legend_container, padding=8)
 
         left_panel = ft.Container(
             content=ft.Column([
-                card(ft.Row([
-                    dimension_row,
-                    self._region_display_mode_dropdown,
-                    self._region_help_text,
-                ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER), padding=8),
+                toolbar,
                 map_card,
-            ], spacing=8),
+            ], spacing=6, expand=True),
             expand=True,
         )
         self._region_left_panel = left_panel
 
+        # Compact side rail — no fixed height / no forced scroll
         side_panel = ft.Container(
             content=ft.Column([
                 selection_card,
                 stats_card,
                 legend,
                 card(ft.Column([
-                    ft.Text("⚙️ 显示选项", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-                    view_option_row,
-                ], spacing=8), padding=10),
-                card(ft.Column([
-                    ft.Text("🛠️ 区域操作", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                    ft.Text("🛠️ 操作", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
                     action_row,
-                ], spacing=8), padding=10),
-            ], spacing=8, scroll=ft.ScrollMode.AUTO),
-            height=320,
-            width=360,
+                ], spacing=6), padding=8),
+            ], spacing=6),
+            width=280,
+            expand=False,
         )
         self._region_side_panel = side_panel
 
-        self._tab_region.content = ft.Row([
-            left_panel,
-            side_panel,
-        ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
+        self._region_layout = ft.Row(
+            [left_panel, side_panel],
+            spacing=10,
+            expand=True,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
+        self._tab_region.content = self._region_layout
+        self._tab_region.expand = True
+
+    def _toggle_map_fullscreen(self) -> None:
+        """App-wide fullscreen overlay for the map (covers sidebar + chrome)."""
+        if getattr(self, "_map_fullscreen", False):
+            self._exit_map_fullscreen()
+        else:
+            self._enter_map_fullscreen()
+
+    def _page_window_size(self, page: ft.Page) -> Tuple[int, int]:
+        """Best-effort full window content size for overlay layout."""
+        w = 0
+        h = 0
+        try:
+            w = int(getattr(page, "width", 0) or 0)
+            h = int(getattr(page, "height", 0) or 0)
+        except Exception:
+            pass
+        try:
+            win = getattr(page, "window", None)
+            if win is not None:
+                ww = int(getattr(win, "width", 0) or 0)
+                wh = int(getattr(win, "height", 0) or 0)
+                w = max(w, ww)
+                h = max(h, wh)
+        except Exception:
+            pass
+        return max(800, w or 1100), max(600, h or 800)
+
+    def _enter_map_fullscreen(self) -> None:
+        map_view = getattr(self, "_map_view", None)
+        page = getattr(getattr(self, "app", None), "page", None)
+        host = getattr(self, "_map_host", None)
+        if map_view is None or page is None or host is None:
+            # Fallback: tab-only fullscreen
+            self._map_fullscreen = True
+            side = getattr(self, "_region_side_panel", None)
+            if side is not None:
+                side.visible = False
+                try:
+                    side.update()
+                except Exception:
+                    pass
+            btn = getattr(self, "_map_fullscreen_btn", None)
+            if btn is not None:
+                btn.set_text("⛶ 退出")
+                safe_update(btn)
+            return
+
+        # Avoid stacking multiple overlays
+        if getattr(self, "_map_fs_overlay", None) is not None:
+            return
+
+        self._map_fullscreen = True
+        self._map_inline_parent = host
+        self._map_pre_fs_size = (
+            int(map_view.width or 900),
+            int(map_view.height or 560),
+        )
+
+        win_w, win_h = self._page_window_size(page)
+        # Full-bleed overlay; tiny inset only for edge contrast
+        pad = 0
+        bar_h = 48
+        map_w = max(400, win_w - pad * 2)
+        map_h = max(300, win_h - bar_h - pad * 2)
+
+        # Detach map from inline host
+        host.content = ft.Container(
+            content=ft.Text("地图全屏中…", size=13, color=THEME.text_muted),
+            alignment=ft.alignment.Alignment(0, 0),
+            expand=True,
+            bgcolor=THEME.bg_secondary,
+        )
+        try:
+            host.update()
+        except Exception:
+            pass
+
+        exit_btn = btn_ghost("⛶ 退出全屏", width=120, on_click=lambda e: self._exit_map_fullscreen())
+        zoom_in_btn = btn_ghost("🔍+", width=52, on_click=lambda e: self._map_zoom_in())
+        zoom_out_btn = btn_ghost("🔍−", width=52, on_click=lambda e: self._map_zoom_out())
+        reset_btn = btn_ghost("🏠", width=52, on_click=lambda e: self._map_reset_view())
+        refresh_btn = btn_primary("🔄 刷新", width=84, on_click=lambda e: self._refresh_map())
+
+        top_bar = ft.Container(
+            content=ft.Row(
+                [
+                    ft.Text("🗺️ 区域地图 · 全屏", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                    ft.Container(expand=True),
+                    refresh_btn,
+                    zoom_in_btn,
+                    zoom_out_btn,
+                    reset_btn,
+                    exit_btn,
+                ],
+                spacing=8,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
+            height=bar_h,
+            bgcolor=THEME.bg_card,
+            border=mc_border(2),
+        )
+
+        # Force explicit pixel size so canvas really fills the window,
+        # and re-fit/center the world to the new viewport.
+        try:
+            map_view.resize_map(map_w, map_h, refit=True)
+        except TypeError:
+            # Older signature fallback
+            try:
+                map_view.resize_map(map_w, map_h)
+                if hasattr(map_view, "fit_to_view"):
+                    map_view.fit_to_view()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+        map_body = ft.Container(
+            content=map_view,
+            width=map_w,
+            height=map_h,
+            bgcolor=THEME.bg_secondary,
+            padding=0,
+            # Scale-in animation for enter
+            scale=0.96,
+            opacity=0.0,
+            animate_scale=ft.Animation(220, ft.AnimationCurve.EASE_OUT_CUBIC),
+            animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        )
+        self._map_fs_body = map_body
+
+        # Absolute-positioned full-window overlay (page.overlay does not stretch expand alone)
+        overlay = ft.Container(
+            content=ft.Column(
+                [top_bar, map_body],
+                spacing=0,
+                tight=True,
+            ),
+            left=0,
+            top=0,
+            width=win_w,
+            height=win_h,
+            padding=0,
+            bgcolor="#0B120B",
+            opacity=0.0,
+            animate_opacity=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
+        )
+        self._map_fs_overlay = overlay
+        self._map_fs_size = (win_w, win_h)
+
+        try:
+            # Ensure we sit on top of any other overlays
+            page.overlay.append(overlay)
+            page.update()
+        except Exception:
+            # restore if overlay fails
+            self._map_fullscreen = False
+            host.content = map_view
+            try:
+                host.update()
+            except Exception:
+                pass
+            self._map_fs_overlay = None
+            self._map_fs_body = None
+            return
+
+        def _animate_in() -> None:
+            try:
+                # Re-measure in case window size is available only after paint
+                w2, h2 = self._page_window_size(page)
+                if (w2, h2) != (win_w, win_h):
+                    overlay.width = w2
+                    overlay.height = h2
+                    mw = max(400, w2)
+                    mh = max(300, h2 - bar_h)
+                    map_body.width = mw
+                    map_body.height = mh
+                    try:
+                        map_view.resize_map(mw, mh, refit=True)
+                    except TypeError:
+                        try:
+                            map_view.resize_map(mw, mh)
+                            if hasattr(map_view, "fit_to_view"):
+                                map_view.fit_to_view()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                overlay.opacity = 1.0
+                map_body.scale = 1.0
+                map_body.opacity = 1.0
+                overlay.update()
+                map_body.update()
+            except Exception:
+                pass
+
+        try:
+            page.run_task(self._async_call, _animate_in)
+        except Exception:
+            _animate_in()
+
+        btn = getattr(self, "_map_fullscreen_btn", None)
+        if btn is not None:
+            btn.set_text("⛶ 退出")
+            safe_update(btn)
+
+    def _exit_map_fullscreen(self) -> None:
+        page = getattr(getattr(self, "app", None), "page", None)
+        map_view = getattr(self, "_map_view", None)
+        host = getattr(self, "_map_inline_parent", None) or getattr(self, "_map_host", None)
+        overlay = getattr(self, "_map_fs_overlay", None)
+        body = getattr(self, "_map_fs_body", None)
+
+        def _restore() -> None:
+            self._map_fullscreen = False
+            # Remove overlay
+            if page is not None and overlay is not None:
+                try:
+                    if overlay in page.overlay:
+                        page.overlay.remove(overlay)
+                    page.update()
+                except Exception:
+                    pass
+            self._map_fs_overlay = None
+            self._map_fs_body = None
+
+            # Reattach map to inline host
+            if host is not None and map_view is not None:
+                host.content = map_view
+                try:
+                    host.update()
+                except Exception:
+                    pass
+            if map_view is not None:
+                pre = getattr(self, "_map_pre_fs_size", None)
+                if pre:
+                    map_view.resize_map(pre[0], pre[1])
+                elif hasattr(map_view, "_schedule_rebuild"):
+                    map_view._schedule_rebuild()
+
+            # Tab-only fallback cleanup
+            side = getattr(self, "_region_side_panel", None)
+            if side is not None and getattr(side, "visible", True) is False:
+                side.visible = True
+                try:
+                    side.update()
+                except Exception:
+                    pass
+
+            btn = getattr(self, "_map_fullscreen_btn", None)
+            if btn is not None:
+                btn.set_text("⛶ 全屏")
+                safe_update(btn)
+
+        # Animate out then restore
+        if overlay is not None and body is not None:
+            try:
+                overlay.opacity = 0.0
+                body.scale = 0.96
+                body.opacity = 0.0
+                overlay.update()
+                body.update()
+            except Exception:
+                pass
+
+            def _after() -> None:
+                import time
+                time.sleep(0.18)
+                if page is not None:
+                    from app.ui.utils import run_on_ui
+                    run_on_ui(page, _restore)
+                else:
+                    _restore()
+
+            import threading
+            threading.Thread(target=_after, daemon=True).start()
+        else:
+            _restore()
+
+    async def _async_call(self, fn) -> None:
+        """Run a sync callback after yielding to the UI loop (for enter animation)."""
+        import asyncio
+        await asyncio.sleep(0.02)
+        try:
+            fn()
+        except Exception:
+            pass
 
     def _create_region_legend_content(self) -> ft.Column:
         title, items = self._get_region_display_legend()
@@ -179,14 +480,17 @@ class RegionTabMixin:
 
     def _get_region_display_legend(
             self) -> tuple[str, list[tuple[str, str, str]]]:
-        return "🗺️ 区域地图图例", [
-            ("#4CAF50", "已生成", "存在 r.x.z.mca 区域文件"),
-            ("#263426", "空格", "未生成（可开关显示）"),
-            ("#FFD54F", "选中", "当前选中的区域边框"),
+        return "🗺️ 俯视图例", [
+            ("#228B22", "草地", "植被"),
+            ("#64A4DF", "水体", "海/河"),
+            ("#EED6AF", "沙地", "沙漠"),
+            ("#808080", "岩石", "石/深板岩"),
+            ("#4CAF50", "占位", "未加载"),
+            ("#FFD54F", "选中", "边框"),
         ]
 
     def _change_region_display_mode(self, e: ft.ControlEvent) -> None:
-        mode = self._region_display_mode_dropdown.value or "activity"
+        mode = self._region_display_mode_dropdown.value or "topview"
         self._region_display_mode = mode
         if self._map_view is not None and hasattr(self._map_view, "set_display_mode"):
             self._map_view.set_display_mode(mode)
@@ -207,7 +511,7 @@ class RegionTabMixin:
             self._map_view.set_detail_level(level)
 
     def _get_region_display_help(self, mode: str) -> str:
-        return "绿色方格表示该区域文件已生成；点击查看坐标与文件信息。"
+        return "按区域最高方块着色的俯视图；扫描时渐进加载，未加载前显示绿色占位。"
 
     def _map_zoom_in(self) -> None:
         map_view = self._map_view
@@ -246,10 +550,7 @@ class RegionTabMixin:
         if coord is None or size is None:
             self._selected_region_coord = None
             total = stats.get("total_regions", 0)
-            self._region_stats_text.value = (
-                f"🗺️ 已生成区域: {total} 个\n"
-                f"点击地图上的方格查看区域坐标与文件信息。"
-            )
+            self._region_stats_text.value = f"已生成区域: {total} 个"
             self._region_stats_text.color = THEME.text_primary
             self._region_status_text.value = "✅ 扫描完成，点击方块查看详情"
             self._region_status_text.color = THEME.text_secondary
@@ -267,13 +568,30 @@ class RegionTabMixin:
         block_x1 = region_x * 512 + 511
         block_z0 = region_z * 512
         block_z1 = region_z * 512 + 511
-        self._region_status_text.value = (
-            f"✅ 已选择区域\n"
-            f"   🧭 区域坐标: ({region_x}, {region_z})\n"
-            f"   📄 文件: r.{region_x}.{region_z}.mca\n"
-            f"   🧩 区块范围: X {chunk_x0} ~ {chunk_x1}, Z {chunk_z0} ~ {chunk_z1}\n"
-            f"   🧱 方块范围: X {block_x0} ~ {block_x1}, Z {block_z0} ~ {block_z1}"
-        )
+        if detail and detail.get("level") in {"chunk", "block"}:
+            chunk = detail.get("chunk_coord")
+            br = detail.get("block_range", "")
+            level = detail.get("level")
+            if chunk:
+                title = "区块内" if level == "block" else "区块"
+                self._region_status_text.value = (
+                    f"{title} ({chunk[0]}, {chunk[1]})\n"
+                    f"所属 r.{region_x}.{region_z}.mca\n"
+                    f"方块 {br}"
+                )
+            else:
+                self._region_status_text.value = (
+                    f"区域 ({region_x}, {region_z}) · 区块级\n"
+                    f"r.{region_x}.{region_z}.mca\n"
+                    f"方块 {detail.get('block_range', self._region_status_text.value)}"
+                )
+        else:
+            self._region_status_text.value = (
+                f"区域 ({region_x}, {region_z})\n"
+                f"r.{region_x}.{region_z}.mca\n"
+                f"区块 X{chunk_x0}~{chunk_x1} Z{chunk_z0}~{chunk_z1}\n"
+                f"方块 X{block_x0}~{block_x1} Z{block_z0}~{block_z1}"
+            )
         self._region_status_text.color = THEME.accent_light
         safe_update(self._region_status_text)
 
@@ -436,9 +754,6 @@ class RegionTabMixin:
     def _update_region_stats(self) -> None:
         stats = self._map_service.get_statistics()
         total = stats.get("total_regions", 0)
-        self._region_stats_text.value = (
-            f"🗺️ 已生成区域: {total} 个\n"
-            f"点击地图上的方格查看区域坐标与文件信息。"
-        )
+        self._region_stats_text.value = f"已生成区域: {total} 个"
         self._region_stats_text.color = THEME.text_primary
         safe_update(self._region_stats_text)

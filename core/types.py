@@ -35,23 +35,26 @@ BatchResult = Dict[str, Dict[str, Any]]
 # 文件扫描结果
 FileScanResult = List[Path]
 
-# NBT 标签类型（需要运行时导入）
-try:
+# NBT 标签类型（延迟导入：避免 types 模块在启动期就拉入 nbtlib 重库。
+# 类型注解在运行时无需真实类型，用 TYPE_CHECKING 守卫即可。）
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
     import nbtlib
     NBTTag = Union[
-        nbtlib.tag.Compound,
-        nbtlib.tag.List,
-        nbtlib.tag.String,
-        nbtlib.tag.IntArray,
-        nbtlib.tag.Long,
-        nbtlib.tag.Int,
-        nbtlib.tag.Byte,
-        nbtlib.tag.Short,
-        nbtlib.tag.Float,
-        nbtlib.tag.Double,
+        "nbtlib.tag.Compound",
+        "nbtlib.tag.List",
+        "nbtlib.tag.String",
+        "nbtlib.tag.IntArray",
+        "nbtlib.tag.Long",
+        "nbtlib.tag.Int",
+        "nbtlib.tag.Byte",
+        "nbtlib.tag.Short",
+        "nbtlib.tag.Float",
+        "nbtlib.tag.Double",
         Any
     ]
-except ImportError:
+else:
     NBTTag = Any
 
 # 配置字典类型

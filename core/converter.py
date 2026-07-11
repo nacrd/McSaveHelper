@@ -353,13 +353,17 @@ def convert_world(src_path: Path, dst_path: Path,
                         tracker.increment_errors(1)
 
         # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
+        #    region 级并发（各处理独立文件，写回安全）
         if target_platform != "java" or target_version is not None:
             try:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
                 from .scanner import scan_all_regions
                 import anvil
 
                 mca_files = scan_all_regions(work_path)
-                for mca_path in mca_files:
+
+                def _convert_one_mca(mca_path: Path):
+                    """处理单个 .mca，返回 (成功, 错误消息|None)。"""
                     try:
                         region = anvil.Region.from_file(str(mca_path))
                         region_modified = False
@@ -387,13 +391,25 @@ def convert_world(src_path: Path, dst_path: Path,
 
                         if region_modified and hasattr(region, "save"):
                             region.save(str(mca_path))
+                            return True, None
+                        return False, None
+                    except Exception as e:
+                        return False, f"转换区域文件 {mca_path} 时出错: {e}"
+
+                workers = min(8, max(1, len(mca_files)))
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = [
+                        executor.submit(_convert_one_mca, p) for p in mca_files
+                    ]
+                    for future in as_completed(futures):
+                        ok, err = future.result()
+                        if err:
+                            result.errors.append(err)
+                            _logger.warning(err, module="Converter")
+                            tracker.increment_errors(1)
+                        elif ok:
                             tracker.increment_files(1)
                             result.converted_files += 1
-                    except Exception as e:
-                        message = f"转换区域文件 {mca_path} 时出错: {e}"
-                        result.errors.append(message)
-                        _logger.warning(message, module="Converter")
-                        tracker.increment_errors(1)
             except ImportError:
                 message = "anvil-parser 未安装，跳过区域文件转换"
                 result.warnings.append(message)

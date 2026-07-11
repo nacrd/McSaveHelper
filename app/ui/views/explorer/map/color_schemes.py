@@ -88,6 +88,7 @@ def get_mode_title(display_mode: str) -> str:
     """Display mode title."""
     return {
         "activity": "区域地图",
+        "topview": "方块俯视",
         "biome": "主要群系",
         "structure": "生成结构",
     }.get(display_mode, "区域地图")
