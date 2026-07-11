@@ -2,6 +2,12 @@
 
 Draws region files (r.x.z.mca) as a colored grid on Flet Canvas.
 Supports pan, zoom, click-to-select, and progressive scan updates.
+
+Zoom levels (auto-switched by scale thresholds on wheel):
+  world  — overview of many regions
+  region — one/few regions dominant
+  chunk  — 32x32 chunk mesh inside a region
+  block  — deep zoom into a single chunk (16x16 block mesh)
 """
 from __future__ import annotations
 
@@ -32,14 +38,35 @@ from app.ui.views.explorer.map.color_schemes import (
 from app.ui.views.explorer.map.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
-    HIRES_TILE_SIZE,
-    PREVIEW_TILE_SIZE,
 )
 
 
 MapSelectionCallback = Callable[
     [Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Any]]], None
 ]
+
+
+
+# Scale thresholds (relative to CELL_SIZE=32):
+#   scale 2.0  -> region cell ~ 64px
+#   scale 6.5  -> region cell ~ 208px, chunk ~ 6.5px (mesh readable)
+#   scale 20   -> chunk ~ 20px, deep enough for single-chunk interior
+SCALE_REGION = 2.0
+SCALE_CHUNK = 6.5
+SCALE_BLOCK = 20.0
+MIN_SCALE = 0.1
+MAX_SCALE = 320.0  # one chunk can fill the viewport (~10px/block)
+
+
+def view_level_from_scale(scale: float) -> str:
+    """Map camera scale -> semantic view level (pure helper for tests/UI)."""
+    if scale >= SCALE_BLOCK:
+        return "block"
+    if scale >= SCALE_CHUNK:
+        return "chunk"
+    if scale >= SCALE_REGION:
+        return "region"
+    return "world"
 
 
 class McaMapView(ft.Container):
@@ -50,6 +77,12 @@ class McaMapView(ft.Container):
     ORIGIN_COLOR = ORIGIN_COLOR
     CELL_SIZE = 32
     CELL_GAP = 2
+
+    MIN_SCALE = MIN_SCALE
+    MAX_SCALE = MAX_SCALE
+    SCALE_REGION = SCALE_REGION
+    SCALE_CHUNK = SCALE_CHUNK
+    SCALE_BLOCK = SCALE_BLOCK
 
     def __init__(
         self,
@@ -75,13 +108,15 @@ class McaMapView(ft.Container):
 
         self._selected_cell: Optional[Tuple[int, int]] = None
         self._selected_chunk: Optional[Tuple[int, int]] = None  # world chunk (cx, cz)
-        self._view_level: str = "world"  # world | region | chunk
+        # world | region | chunk | block
+        self._view_level: str = "world"
         self._current_data: Dict[Tuple[int, int], int] = {}
         self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
+        self._block_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         # base64 cache for canvas Image.src (derived from service PNG bytes)
-        self._tile_src_cache: Dict[Any, str] = {}
+        self._tile_src_cache: Dict[Tuple[int, int], str] = {}
         self._tile_src_generation = -1
 
         self._last_x = 0.0
@@ -94,14 +129,9 @@ class McaMapView(ft.Container):
         self._rebuild_pending = False
         self._rebuild_timer: Optional[threading.Timer] = None
         self._last_rebuild_ts = 0.0
-        # Cap interactive redraws (~20fps). Full 60fps canvas rebuild freezes UI.
-        self._min_rebuild_interval = 1.0 / 20.0
-        # True while panning / zoom-animating: skip tile fetches & heavy overlays.
-        self._camera_busy = False
-        self._idle_tile_timer: Optional[threading.Timer] = None
+        self._min_rebuild_interval = 1.0 / 60.0
         # Smooth zoom animation state (world-space pivot + ease-out)
         self._zoom_anim_timer: Optional[threading.Timer] = None
-
         self._zoom_anim_active = False
         self._zoom_anim_start_scale = 1.0
         self._zoom_anim_target_scale = 1.0
@@ -111,6 +141,10 @@ class McaMapView(ft.Container):
         self._zoom_anim_target_offset_y = 0.0
         self._zoom_anim_t0 = 0.0
         self._zoom_anim_duration = 0.16
+        # Pointer used for level auto-switch while zooming.
+        self._zoom_pivot_x = 0.0
+        self._zoom_pivot_y = 0.0
+        self._last_notified_level: Optional[str] = None
 
         self.width = width
         self.height = height
@@ -129,7 +163,6 @@ class McaMapView(ft.Container):
         self._gesture = ft.GestureDetector(
             on_pan_start=self._on_pan_start,
             on_pan_update=self._on_pan_update,
-            on_pan_end=self._on_pan_end,
             on_tap=self._on_tap,
             on_double_tap=self._on_double_tap,
             on_secondary_tap=self._on_secondary_tap,
@@ -149,43 +182,28 @@ class McaMapView(ft.Container):
     def _on_tile_ready(self, coord: Tuple[int, int]) -> None:
         """Called from a worker thread when a topview PNG is cached."""
         try:
-            if self._camera_busy or self._zoom_anim_active:
-                self._schedule_idle_tile_pass(0.12)
-                return
+            # Only rebuild if the cell is currently relevant.
             if coord in self._current_data or not self._current_data:
                 self._schedule_rebuild()
         except Exception:
             pass
 
     def _tile_src(self, coord: Tuple[int, int]) -> Optional[str]:
-        """Return base64 PNG for coord, caching decoded form for canvas.
-
-        Cache key includes rendered tile size so progressive upgrades
-        (16->32->64->128) invalidate the previous base64 payload.
-        """
+        """Return base64 PNG for coord, caching decoded form for canvas."""
         import base64
 
         generation = self._service.get_topview_generation()
         if generation != self._tile_src_generation:
             self._tile_src_cache.clear()
             self._tile_src_generation = generation
-        try:
-            tile_size = int(self._service.get_topview_tile_size(coord) or 0)
-        except Exception:
-            tile_size = 0
-        cache_key = (coord, tile_size)
-        cached = self._tile_src_cache.get(cache_key)  # type: ignore[arg-type]
+        cached = self._tile_src_cache.get(coord)
         if cached is not None:
             return cached
         raw = self._service.get_topview_tile(coord)
         if not raw:
             return None
         src = base64.b64encode(raw).decode("ascii")
-        # Drop older size variants for this coord to bound memory.
-        for k in list(self._tile_src_cache.keys()):
-            if isinstance(k, tuple) and k and k[0] == coord:
-                self._tile_src_cache.pop(k, None)
-        self._tile_src_cache[cache_key] = src  # type: ignore[index]
+        self._tile_src_cache[coord] = src
         return src
 
     # ------------------------------------------------------------------ UI helpers
@@ -224,21 +242,8 @@ class McaMapView(ft.Container):
         except Exception:
             pass
 
-    def _rebuild_now(self) -> None:
-        """Synchronous rebuild for gesture handlers already on the UI thread.
-
-        Do NOT route pan/scroll through run_on_ui — that queues async work and
-        makes the map lag behind the finger (and can flash).
-        """
-        if not self._mounted:
-            return
-        try:
-            self._rebuild_canvas()
-        except Exception:
-            pass
-
     def _schedule_rebuild(self) -> None:
-        """Rate-limit rebuilds from background threads (tile-ready, timers)."""
+        """Rate-limit rebuild requests, then hop to the UI thread."""
         now = time.monotonic()
         elapsed = now - self._last_rebuild_ts
         if elapsed >= self._min_rebuild_interval and not self._rebuild_pending:
@@ -267,15 +272,6 @@ class McaMapView(ft.Container):
         self._rebuild_timer.daemon = True
         self._rebuild_timer.start()
 
-    def _schedule_interactive_redraw(self) -> None:
-        """Rate-limited *direct* redraw for pan/zoom (already on UI thread)."""
-        now = time.monotonic()
-        # ~15fps during drag is enough; fewer Image/shape rebuilds = less flicker.
-        if now - self._last_rebuild_ts < (1.0 / 15.0):
-            return
-        self._last_rebuild_ts = now
-        self._rebuild_now()
-
     def _cancel_rebuild_timer(self) -> None:
         try:
             if self._rebuild_timer is not None:
@@ -284,38 +280,11 @@ class McaMapView(ft.Container):
             pass
         self._rebuild_timer = None
         self._rebuild_pending = False
-        try:
-            if getattr(self, "_idle_tile_timer", None) is not None:
-                self._idle_tile_timer.cancel()
-        except Exception:
-            pass
-        self._idle_tile_timer = None
-
-    def _schedule_idle_tile_pass(self, delay: float = 0.18) -> None:
-        """After camera settles, fetch/upgrade tiles once (not every pan frame)."""
-        try:
-            if self._idle_tile_timer is not None:
-                self._idle_tile_timer.cancel()
-        except Exception:
-            pass
-
-        def _fire() -> None:
-            self._idle_tile_timer = None
-            self._camera_busy = False
-            try:
-                self._request_rebuild()
-            except Exception:
-                pass
-
-        self._idle_tile_timer = threading.Timer(max(0.05, delay), _fire)
-        self._idle_tile_timer.daemon = True
-        self._idle_tile_timer.start()
 
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
-        self._camera_busy = True
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
         dx = e.local_position.x - self._last_x
@@ -324,60 +293,14 @@ class McaMapView(ft.Container):
         self._offset_y += dy
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
-        self._camera_busy = True
-        # Translate existing shapes in place — never rebuild the whole canvas
-        # while the finger is down (rebuild = lag + flicker).
-        self._nudge_shapes(dx, dy)
-        self._schedule_idle_tile_pass()
-
-    def _on_pan_end(self, e: Any = None) -> None:
-        self._camera_busy = False
-        try:
-            if self._idle_tile_timer is not None:
-                self._idle_tile_timer.cancel()
-        except Exception:
-            pass
-        self._idle_tile_timer = None
-        # One authoritative rebuild (tiles + hit bounds + HUD) after the gesture.
-        self._rebuild_now()
-
-    def _nudge_shapes(self, dx: float, dy: float) -> None:
-        """Shift every canvas shape and hit-box by (dx, dy) without recreating them."""
-        if not dx and not dy:
-            return
-        shapes = getattr(self._canvas, "shapes", None) or []
-        for s in shapes:
-            try:
-                if hasattr(s, "x") and getattr(s, "x", None) is not None:
-                    s.x = float(s.x) + dx
-                if hasattr(s, "y") and getattr(s, "y", None) is not None:
-                    s.y = float(s.y) + dy
-                # Lines use x1/y1/x2/y2
-                if hasattr(s, "x1") and getattr(s, "x1", None) is not None:
-                    s.x1 = float(s.x1) + dx
-                    s.x2 = float(s.x2) + dx
-                    s.y1 = float(s.y1) + dy
-                    s.y2 = float(s.y2) + dy
-            except Exception:
-                continue
-        # Keep hit testing in sync with the visual shift.
-        if self._cell_bounds:
-            for k, (bx, by, bw, bh) in list(self._cell_bounds.items()):
-                self._cell_bounds[k] = (bx + dx, by + dy, bw, bh)
-        if self._chunk_bounds:
-            for k, (bx, by, bw, bh) in list(self._chunk_bounds.items()):
-                self._chunk_bounds[k] = (bx + dx, by + dy, bw, bh)
-        try:
-            self._canvas.update()
-        except Exception:
-            pass
+        self._schedule_rebuild()
 
     def _on_tap(self, e: ft.TapEvent) -> None:
         tap_x = e.local_position.x
         tap_y = e.local_position.y
 
-        # Chunk-level selection when deeply zoomed into a region.
-        if self._view_level == "chunk" and self._chunk_bounds:
+        # Chunk/block-level selection when deeply zoomed into a region.
+        if self._view_level in {"chunk", "block"} and self._chunk_bounds:
             for chunk_coord, bounds in self._chunk_bounds.items():
                 bx, by, bw, bh = bounds
                 if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
@@ -385,16 +308,23 @@ class McaMapView(ft.Container):
                     region = (chunk_coord[0] // 32, chunk_coord[1] // 32)
                     self._selected_cell = region
                     size = self._current_data.get(region, 0)
+                    level = "block" if self._view_level == "block" else "chunk"
                     if self._on_selection_changed:
                         self._on_selection_changed(
                             region,
                             size,
                             {
-                                "level": "chunk",
+                                "level": level,
                                 "chunk_coord": chunk_coord,
                                 "block_range": self._chunk_block_range(chunk_coord),
                             },
                         )
+                    if (
+                        self._view_level == "block"
+                        or self._scale >= self.SCALE_BLOCK * 0.85
+                    ):
+                        self._focus_chunk(chunk_coord, animate=True, target_fill=0.78)
+                        self._view_level = "block"
                     self._request_rebuild()
                     return
 
@@ -421,13 +351,34 @@ class McaMapView(ft.Container):
                 break
 
     def _on_double_tap(self, e: Any) -> None:
-        """Double-click: zoom to chunk level inside the hit region."""
+        """Double-click: zoom to chunk level, or deeper into a single chunk."""
         tap_x = getattr(getattr(e, "local_position", None), "x", None)
         tap_y = getattr(getattr(e, "local_position", None), "y", None)
         if tap_x is None or tap_y is None:
             # Some Flet versions only provide local_x/local_y on double tap.
             tap_x = getattr(e, "local_x", (self.width or 800) / 2)
             tap_y = getattr(e, "local_y", (self.height or 600) / 2)
+
+        # If already at chunk/block and a chunk is under the pointer, dive in.
+        hit_chunk = self._hit_chunk(float(tap_x), float(tap_y))
+        if hit_chunk is not None and self._view_level in {"chunk", "block"}:
+            region = (hit_chunk[0] // 32, hit_chunk[1] // 32)
+            self._selected_cell = region
+            self._selected_chunk = hit_chunk
+            size = self._current_data.get(region, 0)
+            if self._on_selection_changed:
+                self._on_selection_changed(
+                    region,
+                    size,
+                    {
+                        "level": "block",
+                        "chunk_coord": hit_chunk,
+                        "block_range": self._chunk_block_range(hit_chunk),
+                    },
+                )
+            self._focus_chunk(hit_chunk, animate=True, target_fill=0.85)
+            self._view_level = "block"
+            return
 
         hit = self._hit_region(float(tap_x), float(tap_y))
         if hit is None:
@@ -454,12 +405,34 @@ class McaMapView(ft.Container):
         self._view_level = "chunk"
         # Ensure hi-res tile for chunk inspection.
         if self._use_topview:
-            self._request_tiles_progressive(
-                [hit], desired=HIRES_TILE_SIZE, priority=True
-            )
+            try:
+                self._service.request_topview_tiles(
+                    [hit],
+                    tile_size=DETAIL_TILE_SIZE,
+                    force=True,
+                    priority=True,
+                )
+            except TypeError:
+                self._service.request_topview_tiles([hit], tile_size=DETAIL_TILE_SIZE)
 
     def _on_secondary_tap(self, e: Any) -> None:
-        """Right-click: step back overview (chunk→region→world)."""
+        """Right-click: step back overview (block→chunk→region→world)."""
+        if self._view_level == "block":
+            self._view_level = "chunk"
+            if self._selected_cell is not None:
+                self._focus_region(self._selected_cell, animate=True, target_fill=0.88)
+            if self._on_selection_changed and self._selected_cell is not None:
+                size = self._current_data.get(self._selected_cell, 0)
+                detail: Dict[str, Any] = {
+                    "level": "chunk",
+                    "block_range": self._region_block_range(self._selected_cell),
+                }
+                if self._selected_chunk is not None:
+                    detail["chunk_coord"] = self._selected_chunk
+                    detail["block_range"] = self._chunk_block_range(self._selected_chunk)
+                self._on_selection_changed(self._selected_cell, size, detail)
+            return
+
         if self._view_level == "chunk":
             self._view_level = "region"
             self._selected_chunk = None
@@ -496,6 +469,13 @@ class McaMapView(ft.Container):
                     return coord
         return None
 
+    def _hit_chunk(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
+        for chunk_coord, bounds in self._chunk_bounds.items():
+            bx, by, bw, bh = bounds
+            if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+                return chunk_coord
+        return None
+
     def _region_block_range(self, coord: Tuple[int, int]) -> str:
         rx, rz = coord
         return f"X {rx * 512}~{rx * 512 + 511}, Z {rz * 512}~{rz * 512 + 511}"
@@ -512,7 +492,7 @@ class McaMapView(ft.Container):
         - near/chunk: center block coords (actual game X/Z)
         """
         rx, rz = coord
-        if self._view_level == "chunk" or self._scale >= 6.0 or cell_size >= 180:
+        if self._view_level in {"chunk", "block"} or self._scale >= 6.0 or cell_size >= 180:
             bx = rx * 512 + 256
             bz = rz * 512 + 256
             return f"{bx}, {bz}"
@@ -541,7 +521,7 @@ class McaMapView(ft.Container):
         cell_pitch = float(self.CELL_SIZE + self.CELL_GAP)
         # Desired on-screen size of one region cell.
         desired = min(view_w, view_h) * max(0.35, min(0.95, target_fill))
-        target_scale = max(0.35, min(18.0, desired / self.CELL_SIZE))
+        target_scale = max(self.MIN_SCALE, min(self.MAX_SCALE, desired / self.CELL_SIZE))
 
         # World-space center of the region cell.
         world_cx = (coord[0] + 0.5) * cell_pitch
@@ -558,13 +538,78 @@ class McaMapView(ft.Container):
                 if (coord[0] + dx, coord[1] + dz) in self._current_data
                 or (dx, dz) == (0, 0)
             ]
-            self._request_tiles_progressive(
-                neighbors, desired=self._desired_tile_size(), priority=True
-            )
+            try:
+                self._service.request_topview_tiles(
+                    neighbors,
+                    tile_size=DETAIL_TILE_SIZE,
+                    force=True,
+                    priority=True,
+                )
+            except TypeError:
+                # Older service signature fallback
+                self._service.request_topview_tiles(
+                    neighbors, tile_size=DETAIL_TILE_SIZE
+                )
 
         if animate:
             self._animate_camera_to(
-                target_scale, target_ox, target_oy, duration=0.16
+                target_scale, target_ox, target_oy, duration=0.28
+            )
+        else:
+            self._scale = target_scale
+            self._offset_x = target_ox
+            self._offset_y = target_oy
+            self._request_rebuild()
+
+    def _focus_chunk(
+        self,
+        chunk_coord: Tuple[int, int],
+        *,
+        animate: bool = True,
+        target_fill: float = 0.78,
+    ) -> None:
+        """Center and zoom so a single 16x16 chunk fills most of the viewport."""
+        view_w = float(self.width or 800)
+        view_h = float(self.height or 600)
+        if view_w <= 1 or view_h <= 1:
+            self._request_rebuild()
+            return
+
+        cx, cz = chunk_coord
+        rx = cx // 32
+        rz = cz // 32
+        local_x = cx - rx * 32
+        local_z = cz - rz * 32
+
+        cell_pitch = float(self.CELL_SIZE + self.CELL_GAP)
+        chunk_base = float(self.CELL_SIZE) / 32.0
+        world_cx = rx * cell_pitch + (local_x + 0.5) * chunk_base
+        world_cz = rz * cell_pitch + (local_z + 0.5) * chunk_base
+
+        desired = min(view_w, view_h) * max(0.4, min(0.95, target_fill))
+        target_scale = max(self.SCALE_BLOCK, min(self.MAX_SCALE, desired / chunk_base))
+        target_ox = view_w / 2.0 - world_cx * target_scale
+        target_oy = view_h / 2.0 - world_cz * target_scale
+
+        self._selected_cell = (rx, rz)
+        self._selected_chunk = chunk_coord
+
+        if self._use_topview:
+            try:
+                self._service.request_topview_tiles(
+                    [(rx, rz)],
+                    tile_size=DETAIL_TILE_SIZE,
+                    force=True,
+                    priority=True,
+                )
+            except TypeError:
+                self._service.request_topview_tiles(
+                    [(rx, rz)], tile_size=DETAIL_TILE_SIZE
+                )
+
+        if animate:
+            self._animate_camera_to(
+                target_scale, target_ox, target_oy, duration=0.28
             )
         else:
             self._scale = target_scale
@@ -592,77 +637,150 @@ class McaMapView(ft.Container):
             "y",
             (self.height or 600) / 2,
         )
+        self._zoom_pivot_x = float(pointer_x)
+        self._zoom_pivot_y = float(pointer_y)
         self._animate_zoom_toward(zoom_factor, float(pointer_x), float(pointer_y))
 
-
-    def _desired_tile_size(self) -> int:
-        """Target tile resolution for current camera / view level."""
-        if self._view_level == "chunk" or self._scale >= 5.5:
-            return HIRES_TILE_SIZE
-        if self._view_level == "region" or self._scale >= 2.2:
-            return DETAIL_TILE_SIZE
-        if self._scale >= 1.2:
-            return DEFAULT_TILE_SIZE
-        return DEFAULT_TILE_SIZE
-
-    def _next_tile_size(self, current: int, desired: int) -> int:
-        """Step up one rung on 16->32->64->128 so first paint stays cheap."""
-        ladder = (PREVIEW_TILE_SIZE, DEFAULT_TILE_SIZE, DETAIL_TILE_SIZE, HIRES_TILE_SIZE)
-        desired = max(PREVIEW_TILE_SIZE, int(desired))
-        for s in reversed(ladder):
-            if desired >= s:
-                desired = s
-                break
-        if current <= 0:
-            return PREVIEW_TILE_SIZE
-        if current >= desired:
-            return desired
-        for s in ladder:
-            if s > current:
-                return min(s, desired)
-        return desired
-
-    def _request_tiles_progressive(
+    def _sync_view_level_from_scale(
         self,
-        coords: list,
         *,
-        desired: int | None = None,
-        priority: bool = False,
+        pivot_x: Optional[float] = None,
+        pivot_y: Optional[float] = None,
+        notify: bool = True,
+    ) -> bool:
+        """Update ``_view_level`` from current scale thresholds.
+
+        On zoom-in crossings, auto-select the region/chunk under the pivot so the
+        side panel stays in sync without requiring an extra click. Returns True
+        when the semantic level changed.
+        """
+        px = self._zoom_pivot_x if pivot_x is None else float(pivot_x)
+        py = self._zoom_pivot_y if pivot_y is None else float(pivot_y)
+        if px == 0.0 and py == 0.0:
+            px = float(self.width or 800) / 2.0
+            py = float(self.height or 600) / 2.0
+
+        prev = self._view_level
+        new_level = view_level_from_scale(self._scale)
+        level_order = {"world": 0, "region": 1, "chunk": 2, "block": 3}
+        going_deeper = level_order.get(new_level, 0) > level_order.get(prev, 0)
+        going_out = level_order.get(new_level, 0) < level_order.get(prev, 0)
+
+        if new_level == prev:
+            if new_level in {"chunk", "block"}:
+                self._auto_select_under_pointer(px, py, new_level, notify=False)
+            return False
+
+        self._view_level = new_level
+
+        if going_out and new_level in {"world", "region"}:
+            self._selected_chunk = None
+
+        if going_deeper or new_level in {"chunk", "block"}:
+            self._auto_select_under_pointer(px, py, new_level, notify=False)
+            if self._use_topview and self._selected_cell is not None:
+                try:
+                    self._service.request_topview_tiles(
+                        [self._selected_cell],
+                        tile_size=DETAIL_TILE_SIZE,
+                        force=True,
+                        priority=True,
+                    )
+                except TypeError:
+                    self._service.request_topview_tiles(
+                        [self._selected_cell], tile_size=DETAIL_TILE_SIZE
+                    )
+
+        if notify and (new_level != prev or new_level != self._last_notified_level):
+            self._notify_level_selection(new_level)
+        return True
+
+    def _auto_select_under_pointer(
+        self,
+        px: float,
+        py: float,
+        level: str,
+        *,
+        notify: bool = False,
     ) -> None:
-        if not coords or not self._use_topview:
+        """Pick region/chunk under screen point for the given level."""
+        region = self._hit_region(px, py)
+        if region is None and self._selected_cell is not None:
+            region = self._selected_cell
+        if region is None:
+            region = self._region_at_screen(px, py)
+
+        if region is not None and region in self._current_data:
+            self._selected_cell = region
+
+        if level in {"chunk", "block"}:
+            chunk = self._hit_chunk(px, py)
+            if chunk is None:
+                chunk = self._chunk_at_screen(px, py)
+            if chunk is not None:
+                self._selected_chunk = chunk
+                self._selected_cell = (chunk[0] // 32, chunk[1] // 32)
+        else:
+            self._selected_chunk = None
+
+        if notify:
+            self._notify_level_selection(level)
+
+    def _region_at_screen(self, px: float, py: float) -> Optional[Tuple[int, int]]:
+        """Inverse-project screen point → region coord (no hit-test needed)."""
+        scale = self._scale or 1.0
+        cell_pitch = float(self.CELL_SIZE + self.CELL_GAP)
+        if scale <= 0 or cell_pitch <= 0:
+            return None
+        world_x = (px - self._offset_x) / scale
+        world_z = (py - self._offset_y) / scale
+        rx = int(math.floor(world_x / cell_pitch))
+        rz = int(math.floor(world_z / cell_pitch))
+        if (rx, rz) in self._current_data:
+            return (rx, rz)
+        return None
+
+    def _chunk_at_screen(self, px: float, py: float) -> Optional[Tuple[int, int]]:
+        """Inverse-project screen point → world chunk coord."""
+        scale = self._scale or 1.0
+        cell_pitch = float(self.CELL_SIZE + self.CELL_GAP)
+        if scale <= 0 or cell_pitch <= 0:
+            return None
+        world_x = (px - self._offset_x) / scale
+        world_z = (py - self._offset_y) / scale
+        rx = int(math.floor(world_x / cell_pitch))
+        rz = int(math.floor(world_z / cell_pitch))
+        local_x = world_x - rx * cell_pitch
+        local_z = world_z - rz * cell_pitch
+        if (
+            local_x < 0
+            or local_z < 0
+            or local_x >= self.CELL_SIZE
+            or local_z >= self.CELL_SIZE
+        ):
+            return None
+        if (rx, rz) not in self._current_data:
+            return None
+        lx = int(min(31, max(0, math.floor(local_x / (self.CELL_SIZE / 32.0)))))
+        lz = int(min(31, max(0, math.floor(local_z / (self.CELL_SIZE / 32.0)))))
+        return (rx * 32 + lx, rz * 32 + lz)
+
+    def _notify_level_selection(self, level: str) -> None:
+        if not self._on_selection_changed:
             return
-        desired_i = int(desired if desired is not None else self._desired_tile_size())
-        previews: list = []
-        upgrades: list = []
-        for coord in coords:
-            have = 0
-            try:
-                have = int(self._service.get_topview_tile_size(coord) or 0)
-            except Exception:
-                have = 0 if not self._service.has_topview_tile(coord) else DEFAULT_TILE_SIZE
-            if have <= 0:
-                previews.append(coord)
-            elif have < desired_i:
-                upgrades.append((coord, self._next_tile_size(have, desired_i)))
-
-        if previews:
-            try:
-                self._service.request_topview_tiles(
-                    previews, tile_size=PREVIEW_TILE_SIZE, priority=priority
-                )
-            except TypeError:
-                self._service.request_topview_tiles(previews, tile_size=PREVIEW_TILE_SIZE)
-
-        by_size: dict = {}
-        for coord, size in upgrades:
-            by_size.setdefault(size, []).append(coord)
-        for size, group in by_size.items():
-            try:
-                self._service.request_topview_tiles(
-                    group, tile_size=size, force=True, priority=priority
-                )
-            except TypeError:
-                self._service.request_topview_tiles(group, tile_size=size)
+        self._last_notified_level = level
+        if level == "world" or self._selected_cell is None:
+            self._on_selection_changed(None, None, {"level": "world"})
+            return
+        region = self._selected_cell
+        size = self._current_data.get(region, 0)
+        detail: Dict[str, Any] = {"level": level}
+        if self._selected_chunk is not None and level in {"chunk", "block"}:
+            detail["chunk_coord"] = self._selected_chunk
+            detail["block_range"] = self._chunk_block_range(self._selected_chunk)
+        else:
+            detail["block_range"] = self._region_block_range(region)
+        self._on_selection_changed(region, size, detail)
 
     # ------------------------------------------------------------------ draw
     def _rebuild_canvas(self) -> None:
@@ -713,9 +831,11 @@ class McaMapView(ft.Container):
             center_z = (min_z + max_z) / 2.0
             self._offset_x = view_w / 2.0 - center_x * cell_pitch * self._scale
             self._offset_y = view_h / 2.0 - center_z * cell_pitch * self._scale
+            self._view_level = view_level_from_scale(self._scale)
 
         self._cell_bounds.clear()
         self._chunk_bounds.clear()
+        self._block_bounds.clear()
         origin_x = self._offset_x
         origin_y = self._offset_y
         shapes.extend(self._build_origin_marker(origin_x, origin_y))
@@ -735,12 +855,14 @@ class McaMapView(ft.Container):
         draw_min_z = max(min_z, vis_min_z)
         draw_max_z = min(max_z, vis_max_z)
 
-        missing: List[Tuple[int, int]] = []
-        camera_busy = bool(self._camera_busy or self._zoom_anim_active)
-        draw_chunk_grid = (
-            not camera_busy
-            and (self._view_level == "chunk" or self._scale >= 6.5)
+        show_chunk_grid = (
+            self._view_level in {"chunk", "block"} or self._scale >= self.SCALE_CHUNK
         )
+        show_block_grid = (
+            self._view_level == "block" or self._scale >= self.SCALE_BLOCK
+        )
+
+        missing: List[Tuple[int, int]] = []
         for z in range(draw_min_z, draw_max_z + 1):
             for x in range(draw_min_x, draw_max_x + 1):
                 screen_x = x * cell_pitch * self._scale + self._offset_x
@@ -764,13 +886,18 @@ class McaMapView(ft.Container):
                             screen_x, screen_y, cell_size, color, coord, size
                         )
                     )
-                    if draw_chunk_grid and cell_size >= 160:
+                    # Chunk grid when deeply zoomed / chunk·block view level.
+                    if show_chunk_grid or cell_size >= 160:
                         shapes.extend(
                             self._build_chunk_grid(
-                                screen_x, screen_y, cell_size, coord
+                                screen_x,
+                                screen_y,
+                                cell_size,
+                                coord,
+                                show_block_grid=show_block_grid,
                             )
                         )
-                    if self._use_topview and not camera_busy:
+                    if self._use_topview and not self._service.has_topview_tile(coord):
                         missing.append(coord)
                 elif self._show_empty_regions:
                     shapes.append(
@@ -787,44 +914,49 @@ class McaMapView(ft.Container):
                         )
                     )
 
-        if not camera_busy:
-            if missing:
-                self._request_tiles_progressive(
-                    missing[:80], desired=self._desired_tile_size()
-                )
-            if self._use_topview and self._selected_cell is not None:
-                sel = self._selected_cell
-                hot = [
-                    (sel[0] + dx, sel[1] + dz)
-                    for dz in (-1, 0, 1)
-                    for dx in (-1, 0, 1)
-                    if (sel[0] + dx, sel[1] + dz) in self._current_data
-                ]
-                self._request_tiles_progressive(
-                    hot,
-                    desired=self._desired_tile_size(),
-                    priority=True,
-                )
+        if missing:
+            self._service.request_topview_tiles(
+                missing, tile_size=DEFAULT_TILE_SIZE
+            )
+        # While zoomed in, upgrade selected/nearby tiles to detail resolution.
+        if self._use_topview and self._selected_cell is not None and self._scale >= 2.2:
+            sel = self._selected_cell
+            upgrade = [
+                (sel[0] + dx, sel[1] + dz)
+                for dz in (-1, 0, 1)
+                for dx in (-1, 0, 1)
+                if (sel[0] + dx, sel[1] + dz) in self._current_data
+            ]
+            need = [
+                c for c in upgrade
+                if not self._service.has_topview_tile(c, min_size=DETAIL_TILE_SIZE)
+            ]
+            if need:
+                try:
+                    self._service.request_topview_tiles(
+                        need,
+                        tile_size=DETAIL_TILE_SIZE,
+                        force=True,
+                        priority=True,
+                    )
+                except TypeError:
+                    self._service.request_topview_tiles(
+                        need, tile_size=DETAIL_TILE_SIZE
+                    )
 
         shapes.extend(self._build_info_overlay())
         self._apply_shapes(shapes)
         self._needs_initial_draw = False
 
     def _apply_shapes(self, shapes: List[cv.Shape]) -> None:
-        if not self._mounted:
+        if not self._mounted or self.page is None:
             return
-        # Prefer in-place update; avoid full list churn flicker when possible.
+        # Assign a fresh list so Flutter never iterates a list mid-mutation.
+        self._canvas.shapes = list(shapes)
         try:
-            self._canvas.shapes = shapes
             self._canvas.update()
         except RuntimeError:
             pass
-        except Exception:
-            try:
-                self._canvas.shapes = list(shapes)
-                self._canvas.update()
-            except Exception:
-                pass
 
     def _build_region_cell(
         self,
@@ -836,12 +968,7 @@ class McaMapView(ft.Container):
         file_size: int,
     ) -> List[cv.Shape]:
         shapes: List[cv.Shape] = []
-        # During pan/zoom: solid rect only. Rebuilding dozens of base64 Images
-        # every frame causes flicker and multi-frame input lag.
-        camera_busy = bool(self._camera_busy or self._zoom_anim_active)
-        tile_src = None if camera_busy else (
-            self._tile_src(coord) if self._use_topview else None
-        )
+        tile_src = self._tile_src(coord) if self._use_topview else None
         if tile_src:
             shapes.append(
                 cv.Image(
@@ -853,7 +980,7 @@ class McaMapView(ft.Container):
                 )
             )
         else:
-            # Placeholder until topview tile is ready (or while camera moving)
+            # Placeholder until topview tile is ready
             shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
         selected = coord == self._selected_cell
         shapes.append(
@@ -869,7 +996,8 @@ class McaMapView(ft.Container):
                 ),
             )
         )
-        if (not camera_busy) and self._show_coordinates and size >= 22:
+        # Hide region labels once inside a single chunk — they clutter the mesh.
+        if self._show_coordinates and size >= 22 and self._view_level != "block":
             label = self._coord_label_for_region(coord, size)
             # Multi-line for mid/near ranges when space allows.
             if "\n" in label:
@@ -905,8 +1033,10 @@ class McaMapView(ft.Container):
         y: float,
         size: float,
         region_coord: Tuple[int, int],
+        *,
+        show_block_grid: bool = False,
     ) -> List[cv.Shape]:
-        """Draw 32×32 chunk mesh inside a region when zoomed in enough."""
+        """Draw 32×32 chunk mesh inside a region; optionally 16×16 block mesh."""
         shapes: List[cv.Shape] = []
         chunk_size = size / 32.0
         if chunk_size < 2.5:
@@ -942,7 +1072,7 @@ class McaMapView(ft.Container):
                 bx = x + local_x * chunk_size
                 by = y + local_z * chunk_size
                 self._chunk_bounds[(cx, cz)] = (bx, by, chunk_size, chunk_size)
-                if self._show_coordinates and chunk_size >= 14:
+                if self._show_coordinates and chunk_size >= 14 and not show_block_grid:
                     # Game block coords of chunk origin.
                     shapes.append(
                         cv.Text(
@@ -952,6 +1082,12 @@ class McaMapView(ft.Container):
                             style=ft.TextStyle(size=8, color="#FFECB3"),
                         )
                     )
+
+        if show_block_grid and chunk_size >= 24:
+            shapes.extend(
+                self._build_block_grid_for_region(x, y, chunk_size, region_coord)
+            )
+
         # Highlight selected chunk.
         if self._selected_chunk is not None:
             scx, scz = self._selected_chunk
@@ -973,6 +1109,76 @@ class McaMapView(ft.Container):
                 )
         return shapes
 
+    def _build_block_grid_for_region(
+        self,
+        region_x: float,
+        region_y: float,
+        chunk_size: float,
+        region_coord: Tuple[int, int],
+    ) -> List[cv.Shape]:
+        """Draw 16×16 block mesh for the selected (or center) chunk."""
+        shapes: List[cv.Shape] = []
+        block_px = chunk_size / 16.0
+        if block_px < 2.0:
+            return shapes
+
+        rx, rz = region_coord
+        targets: List[Tuple[int, int]] = []
+        if self._selected_chunk is not None:
+            scx, scz = self._selected_chunk
+            if scx // 32 == rx and scz // 32 == rz:
+                targets.append((scx - rx * 32, scz - rz * 32))
+        if not targets:
+            targets.append((15, 15))
+
+        for local_x, local_z in targets:
+            bx = region_x + local_x * chunk_size
+            by = region_y + local_z * chunk_size
+            line_color = "#FFFFFF33" if block_px >= 4 else "#FFFFFF22"
+            for i in range(1, 16):
+                pos = i * block_px
+                shapes.append(
+                    cv.Line(
+                        bx + pos,
+                        by,
+                        bx + pos,
+                        by + chunk_size,
+                        paint=ft.Paint(color=line_color, stroke_width=0.5),
+                    )
+                )
+                shapes.append(
+                    cv.Line(
+                        bx,
+                        by + pos,
+                        bx + chunk_size,
+                        by + pos,
+                        paint=ft.Paint(color=line_color, stroke_width=0.5),
+                    )
+                )
+            if self._show_coordinates and block_px >= 6:
+                cx = rx * 32 + local_x
+                cz = rz * 32 + local_z
+                shapes.append(
+                    cv.Text(
+                        x=bx + 2,
+                        y=by + 2,
+                        value=f"{cx * 16},{cz * 16}",
+                        style=ft.TextStyle(size=10, color="#FFF59D"),
+                    )
+                )
+            if block_px >= 4:
+                for bz in range(16):
+                    for bx_i in range(16):
+                        world_bx = (rx * 32 + local_x) * 16 + bx_i
+                        world_bz = (rz * 32 + local_z) * 16 + bz
+                        self._block_bounds[(world_bx, world_bz)] = (
+                            bx + bx_i * block_px,
+                            by + bz * block_px,
+                            block_px,
+                            block_px,
+                        )
+        return shapes
+
     def _build_origin_marker(self, x: float, y: float) -> List[cv.Shape]:
         width = self.width or 800
         height = self.height or 600
@@ -985,8 +1191,11 @@ class McaMapView(ft.Container):
         shapes: List[cv.Shape] = []
         width = self.width or 800
         height = self.height or 600
-        title = f"{get_mode_title(self._display_mode)} · {self._view_level_title()} · {self._scale:.1f}x"
-        shapes.append(cv.Rect(10, 10, 240, 26, paint=ft.Paint(color="#00000099")))
+        title = (
+            f"{get_mode_title(self._display_mode)} · "
+            f"{self._view_level_title()} · {self._scale:.1f}x"
+        )
+        shapes.append(cv.Rect(10, 10, 260, 26, paint=ft.Paint(color="#00000099")))
         shapes.append(
             cv.Text(
                 x=15,
@@ -995,12 +1204,12 @@ class McaMapView(ft.Container):
                 style=ft.TextStyle(size=12, color="#D7CCC8"),
             )
         )
-        shapes.append(cv.Rect(10, 42, 250, 24, paint=ft.Paint(color="#00000066")))
+        shapes.append(cv.Rect(10, 42, 310, 24, paint=ft.Paint(color="#00000066")))
         shapes.append(
             cv.Text(
                 x=15,
                 y=47,
-                value="拖拽平移 · 滚轮缩放 · 双击区块级 · 右键总览",
+                value="拖拽平移 · 滚轮缩放切层级 · 双击深入 · 右键返回",
                 style=ft.TextStyle(size=11, color="#A5D6A7"),
             )
         )
@@ -1021,11 +1230,11 @@ class McaMapView(ft.Container):
 
         if self._selected_cell:
             coord = self._selected_cell
-            size = self._current_data.get(coord, 0)
             if self._selected_chunk is not None:
                 cx, cz = self._selected_chunk
+                prefix = "区块内" if self._view_level == "block" else "区块"
                 info = (
-                    f"区块 ({cx},{cz}) · "
+                    f"{prefix} ({cx},{cz}) · "
                     f"{self._chunk_block_range(self._selected_chunk)}"
                 )
             else:
@@ -1058,6 +1267,7 @@ class McaMapView(ft.Container):
             "world": "世界",
             "region": "区域",
             "chunk": "区块",
+            "block": "区块内",
         }.get(self._view_level, "世界")
 
     # ------------------------------------------------------------------ lifecycle / scan
@@ -1158,6 +1368,7 @@ class McaMapView(ft.Container):
         self._scale = 1.0
         self._offset_x = 0
         self._offset_y = 0
+        self._view_level = "world"
         self._request_rebuild()
 
     def reset_view(self) -> None:
@@ -1182,6 +1393,7 @@ class McaMapView(ft.Container):
             self._scale = 1.0
             self._offset_x = 0.0
             self._offset_y = 0.0
+            self._view_level = "world"
             self._request_rebuild()
             return
 
@@ -1204,6 +1416,7 @@ class McaMapView(ft.Container):
         center_z = (min_z + max_z) / 2.0
         self._offset_x = view_w / 2.0 - center_x * cell_pitch * self._scale
         self._offset_y = view_h / 2.0 - center_z * cell_pitch * self._scale
+        self._view_level = view_level_from_scale(self._scale)
         self._request_rebuild()
 
     def resize_map(self, width: int, height: int, *, refit: bool = False) -> None:
@@ -1255,14 +1468,14 @@ class McaMapView(ft.Container):
         return self._display_mode
 
     def set_detail_level(self, level: str) -> None:
-        if level not in {"auto", "region", "chunk", "world"}:
+        if level not in {"auto", "region", "chunk", "world", "block"}:
             return
         if level == "auto":
+            self._view_level = view_level_from_scale(self._scale)
+            self._request_rebuild()
             return
         self._detail_level = level
-        self._view_level = "chunk" if level == "chunk" else (
-            "region" if level == "region" else "world"
-        )
+        self._view_level = level
         if self._view_level == "world":
             self._selected_chunk = None
             self.fit_to_view()
@@ -1271,6 +1484,11 @@ class McaMapView(ft.Container):
             self._focus_region(self._selected_cell, animate=True, target_fill=0.72)
         elif self._view_level == "chunk" and self._selected_cell is not None:
             self._focus_region(self._selected_cell, animate=True, target_fill=0.92)
+        elif self._view_level == "block" and self._selected_chunk is not None:
+            self._focus_chunk(self._selected_chunk, animate=True, target_fill=0.85)
+        elif self._view_level == "block" and self._selected_cell is not None:
+            self._focus_region(self._selected_cell, animate=True, target_fill=0.98)
+            self._view_level = "block"
         else:
             self._request_rebuild()
 
@@ -1280,11 +1498,15 @@ class McaMapView(ft.Container):
     def zoom_in(self) -> None:
         cx = (self.width or 800) / 2
         cy = (self.height or 600) / 2
+        self._zoom_pivot_x = cx
+        self._zoom_pivot_y = cy
         self._animate_zoom_toward(1.22, cx, cy)
 
     def zoom_out(self) -> None:
         cx = (self.width or 800) / 2
         cy = (self.height or 600) / 2
+        self._zoom_pivot_x = cx
+        self._zoom_pivot_y = cy
         self._animate_zoom_toward(0.82, cx, cy)
 
     def _animate_zoom_toward(
@@ -1306,13 +1528,15 @@ class McaMapView(ft.Container):
         base_oy = (
             self._zoom_anim_target_offset_y if self._zoom_anim_active else self._offset_y
         )
-        new_scale = max(0.1, min(12.0, base_scale * factor))
+        new_scale = max(self.MIN_SCALE, min(self.MAX_SCALE, base_scale * factor))
         if abs(new_scale - base_scale) < 1e-6:
             return
         world_x = (pivot_x - base_ox) / base_scale if base_scale else 0.0
         world_y = (pivot_y - base_oy) / base_scale if base_scale else 0.0
         target_ox = pivot_x - world_x * new_scale
         target_oy = pivot_y - world_y * new_scale
+        self._zoom_pivot_x = pivot_x
+        self._zoom_pivot_y = pivot_y
         self._animate_camera_to(new_scale, target_ox, target_oy, duration=duration)
 
     def _animate_camera_to(
@@ -1320,14 +1544,15 @@ class McaMapView(ft.Container):
         target_scale: float,
         target_offset_x: float,
         target_offset_y: float,
-        duration: float = 0.18,
+        duration: float = 0.22,
     ) -> None:
         """Animate scale + offset toward an absolute camera target."""
-        self._camera_busy = True
         self._zoom_anim_start_scale = self._scale
         self._zoom_anim_start_offset_x = self._offset_x
         self._zoom_anim_start_offset_y = self._offset_y
-        self._zoom_anim_target_scale = max(0.1, min(12.0, float(target_scale)))
+        self._zoom_anim_target_scale = max(
+            self.MIN_SCALE, min(self.MAX_SCALE, float(target_scale))
+        )
         self._zoom_anim_target_offset_x = float(target_offset_x)
         self._zoom_anim_target_offset_y = float(target_offset_y)
         self._zoom_anim_t0 = time.monotonic()
@@ -1354,27 +1579,34 @@ class McaMapView(ft.Container):
             self._scale = s0 + (s1 - s0) * ease
             self._offset_x = (
                 self._zoom_anim_start_offset_x
-                + (self._zoom_anim_target_offset_x - self._zoom_anim_start_offset_x) * ease
+                + (self._zoom_anim_target_offset_x - self._zoom_anim_start_offset_x)
+                * ease
             )
             self._offset_y = (
                 self._zoom_anim_start_offset_y
-                + (self._zoom_anim_target_offset_y - self._zoom_anim_start_offset_y) * ease
+                + (self._zoom_anim_target_offset_y - self._zoom_anim_start_offset_y)
+                * ease
             )
-            # Timer thread → must hop to UI; rate-limited.
-            self._schedule_rebuild()
+            try:
+                self._sync_view_level_from_scale(notify=False)
+            except Exception:
+                pass
+            self._request_rebuild()
             if t < 1.0:
-                # ~15fps animation ticks — keeps UI responsive.
-                self._zoom_anim_timer = threading.Timer(1.0 / 15.0, _tick)
+                self._zoom_anim_timer = threading.Timer(1.0 / 60.0, _tick)
                 self._zoom_anim_timer.daemon = True
                 self._zoom_anim_timer.start()
             else:
                 self._zoom_anim_active = False
                 self._zoom_anim_timer = None
+                # Snap exactly to target
                 self._scale = self._zoom_anim_target_scale
                 self._offset_x = self._zoom_anim_target_offset_x
                 self._offset_y = self._zoom_anim_target_offset_y
-                self._camera_busy = False
-                # One full rebuild with tile fetch after camera stops.
+                try:
+                    self._sync_view_level_from_scale(notify=True)
+                except Exception:
+                    pass
                 self._request_rebuild()
 
         self._zoom_anim_timer = threading.Timer(0.0, _tick)
