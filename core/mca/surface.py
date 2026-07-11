@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
-from core.mca.block_palette import is_air_name, surface_block_id
+from core.mca.block_palette import get_chunk_blocks, is_air_name
 from core.mca.errors import ChunkMissing, McaError
 from core.mca.region_file import RegionFile
 
@@ -32,7 +32,7 @@ def sample_region_surface_ids(
     grid: List[List[Optional[str]]] = [
         [None for _ in range(tile_size)] for _ in range(tile_size)
     ]
-    chunk_cache: Dict[Tuple[int, int], Optional[object]] = {}
+    chunk_views: Dict[Tuple[int, int], Optional[object]] = {}
 
     try:
         for pz in range(tile_size):
@@ -42,18 +42,19 @@ def sample_region_surface_ids(
                 cx, lx = divmod(bx, 16)
                 cz, lz = divmod(bz, 16)
                 key = (cx, cz)
-                if key not in chunk_cache:
+                if key not in chunk_views:
                     try:
-                        chunk_cache[key] = rf.read_chunk(cx, cz)
+                        nbt = rf.read_chunk(cx, cz)
+                        chunk_views[key] = get_chunk_blocks(nbt)
                     except ChunkMissing:
-                        chunk_cache[key] = None
+                        chunk_views[key] = None
                     except Exception:
-                        chunk_cache[key] = None
-                nbt = chunk_cache[key]
-                if nbt is None:
+                        chunk_views[key] = None
+                view = chunk_views[key]
+                if view is None:
                     continue
                 try:
-                    grid[pz][px] = surface_block_id(nbt, lx, lz)
+                    grid[pz][px] = view.surface_block_id(lx, lz)  # type: ignore[attr-defined]
                 except Exception:
                     grid[pz][px] = None
     finally:
