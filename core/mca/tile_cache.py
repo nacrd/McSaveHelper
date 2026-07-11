@@ -10,7 +10,7 @@ import io
 import os
 import threading
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Any, Dict, Optional, Sequence, Union
 
 PathLike = Union[str, Path]
 
@@ -100,6 +100,73 @@ def upscale_cached_tile(region_path: PathLike, tile_size: int) -> Optional[bytes
             return buf.getvalue()
     except Exception:
         return None
+
+
+def get_cache_stats() -> Dict[str, Any]:
+    """Return disk + memory cache stats for settings UI."""
+    root = cache_dir()
+    file_count = 0
+    total_bytes = 0
+    try:
+        for p in root.glob("*.png"):
+            if not p.is_file():
+                continue
+            try:
+                total_bytes += p.stat().st_size
+                file_count += 1
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+    mem_entries = 0
+    try:
+        from core.mca.surface import chunk_decode_cache_size
+        mem_entries = int(chunk_decode_cache_size())
+    except Exception:
+        mem_entries = 0
+
+    return {
+        "path": str(root),
+        "file_count": file_count,
+        "total_bytes": total_bytes,
+        "max_files": _MAX_FILES,
+        "algo_version": ALGO_VERSION,
+        "memory_chunks": mem_entries,
+    }
+
+
+def clear_disk_cache() -> Dict[str, int]:
+    """Delete all cached topview PNG files."""
+    root = cache_dir()
+    deleted = 0
+    freed = 0
+    with _LOCK:
+        try:
+            for p in list(root.glob("*.png")) + list(root.glob("*.tmp")):
+                try:
+                    sz = p.stat().st_size if p.is_file() else 0
+                    p.unlink()
+                    deleted += 1
+                    freed += int(sz)
+                except OSError:
+                    continue
+        except OSError:
+            pass
+    return {"deleted_files": deleted, "freed_bytes": freed}
+
+
+def clear_all_caches() -> Dict[str, Any]:
+    """Clear disk PNG cache and in-process decoded chunk cache."""
+    disk = clear_disk_cache()
+    mem_cleared = 0
+    try:
+        from core.mca.surface import clear_chunk_decode_cache, chunk_decode_cache_size
+        mem_cleared = int(chunk_decode_cache_size())
+        clear_chunk_decode_cache()
+    except Exception:
+        pass
+    return {**disk, "memory_chunks_cleared": mem_cleared}
 
 
 def _maybe_prune() -> None:

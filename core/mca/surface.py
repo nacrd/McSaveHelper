@@ -218,3 +218,9 @@ def clear_chunk_decode_cache() -> None:
     """Drop process-level decoded chunk cache (tests / memory pressure)."""
     with _CHUNK_LRU_LOCK:
         _CHUNK_LRU.clear()
+
+
+def chunk_decode_cache_size() -> int:
+    """Number of entries in the process-level chunk decode LRU."""
+    with _CHUNK_LRU_LOCK:
+        return len(_CHUNK_LRU)
