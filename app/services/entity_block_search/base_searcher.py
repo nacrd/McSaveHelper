@@ -34,7 +34,7 @@ class BaseSearcher(ABC):
             log(f"在 {dimension} 中找到 {len(region_files)} 个区块文件", "INFO")
             self._scan_regions(region_files, dimension, target, log, progress)
         except ImportError:
-            log(f"anvil-parser2 未安装，无法搜索{self.progress_label}", "ERROR")
+            log(f"MCA 读取模块不可用，无法搜索{self.progress_label}", "ERROR")
         except Exception as e:
             log(f"搜索维度 {dimension} 失败: {e}", "ERROR")
 
@@ -51,7 +51,7 @@ class BaseSearcher(ABC):
         log: Callable[[str, str], None],
         progress: Callable[[float, str], None],
     ) -> None:
-        from anvil import Region
+        from core.mca import NativeRegion
         total = len(region_files)
         for idx, region_file in enumerate(region_files):
             if self._limit_reached():
@@ -59,7 +59,8 @@ class BaseSearcher(ABC):
             progress(idx / total, f"搜索{self.progress_label} {idx + 1}/{total}")
             self.summary.scanned_regions += 1
             try:
-                self._scan_region(Region.from_file(str(region_file)), target, dimension)
+                with NativeRegion.from_file(region_file) as region:
+                    self._scan_region(region, target, dimension)
             except Exception as e:
                 log(f"读取区块文件 {region_file.name} 失败: {e}", "WARNING")
 

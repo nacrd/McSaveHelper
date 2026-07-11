@@ -80,18 +80,11 @@ class BlockSearcher(BaseSearcher):
 
     @staticmethod
     def _target_block(target: str) -> Any:
-        if ":" not in target:
-            return None
-        try:
-            from anvil import Block
-            return Block.from_name(target)
-        except Exception:
-            return None
+        # Native path matches by name string only (no anvil Block objects).
+        return None
 
     @staticmethod
     def _block_matches(block: Any, target: str, target_block: Any) -> bool:
-        if target_block is not None and block == target_block:
-            return True
         block_name = get_block_name(block)
         block_id = tag_to_str(getattr(block, "id", ""))
         return matches_target(block_name, target) or matches_target(block_id, target)

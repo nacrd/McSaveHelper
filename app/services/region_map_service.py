@@ -69,7 +69,7 @@ class RegionMapService:
         # 俯视图生成代数：clear/start 时递增，丢弃过期回调
         self._topview_generation: int = 0
         self._topview_pending: set = set()
-        self._topview_tile_size: int = 128
+        self._topview_tile_size: int = 32
         self._topview_enabled: bool = True
         # Track rendered tile size so we can upgrade 64→128 later if needed.
         self._topview_tile_sizes: Dict[Tuple[int, int], int] = {}
@@ -78,7 +78,7 @@ class RegionMapService:
         # Bounded topview queue: never spawn one thread per region.
         # anvil chunk decode is CPU+IO heavy; 2 workers keep hang detector calm.
         cpu = os.cpu_count() or 2
-        self._topview_max_workers: int = max(1, min(2, cpu // 2 or 1))
+        self._topview_max_workers: int = max(2, min(4, (cpu or 2) // 2 or 2))
         self._topview_active: int = 0
         self._topview_queue: Deque[Tuple[Tuple[int, int], str, int, int]] = deque()
         self._topview_executor: Optional[ThreadPoolExecutor] = None
@@ -381,40 +381,40 @@ class RegionMapService:
         chunk_count = 0
         with PerfTimer("heatmap._scan_region_meta"):
             try:
-                import anvil
-                region = anvil.Region.from_file(str(region_file))
-                sample_points = [(0, 0), (0, 16), (16, 0), (16, 16),
-                                 (8, 8), (8, 24), (24, 8), (24, 24)]
-                for cx, cz in sample_points:
-                    try:
-                        chunk = region.get_chunk(cx, cz)
-                        if chunk is None or not hasattr(chunk, "data"):
+                from core.mca import NativeRegion
+                with NativeRegion.from_file(region_file) as region:
+                    sample_points = [(0, 0), (0, 16), (16, 0), (16, 16),
+                                     (8, 8), (8, 24), (24, 8), (24, 24)]
+                    for cx, cz in sample_points:
+                        try:
+                            chunk = region.get_chunk(cx, cz)
+                            if chunk is None or chunk.data is None:
+                                continue
+                            chunk_count += 1
+                            data = chunk.data
+                            self._collect_biomes(data, biomes)
+                            self._collect_structures(
+                                data, structures, structure_positions)
+                        except Exception:
                             continue
-                        chunk_count += 1
-                        data = chunk.data
-                        self._collect_biomes(data, biomes)
-                        self._collect_structures(
-                            data, structures, structure_positions)
-                    except Exception:
-                        continue
-                if not biomes and not structures:
-                    for cx in range(0, 32, 4):
-                        for cz in range(0, 32, 4):
+                    if not biomes and not structures:
+                        for cx in range(0, 32, 4):
+                            for cz in range(0, 32, 4):
+                                if chunk_count >= 16:
+                                    break
+                                try:
+                                    chunk = region.get_chunk(cx, cz)
+                                    if chunk is None or chunk.data is None:
+                                        continue
+                                    chunk_count += 1
+                                    data = chunk.data
+                                    self._collect_biomes(data, biomes)
+                                    self._collect_structures(
+                                        data, structures, structure_positions)
+                                except Exception:
+                                    continue
                             if chunk_count >= 16:
                                 break
-                            try:
-                                chunk = region.get_chunk(cx, cz)
-                                if chunk is None or not hasattr(chunk, "data"):
-                                    continue
-                                chunk_count += 1
-                                data = chunk.data
-                                self._collect_biomes(data, biomes)
-                                self._collect_structures(
-                                    data, structures, structure_positions)
-                            except Exception:
-                                continue
-                        if chunk_count >= 16:
-                            break
             except Exception:
                 pass
 

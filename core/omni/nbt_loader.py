@@ -177,16 +177,17 @@ class NbtLoader:
                 self._log(f"区域文件不存在: {region_path}", "ERROR")
                 return None
 
-            from anvil import Region
-            region = Region.from_file(str(abs_region_path))
-            chunk = region.get_chunk(chunk_x, chunk_z)
-
-            if chunk is None or not hasattr(chunk, "data"):
-                self._log(f"区块数据不存在: {region_path} [{chunk_x}, {chunk_z}]", "WARNING")
-                return None
-
-            self._log(f"已加载区块: {region_path} [{chunk_x}, {chunk_z}]", "INFO")
-            return chunk.data, abs_region_path
+            from core.mca import NativeRegion
+            with NativeRegion.from_file(abs_region_path) as region:
+                chunk = region.get_chunk(chunk_x, chunk_z)
+                if chunk is None or chunk.data is None:
+                    self._log(
+                        f"区块数据不存在: {region_path} [{chunk_x}, {chunk_z}]",
+                        "WARNING",
+                    )
+                    return None
+                self._log(f"已加载区块: {region_path} [{chunk_x}, {chunk_z}]", "INFO")
+                return chunk.data, abs_region_path
 
         except Exception as e:
             self._log(f"加载区块失败: {e}", "ERROR")

@@ -256,7 +256,7 @@ class MapExportService:
                 135, 206, 235))  # 天蓝色背景
 
         try:
-            from anvil import Region
+            from core.mca import NativeRegion
 
             # 使用像素访问对象，比逐个 putpixel 调用快得多
             pixels = image.load()
@@ -275,35 +275,32 @@ class MapExportService:
 
                     rx, rz = coords
 
-                    # 读取区块
-                    region = Region.from_file(str(region_file))
-
-                    # 渲染区块
-                    for cx in range(32):
-                        for cz in range(32):
-                            try:
-                                chunk = region.get_chunk(cx, cz)
-                                if chunk is not None:
-                                    self._render_chunk(
-                                        image,
-                                        chunk,
-                                        rx,
-                                        rz,
-                                        cx,
-                                        cz,
-                                        bounds,
-                                        map_type,
-                                        scale,
-                                        pixels,
-                                    )
-                            except Exception:
-                                pass  # 跳过损坏的区块
+                    with NativeRegion.from_file(region_file) as region:
+                        for cx in range(32):
+                            for cz in range(32):
+                                try:
+                                    chunk = region.get_chunk(cx, cz)
+                                    if chunk is not None:
+                                        self._render_chunk(
+                                            image,
+                                            chunk,
+                                            rx,
+                                            rz,
+                                            cx,
+                                            cz,
+                                            bounds,
+                                            map_type,
+                                            scale,
+                                            pixels,
+                                        )
+                                except Exception:
+                                    pass  # 跳过损坏的区块
 
                 except Exception as e:
                     log(f"处理区块文件 {region_file.name} 失败: {e}", "WARNING")
 
         except ImportError:
-            log("anvil-parser2 未安装，使用简化渲染", "WARNING")
+            log("地图渲染后端不可用，使用简化渲染", "WARNING")
             # 简化渲染：绘制网格
             draw = ImageDraw.Draw(image)
             for i in range(0, width, 16 // scale):
@@ -375,13 +372,16 @@ class MapExportService:
     def _get_highest_block_y(self, chunk: Any, x: int,
                              z: int) -> Optional[int]:
         try:
-            # section 级非空气缓存：同一 chunk 的 256 像素共享 palette 扫描结果
+            blocks = getattr(chunk, "_blocks", None)
+            if blocks is not None and hasattr(blocks, "surface_y"):
+                return blocks.surface_y(x, z)
+
             cache_attr = "_mcsh_non_air_sections"
             non_air_sections = getattr(chunk, cache_attr, None)
             if non_air_sections is None:
                 try:
-                    from anvil.chunk import _section_height_range
-                    section_range = _section_height_range(chunk.version)
+                    from core.mca import section_range_for_chunk
+                    section_range = section_range_for_chunk(chunk)
                 except Exception:
                     section_range = range(-4, 20)
 
@@ -392,7 +392,7 @@ class MapExportService:
                         if palette is None:
                             continue
                         has_non_air = any(
-                            p is not None and not p.id.endswith("air")
+                            p is not None and not str(getattr(p, "id", "")).endswith("air")
                             for p in palette
                         )
                         if has_non_air:
@@ -402,14 +402,15 @@ class MapExportService:
                 try:
                     setattr(chunk, cache_attr, non_air_sections)
                 except Exception:
-                    pass  # chunk 可能不允许 setattr，退化到本调用内使用
+                    pass
 
             for section_y in non_air_sections:
                 y_start = section_y * 16
                 for y in range(y_start + 15, y_start - 1, -1):
                     try:
                         block = chunk.get_block(x, y, z)
-                        if block and not block.id.endswith("air"):
+                        bid = str(getattr(block, "id", ""))
+                        if block and not bid.endswith("air"):
                             return y
                     except Exception:
                         continue

@@ -66,21 +66,20 @@ class RegionEditorService:
 
     def get_chunks_in_region(self, region_path: Path) -> List[ChunkInfo]:
         """获取区域文件中所有区块信息"""
-        import anvil
+        from core.mca import RegionFile
         chunks = []
         try:
-            region = anvil.Region.from_file(str(region_path))
-            for x in range(32):
-                for z in range(32):
-                    try:
-                        chunk = region.get_chunk(x, z)
-                        has_data = chunk is not None
-                        chunks.append(ChunkInfo(x=x, z=z, has_data=has_data))
-                    except Exception:
-                        chunks.append(ChunkInfo(x=x, z=z, has_data=False))
+            with RegionFile.open(region_path) as region:
+                present = set(region.iter_present_chunks())
+                for x in range(32):
+                    for z in range(32):
+                        chunks.append(
+                            ChunkInfo(x=x, z=z, has_data=(x, z) in present)
+                        )
         except Exception as e:
             self._log(f"读取区块信息失败: {e}", "ERROR")
         return chunks
+
 
     def delete_region(self, region_path: Path, backup: bool = True) -> bool:
         """删除区域文件"""
@@ -123,18 +122,14 @@ class RegionEditorService:
         failed = 0
 
         try:
-            self._backup_region(region_path, backup)
-            with open(region_path, "r+b") as f:
-                for cx, cz in chunk_coords:
-                    if not 0 <= cx < 32 or not 0 <= cz < 32:
-                        failed += 1
-                        continue
-                    index = self._chunk_index(cx, cz)
-                    f.seek(index * 4)
-                    f.write(b"\x00\x00\x00\x00")
-                    f.seek(4096 + index * 4)
-                    f.write(b"\x00\x00\x00\x00")
-                    success += 1
+            from core.mca import delete_chunk_entries
+            valid = [
+                (cx, cz)
+                for cx, cz in chunk_coords
+                if 0 <= cx < 32 and 0 <= cz < 32
+            ]
+            failed = len(chunk_coords) - len(valid)
+            success = delete_chunk_entries(region_path, valid, backup=backup)
             self._log(f"已从 {region_path.name} 重置 {success} 个区块", "SAVE")
         except Exception as e:
             self._log(f"操作区域文件失败: {e}", "ERROR")
@@ -238,21 +233,13 @@ class RegionEditorService:
 
     def _count_chunks(self, region_path: Path) -> int:
         """计算区域文件中的区块数量"""
-        import anvil
+        from core.mca import RegionFile
         try:
-            region = anvil.Region.from_file(str(region_path))
-            count = 0
-            for x in range(32):
-                for z in range(32):
-                    try:
-                        chunk = region.get_chunk(x, z)
-                        if chunk is not None:
-                            count += 1
-                    except Exception:
-                        pass
-            return count
+            with RegionFile.open(region_path) as region:
+                return region.count_chunks()
         except Exception:
             return 0
+
 
     def _backup_region(self, region_path: Path, backup: bool) -> None:
         if backup and region_path.exists():

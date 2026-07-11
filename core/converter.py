@@ -358,39 +358,33 @@ def convert_world(src_path: Path, dst_path: Path,
             try:
                 from concurrent.futures import ThreadPoolExecutor, as_completed
                 from .scanner import scan_all_regions
-                import anvil
+                from core.mca import WritableRegion
 
                 mca_files = scan_all_regions(work_path)
 
                 def _convert_one_mca(mca_path: Path):
-                    """处理单个 .mca，返回 (成功, 错误消息|None)。"""
+                    # Process one .mca; return (ok, err|None).
                     try:
-                        region = anvil.Region.from_file(str(mca_path))
+                        region = WritableRegion.open(mca_path)
                         region_modified = False
-                        for x in range(32):
-                            for z in range(32):
-                                chunk = region.get_chunk(x, z)
-                                if chunk is None:
-                                    continue
-                                data = chunk.data if hasattr(
-                                    chunk, 'data') else chunk
-                                if not isinstance(data, nbtlib.tag.Compound):
-                                    continue
+                        for x, z, data in region.iter_chunks():
+                            if not isinstance(data, nbtlib.tag.Compound):
+                                continue
 
-                                if target_platform != "java":
-                                    to_bedrock = (target_platform == "bedrock")
-                                    convert_block_ids_in_nbt(data, to_bedrock)
-                                    region_modified = True
+                            if target_platform != "java":
+                                to_bedrock = (target_platform == "bedrock")
+                                convert_block_ids_in_nbt(data, to_bedrock)
+                                region_modified = True
 
-                                if target_version is not None:
-                                    VersionDowngrader.strip_data_components(
-                                        data)
-                                    VersionDowngrader.replace_unknown_blocks(
-                                        data, target_version)
-                                    region_modified = True
+                            if target_version is not None:
+                                VersionDowngrader.strip_data_components(
+                                    data)
+                                VersionDowngrader.replace_unknown_blocks(
+                                    data, target_version)
+                                region_modified = True
 
-                        if region_modified and hasattr(region, "save"):
-                            region.save(str(mca_path))
+                        if region_modified:
+                            region.save(mca_path, backup=True)
                             return True, None
                         return False, None
                     except Exception as e:
@@ -411,7 +405,7 @@ def convert_world(src_path: Path, dst_path: Path,
                             tracker.increment_files(1)
                             result.converted_files += 1
             except ImportError:
-                message = "anvil-parser 未安装，跳过区域文件转换"
+                message = "区域文件转换模块不可用，跳过区域文件转换"
                 result.warnings.append(message)
                 _logger.warning(message, module="Converter")
 

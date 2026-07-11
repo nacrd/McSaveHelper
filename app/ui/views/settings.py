@@ -136,6 +136,7 @@ class SettingsView(ft.Column):
         ))
         self._build_general_card()
         self._build_ui_card()
+        self._build_cache_card()
         self._build_batch_card()
         self._build_cleanup_card()
         self._build_action_card()
@@ -281,6 +282,131 @@ class SettingsView(ft.Column):
             body,
             expanded=True,
         ))
+
+    # ─── 地图缓存 ───────────────────────────────
+
+    def _build_cache_card(self) -> None:
+        body = ft.Column(spacing=0)
+
+        body.controls.append(ft.Container(
+            content=ft.Text(
+                self._t(
+                    "settings.cache.description",
+                    "区域地图俯视图会缓存到本地磁盘，加快再次打开速度。"
+                    " 可在此查看占用空间并清理。",
+                ),
+                size=12,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=16, right=16, bottom=8, top=10),
+        ))
+
+        self._cache_summary = ft.Text(
+            self._cache_summary_text(),
+            size=13,
+            color=THEME.text_primary,
+            font_family="monospace",
+        )
+        self._cache_path_label = ft.Text(
+            self._cache_path_text(),
+            size=11,
+            color=THEME.text_muted,
+            selectable=True,
+        )
+        body.controls.append(ft.Container(
+            content=ft.Column([
+                self._cache_summary,
+                self._cache_path_label,
+            ], spacing=6),
+            padding=ft.Padding(left=16, right=16, bottom=10),
+        ))
+
+        btn_row = ft.Row(
+            [
+                btn_ghost(
+                    self._t("settings.cache.refresh", "刷新"),
+                    width=100,
+                    height=32,
+                    on_click=lambda e: self._refresh_cache_stats(),
+                ),
+                btn_ghost(
+                    self._t("settings.cache.clear", "清理缓存"),
+                    width=120,
+                    height=32,
+                    on_click=lambda e: self._clear_map_cache(),
+                ),
+            ],
+            spacing=10,
+        )
+        body.controls.append(ft.Container(
+            content=btn_row,
+            padding=ft.Padding(left=16, right=16, bottom=16),
+        ))
+
+        self.controls.append(_collapsible_section(
+            self._t("settings.cache.title", "地图缓存"),
+            body,
+            expanded=True,
+        ))
+
+    def _cache_summary_text(self) -> str:
+        try:
+            from core.mca.tile_cache import get_cache_stats
+            from app.ui.utils import format_size
+
+            s = get_cache_stats()
+            size_txt = format_size(int(s.get("total_bytes", 0) or 0))
+            files = int(s.get("file_count", 0) or 0)
+            mem = int(s.get("memory_chunks", 0) or 0)
+            return (
+                f"磁盘: {size_txt} · {files} 个瓦片文件"
+                f"  |  内存解码缓存: {mem} 个 chunk"
+            )
+        except Exception as ex:
+            return f"无法读取缓存信息: {ex}"
+
+    def _cache_path_text(self) -> str:
+        try:
+            from core.mca.tile_cache import get_cache_stats
+
+            return f"路径: {get_cache_stats().get('path', '')}"
+        except Exception:
+            return "路径: —"
+
+    def _refresh_cache_stats(self) -> None:
+        try:
+            self._cache_summary.value = self._cache_summary_text()
+            self._cache_path_label.value = self._cache_path_text()
+            self._cache_summary.update()
+            self._cache_path_label.update()
+        except Exception:
+            pass
+
+    def _clear_map_cache(self) -> None:
+        try:
+            from core.mca.tile_cache import clear_all_caches
+            from app.ui.utils import format_size
+
+            result = clear_all_caches()
+            deleted = int(result.get("deleted_files", 0) or 0)
+            freed = format_size(int(result.get("freed_bytes", 0) or 0))
+            mem = int(result.get("memory_chunks_cleared", 0) or 0)
+            self._refresh_cache_stats()
+            self.app.info_dialog(
+                self._t("dialogs.success", "成功"),
+                f"已清理地图缓存：{deleted} 个文件（{freed}），内存 chunk {mem} 条",
+            )
+        except Exception as ex:
+            try:
+                self.app.error_dialog(
+                    self._t("dialogs.error", "错误"),
+                    f"清理缓存失败: {ex}",
+                )
+            except Exception:
+                try:
+                    self.app.info_dialog("错误", f"清理缓存失败: {ex}")
+                except Exception:
+                    pass
 
     # ─── 批量处理 ───────────────────────────────
 
