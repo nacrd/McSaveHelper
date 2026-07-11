@@ -34,7 +34,7 @@ class BaseSearcher(ABC):
             log(f"在 {dimension} 中找到 {len(region_files)} 个区块文件", "INFO")
             self._scan_regions(region_files, dimension, target, log, progress)
         except ImportError:
-            log(f"anvil-parser2 未安装，无法搜索{self.progress_label}", "ERROR")
+            log(f"MCA 读取模块不可用，无法搜索{self.progress_label}", "ERROR")
         except Exception as e:
             log(f"搜索维度 {dimension} 失败: {e}", "ERROR")
 
