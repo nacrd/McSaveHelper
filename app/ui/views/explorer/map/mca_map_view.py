@@ -94,9 +94,14 @@ class McaMapView(ft.Container):
         self._rebuild_pending = False
         self._rebuild_timer: Optional[threading.Timer] = None
         self._last_rebuild_ts = 0.0
-        self._min_rebuild_interval = 1.0 / 60.0
+        # Cap interactive redraws (~20fps). Full 60fps canvas rebuild freezes UI.
+        self._min_rebuild_interval = 1.0 / 20.0
+        # True while panning / zoom-animating: skip tile fetches & heavy overlays.
+        self._camera_busy = False
+        self._idle_tile_timer: Optional[threading.Timer] = None
         # Smooth zoom animation state (world-space pivot + ease-out)
         self._zoom_anim_timer: Optional[threading.Timer] = None
+
         self._zoom_anim_active = False
         self._zoom_anim_start_scale = 1.0
         self._zoom_anim_target_scale = 1.0
@@ -143,7 +148,9 @@ class McaMapView(ft.Container):
     def _on_tile_ready(self, coord: Tuple[int, int]) -> None:
         """Called from a worker thread when a topview PNG is cached."""
         try:
-            # Only rebuild if the cell is currently relevant.
+            if self._camera_busy or self._zoom_anim_active:
+                self._schedule_idle_tile_pass(0.12)
+                return
             if coord in self._current_data or not self._current_data:
                 self._schedule_rebuild()
         except Exception:
@@ -254,11 +261,38 @@ class McaMapView(ft.Container):
             pass
         self._rebuild_timer = None
         self._rebuild_pending = False
+        try:
+            if getattr(self, "_idle_tile_timer", None) is not None:
+                self._idle_tile_timer.cancel()
+        except Exception:
+            pass
+        self._idle_tile_timer = None
+
+    def _schedule_idle_tile_pass(self, delay: float = 0.18) -> None:
+        """After camera settles, fetch/upgrade tiles once (not every pan frame)."""
+        try:
+            if self._idle_tile_timer is not None:
+                self._idle_tile_timer.cancel()
+        except Exception:
+            pass
+
+        def _fire() -> None:
+            self._idle_tile_timer = None
+            self._camera_busy = False
+            try:
+                self._request_rebuild()
+            except Exception:
+                pass
+
+        self._idle_tile_timer = threading.Timer(max(0.05, delay), _fire)
+        self._idle_tile_timer.daemon = True
+        self._idle_tile_timer.start()
 
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
+        self._camera_busy = True
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
         dx = e.local_position.x - self._last_x
@@ -267,7 +301,9 @@ class McaMapView(ft.Container):
         self._offset_y += dy
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
+        self._camera_busy = True
         self._schedule_rebuild()
+        self._schedule_idle_tile_pass()
 
     def _on_tap(self, e: ft.TapEvent) -> None:
         tap_x = e.local_position.x
@@ -461,7 +497,7 @@ class McaMapView(ft.Container):
 
         if animate:
             self._animate_camera_to(
-                target_scale, target_ox, target_oy, duration=0.28
+                target_scale, target_ox, target_oy, duration=0.16
             )
         else:
             self._scale = target_scale
@@ -633,6 +669,11 @@ class McaMapView(ft.Container):
         draw_max_z = min(max_z, vis_max_z)
 
         missing: List[Tuple[int, int]] = []
+        camera_busy = bool(self._camera_busy or self._zoom_anim_active)
+        draw_chunk_grid = (
+            not camera_busy
+            and (self._view_level == "chunk" or self._scale >= 6.5)
+        )
         for z in range(draw_min_z, draw_max_z + 1):
             for x in range(draw_min_x, draw_max_x + 1):
                 screen_x = x * cell_pitch * self._scale + self._offset_x
@@ -656,18 +697,13 @@ class McaMapView(ft.Container):
                             screen_x, screen_y, cell_size, color, coord, size
                         )
                     )
-                    # Chunk grid when deeply zoomed / chunk view level.
-                    if (
-                        self._view_level == "chunk"
-                        or self._scale >= 6.5
-                        or cell_size >= 160
-                    ):
+                    if draw_chunk_grid and cell_size >= 160:
                         shapes.extend(
                             self._build_chunk_grid(
                                 screen_x, screen_y, cell_size, coord
                             )
                         )
-                    if self._use_topview:
+                    if self._use_topview and not camera_busy:
                         missing.append(coord)
                 elif self._show_empty_regions:
                     shapes.append(
@@ -684,23 +720,24 @@ class McaMapView(ft.Container):
                         )
                     )
 
-        if missing:
-            # Progressive: 16 preview first, then step toward desired for visible cells.
-            self._request_tiles_progressive(missing, desired=self._desired_tile_size())
-        # Prioritize selected region + neighbors at higher LOD.
-        if self._use_topview and self._selected_cell is not None:
-            sel = self._selected_cell
-            hot = [
-                (sel[0] + dx, sel[1] + dz)
-                for dz in (-1, 0, 1)
-                for dx in (-1, 0, 1)
-                if (sel[0] + dx, sel[1] + dz) in self._current_data
-            ]
-            self._request_tiles_progressive(
-                hot,
-                desired=self._desired_tile_size(),
-                priority=True,
-            )
+        if not camera_busy:
+            if missing:
+                self._request_tiles_progressive(
+                    missing[:80], desired=self._desired_tile_size()
+                )
+            if self._use_topview and self._selected_cell is not None:
+                sel = self._selected_cell
+                hot = [
+                    (sel[0] + dx, sel[1] + dz)
+                    for dz in (-1, 0, 1)
+                    for dx in (-1, 0, 1)
+                    if (sel[0] + dx, sel[1] + dz) in self._current_data
+                ]
+                self._request_tiles_progressive(
+                    hot,
+                    desired=self._desired_tile_size(),
+                    priority=True,
+                )
 
         shapes.extend(self._build_info_overlay())
         self._apply_shapes(shapes)
@@ -1205,9 +1242,10 @@ class McaMapView(ft.Container):
         target_scale: float,
         target_offset_x: float,
         target_offset_y: float,
-        duration: float = 0.22,
+        duration: float = 0.18,
     ) -> None:
         """Animate scale + offset toward an absolute camera target."""
+        self._camera_busy = True
         self._zoom_anim_start_scale = self._scale
         self._zoom_anim_start_offset_x = self._offset_x
         self._zoom_anim_start_offset_y = self._offset_y
@@ -1244,18 +1282,21 @@ class McaMapView(ft.Container):
                 self._zoom_anim_start_offset_y
                 + (self._zoom_anim_target_offset_y - self._zoom_anim_start_offset_y) * ease
             )
-            self._request_rebuild()
+            # Lightweight redraw only; tile upgrades wait until settle.
+            self._schedule_rebuild()
             if t < 1.0:
-                self._zoom_anim_timer = threading.Timer(1.0 / 60.0, _tick)
+                # ~20fps animation ticks instead of 60 — keeps UI responsive.
+                self._zoom_anim_timer = threading.Timer(0.05, _tick)
                 self._zoom_anim_timer.daemon = True
                 self._zoom_anim_timer.start()
             else:
                 self._zoom_anim_active = False
                 self._zoom_anim_timer = None
-                # Snap exactly to target
                 self._scale = self._zoom_anim_target_scale
                 self._offset_x = self._zoom_anim_target_offset_x
                 self._offset_y = self._zoom_anim_target_offset_y
+                self._camera_busy = False
+                # One full rebuild with tile fetch after camera stops.
                 self._request_rebuild()
 
         self._zoom_anim_timer = threading.Timer(0.0, _tick)

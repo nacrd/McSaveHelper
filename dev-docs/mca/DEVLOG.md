@@ -1,3 +1,20 @@
+## 2026-07-11 (fix interaction freeze)
+
+### Cause
+
+Pan/zoom triggered full canvas rebuild + progressive tile upgrades every frame
+(60fps anim + 32x32 chunk mesh), starving UI thread (could not move/select/close).
+
+### Fix
+
+- Rebuild cap ~20fps during interaction
+- camera_busy: while panning/zooming skip tile fetch, skip chunk mesh
+- After idle ~180ms, one rebuild that requests tiles
+- Zoom anim ticks 50ms, tile upgrades only on settle
+- Cap visible tile requests to 80
+
+---
+
 ## 2026-07-11 (progressive LOD 16/32/64/128)
 
 ### Behavior
