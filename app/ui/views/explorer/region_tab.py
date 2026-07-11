@@ -182,6 +182,26 @@ class RegionTabMixin:
         else:
             self._enter_map_fullscreen()
 
+    def _page_window_size(self, page: ft.Page) -> Tuple[int, int]:
+        """Best-effort full window content size for overlay layout."""
+        w = 0
+        h = 0
+        try:
+            w = int(getattr(page, "width", 0) or 0)
+            h = int(getattr(page, "height", 0) or 0)
+        except Exception:
+            pass
+        try:
+            win = getattr(page, "window", None)
+            if win is not None:
+                ww = int(getattr(win, "width", 0) or 0)
+                wh = int(getattr(win, "height", 0) or 0)
+                w = max(w, ww)
+                h = max(h, wh)
+        except Exception:
+            pass
+        return max(800, w or 1100), max(600, h or 800)
+
     def _enter_map_fullscreen(self) -> None:
         map_view = getattr(self, "_map_view", None)
         page = getattr(getattr(self, "app", None), "page", None)
@@ -202,12 +222,23 @@ class RegionTabMixin:
                 safe_update(btn)
             return
 
+        # Avoid stacking multiple overlays
+        if getattr(self, "_map_fs_overlay", None) is not None:
+            return
+
         self._map_fullscreen = True
         self._map_inline_parent = host
         self._map_pre_fs_size = (
             int(map_view.width or 900),
             int(map_view.height or 560),
         )
+
+        win_w, win_h = self._page_window_size(page)
+        # Full-bleed overlay; tiny inset only for edge contrast
+        pad = 0
+        bar_h = 48
+        map_w = max(400, win_w - pad * 2)
+        map_h = max(300, win_h - bar_h - pad * 2)
 
         # Detach map from inline host
         host.content = ft.Container(
@@ -242,45 +273,52 @@ class RegionTabMixin:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             padding=ft.Padding(left=12, right=12, top=8, bottom=8),
+            height=bar_h,
             bgcolor=THEME.bg_card,
             border=mc_border(2),
-            border_radius=6,
         )
+
+        # Force explicit pixel size so canvas really fills the window.
+        try:
+            map_view.resize_map(map_w, map_h)
+        except Exception:
+            pass
 
         map_body = ft.Container(
             content=map_view,
-            expand=True,
+            width=map_w,
+            height=map_h,
             bgcolor=THEME.bg_secondary,
-            border=mc_border(2),
-            border_radius=4,
-            padding=2,
+            padding=0,
             # Scale-in animation for enter
-            scale=0.92,
+            scale=0.96,
             opacity=0.0,
             animate_scale=ft.Animation(220, ft.AnimationCurve.EASE_OUT_CUBIC),
             animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
         )
         self._map_fs_body = map_body
 
+        # Absolute-positioned full-window overlay (page.overlay does not stretch expand alone)
         overlay = ft.Container(
             content=ft.Column(
                 [top_bar, map_body],
-                spacing=8,
-                expand=True,
+                spacing=0,
+                tight=True,
             ),
             left=0,
             top=0,
-            right=0,
-            bottom=0,
-            padding=10,
-            bgcolor="#0B120BEE",
-            expand=True,
+            width=win_w,
+            height=win_h,
+            padding=0,
+            bgcolor="#0B120B",
             opacity=0.0,
             animate_opacity=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
         )
         self._map_fs_overlay = overlay
+        self._map_fs_size = (win_w, win_h)
 
         try:
+            # Ensure we sit on top of any other overlays
             page.overlay.append(overlay)
             page.update()
         except Exception:
@@ -291,24 +329,30 @@ class RegionTabMixin:
                 host.update()
             except Exception:
                 pass
+            self._map_fs_overlay = None
+            self._map_fs_body = None
             return
 
-        # Kick off enter animation on next frame
         def _animate_in() -> None:
             try:
+                # Re-measure in case window size is available only after paint
+                w2, h2 = self._page_window_size(page)
+                if (w2, h2) != (win_w, win_h):
+                    overlay.width = w2
+                    overlay.height = h2
+                    mw = max(400, w2)
+                    mh = max(300, h2 - bar_h)
+                    map_body.width = mw
+                    map_body.height = mh
+                    try:
+                        map_view.resize_map(mw, mh)
+                    except Exception:
+                        pass
                 overlay.opacity = 1.0
                 map_body.scale = 1.0
                 map_body.opacity = 1.0
                 overlay.update()
                 map_body.update()
-            except Exception:
-                pass
-            # Resize map to fill overlay after layout settles
-            try:
-                w = int(getattr(page, "width", 0) or 0) or 1100
-                h = int(getattr(page, "height", 0) or 0) or 800
-                # leave room for top bar + padding
-                map_view.resize_map(max(400, w - 40), max(300, h - 100))
             except Exception:
                 pass
 
@@ -358,7 +402,7 @@ class RegionTabMixin:
 
             # Tab-only fallback cleanup
             side = getattr(self, "_region_side_panel", None)
-            if side is not None and side.visible is False and not getattr(self, "_map_fullscreen", False):
+            if side is not None and getattr(side, "visible", True) is False:
                 side.visible = True
                 try:
                     side.update()
@@ -374,7 +418,7 @@ class RegionTabMixin:
         if overlay is not None and body is not None:
             try:
                 overlay.opacity = 0.0
-                body.scale = 0.94
+                body.scale = 0.96
                 body.opacity = 0.0
                 overlay.update()
                 body.update()
@@ -383,7 +427,7 @@ class RegionTabMixin:
 
             def _after() -> None:
                 import time
-                time.sleep(0.2)
+                time.sleep(0.18)
                 if page is not None:
                     from app.ui.utils import run_on_ui
                     run_on_ui(page, _restore)
