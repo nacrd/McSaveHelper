@@ -1,4 +1,4 @@
-"""Section palette + bit-packed block state access with per-chunk cache."""
+"""Section palette + bit-packed block state access with lazy section parse."""
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,16 +19,10 @@ from core.mca.nbt_access import (
 )
 from core.mca.versions import DATA_VERSION_1_13
 
-_AIR_NAMES = frozenset(
-    {
-        "minecraft:air",
-        "minecraft:cave_air",
-        "minecraft:void_air",
-        "air",
-        "cave_air",
-        "void_air",
-    }
-)
+_AIR_NAMES = frozenset({
+    "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
+    "air", "cave_air", "void_air",
+})
 
 _CHUNK_CACHE: Dict[int, "ChunkBlocks"] = {}
 
@@ -51,7 +45,6 @@ def _section_y(section: Any) -> Optional[int]:
     y = as_int(first_key(section, "Y", "y"))
     if y is None:
         return None
-    # Section Y is a signed byte in modern formats (-4..19).
     if y > 127:
         y -= 256
     return y
@@ -74,7 +67,6 @@ def _palette_and_data(section: Any) -> Tuple[List[str], Optional[List[int]]]:
         if data_tag is not None and not is_mapping(data_tag):
             data = long_array_values(data_tag)
         return palette, data
-
     return [], None
 
 
@@ -84,12 +76,7 @@ def _bits_per_entry(palette_len: int) -> int:
     return max(4, (palette_len - 1).bit_length())
 
 
-def _palette_index(
-    data: List[int],
-    index: int,
-    bits: int,
-    stretch: bool,
-) -> int:
+def _palette_index(data: List[int], index: int, bits: int, stretch: bool) -> int:
     if bits <= 0:
         return 0
     mask = (1 << bits) - 1
@@ -124,13 +111,7 @@ def _palette_index(
 class _SectionData:
     __slots__ = ("palette", "data", "bits", "stretch", "legacy_blocks")
 
-    def __init__(
-        self,
-        palette: List[str],
-        data: Optional[List[int]],
-        stretch: bool,
-        legacy_blocks: Optional[List[int]] = None,
-    ) -> None:
+    def __init__(self, palette: List[str], data: Optional[List[int]], stretch: bool, legacy_blocks: Optional[List[int]] = None) -> None:
         self.palette = palette
         self.data = data
         self.bits = _bits_per_entry(len(palette)) if palette else 0
@@ -139,15 +120,18 @@ class _SectionData:
 
 
 class ChunkBlocks:
-    """Parsed chunk view: heightmap + section palettes, built once per chunk."""
+    """Parsed chunk view with lazy section decoding for topview speed."""
 
-    __slots__ = ("root", "version", "sections", "heightmap", "section_ys_desc")
+    __slots__ = ("root", "version", "sections", "heightmap", "section_ys_desc", "_section_raw", "_stretch", "_legacy")
 
     def __init__(self, chunk_nbt: Any) -> None:
         self.root, self.version = chunk_root_and_version(chunk_nbt)
         self.sections: Dict[int, _SectionData] = {}
         self.heightmap: Optional[List[int]] = None
         self.section_ys_desc: List[int] = []
+        self._section_raw: Dict[int, Any] = {}
+        self._stretch = False
+        self._legacy = False
         if self.root is None:
             return
 
@@ -155,8 +139,9 @@ class ChunkBlocks:
         if ver is not None:
             self.version = ver
         self.heightmap = hm
+        self._stretch = self.version is not None and self.version < 2529
+        self._legacy = self.version is not None and self.version < DATA_VERSION_1_13
 
-        stretch = self.version is not None and self.version < 2529
         sections_tag = first_key(self.root, "sections", "Sections")
         for section in iter_sequence(sections_tag):
             if not is_mapping(section):
@@ -164,24 +149,34 @@ class ChunkBlocks:
             sy = _section_y(section)
             if sy is None:
                 continue
-            legacy = None
-            if self.version is not None and self.version < DATA_VERSION_1_13:
-                blocks = first_key(section, "Blocks")
-                if blocks is not None:
-                    try:
-                        legacy = [int(tag_value(b)) for b in iter_sequence(blocks)]
-                    except Exception:
-                        legacy = None
-            palette, data = _palette_and_data(section)
-            self.sections[sy] = _SectionData(palette, data, stretch, legacy)
+            self._section_raw[sy] = section
 
-        self.section_ys_desc = sorted(self.sections.keys(), reverse=True)
+        self.section_ys_desc = sorted(self._section_raw.keys(), reverse=True)
+
+    def _ensure_section(self, section_y: int) -> Optional[_SectionData]:
+        if section_y in self.sections:
+            return self.sections[section_y]
+        section = self._section_raw.get(section_y)
+        if section is None:
+            return None
+        legacy = None
+        if self._legacy:
+            blocks = first_key(section, "Blocks")
+            if blocks is not None:
+                try:
+                    legacy = [int(tag_value(b)) for b in iter_sequence(blocks)]
+                except Exception:
+                    legacy = None
+        palette, data = _palette_and_data(section)
+        sec = _SectionData(palette, data, self._stretch, legacy)
+        self.sections[section_y] = sec
+        return sec
 
     def block_id_at(self, x: int, y: int, z: int) -> Optional[str]:
         if not (0 <= x < 16 and 0 <= z < 16):
             return None
         section_y = y // 16
-        sec = self.sections.get(section_y)
+        sec = self._ensure_section(section_y)
         if sec is None:
             return "minecraft:air"
 
@@ -208,6 +203,12 @@ class ChunkBlocks:
             return sec.palette[pi]
         return "minecraft:air"
 
+    def get_palette_names(self, section_y: int) -> Optional[List[str]]:
+        sec = self._ensure_section(int(section_y))
+        if sec is None or not sec.palette:
+            return None
+        return list(sec.palette)
+
     def surface_y(self, x: int, z: int) -> Optional[int]:
         if self.heightmap is not None:
             index = z * 16 + x
@@ -222,7 +223,9 @@ class ChunkBlocks:
 
     def scan_surface_y(self, x: int, z: int) -> Optional[int]:
         for section_y in self.section_ys_desc:
-            sec = self.sections[section_y]
+            sec = self._ensure_section(section_y)
+            if sec is None:
+                continue
             if not sec.palette and sec.legacy_blocks is None:
                 continue
             if sec.palette and all(is_air_name(n) for n in sec.palette):

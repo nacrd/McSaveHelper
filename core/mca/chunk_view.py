@@ -51,10 +51,10 @@ class ChunkView:
         return NamedBlock(name)
 
     def get_palette(self, section_y: int) -> Optional[List[NamedBlock]]:
-        sec = self._blocks.sections.get(int(section_y))
-        if sec is None or not sec.palette:
+        names = self._blocks.get_palette_names(int(section_y))
+        if not names:
             return None
-        return [NamedBlock(n) for n in sec.palette]
+        return [NamedBlock(n) for n in names]
 
     def section_ys(self) -> Sequence[int]:
         if self._blocks.section_ys_desc:

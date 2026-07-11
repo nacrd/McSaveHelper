@@ -1,3 +1,28 @@
+## 2026-07-11 (example_saves validation)
+
+World: example_saves/新的世界
+
+### Correctness (r.-2.0.mca, 8.6MB, 1024 chunks)
+
+- surface samples: grass_block / oak_leaves / water look correct
+- grid32 top: grass 606, water 184, oak_leaves 143
+
+### Performance
+
+RegionFile open ~80-95ms
+64-chunk native read batch ~58ms vs anvil ~113ms (~2x faster)
+
+Topview (lazy sections):
+- tile 32/64/128: ~1.6-1.7s per full region (1024 chunks present)
+- bottleneck: zlib+nbtlib full chunk parse for nearly every chunk at overview sampling
+
+### Notes
+
+- Lazy section decode improved ~2.3s -> ~1.6s
+- Further gains: disk tile cache, progressive low-res first, or lighter NBT subset parser
+
+---
+
 ## 2026-07-11 (fix)
 
 ### Heightmap Y + performance
