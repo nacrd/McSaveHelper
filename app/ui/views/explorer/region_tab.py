@@ -10,7 +10,7 @@ import flet as ft
 from app.ui.theme import THEME, mc_border
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
 from app.ui.components.cards import card
-from app.ui.views.explorer.utils import safe_update, format_size
+from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
 
 
@@ -32,15 +32,15 @@ class RegionTabMixin:
         ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
         try:
-            self._heatmap = McaMapView(
-                heatmap_service=self._heatmap_service,
+            self._map_view = McaMapView(
+                map_service=self._map_service,
                 on_selection_changed=self._on_region_selected,
                 width=420,
                 height=260,
             )
-            map_view = self._heatmap
+            map_view = self._map_view
         except Exception:
-            self._heatmap = None
+            self._map_view = None
             map_view = ft.Container(
                 content=ft.Column([
                     ft.Icon(ft.Icons.WARNING, size=48, color="#FF9800"),
@@ -53,14 +53,14 @@ class RegionTabMixin:
             )
 
         self._region_help_text = ft.Text(
-            "1 格 = 1 个 r.x.z.mca 区域文件（512×512 方块），颜色越红/紫代表文件越大。",
+            "1 格 = 1 个 r.x.z.mca 区域文件（512×512 方块）。绿色表示该区域已生成。",
             size=11,
             color=THEME.text_muted,
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
 
-        # Keep display-mode state for side-panel detail text; map v1 is activity-only.
+        # Keep display-mode state for side-panel detail text; map v1 is presence-only.
         self._region_display_mode = "activity"
         self._region_display_mode_dropdown = ft.Dropdown(
             label="显示方式",
@@ -77,12 +77,9 @@ class RegionTabMixin:
         )
 
         self._map_coord_btn = btn_ghost(
-            "隐藏坐标", width=112, on_click=lambda e: self._toggle_heatmap_coordinates())
+            "隐藏坐标", width=112, on_click=lambda e: self._toggle_map_coordinates())
         self._map_empty_btn = btn_ghost(
-            "显示空格", width=112, on_click=lambda e: self._toggle_heatmap_empty_regions())
-        # Keep old names as aliases so existing callers don't break
-        self._heatmap_coord_btn = self._map_coord_btn
-        self._heatmap_empty_btn = self._map_empty_btn
+            "显示空格", width=112, on_click=lambda e: self._toggle_map_empty_regions())
 
         self._region_stats_text = ft.Text(
             "等待设置当前存档...", size=12, color=THEME.text_muted)
@@ -91,12 +88,12 @@ class RegionTabMixin:
 
         action_row = ft.Column([
             ft.Row([
-                btn_primary("🔄 刷新", width=100, on_click=lambda e: self._refresh_heatmap()),
-                btn_ghost("🔍 放大", width=90, on_click=lambda e: self._heatmap_zoom_in()),
+                btn_primary("🔄 刷新", width=100, on_click=lambda e: self._refresh_map()),
+                btn_ghost("🔍 放大", width=90, on_click=lambda e: self._map_zoom_in()),
             ], spacing=8),
             ft.Row([
-                btn_ghost("🔍 缩小", width=90, on_click=lambda e: self._heatmap_zoom_out()),
-                btn_ghost("🏠 重置", width=90, on_click=lambda e: self._heatmap_reset_view()),
+                btn_ghost("🔍 缩小", width=90, on_click=lambda e: self._map_zoom_out()),
+                btn_ghost("🏠 重置", width=90, on_click=lambda e: self._map_reset_view()),
             ], spacing=8),
             ft.Row([
                 btn_ghost("填入 NBT", width=112, on_click=self._fill_selected_region_for_nbt),
@@ -116,7 +113,7 @@ class RegionTabMixin:
         ), padding=6)
 
         stats_card = card(ft.Column([
-            ft.Text("📊 区域统计", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            ft.Text("📊 地图概况", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             self._region_stats_text,
         ], spacing=6), padding=10)
 
@@ -183,25 +180,22 @@ class RegionTabMixin:
     def _get_region_display_legend(
             self) -> tuple[str, list[tuple[str, str, str]]]:
         return "🗺️ 区域地图图例", [
-            ("#2E7D32", "草地", "很少生成 / 文件小"),
-            ("#689F38", "森林", "低活动"),
-            ("#C0A44A", "沙地", "普通活动"),
-            ("#D9822B", "岩浆", "高活动"),
-            ("#C63D2F", "下界", "非常活跃"),
-            ("#8E24AA", "紫晶", "极高活动 / 最大文件"),
+            ("#4CAF50", "已生成", "存在 r.x.z.mca 区域文件"),
+            ("#263426", "空格", "未生成（可开关显示）"),
+            ("#FFD54F", "选中", "当前选中的区域边框"),
         ]
 
     def _change_region_display_mode(self, e: ft.ControlEvent) -> None:
         mode = self._region_display_mode_dropdown.value or "activity"
         self._region_display_mode = mode
-        if self._heatmap is not None and hasattr(self._heatmap, "set_display_mode"):
-            self._heatmap.set_display_mode(mode)
+        if self._map_view is not None and hasattr(self._map_view, "set_display_mode"):
+            self._map_view.set_display_mode(mode)
         self._region_help_text.value = self._get_region_display_help(mode)
         self._region_legend_container.content = self._create_region_legend_content()
         safe_update(self._region_help_text)
         safe_update(self._region_legend_container)
         if self._selected_region_coord is not None:
-            data = self._heatmap_service.get_all_data()
+            data = self._map_service.get_all_data()
             size = data.get(self._selected_region_coord)
             if size is not None:
                 self._on_region_selected(self._selected_region_coord, size, None)
@@ -209,47 +203,38 @@ class RegionTabMixin:
     def _change_region_detail_level(self, e: ft.ControlEvent) -> None:
         # v1 map is region-level only; keep method for API compatibility
         level = getattr(e.control, "value", None) or "region"
-        if self._heatmap is not None and hasattr(self._heatmap, "set_detail_level"):
-            self._heatmap.set_detail_level(level)
+        if self._map_view is not None and hasattr(self._map_view, "set_detail_level"):
+            self._map_view.set_detail_level(level)
 
     def _get_region_display_help(self, mode: str) -> str:
-        return "按区域文件大小相对平均值着色，适合快速判断玩家活动和内容密集区域。"
+        return "绿色方格表示该区域文件已生成；点击查看坐标与文件信息。"
 
-    def _get_region_mode_value_text(
-            self, coord: tuple[int, int], size: int, stats: dict[str, Any]) -> str:
-        if stats.get("avg_size", 0) > 0:
-            ratio = size / stats["avg_size"]
-            return "🔥 非常活跃" if ratio > 1.5 else \
-                   "📗 较活跃" if ratio > 1.0 else \
-                   "📙 一般" if ratio > 0.5 else "📕 不活跃"
-        return "活动度未知"
+    def _map_zoom_in(self) -> None:
+        map_view = self._map_view
+        if map_view is not None and hasattr(map_view, "zoom_in"):
+            map_view.zoom_in()
 
-    def _heatmap_zoom_in(self) -> None:
-        heatmap = self._heatmap
-        if heatmap is not None and hasattr(heatmap, "zoom_in"):
-            heatmap.zoom_in()
+    def _map_zoom_out(self) -> None:
+        map_view = self._map_view
+        if map_view is not None and hasattr(map_view, "zoom_out"):
+            map_view.zoom_out()
 
-    def _heatmap_zoom_out(self) -> None:
-        heatmap = self._heatmap
-        if heatmap is not None and hasattr(heatmap, "zoom_out"):
-            heatmap.zoom_out()
+    def _map_reset_view(self) -> None:
+        map_view = self._map_view
+        if map_view is not None and hasattr(map_view, "reset_view"):
+            map_view.reset_view()
 
-    def _heatmap_reset_view(self) -> None:
-        heatmap = self._heatmap
-        if heatmap is not None and hasattr(heatmap, "reset_view"):
-            heatmap.reset_view()
-
-    def _toggle_heatmap_coordinates(self) -> None:
-        heatmap = self._heatmap
-        if heatmap is not None and hasattr(heatmap, "toggle_coordinates"):
-            enabled = heatmap.toggle_coordinates()
+    def _toggle_map_coordinates(self) -> None:
+        map_view = self._map_view
+        if map_view is not None and hasattr(map_view, "toggle_coordinates"):
+            enabled = map_view.toggle_coordinates()
             self._map_coord_btn.set_text("隐藏坐标" if enabled else "显示坐标")
             safe_update(self._map_coord_btn)
 
-    def _toggle_heatmap_empty_regions(self) -> None:
-        heatmap = self._heatmap
-        if heatmap is not None and hasattr(heatmap, "toggle_empty_regions"):
-            enabled = heatmap.toggle_empty_regions()
+    def _toggle_map_empty_regions(self) -> None:
+        map_view = self._map_view
+        if map_view is not None and hasattr(map_view, "toggle_empty_regions"):
+            enabled = map_view.toggle_empty_regions()
             self._map_empty_btn.set_text("隐藏空格" if enabled else "显示空格")
             safe_update(self._map_empty_btn)
 
@@ -257,16 +242,14 @@ class RegionTabMixin:
                             coord: Optional[Tuple[int, int]],
                             size: Optional[int],
                             detail: Optional[Dict[str, Any]] = None) -> None:
-        stats = self._heatmap_service.get_statistics()
+        stats = self._map_service.get_statistics()
         if coord is None or size is None:
             self._selected_region_coord = None
-            lines = [
-                f"📊 区域总数: {stats['total_regions']} 个",
-                f"💾 总大小: {format_size(stats['total_size'])}",
-                f"📈 平均: {format_size(stats['avg_size'])}",
-                f"🔍 最小: {format_size(stats['min_size'])} | 最大: {format_size(stats['max_size'])}",
-            ]
-            self._region_stats_text.value = "\n".join(lines)
+            total = stats.get("total_regions", 0)
+            self._region_stats_text.value = (
+                f"🗺️ 已生成区域: {total} 个\n"
+                f"点击地图上的方格查看区域坐标与文件信息。"
+            )
             self._region_stats_text.color = THEME.text_primary
             self._region_status_text.value = "✅ 扫描完成，点击方块查看详情"
             self._region_status_text.color = THEME.text_secondary
@@ -275,11 +258,6 @@ class RegionTabMixin:
             return
 
         self._selected_region_coord = coord
-        value_text = self._get_region_mode_value_text(coord, size, stats)
-        avg_text = (
-            f"平均 {format_size(int(stats['avg_size']))}"
-            if stats['avg_size'] > 0 else "平均未知"
-        )
         region_x, region_z = coord
         chunk_x0 = region_x * 32
         chunk_x1 = region_x * 32 + 31
@@ -294,9 +272,7 @@ class RegionTabMixin:
             f"   🧭 区域坐标: ({region_x}, {region_z})\n"
             f"   📄 文件: r.{region_x}.{region_z}.mca\n"
             f"   🧩 区块范围: X {chunk_x0} ~ {chunk_x1}, Z {chunk_z0} ~ {chunk_z1}\n"
-            f"   🧱 方块范围: X {block_x0} ~ {block_x1}, Z {block_z0} ~ {block_z1}\n"
-            f"   💾 大小: {format_size(size)}（{avg_text}）\n"
-            f"   {value_text}"
+            f"   🧱 方块范围: X {block_x0} ~ {block_x1}, Z {block_z0} ~ {block_z1}"
         )
         self._region_status_text.color = THEME.accent_light
         safe_update(self._region_status_text)
@@ -319,7 +295,7 @@ class RegionTabMixin:
                 self.app.info_dialog(
                     "成功", f"已删除区域 {coord}，游戏下次进入会重新生成。备份文件保留为 .bak。")
                 self._selected_region_coord = None
-                self._refresh_heatmap()
+                self._refresh_map()
             else:
                 self.app.warn_dialog("失败", "区域删除失败，请查看日志。")
         except Exception as ex:
@@ -391,11 +367,11 @@ class RegionTabMixin:
         if self._fill_chunk_from_world_coords(e):
             self._load_chunk_nbt(e)
 
-    def _refresh_heatmap(self) -> None:
+    def _refresh_map(self) -> None:
         try:
             if not self.world_session:
                 return
-            if not hasattr(self, "_region_stats_text") or self._heatmap is None:
+            if not hasattr(self, "_region_stats_text") or self._map_view is None:
                 return
             self._selected_region_coord = None
             region_dir_str = self._dimension_region_dirs.get(self._current_dimension)
@@ -410,13 +386,13 @@ class RegionTabMixin:
                 self._region_stats_text.color = THEME.warning
                 safe_update(self._region_stats_text)
                 return
-            self._heatmap_service.clear_data()
+            self._map_service.clear_data()
             self._region_stats_text.value = "🔄 正在扫描..."
             self._region_stats_text.color = THEME.accent
             safe_update(self._region_stats_text)
-            heatmap = self._heatmap
-            if heatmap is not None and hasattr(heatmap, "start_scan"):
-                heatmap.start_scan(str(region_dir))
+            map_view = self._map_view
+            if map_view is not None and hasattr(map_view, "start_scan"):
+                map_view.start_scan(str(region_dir))
             else:
                 self.app.warn_dialog("提示", "当前区域地图组件不支持后台扫描")
         except Exception as e:
@@ -453,18 +429,16 @@ class RegionTabMixin:
             if new_dim == self._current_dimension:
                 return
             self._current_dimension = new_dim
-            self._refresh_heatmap()
+            self._refresh_map()
         except Exception as ex:
             self.app.handle_exception(ex, title="切换维度失败")
 
     def _update_region_stats(self) -> None:
-        stats = self._heatmap_service.get_statistics()
-        lines = [
-            f"📊 区域总数: {stats['total_regions']} 个",
-            f"💾 总大小: {format_size(stats['total_size'])}",
-            f"📈 平均: {format_size(stats['avg_size'])}",
-            f"🔍 最小: {format_size(stats['min_size'])} | 最大: {format_size(stats['max_size'])}",
-        ]
-        self._region_stats_text.value = "\n".join(lines)
+        stats = self._map_service.get_statistics()
+        total = stats.get("total_regions", 0)
+        self._region_stats_text.value = (
+            f"🗺️ 已生成区域: {total} 个\n"
+            f"点击地图上的方格查看区域坐标与文件信息。"
+        )
         self._region_stats_text.color = THEME.text_primary
         safe_update(self._region_stats_text)

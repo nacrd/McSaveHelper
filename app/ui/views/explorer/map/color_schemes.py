@@ -1,33 +1,27 @@
-"""Map color schemes and region value labels."""
-import math
+"""Map color schemes and region value labels.
+
+v1 map display is presence-based: existing regions share one fill color.
+Biome / structure helpers are reserved for later layers.
+"""
 from typing import Any, Dict, Tuple
 
+# Existing region fill (Minecraft grass-like)
+REGION_FILL_COLOR = "#4CAF50"
+REGION_BORDER_COLOR = "#2E7D32"
+EMPTY_REGION_COLOR = "#263426"
+ORIGIN_COLOR = "#7CB34288"
+BACKGROUND_COLOR = "#162016"
+SELECTED_BORDER_COLOR = "#FFD54F"
 
+
+def get_region_color(_size: int = 0, _stats: Dict[str, Any] | None = None) -> str:
+    """Solid fill for an existing region cell (not size-weighted)."""
+    return REGION_FILL_COLOR
+
+
+# Backward-compatible names used by older call sites during the transition.
 def get_activity_color(size: int, stats: Dict[str, Any]) -> str:
-    """Activity mode color: cool green → warm purple by relative size."""
-    if stats.get("min_size") == stats.get("max_size"):
-        return "#64B5F6"
-    min_size = max(1, int(stats.get("min_size", 1) or 1))
-    max_size = int(stats.get("max_size", 2) or 2)
-    try:
-        log_min = math.log(min_size)
-        log_max = math.log(max_size)
-        log_size = math.log(max(1, size))
-        ratio = (log_size - log_min) / (log_max - log_min) if log_max > log_min else 0.5
-    except (ValueError, TypeError):
-        ratio = 0.5
-    ratio = max(0.0, min(1.0, ratio))
-    if ratio < 0.18:
-        return "#2E7D32"
-    if ratio < 0.36:
-        return "#689F38"
-    if ratio < 0.56:
-        return "#C0A44A"
-    if ratio < 0.76:
-        return "#D9822B"
-    if ratio < 0.92:
-        return "#C63D2F"
-    return "#8E24AA"
+    return get_region_color(size, stats)
 
 
 def get_biome_color(biome: str) -> str:
@@ -72,29 +66,6 @@ def get_structure_color(count: int, name: str) -> str:
     return "#FFB300" if count < 3 else "#FF7043"
 
 
-def get_activity_name(size: int, stats: Dict[str, Any]) -> str:
-    """Activity level name for display."""
-    avg = stats.get("avg_size", 0) or 0
-    if avg <= 0:
-        return "未知活动度"
-    ratio = size / avg
-    if ratio >= 2.0:
-        return "极高活动"
-    if ratio >= 1.4:
-        return "高活动"
-    if ratio >= 0.8:
-        return "普通活动"
-    if ratio >= 0.35:
-        return "低活动"
-    return "很少生成"
-
-
-def get_activity_icon(size: int, stats: Dict[str, Any]) -> str:
-    """Activity level icon."""
-    name = get_activity_name(size, stats)
-    return {"极高活动": "◆◆", "高活动": "◆", "普通活动": "■", "低活动": "▪"}.get(name, "·")
-
-
 def get_region_value_label(
     display_mode: str,
     coord: Tuple[int, int],
@@ -102,7 +73,7 @@ def get_region_value_label(
     region_meta: Dict[str, Any],
     stats: Dict[str, Any],
 ) -> str:
-    """Region value label for info overlay."""
+    """Short label for info overlay (no activity-heat wording)."""
     if display_mode == "biome":
         return f"主要群系 {region_meta.get('dominant_biome', 'unknown')}"
     if display_mode == "structure":
@@ -110,7 +81,7 @@ def get_region_value_label(
         if count <= 0:
             return "未发现结构"
         return f"{region_meta.get('dominant_structure', 'unknown')} 等 {count} 个结构引用"
-    return get_activity_name(size, stats)
+    return f"r.{coord[0]}.{coord[1]}.mca"
 
 
 def get_mode_title(display_mode: str) -> str:

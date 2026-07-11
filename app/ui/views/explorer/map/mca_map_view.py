@@ -18,12 +18,15 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.services.heatmap_service import HeatmapService, get_heatmap_service
-from app.ui.utils import format_size
+from app.services.region_map_service import RegionMapService, get_region_map_service
 from app.ui.views.explorer.map.color_schemes import (
-    get_activity_color,
-    get_activity_icon,
+    BACKGROUND_COLOR,
+    EMPTY_REGION_COLOR,
+    ORIGIN_COLOR,
+    REGION_FILL_COLOR,
+    SELECTED_BORDER_COLOR,
     get_mode_title,
+    get_region_color,
     get_region_value_label,
 )
 
@@ -33,17 +36,17 @@ MapSelectionCallback = Callable[
 
 
 class McaMapView(ft.Container):
-    """Minimal MCA region map (activity-colored grid)."""
+    """Minimal MCA region map (presence grid, not size heatmap)."""
 
-    BACKGROUND_COLOR = "#162016"
-    EMPTY_REGION_COLOR = "#263426"
-    ORIGIN_COLOR = "#7CB34288"
+    BACKGROUND_COLOR = BACKGROUND_COLOR
+    EMPTY_REGION_COLOR = EMPTY_REGION_COLOR
+    ORIGIN_COLOR = ORIGIN_COLOR
     CELL_SIZE = 32
     CELL_GAP = 2
 
     def __init__(
         self,
-        heatmap_service: Optional[HeatmapService] = None,
+        map_service: Optional[RegionMapService] = None,
         on_selection_changed: Optional[MapSelectionCallback] = None,
         width: int = 700,
         height: int = 450,
@@ -51,7 +54,7 @@ class McaMapView(ft.Container):
     ) -> None:
         super().__init__(**kwargs)
 
-        self._service = heatmap_service or get_heatmap_service()
+        self._service = map_service or get_region_map_service()
         self._on_selection_changed = on_selection_changed
 
         self._offset_x = 0.0
@@ -277,7 +280,7 @@ class McaMapView(ft.Container):
                 self._cell_bounds[coord] = (screen_x, screen_y, cell_size, cell_size)
                 if coord in self._current_data:
                     size = self._current_data[coord]
-                    color = get_activity_color(size, self._cached_stats or {})
+                    color = get_region_color(size, self._cached_stats or {})
                     shapes.extend(
                         self._build_region_cell(
                             screen_x, screen_y, cell_size, color, coord, size
@@ -329,7 +332,7 @@ class McaMapView(ft.Container):
                 size,
                 size,
                 paint=ft.Paint(
-                    color="#FFD54F" if selected else "#00000055",
+                    color=SELECTED_BORDER_COLOR if selected else "#00000055",
                     style=ft.PaintingStyle.STROKE,
                     stroke_width=3 if selected else 1,
                 ),
@@ -342,15 +345,6 @@ class McaMapView(ft.Container):
                     y=y + 5,
                     value=f"{coord[0]},{coord[1]}",
                     style=ft.TextStyle(size=9 if size < 42 else 10, color="#F5F5DC"),
-                )
-            )
-        if size >= 30:
-            shapes.append(
-                cv.Text(
-                    x=x + 5,
-                    y=y + size - 17,
-                    value=get_activity_icon(file_size, self._cached_stats or {}),
-                    style=ft.TextStyle(size=12, color="#F5F5DC"),
                 )
             )
         return shapes
@@ -405,11 +399,10 @@ class McaMapView(ft.Container):
             coord = self._selected_cell
             size = self._current_data.get(coord, 0)
             meta = self._service.get_region_meta(coord)
-            label = get_region_value_label(
+            info = get_region_value_label(
                 self._display_mode, coord, size, meta, self._cached_stats or {}
             )
-            info = f"r.{coord[0]}.{coord[1]}.mca · {format_size(size)} · {label}"
-            text_w = len(info) * 7 + 20
+            text_w = max(120, len(info) * 7 + 20)
             shapes.append(
                 cv.Rect(
                     width - text_w - 10,
@@ -552,6 +545,3 @@ class McaMapView(ft.Container):
     def get_selected_cell(self) -> Optional[Tuple[int, int]]:
         return self._selected_cell
 
-
-# Backward-compatible alias used by older imports
-McaHeatmapView = McaMapView

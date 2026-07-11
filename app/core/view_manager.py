@@ -158,8 +158,8 @@ class ViewManager:
                     lambda e: current_view._start_entity_block_search(e)
                 ),
                 TopAction(
-                    _t("top_bar.refresh_heatmap", "刷新区域图"),
-                    lambda e: current_view._refresh_heatmap()
+                    _t("top_bar.refresh_map", "刷新地图"),
+                    lambda e: current_view._refresh_map()
                 ),
                 TopAction(
                     _t("top_bar.stage_player", "暂存玩家"),

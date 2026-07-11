@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from app.application import Application
 
 from core.omni.world_session import WorldSession
-from app.services.heatmap_service import get_heatmap_service
+from app.services.region_map_service import get_region_map_service
 
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
@@ -51,11 +51,11 @@ class ExplorerView(
         self._nbt_target_options: Dict[str, Path] = {}
         self._last_chunk_objects: List[Dict[str, Any]] = []
         self._staged_nbt_changes: List[Dict[str, Any]] = []
-        self._heatmap_service = get_heatmap_service()
+        self._map_service = get_region_map_service()
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
-        self._heatmap: Optional[Any] = None
+        self._map_view: Optional[Any] = None
         self._compact_mode = False
         self._build()
 
@@ -127,7 +127,7 @@ class ExplorerView(
                 elif index == 2:
                     self._build_region_tab()
                     self._update_dimension_list()
-                    self._refresh_heatmap()
+                    self._refresh_map()
                 elif index == 3:
                     self._build_stats_tab()
                 elif index == 4:
@@ -183,9 +183,9 @@ class ExplorerView(
             if hasattr(self, '_region_side_panel'):
                 self._region_side_panel.width = 320 if compact else 360
                 self._region_side_panel.height = 280 if compact else 320
-            if self._heatmap is not None and hasattr(
-                    self._heatmap, 'resize_map'):
-                self._heatmap.resize_map(
+            if self._map_view is not None and hasattr(
+                    self._map_view, 'resize_map'):
+                self._map_view.resize_map(
                     340 if compact else 420, 220 if compact else 260)
             safe_update(self)
         except Exception as ex:
@@ -292,5 +292,5 @@ class ExplorerView(
         # 扫描并填充维度列表
         self._update_dimension_list()
 
-        if hasattr(self, "_region_stats_text") and self._heatmap is not None:
-            self._refresh_heatmap()
+        if hasattr(self, "_region_stats_text") and self._map_view is not None:
+            self._refresh_map()
