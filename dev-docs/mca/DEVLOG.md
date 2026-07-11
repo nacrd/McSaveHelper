@@ -1,3 +1,17 @@
+## 2026-07-11 (fix pan lag + flicker)
+
+### Cause
+- Pan handlers already on UI thread but redraw went through run_on_ui (async queue) -> lag
+- Every pan frame rebuilt many cv.Image(base64) shapes -> flicker and jank
+
+### Fix
+- Pan: direct _schedule_interactive_redraw() (~15fps), no run_on_ui
+- While camera_busy: draw solid color rects only (no Images/labels/chunk grid)
+- On idle: full redraw + progressive tiles
+- Zoom anim still uses run_on_ui (timer thread) but no Images mid-anim
+
+---
+
 ## 2026-07-11 (fix interaction freeze)
 
 ### Cause

@@ -223,8 +223,21 @@ class McaMapView(ft.Container):
         except Exception:
             pass
 
+    def _rebuild_now(self) -> None:
+        """Synchronous rebuild for gesture handlers already on the UI thread.
+
+        Do NOT route pan/scroll through run_on_ui — that queues async work and
+        makes the map lag behind the finger (and can flash).
+        """
+        if not self._mounted:
+            return
+        try:
+            self._rebuild_canvas()
+        except Exception:
+            pass
+
     def _schedule_rebuild(self) -> None:
-        """Rate-limit rebuild requests, then hop to the UI thread."""
+        """Rate-limit rebuilds from background threads (tile-ready, timers)."""
         now = time.monotonic()
         elapsed = now - self._last_rebuild_ts
         if elapsed >= self._min_rebuild_interval and not self._rebuild_pending:
@@ -252,6 +265,15 @@ class McaMapView(ft.Container):
         self._rebuild_timer = threading.Timer(delay, _fire)
         self._rebuild_timer.daemon = True
         self._rebuild_timer.start()
+
+    def _schedule_interactive_redraw(self) -> None:
+        """Rate-limited *direct* redraw for pan/zoom (already on UI thread)."""
+        now = time.monotonic()
+        # ~15fps during drag is enough; fewer Image/shape rebuilds = less flicker.
+        if now - self._last_rebuild_ts < (1.0 / 15.0):
+            return
+        self._last_rebuild_ts = now
+        self._rebuild_now()
 
     def _cancel_rebuild_timer(self) -> None:
         try:
@@ -302,7 +324,8 @@ class McaMapView(ft.Container):
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
         self._camera_busy = True
-        self._schedule_rebuild()
+        # Direct UI-thread redraw (no run_on_ui queue lag).
+        self._schedule_interactive_redraw()
         self._schedule_idle_tile_pass()
 
     def _on_tap(self, e: ft.TapEvent) -> None:
@@ -744,14 +767,20 @@ class McaMapView(ft.Container):
         self._needs_initial_draw = False
 
     def _apply_shapes(self, shapes: List[cv.Shape]) -> None:
-        if not self._mounted or self.page is None:
+        if not self._mounted:
             return
-        # Assign a fresh list so Flutter never iterates a list mid-mutation.
-        self._canvas.shapes = list(shapes)
+        # Prefer in-place update; avoid full list churn flicker when possible.
         try:
+            self._canvas.shapes = shapes
             self._canvas.update()
         except RuntimeError:
             pass
+        except Exception:
+            try:
+                self._canvas.shapes = list(shapes)
+                self._canvas.update()
+            except Exception:
+                pass
 
     def _build_region_cell(
         self,
@@ -763,7 +792,12 @@ class McaMapView(ft.Container):
         file_size: int,
     ) -> List[cv.Shape]:
         shapes: List[cv.Shape] = []
-        tile_src = self._tile_src(coord) if self._use_topview else None
+        # During pan/zoom: solid rect only. Rebuilding dozens of base64 Images
+        # every frame causes flicker and multi-frame input lag.
+        camera_busy = bool(self._camera_busy or self._zoom_anim_active)
+        tile_src = None if camera_busy else (
+            self._tile_src(coord) if self._use_topview else None
+        )
         if tile_src:
             shapes.append(
                 cv.Image(
@@ -775,7 +809,7 @@ class McaMapView(ft.Container):
                 )
             )
         else:
-            # Placeholder until topview tile is ready
+            # Placeholder until topview tile is ready (or while camera moving)
             shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
         selected = coord == self._selected_cell
         shapes.append(
@@ -791,7 +825,7 @@ class McaMapView(ft.Container):
                 ),
             )
         )
-        if self._show_coordinates and size >= 22:
+        if (not camera_busy) and self._show_coordinates and size >= 22:
             label = self._coord_label_for_region(coord, size)
             # Multi-line for mid/near ranges when space allows.
             if "\n" in label:
@@ -1282,11 +1316,11 @@ class McaMapView(ft.Container):
                 self._zoom_anim_start_offset_y
                 + (self._zoom_anim_target_offset_y - self._zoom_anim_start_offset_y) * ease
             )
-            # Lightweight redraw only; tile upgrades wait until settle.
+            # Timer thread → must hop to UI; rate-limited.
             self._schedule_rebuild()
             if t < 1.0:
-                # ~20fps animation ticks instead of 60 — keeps UI responsive.
-                self._zoom_anim_timer = threading.Timer(0.05, _tick)
+                # ~15fps animation ticks — keeps UI responsive.
+                self._zoom_anim_timer = threading.Timer(1.0 / 15.0, _tick)
                 self._zoom_anim_timer.daemon = True
                 self._zoom_anim_timer.start()
             else:
