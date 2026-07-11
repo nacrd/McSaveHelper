@@ -18,7 +18,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.services.heatmap_service import HeatmapService, get_heatmap_service
+from app.services.region_map_service import RegionMapService, get_region_map_service
 from app.ui.utils import format_size
 from app.ui.views.explorer.map.color_schemes import (
     get_activity_color,
@@ -43,7 +43,7 @@ class McaMapView(ft.Container):
 
     def __init__(
         self,
-        heatmap_service: Optional[HeatmapService] = None,
+        map_service: Optional[RegionMapService] = None,
         on_selection_changed: Optional[MapSelectionCallback] = None,
         width: int = 700,
         height: int = 450,
@@ -51,7 +51,7 @@ class McaMapView(ft.Container):
     ) -> None:
         super().__init__(**kwargs)
 
-        self._service = heatmap_service or get_heatmap_service()
+        self._service = map_service or get_region_map_service()
         self._on_selection_changed = on_selection_changed
 
         self._offset_x = 0.0
@@ -552,6 +552,3 @@ class McaMapView(ft.Container):
     def get_selected_cell(self) -> Optional[Tuple[int, int]]:
         return self._selected_cell
 
-
-# Backward-compatible alias used by older imports
-McaHeatmapView = McaMapView

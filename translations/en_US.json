@@ -16,7 +16,6 @@
     "batch_failed": "Batch processing failed",
     "start_stats": "Start Analysis",
     "open_search": "Open Search",
-    "refresh_heatmap": "Refresh Heatmap",
     "stage_player": "Stage Player",
     "commit_changes": "Commit Changes",
     "discard_changes": "Discard Changes",
@@ -24,7 +23,8 @@
     "start_export": "Start Export",
     "start_compare": "Start Compare",
     "import_lang": "Import Lang File",
-    "read_config": "Read Config"
+    "read_config": "Read Config",
+    "refresh_map": "Refresh Map"
   },
   "sidebar": {
     "migrator": "Batch Migration",
@@ -106,10 +106,7 @@
     "air": "Air",
     "dimension": "Dimension",
     "position": "Position",
-    "region_heatmap": "Region Heatmap (colored by file size)",
-    "refresh_heatmap": "Refresh Heatmap",
     "clear_selection": "Clear Selection",
-    "heatmap_hint": "Click a cell to select a region, click again to deselect",
     "nbt_viewer": "NBT Tree Viewer (supports search and editing)",
     "search": "Search:",
     "search_hint": "Enter key name or value...",
@@ -120,12 +117,15 @@
     "load_first": "Please load a save first",
     "imported_cache": "Imported {count} player name mappings",
     "import_fail": "Import failed: {error}",
-    "heatmap_refreshed": "Heatmap refreshed",
     "player_loaded": "Loaded data for player {uuid}",
     "player_load_fail": "Unable to load data for player {uuid}",
     "session_loaded": "Save loaded, found {count} players",
     "unknown_player": "Unknown Player",
-    "world_label": "Save"
+    "world_label": "Save",
+    "region_map": "Region Map (colored by file size)",
+    "refresh_map": "Refresh Map",
+    "map_hint": "Click a cell to select a region, click again to deselect",
+    "map_refreshed": "Map refreshed"
   },
   "mappings": {
     "title": "UUID Mapping Manager",
