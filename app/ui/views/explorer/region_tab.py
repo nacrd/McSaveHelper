@@ -53,7 +53,7 @@ class RegionTabMixin:
             )
 
         self._region_help_text = ft.Text(
-            "单击放大区域 · 双击区块级 · 右键返回总览 · 坐标随缩放变为游戏坐标",
+            "滚轮缩放自动切层级 · 双击深入区块/区块内 · 右键逐级返回 · 坐标随缩放变为游戏坐标",
             size=11,
             color=THEME.text_muted,
             no_wrap=True,
@@ -568,12 +568,14 @@ class RegionTabMixin:
         block_x1 = region_x * 512 + 511
         block_z0 = region_z * 512
         block_z1 = region_z * 512 + 511
-        if detail and detail.get("level") == "chunk":
+        if detail and detail.get("level") in {"chunk", "block"}:
             chunk = detail.get("chunk_coord")
             br = detail.get("block_range", "")
+            level = detail.get("level")
             if chunk:
+                title = "区块内" if level == "block" else "区块"
                 self._region_status_text.value = (
-                    f"区块 ({chunk[0]}, {chunk[1]})\n"
+                    f"{title} ({chunk[0]}, {chunk[1]})\n"
                     f"所属 r.{region_x}.{region_z}.mca\n"
                     f"方块 {br}"
                 )
