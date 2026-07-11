@@ -181,12 +181,12 @@ class ExplorerView(
             if hasattr(self, '_player_left_panel'):
                 self._player_left_panel.width = 300 if compact else 340
             if hasattr(self, '_region_side_panel'):
-                self._region_side_panel.width = 320 if compact else 360
-                self._region_side_panel.height = 280 if compact else 320
+                self._region_side_panel.width = 240 if compact else 280
             if self._map_view is not None and hasattr(
                     self._map_view, 'resize_map'):
+                # Prefer expand/on_resize; only seed a larger fallback size.
                 self._map_view.resize_map(
-                    340 if compact else 420, 220 if compact else 260)
+                    700 if compact else 900, 420 if compact else 560)
             safe_update(self)
         except Exception as ex:
             self.app.handle_exception(ex, title="设置紧凑模式失败")

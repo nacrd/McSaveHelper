@@ -19,11 +19,11 @@ except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
 from app.services.region_map_service import RegionMapService, get_region_map_service
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,
     ORIGIN_COLOR,
-    REGION_FILL_COLOR,
     SELECTED_BORDER_COLOR,
     get_mode_title,
     get_region_color,
@@ -81,6 +81,7 @@ class McaMapView(ft.Container):
         self._needs_initial_draw = True
         self._update_task: Optional[asyncio.Task[Any]] = None
         self._last_drawn_count = -1
+        self._mounted = False
 
         self._rebuild_pending = False
         self._rebuild_timer: Optional[threading.Timer] = None
@@ -91,11 +92,15 @@ class McaMapView(ft.Container):
         self.height = height
         self.bgcolor = self.BACKGROUND_COLOR
         self.border_radius = 0
+        self.expand = True
 
         self._canvas = cv.Canvas(
             width=width,
             height=height,
+            expand=True,
             shapes=self._empty_shapes(),
+            resize_interval=50,
+            on_resize=self._on_canvas_resize,
         )
         self._gesture = ft.GestureDetector(
             on_pan_start=self._on_pan_start,
@@ -104,8 +109,12 @@ class McaMapView(ft.Container):
             on_scroll=self._on_scroll,
             width=width,
             height=height,
+            expand=True,
         )
-        self.content = ft.Stack([self._canvas, self._gesture])
+        self.content = ft.Stack(
+            [self._canvas, self._gesture],
+            expand=True,
+        )
 
         # Progressive topview: service notifies when a tile finishes rendering.
         self._service.set_tile_ready_callback(self._on_tile_ready)
@@ -149,12 +158,34 @@ class McaMapView(ft.Container):
             )
         ]
 
+    def _request_rebuild(self) -> None:
+        """Marshal canvas rebuild onto the Flet UI thread.
+
+        Canvas.shapes must only be mutated on the UI thread. Background timers,
+        topview workers, and off-loop scan tasks all funnel through here.
+        """
+        if not self._mounted:
+            return
+        page = self.page
+        if page is None:
+            return
+        run_on_ui(page, self._rebuild_canvas_safe)
+
+    def _rebuild_canvas_safe(self) -> None:
+        if not self._mounted or self.page is None:
+            return
+        try:
+            self._rebuild_canvas()
+        except Exception:
+            pass
+
     def _schedule_rebuild(self) -> None:
+        """Rate-limit rebuild requests, then hop to the UI thread."""
         now = time.monotonic()
         elapsed = now - self._last_rebuild_ts
         if elapsed >= self._min_rebuild_interval and not self._rebuild_pending:
             self._last_rebuild_ts = now
-            self._rebuild_canvas()
+            self._request_rebuild()
             return
         if self._rebuild_pending:
             return
@@ -165,7 +196,7 @@ class McaMapView(ft.Container):
             self._rebuild_pending = False
             self._last_rebuild_ts = time.monotonic()
             try:
-                self._rebuild_canvas()
+                self._request_rebuild()
             except Exception:
                 pass
 
@@ -177,6 +208,15 @@ class McaMapView(ft.Container):
         self._rebuild_timer = threading.Timer(delay, _fire)
         self._rebuild_timer.daemon = True
         self._rebuild_timer.start()
+
+    def _cancel_rebuild_timer(self) -> None:
+        try:
+            if self._rebuild_timer is not None:
+                self._rebuild_timer.cancel()
+        except Exception:
+            pass
+        self._rebuild_timer = None
+        self._rebuild_pending = False
 
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
@@ -204,7 +244,7 @@ class McaMapView(ft.Container):
                 size = self._current_data[coord]
                 if self._on_selection_changed:
                     self._on_selection_changed(coord, size, {"level": "region"})
-                self._rebuild_canvas()
+                self._request_rebuild()
                 break
 
     def _on_scroll(self, e: ft.ScrollEvent) -> None:
@@ -290,6 +330,10 @@ class McaMapView(ft.Container):
 
         margin = cell_pitch
         pitch_scaled = cell_pitch * self._scale
+        # Guard against degenerate scale that would explode the draw loop.
+        if pitch_scaled <= 1e-6:
+            self._apply_shapes(shapes)
+            return
         vis_min_x = int(math.floor((0 - margin - self._offset_x) / pitch_scaled))
         vis_max_x = int(math.ceil((view_w + margin - self._offset_x) / pitch_scaled))
         vis_min_z = int(math.floor((0 - margin - self._offset_y) / pitch_scaled))
@@ -348,7 +392,10 @@ class McaMapView(ft.Container):
         self._needs_initial_draw = False
 
     def _apply_shapes(self, shapes: List[cv.Shape]) -> None:
-        self._canvas.shapes = shapes
+        if not self._mounted or self.page is None:
+            return
+        # Assign a fresh list so Flutter never iterates a list mid-mutation.
+        self._canvas.shapes = list(shapes)
         try:
             self._canvas.update()
         except RuntimeError:
@@ -485,41 +532,72 @@ class McaMapView(ft.Container):
             count = self._service.progress_info.scanned_files
             if count != self._last_drawn_count:
                 self._last_drawn_count = count
-                self._rebuild_canvas()
+                self._request_rebuild()
             await asyncio.sleep(0.2)
         self._last_drawn_count = -1
-        self._rebuild_canvas()
+        self._request_rebuild()
         if self._on_selection_changed:
-            self._on_selection_changed(None, None, None)
+            # Selection callback also mutates UI controls — hop to page loop.
+            page = self.page
+            if page is not None:
+                run_on_ui(page, self._on_selection_changed, None, None, None)
+            else:
+                try:
+                    self._on_selection_changed(None, None, None)
+                except Exception:
+                    pass
 
     def did_mount(self) -> None:
         super().did_mount()
+        self._mounted = True
+        self._service.set_tile_ready_callback(self._on_tile_ready)
         if self._needs_initial_draw:
-            self._rebuild_canvas()
+            self._request_rebuild()
         if self._service.is_scanning:
             self._start_update_loop()
 
     def did_unmount(self) -> None:
+        self._mounted = False
+        self._cancel_rebuild_timer()
+        self._stop_update_loop()
+        # Drop callback so worker threads do not touch a dead view.
+        try:
+            if getattr(self._service, "_tile_ready_callback", None) is self._on_tile_ready:
+                self._service.set_tile_ready_callback(None)
+        except Exception:
+            pass
         super_did_unmount = getattr(super(), "did_unmount", None)
         if super_did_unmount:
             super_did_unmount()
-        self._stop_update_loop()
 
     def _schedule_task(self, coro: Any) -> Optional[asyncio.Task[Any]]:
+        """Schedule a coroutine on the UI event loop when possible."""
         try:
             return asyncio.get_running_loop().create_task(coro)
         except RuntimeError:
+            pass
 
-            def _run_in_thread() -> None:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(coro)
-                finally:
-                    loop.close()
+        page = self.page
+        if page is not None:
+            try:
+                async def _runner() -> Any:
+                    return await coro
 
-            threading.Thread(target=_run_in_thread, daemon=True).start()
-            return None
+                return page.run_task(_runner)
+            except Exception:
+                pass
+
+        # Last resort: background loop (scan-only; UI updates still go via run_on_ui).
+        def _run_in_thread() -> None:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
+        threading.Thread(target=_run_in_thread, daemon=True).start()
+        return None
 
     def _start_update_loop(self) -> None:
         if self._update_task is None or self._update_task.done():
@@ -528,6 +606,7 @@ class McaMapView(ft.Container):
     def _stop_update_loop(self) -> None:
         if self._update_task and not self._update_task.done():
             self._update_task.cancel()
+        self._update_task = None
 
     # ------------------------------------------------------------------ public API (region_tab)
     def start_scan(self, region_dir: str) -> None:
@@ -538,16 +617,18 @@ class McaMapView(ft.Container):
         self._scale = 1.0
         self._offset_x = 0
         self._offset_y = 0
-        self._rebuild_canvas()
+        self._request_rebuild()
 
     def reset_view(self) -> None:
         self._scale = 1.0
         self._offset_x = 0
         self._offset_y = 0
         self._selected_cell = None
-        self._rebuild_canvas()
+        self._request_rebuild()
 
     def resize_map(self, width: int, height: int) -> None:
+        width = max(120, int(width))
+        height = max(100, int(height))
         if self.width == width and self.height == height:
             return
         self.width = width
@@ -556,19 +637,28 @@ class McaMapView(ft.Container):
         self._canvas.height = height
         self._gesture.width = width
         self._gesture.height = height
-        self._scale = 1.0
-        self._offset_x = 0
-        self._offset_y = 0
-        self._rebuild_canvas()
+        # Keep camera when adapting to layout; only re-center on explicit reset.
+        self._request_rebuild()
+
+    def _on_canvas_resize(self, e: Any) -> None:
+        """Adapt to parent layout size (border-aware fill)."""
+        try:
+            w = int(getattr(e, "width", 0) or 0)
+            h = int(getattr(e, "height", 0) or 0)
+        except Exception:
+            return
+        if w < 80 or h < 80:
+            return
+        self.resize_map(w, h)
 
     def toggle_coordinates(self) -> bool:
         self._show_coordinates = not self._show_coordinates
-        self._rebuild_canvas()
+        self._request_rebuild()
         return self._show_coordinates
 
     def toggle_empty_regions(self) -> bool:
         self._show_empty_regions = not self._show_empty_regions
-        self._rebuild_canvas()
+        self._request_rebuild()
         return self._show_empty_regions
 
     def set_display_mode(self, mode: str) -> None:
@@ -576,7 +666,7 @@ class McaMapView(ft.Container):
             return
         self._display_mode = mode
         self._use_topview = mode in {"activity", "topview"}
-        self._rebuild_canvas()
+        self._request_rebuild()
 
     def get_display_mode(self) -> str:
         return self._display_mode
@@ -586,19 +676,18 @@ class McaMapView(ft.Container):
         if level not in {"auto", "region", "chunk"}:
             return
         self._detail_level = "region"
-        self._rebuild_canvas()
+        self._request_rebuild()
 
     def get_detail_level(self) -> str:
         return self._detail_level
 
     def zoom_in(self) -> None:
         self._scale = min(10.0, self._scale * 1.2)
-        self._rebuild_canvas()
+        self._request_rebuild()
 
     def zoom_out(self) -> None:
         self._scale = max(0.1, self._scale * 0.8)
-        self._rebuild_canvas()
+        self._request_rebuild()
 
     def get_selected_cell(self) -> Optional[Tuple[int, int]]:
         return self._selected_cell
-
