@@ -17,11 +17,11 @@ try:
 except ImportError:  # pragma: no cover
     PIL_AVAILABLE = False
 
-# Default tile resolution (pixels per region edge).
-# 128 → sample every 4 blocks across a 512-block region edge.
-DEFAULT_TILE_SIZE = 128
+# Default overview tile (pixels per region edge).
+# 32px is enough for CELL_SIZE=32 map cells and is ~16x fewer samples than 128.
+DEFAULT_TILE_SIZE = 32
 # Higher-detail tile used when the user zooms into a region.
-DETAIL_TILE_SIZE = 128
+DETAIL_TILE_SIZE = 64
 
 # Shared palette with map export (subset + common terrain).
 BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {
@@ -144,6 +144,8 @@ def _color_for_block(block: Any) -> Tuple[int, int, int]:
 def render_region_topview(
     region_file: Path | str,
     tile_size: int = DEFAULT_TILE_SIZE,
+    *,
+    use_disk_cache: bool = True,
 ) -> Optional[bytes]:
     """Render one MCA region to PNG bytes (RGB) via core.mca."""
     if not PIL_AVAILABLE:
@@ -154,6 +156,15 @@ def render_region_topview(
         return None
 
     tile_size = max(8, min(256, int(tile_size)))
+
+    if use_disk_cache:
+        try:
+            from core.mca.tile_cache import load_tile, store_tile
+            cached = load_tile(region_path, tile_size)
+            if cached:
+                return cached
+        except Exception:
+            pass
 
     try:
         from core.mca.surface import sample_region_surface_colors
@@ -179,11 +190,19 @@ def render_region_topview(
     try:
         # optimize=False: faster encode for progressive map tiles
         image.save(buf, format="PNG", optimize=False)
-        return buf.getvalue()
+        png = buf.getvalue()
     except Exception:
         return None
     finally:
         image.close()
+
+    if use_disk_cache and png:
+        try:
+            from core.mca.tile_cache import store_tile
+            store_tile(region_path, tile_size, png)
+        except Exception:
+            pass
+    return png
 
 
 def render_region_topview_base64(

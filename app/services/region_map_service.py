@@ -69,7 +69,7 @@ class RegionMapService:
         # 俯视图生成代数：clear/start 时递增，丢弃过期回调
         self._topview_generation: int = 0
         self._topview_pending: set = set()
-        self._topview_tile_size: int = 128
+        self._topview_tile_size: int = 32
         self._topview_enabled: bool = True
         # Track rendered tile size so we can upgrade 64→128 later if needed.
         self._topview_tile_sizes: Dict[Tuple[int, int], int] = {}
@@ -78,7 +78,7 @@ class RegionMapService:
         # Bounded topview queue: never spawn one thread per region.
         # anvil chunk decode is CPU+IO heavy; 2 workers keep hang detector calm.
         cpu = os.cpu_count() or 2
-        self._topview_max_workers: int = max(1, min(2, cpu // 2 or 1))
+        self._topview_max_workers: int = max(2, min(4, (cpu or 2) // 2 or 2))
         self._topview_active: int = 0
         self._topview_queue: Deque[Tuple[Tuple[int, int], str, int, int]] = deque()
         self._topview_executor: Optional[ThreadPoolExecutor] = None

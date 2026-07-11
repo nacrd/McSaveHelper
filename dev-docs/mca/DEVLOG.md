@@ -1,3 +1,20 @@
+## 2026-07-11 (topview cache + LOD)
+
+### Changes
+
+- core/mca/tile_cache.py: disk PNG cache keyed by path+mtime+size+tile+algo
+- DEFAULT_TILE_SIZE 128 -> 32 (overview), DETAIL_TILE_SIZE 128 -> 64
+- region_map workers max 2-4; default tile size 32
+- render_region_topview(use_disk_cache=True)
+
+### example_saves/新的世界 r.-2.0.mca
+
+- cold tile32/64: ~1.56s
+- warm disk cache: ~1ms
+- second app open for same regions should feel instant for cached tiles
+
+---
+
 ## 2026-07-11 (example_saves validation)
 
 World: example_saves/新的世界
