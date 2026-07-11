@@ -53,7 +53,7 @@ class RegionTabMixin:
             )
 
         self._region_help_text = ft.Text(
-            "1 格 = 1 个 r.x.z.mca 区域文件（512×512 方块）。扫描后逐步加载方块俯视图。",
+            "1 格 = 1 个 r.x.z.mca · 俯视 128px · 点击区域局部放大",
             size=11,
             color=THEME.text_muted,
             no_wrap=True,

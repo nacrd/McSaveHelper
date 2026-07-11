@@ -29,7 +29,10 @@ from app.ui.views.explorer.map.color_schemes import (
     get_region_color,
     get_region_value_label,
 )
-from app.ui.views.explorer.map.topview_renderer import DEFAULT_TILE_SIZE
+from app.ui.views.explorer.map.topview_renderer import (
+    DEFAULT_TILE_SIZE,
+    DETAIL_TILE_SIZE,
+)
 
 
 MapSelectionCallback = Callable[
@@ -258,8 +261,66 @@ class McaMapView(ft.Container):
                 size = self._current_data[coord]
                 if self._on_selection_changed:
                     self._on_selection_changed(coord, size, {"level": "region"})
-                self._request_rebuild()
+                # Local zoom into the clicked region + request hi-res tile.
+                self._focus_region(coord, animate=True)
                 break
+
+    def _focus_region(
+        self,
+        coord: Tuple[int, int],
+        *,
+        animate: bool = True,
+        target_fill: float = 0.72,
+    ) -> None:
+        """Center and zoom so the given region fills most of the viewport."""
+        view_w = float(self.width or 800)
+        view_h = float(self.height or 600)
+        if view_w <= 1 or view_h <= 1:
+            self._request_rebuild()
+            return
+
+        cell_pitch = float(self.CELL_SIZE + self.CELL_GAP)
+        # Desired on-screen size of one region cell.
+        desired = min(view_w, view_h) * max(0.35, min(0.95, target_fill))
+        target_scale = max(0.35, min(12.0, desired / self.CELL_SIZE))
+
+        # World-space center of the region cell.
+        world_cx = (coord[0] + 0.5) * cell_pitch
+        world_cz = (coord[1] + 0.5) * cell_pitch
+        target_ox = view_w / 2.0 - world_cx * target_scale
+        target_oy = view_h / 2.0 - world_cz * target_scale
+
+        # Prefer detail tiles for the focused region and its neighbors.
+        if self._use_topview:
+            neighbors = [
+                (coord[0] + dx, coord[1] + dz)
+                for dz in (-1, 0, 1)
+                for dx in (-1, 0, 1)
+                if (coord[0] + dx, coord[1] + dz) in self._current_data
+                or (dx, dz) == (0, 0)
+            ]
+            try:
+                self._service.request_topview_tiles(
+                    neighbors,
+                    tile_size=DETAIL_TILE_SIZE,
+                    force=True,
+                    priority=True,
+                )
+            except TypeError:
+                # Older service signature fallback
+                self._service.request_topview_tiles(
+                    neighbors, tile_size=DETAIL_TILE_SIZE
+                )
+
+        if animate:
+            self._animate_camera_to(
+                target_scale, target_ox, target_oy, duration=0.28
+            )
+        else:
+            self._scale = target_scale
+            self._offset_x = target_ox
+            self._offset_y = target_oy
+            self._request_rebuild()
 
     def _on_scroll(self, e: ft.ScrollEvent) -> None:
         scroll_delta = getattr(e, "scroll_delta", None)
@@ -395,7 +456,34 @@ class McaMapView(ft.Container):
                     )
 
         if missing:
-            self._service.request_topview_tiles(missing, tile_size=DEFAULT_TILE_SIZE)
+            self._service.request_topview_tiles(
+                missing, tile_size=DEFAULT_TILE_SIZE
+            )
+        # While zoomed in, upgrade selected/nearby tiles to detail resolution.
+        if self._use_topview and self._selected_cell is not None and self._scale >= 2.2:
+            sel = self._selected_cell
+            upgrade = [
+                (sel[0] + dx, sel[1] + dz)
+                for dz in (-1, 0, 1)
+                for dx in (-1, 0, 1)
+                if (sel[0] + dx, sel[1] + dz) in self._current_data
+            ]
+            need = [
+                c for c in upgrade
+                if not self._service.has_topview_tile(c, min_size=DETAIL_TILE_SIZE)
+            ]
+            if need:
+                try:
+                    self._service.request_topview_tiles(
+                        need,
+                        tile_size=DETAIL_TILE_SIZE,
+                        force=True,
+                        priority=True,
+                    )
+                except TypeError:
+                    self._service.request_topview_tiles(
+                        need, tile_size=DETAIL_TILE_SIZE
+                    )
 
         shapes.extend(self._build_info_overlay())
         self._apply_shapes(shapes)
@@ -767,20 +855,29 @@ class McaMapView(ft.Container):
         base_oy = (
             self._zoom_anim_target_offset_y if self._zoom_anim_active else self._offset_y
         )
-        new_scale = max(0.1, min(10.0, base_scale * factor))
+        new_scale = max(0.1, min(12.0, base_scale * factor))
         if abs(new_scale - base_scale) < 1e-6:
             return
         world_x = (pivot_x - base_ox) / base_scale if base_scale else 0.0
         world_y = (pivot_y - base_oy) / base_scale if base_scale else 0.0
         target_ox = pivot_x - world_x * new_scale
         target_oy = pivot_y - world_y * new_scale
+        self._animate_camera_to(new_scale, target_ox, target_oy, duration=duration)
 
+    def _animate_camera_to(
+        self,
+        target_scale: float,
+        target_offset_x: float,
+        target_offset_y: float,
+        duration: float = 0.22,
+    ) -> None:
+        """Animate scale + offset toward an absolute camera target."""
         self._zoom_anim_start_scale = self._scale
         self._zoom_anim_start_offset_x = self._offset_x
         self._zoom_anim_start_offset_y = self._offset_y
-        self._zoom_anim_target_scale = new_scale
-        self._zoom_anim_target_offset_x = target_ox
-        self._zoom_anim_target_offset_y = target_oy
+        self._zoom_anim_target_scale = max(0.1, min(12.0, float(target_scale)))
+        self._zoom_anim_target_offset_x = float(target_offset_x)
+        self._zoom_anim_target_offset_y = float(target_offset_y)
         self._zoom_anim_t0 = time.monotonic()
         self._zoom_anim_duration = max(0.05, duration)
         self._zoom_anim_active = True

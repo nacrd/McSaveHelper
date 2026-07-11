@@ -4,11 +4,13 @@
 提供异步、非阻塞的区域文件扫描能力，
 支持进度追踪和数据查询。
 """
+import os
 import threading
 import asyncio
-from collections import Counter
+from collections import Counter, deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Deque, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 from core.region_utils import parse_region_coords, scan_region_dir
@@ -67,10 +69,27 @@ class RegionMapService:
         # 俯视图生成代数：clear/start 时递增，丢弃过期回调
         self._topview_generation: int = 0
         self._topview_pending: set = set()
-        self._topview_tile_size: int = 64
+        self._topview_tile_size: int = 128
         self._topview_enabled: bool = True
+        # Track rendered tile size so we can upgrade 64→128 later if needed.
+        self._topview_tile_sizes: Dict[Tuple[int, int], int] = {}
         # 瓦片变更回调（由 UI 注册，在 UI 线程调度）
         self._tile_ready_callback: Optional[Any] = None
+        # Bounded topview queue: never spawn one thread per region.
+        # anvil chunk decode is CPU+IO heavy; 2 workers keep hang detector calm.
+        cpu = os.cpu_count() or 2
+        self._topview_max_workers: int = max(1, min(2, cpu // 2 or 1))
+        self._topview_active: int = 0
+        self._topview_queue: Deque[Tuple[Tuple[int, int], str, int, int]] = deque()
+        self._topview_executor: Optional[ThreadPoolExecutor] = None
+
+    def _ensure_topview_executor(self) -> ThreadPoolExecutor:
+        if self._topview_executor is None:
+            self._topview_executor = ThreadPoolExecutor(
+                max_workers=self._topview_max_workers,
+                thread_name_prefix="topview",
+            )
+        return self._topview_executor
 
     @property
     def is_scanning(self) -> bool:
@@ -132,7 +151,9 @@ class RegionMapService:
             self._region_meta.clear()
             self._region_paths.clear()
             self._topview_tiles.clear()
+            self._topview_tile_sizes.clear()
             self._topview_pending.clear()
+            self._topview_queue.clear()
             self._topview_generation += 1
             self._scanned_count = 0
             self._total_count = 0
@@ -155,9 +176,17 @@ class RegionMapService:
         with self._data_lock:
             return self._topview_tiles.get(coord)
 
-    def has_topview_tile(self, coord: Tuple[int, int]) -> bool:
+    def has_topview_tile(self, coord: Tuple[int, int], min_size: int = 0) -> bool:
         with self._data_lock:
-            return coord in self._topview_tiles
+            if coord not in self._topview_tiles:
+                return False
+            if min_size <= 0:
+                return True
+            return int(self._topview_tile_sizes.get(coord, 0) or 0) >= min_size
+
+    def get_topview_tile_size(self, coord: Tuple[int, int]) -> int:
+        with self._data_lock:
+            return int(self._topview_tile_sizes.get(coord, 0) or 0)
 
     def get_topview_generation(self) -> int:
         with self._data_lock:
@@ -167,29 +196,69 @@ class RegionMapService:
         self,
         coords: list[Tuple[int, int]],
         tile_size: Optional[int] = None,
+        *,
+        force: bool = False,
+        priority: bool = False,
     ) -> None:
-        """Enqueue topview rendering for coords missing a cached tile."""
+        """Enqueue topview rendering for coords missing a cached tile.
+
+        Uses a bounded worker pool instead of one thread per region. Visible
+        tiles should be requested by the map view; scan itself does not flood
+        the queue.
+
+        Args:
+            force: re-render even if a tile already exists (e.g. upgrade size).
+            priority: put jobs at the front of the queue (selected region).
+        """
         if not self._topview_enabled:
             return
-        size = tile_size or self._topview_tile_size
-        to_start: list[Tuple[Tuple[int, int], str, int, int]] = []
+        size = int(tile_size or self._topview_tile_size)
         with self._data_lock:
             generation = self._topview_generation
             for coord in coords:
-                if coord in self._topview_tiles or coord in self._topview_pending:
+                if coord in self._topview_pending and not force:
+                    # Already scheduled; if force-upgrade, still allow a second
+                    # job only when existing scheduled size is smaller.
+                    continue
+                existing = self._topview_tiles.get(coord)
+                existing_size = int(self._topview_tile_sizes.get(coord, 0) or 0)
+                if existing is not None and not force and existing_size >= size:
+                    continue
+                if existing is not None and force and existing_size >= size:
                     continue
                 path = self._region_paths.get(coord)
                 if not path:
                     continue
                 self._topview_pending.add(coord)
-                to_start.append((coord, path, size, generation))
+                job = (coord, path, size, generation)
+                if priority:
+                    self._topview_queue.appendleft(job)
+                else:
+                    self._topview_queue.append(job)
+        self._pump_topview_queue()
 
-        for coord, path, size, generation in to_start:
-            threading.Thread(
-                target=self._render_topview_worker,
-                args=(coord, path, size, generation),
-                daemon=True,
-            ).start()
+    def _pump_topview_queue(self) -> None:
+        """Start queued jobs up to the worker cap."""
+        jobs: list[Tuple[Tuple[int, int], str, int, int]] = []
+        with self._data_lock:
+            while (
+                self._topview_active < self._topview_max_workers
+                and self._topview_queue
+            ):
+                job = self._topview_queue.popleft()
+                # Drop stale jobs from a previous generation.
+                if job[3] != self._topview_generation:
+                    self._topview_pending.discard(job[0])
+                    continue
+                self._topview_active += 1
+                jobs.append(job)
+
+        if not jobs:
+            return
+
+        executor = self._ensure_topview_executor()
+        for job in jobs:
+            executor.submit(self._render_topview_worker, *job)
 
     def _render_topview_worker(
         self,
@@ -198,24 +267,34 @@ class RegionMapService:
         tile_size: int,
         generation: int,
     ) -> None:
+        png: Optional[bytes] = None
         try:
+            # Skip work for superseded generations as early as possible.
+            with self._data_lock:
+                if generation != self._topview_generation:
+                    return
             from app.ui.views.explorer.map.topview_renderer import render_region_topview
 
             png = render_region_topview(path, tile_size=tile_size)
         except Exception:
             png = None
-
-        callback = None
-        with self._data_lock:
-            self._topview_pending.discard(coord)
-            if generation != self._topview_generation:
-                return
-            if png is not None:
-                self._topview_tiles[coord] = png
-                callback = self._tile_ready_callback
-        if callback is not None and png is not None:
+        finally:
+            callback = None
+            with self._data_lock:
+                self._topview_pending.discard(coord)
+                self._topview_active = max(0, self._topview_active - 1)
+                if generation == self._topview_generation and png is not None:
+                    self._topview_tiles[coord] = png
+                    self._topview_tile_sizes[coord] = int(tile_size)
+                    callback = self._tile_ready_callback
+            if callback is not None and png is not None:
+                try:
+                    callback(coord)
+                except Exception:
+                    pass
+            # Fill freed worker slots.
             try:
-                callback(coord)
+                self._pump_topview_queue()
             except Exception:
                 pass
 
@@ -270,9 +349,8 @@ class RegionMapService:
                             self._region_meta[coord] = meta
                             self._region_paths[coord] = str(mca_file)
                             self._mark_data_dirty()
-                        # 扫描到区域后异步生成俯视图瓦片
-                        if self._topview_enabled:
-                            self.request_topview_tiles([coord])
+                        # Topview tiles are requested by the map view for
+                        # currently visible cells only (not every region).
 
                     with self._data_lock:
                         self._scanned_count += 1

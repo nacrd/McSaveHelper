@@ -18,8 +18,11 @@ try:
 except ImportError:  # pragma: no cover
     PIL_AVAILABLE = False
 
-# Default tile resolution (pixels per region edge). 64 → sample every 8 blocks.
-DEFAULT_TILE_SIZE = 64
+# Default tile resolution (pixels per region edge).
+# 128 → sample every 4 blocks across a 512-block region edge.
+DEFAULT_TILE_SIZE = 128
+# Higher-detail tile used when the user zooms into a region.
+DETAIL_TILE_SIZE = 128
 
 # Shared palette with map export (subset + common terrain).
 BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {
@@ -199,7 +202,21 @@ def render_region_topview(
     image = Image.new("RGB", (tile_size, tile_size), color=(40, 55, 45))
     pixels = image.load()
 
-    # Pre-load chunks we will touch (tile_size samples across 32×32 chunks).
+    # Cache decoded chunks: tile_size samples hit only a few of the 32×32 chunks,
+    # but without caching we re-parse the same chunk for every sample inside it.
+    chunk_cache: Dict[Tuple[int, int], Any] = {}
+
+    def _get_chunk(cx: int, cz: int) -> Any:
+        key = (cx, cz)
+        if key in chunk_cache:
+            return chunk_cache[key]
+        try:
+            chunk = region.get_chunk(cx, cz)
+        except Exception:
+            chunk = None
+        chunk_cache[key] = chunk
+        return chunk
+
     # Map pixel (px, pz) → world-local block in region [0, 512).
     for pz in range(tile_size):
         for px in range(tile_size):
@@ -207,10 +224,7 @@ def render_region_topview(
             bz = min(511, pz * step + step // 2)
             cx, lx = divmod(bx, 16)
             cz, lz = divmod(bz, 16)
-            try:
-                chunk = region.get_chunk(cx, cz)
-            except Exception:
-                chunk = None
+            chunk = _get_chunk(cx, cz)
             if chunk is None:
                 pixels[px, pz] = (45, 60, 50)
                 continue
