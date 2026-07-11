@@ -20,6 +20,6 @@ htmlcov/
 !/.git/
 !/.gitignore
 !/.github/
-*.md
 *.txt
 !claude.md
+dev-docs/
