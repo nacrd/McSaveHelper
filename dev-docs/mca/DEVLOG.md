@@ -1,3 +1,21 @@
+## 2026-07-11 (faster topview: subsample + parallel decode)
+
+### Changes
+- Overview tiles decode fewer unique chunks (8/16/24/32 edge) then NN-upscale
+- Parallel zlib+NBT decode (up to 6 workers)
+- Shorter heightmap confirm walk (12 -> 4)
+
+### Bench r.0.0.mca cold no-cache (mean of 3)
+| tile | before | after |
+|------|--------|-------|
+| 16 | ~390ms | **~99ms** (~4x) |
+| 32 | ~1510ms | **~354ms** (~4.3x) |
+| 64 | ~1568ms | **~871ms** (~1.8x) |
+| 128 | ~1.5s | ~1.5s (full 1024 chunks) |
+| disk warm | 1ms | 1ms |
+
+---
+
 ## 2026-07-11 (Phase 4 write path)
 
 ### Added

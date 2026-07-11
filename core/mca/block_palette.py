@@ -241,7 +241,7 @@ class ChunkBlocks:
         y = self.surface_y(x, z)
         if y is None:
             return None
-        for dy in range(0, 12):
+        for dy in range(0, 4):
             name = self.block_id_at(x, y - dy, z)
             if not is_air_name(name):
                 return name

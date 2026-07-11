@@ -14,7 +14,7 @@ from typing import Optional, Union
 PathLike = Union[str, Path]
 
 # Bump when sampling/color/heightmap logic changes so stale tiles are ignored.
-ALGO_VERSION = "v3-native-hm"
+ALGO_VERSION = "v5-chunk-subsample"
 
 _CACHE_DIR: Optional[Path] = None
 _LOCK = threading.Lock()
