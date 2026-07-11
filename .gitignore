@@ -22,4 +22,6 @@ htmlcov/
 !/.github/
 *.txt
 !claude.md
-dev-docs/
+dev-docs/*
+!dev-docs/mca/
+!dev-docs/mca/**
