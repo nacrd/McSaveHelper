@@ -53,21 +53,21 @@ class RegionTabMixin:
             )
 
         self._region_help_text = ft.Text(
-            "1 格 = 1 个 r.x.z.mca 区域文件（512×512 方块）。绿色表示该区域已生成。",
+            "1 格 = 1 个 r.x.z.mca 区域文件（512×512 方块）。扫描后逐步加载方块俯视图。",
             size=11,
             color=THEME.text_muted,
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
 
-        # Keep display-mode state for side-panel detail text; map v1 is presence-only.
-        self._region_display_mode = "activity"
+        # Keep display-mode state for side-panel detail text.
+        self._region_display_mode = "topview"
         self._region_display_mode_dropdown = ft.Dropdown(
             label="显示方式",
-            value="activity",
+            value="topview",
             width=150,
             options=[
-                ft.dropdown.Option("activity", "区域地图"),
+                ft.dropdown.Option("topview", "方块俯视"),
             ],
             on_select=self._change_region_display_mode,
             border_color=THEME.border_light,
@@ -179,14 +179,17 @@ class RegionTabMixin:
 
     def _get_region_display_legend(
             self) -> tuple[str, list[tuple[str, str, str]]]:
-        return "🗺️ 区域地图图例", [
-            ("#4CAF50", "已生成", "存在 r.x.z.mca 区域文件"),
-            ("#263426", "空格", "未生成（可开关显示）"),
+        return "🗺️ 方块俯视图例", [
+            ("#228B22", "草地/树叶", "地表植被"),
+            ("#64A4DF", "水体", "海洋 / 河流"),
+            ("#EED6AF", "沙地", "沙漠 / 沙滩"),
+            ("#808080", "岩石", "石头 / 深板岩"),
+            ("#4CAF50", "占位", "俯视尚未加载时的占位色"),
             ("#FFD54F", "选中", "当前选中的区域边框"),
         ]
 
     def _change_region_display_mode(self, e: ft.ControlEvent) -> None:
-        mode = self._region_display_mode_dropdown.value or "activity"
+        mode = self._region_display_mode_dropdown.value or "topview"
         self._region_display_mode = mode
         if self._map_view is not None and hasattr(self._map_view, "set_display_mode"):
             self._map_view.set_display_mode(mode)
@@ -207,7 +210,7 @@ class RegionTabMixin:
             self._map_view.set_detail_level(level)
 
     def _get_region_display_help(self, mode: str) -> str:
-        return "绿色方格表示该区域文件已生成；点击查看坐标与文件信息。"
+        return "按区域最高方块着色的俯视图；扫描时渐进加载，未加载前显示绿色占位。"
 
     def _map_zoom_in(self) -> None:
         map_view = self._map_view

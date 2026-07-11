@@ -47,6 +47,10 @@ class RegionMapService:
         """初始化内部状态"""
         self._mca_data: Dict[Tuple[int, int], int] = {}
         self._region_meta: Dict[Tuple[int, int], Dict[str, Any]] = {}
+        # region 坐标 → mca 文件路径（俯视图渲染用）
+        self._region_paths: Dict[Tuple[int, int], str] = {}
+        # region 坐标 → PNG bytes（顶视瓦片缓存）
+        self._topview_tiles: Dict[Tuple[int, int], bytes] = {}
         self._is_scanning: bool = False
         self._scan_progress: float = 0.0
         self._scan_task: Optional[asyncio.Task] = None
@@ -60,6 +64,13 @@ class RegionMapService:
         self._cached_snapshot_count: int = -1
         # anvil 扫描并发写保护（asyncio.to_thread 后多线程写 _mca_data）
         self._data_lock = threading.Lock()
+        # 俯视图生成代数：clear/start 时递增，丢弃过期回调
+        self._topview_generation: int = 0
+        self._topview_pending: set = set()
+        self._topview_tile_size: int = 64
+        self._topview_enabled: bool = True
+        # 瓦片变更回调（由 UI 注册，在 UI 线程调度）
+        self._tile_ready_callback: Optional[Any] = None
 
     @property
     def is_scanning(self) -> bool:
@@ -116,16 +127,97 @@ class RegionMapService:
 
     def clear_data(self) -> None:
         """清空所有缓存数据"""
-        self._mca_data.clear()
-        self._region_meta.clear()
-        self._scanned_count = 0
-        self._total_count = 0
-        self._scan_progress = 0.0
-        self._error = None
-        self._stats_dirty = True
-        self._cached_stats = None
-        self._cached_data_snapshot = None
-        self._cached_snapshot_count = -1
+        with self._data_lock:
+            self._mca_data.clear()
+            self._region_meta.clear()
+            self._region_paths.clear()
+            self._topview_tiles.clear()
+            self._topview_pending.clear()
+            self._topview_generation += 1
+            self._scanned_count = 0
+            self._total_count = 0
+            self._scan_progress = 0.0
+            self._error = None
+            self._stats_dirty = True
+            self._cached_stats = None
+            self._cached_data_snapshot = None
+            self._cached_snapshot_count = -1
+
+    def set_tile_ready_callback(self, callback: Optional[Any]) -> None:
+        """Register callback(coord) invoked when a topview tile is ready."""
+        self._tile_ready_callback = callback
+
+    def get_region_path(self, coord: Tuple[int, int]) -> Optional[str]:
+        with self._data_lock:
+            return self._region_paths.get(coord)
+
+    def get_topview_tile(self, coord: Tuple[int, int]) -> Optional[bytes]:
+        with self._data_lock:
+            return self._topview_tiles.get(coord)
+
+    def has_topview_tile(self, coord: Tuple[int, int]) -> bool:
+        with self._data_lock:
+            return coord in self._topview_tiles
+
+    def get_topview_generation(self) -> int:
+        with self._data_lock:
+            return self._topview_generation
+
+    def request_topview_tiles(
+        self,
+        coords: list[Tuple[int, int]],
+        tile_size: Optional[int] = None,
+    ) -> None:
+        """Enqueue topview rendering for coords missing a cached tile."""
+        if not self._topview_enabled:
+            return
+        size = tile_size or self._topview_tile_size
+        to_start: list[Tuple[Tuple[int, int], str, int, int]] = []
+        with self._data_lock:
+            generation = self._topview_generation
+            for coord in coords:
+                if coord in self._topview_tiles or coord in self._topview_pending:
+                    continue
+                path = self._region_paths.get(coord)
+                if not path:
+                    continue
+                self._topview_pending.add(coord)
+                to_start.append((coord, path, size, generation))
+
+        for coord, path, size, generation in to_start:
+            threading.Thread(
+                target=self._render_topview_worker,
+                args=(coord, path, size, generation),
+                daemon=True,
+            ).start()
+
+    def _render_topview_worker(
+        self,
+        coord: Tuple[int, int],
+        path: str,
+        tile_size: int,
+        generation: int,
+    ) -> None:
+        try:
+            from app.ui.views.explorer.map.topview_renderer import render_region_topview
+
+            png = render_region_topview(path, tile_size=tile_size)
+        except Exception:
+            png = None
+
+        callback = None
+        with self._data_lock:
+            self._topview_pending.discard(coord)
+            if generation != self._topview_generation:
+                return
+            if png is not None:
+                self._topview_tiles[coord] = png
+                callback = self._tile_ready_callback
+        if callback is not None and png is not None:
+            try:
+                callback(coord)
+            except Exception:
+                pass
 
     def _mark_data_dirty(self) -> None:
         """标记数据变更，下次 get_statistics/get_all_data 时重算。"""
@@ -176,7 +268,11 @@ class RegionMapService:
                         with self._data_lock:
                             self._mca_data[coord] = size
                             self._region_meta[coord] = meta
+                            self._region_paths[coord] = str(mca_file)
                             self._mark_data_dirty()
+                        # 扫描到区域后异步生成俯视图瓦片
+                        if self._topview_enabled:
+                            self.request_topview_tiles([coord])
 
                     with self._data_lock:
                         self._scanned_count += 1

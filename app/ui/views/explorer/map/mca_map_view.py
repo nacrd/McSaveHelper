@@ -29,6 +29,8 @@ from app.ui.views.explorer.map.color_schemes import (
     get_region_color,
     get_region_value_label,
 )
+from app.ui.views.explorer.map.topview_renderer import DEFAULT_TILE_SIZE
+
 
 MapSelectionCallback = Callable[
     [Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Any]]], None
@@ -62,13 +64,17 @@ class McaMapView(ft.Container):
         self._scale = 1.0
         self._show_coordinates = True
         self._show_empty_regions = False
-        self._display_mode = "activity"
+        self._display_mode = "topview"
         self._detail_level = "region"
+        self._use_topview = True
 
         self._selected_cell: Optional[Tuple[int, int]] = None
         self._current_data: Dict[Tuple[int, int], int] = {}
         self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
+        # base64 cache for canvas Image.src (derived from service PNG bytes)
+        self._tile_src_cache: Dict[Tuple[int, int], str] = {}
+        self._tile_src_generation = -1
 
         self._last_x = 0.0
         self._last_y = 0.0
@@ -100,6 +106,36 @@ class McaMapView(ft.Container):
             height=height,
         )
         self.content = ft.Stack([self._canvas, self._gesture])
+
+        # Progressive topview: service notifies when a tile finishes rendering.
+        self._service.set_tile_ready_callback(self._on_tile_ready)
+
+    def _on_tile_ready(self, coord: Tuple[int, int]) -> None:
+        """Called from a worker thread when a topview PNG is cached."""
+        try:
+            # Only rebuild if the cell is currently relevant.
+            if coord in self._current_data or not self._current_data:
+                self._schedule_rebuild()
+        except Exception:
+            pass
+
+    def _tile_src(self, coord: Tuple[int, int]) -> Optional[str]:
+        """Return base64 PNG for coord, caching decoded form for canvas."""
+        import base64
+
+        generation = self._service.get_topview_generation()
+        if generation != self._tile_src_generation:
+            self._tile_src_cache.clear()
+            self._tile_src_generation = generation
+        cached = self._tile_src_cache.get(coord)
+        if cached is not None:
+            return cached
+        raw = self._service.get_topview_tile(coord)
+        if not raw:
+            return None
+        src = base64.b64encode(raw).decode("ascii")
+        self._tile_src_cache[coord] = src
+        return src
 
     # ------------------------------------------------------------------ UI helpers
     def _empty_shapes(self) -> List[cv.Shape]:
@@ -263,6 +299,7 @@ class McaMapView(ft.Container):
         draw_min_z = max(min_z, vis_min_z)
         draw_max_z = min(max_z, vis_max_z)
 
+        missing: List[Tuple[int, int]] = []
         for z in range(draw_min_z, draw_max_z + 1):
             for x in range(draw_min_x, draw_max_x + 1):
                 screen_x = x * cell_pitch * self._scale + self._offset_x
@@ -286,6 +323,8 @@ class McaMapView(ft.Container):
                             screen_x, screen_y, cell_size, color, coord, size
                         )
                     )
+                    if self._use_topview and not self._service.has_topview_tile(coord):
+                        missing.append(coord)
                 elif self._show_empty_regions:
                     shapes.append(
                         cv.Rect(
@@ -300,6 +339,9 @@ class McaMapView(ft.Container):
                             ),
                         )
                     )
+
+        if missing:
+            self._service.request_topview_tiles(missing, tile_size=DEFAULT_TILE_SIZE)
 
         shapes.extend(self._build_info_overlay())
         self._apply_shapes(shapes)
@@ -321,9 +363,21 @@ class McaMapView(ft.Container):
         coord: Tuple[int, int],
         file_size: int,
     ) -> List[cv.Shape]:
-        shapes: List[cv.Shape] = [
-            cv.Rect(x, y, size, size, paint=ft.Paint(color=color))
-        ]
+        shapes: List[cv.Shape] = []
+        tile_src = self._tile_src(coord) if self._use_topview else None
+        if tile_src:
+            shapes.append(
+                cv.Image(
+                    src=tile_src,
+                    x=x,
+                    y=y,
+                    width=size,
+                    height=size,
+                )
+            )
+        else:
+            # Placeholder until topview tile is ready
+            shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
         selected = coord == self._selected_cell
         shapes.append(
             cv.Rect(
@@ -338,13 +392,16 @@ class McaMapView(ft.Container):
                 ),
             )
         )
-        if self._show_coordinates and size >= 18:
+        if self._show_coordinates and size >= 22:
             shapes.append(
                 cv.Text(
                     x=x + 4,
                     y=y + 5,
                     value=f"{coord[0]},{coord[1]}",
-                    style=ft.TextStyle(size=9 if size < 42 else 10, color="#F5F5DC"),
+                    style=ft.TextStyle(
+                        size=9 if size < 42 else 10,
+                        color="#FFFFFF" if tile_src else "#F5F5DC",
+                    ),
                 )
             )
         return shapes
@@ -515,10 +572,10 @@ class McaMapView(ft.Container):
         return self._show_empty_regions
 
     def set_display_mode(self, mode: str) -> None:
-        # v1: activity-only rendering; still accept mode for future layers
-        if mode not in {"activity", "biome", "structure"}:
+        if mode not in {"activity", "topview", "biome", "structure"}:
             return
         self._display_mode = mode
+        self._use_topview = mode in {"activity", "topview"}
         self._rebuild_canvas()
 
     def get_display_mode(self) -> str:
