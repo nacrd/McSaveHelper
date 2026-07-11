@@ -87,6 +87,17 @@ class McaMapView(ft.Container):
         self._rebuild_timer: Optional[threading.Timer] = None
         self._last_rebuild_ts = 0.0
         self._min_rebuild_interval = 1.0 / 60.0
+        # Smooth zoom animation state (world-space pivot + ease-out)
+        self._zoom_anim_timer: Optional[threading.Timer] = None
+        self._zoom_anim_active = False
+        self._zoom_anim_start_scale = 1.0
+        self._zoom_anim_target_scale = 1.0
+        self._zoom_anim_start_offset_x = 0.0
+        self._zoom_anim_start_offset_y = 0.0
+        self._zoom_anim_target_offset_x = 0.0
+        self._zoom_anim_target_offset_y = 0.0
+        self._zoom_anim_t0 = 0.0
+        self._zoom_anim_duration = 0.16
 
         self.width = width
         self.height = height
@@ -166,7 +177,10 @@ class McaMapView(ft.Container):
         """
         if not self._mounted:
             return
-        page = self.page
+        try:
+            page = self.page
+        except RuntimeError:
+            return
         if page is None:
             return
         run_on_ui(page, self._rebuild_canvas_safe)
@@ -256,10 +270,7 @@ class McaMapView(ft.Container):
         )
         if not delta_y:
             return
-        zoom_factor = 1.1 if delta_y < 0 else 0.9
-        new_scale = max(0.1, min(10.0, self._scale * zoom_factor))
-        if new_scale == self._scale:
-            return
+        zoom_factor = 1.12 if delta_y < 0 else 0.89
         pointer_x = getattr(
             getattr(e, "local_position", None),
             "x",
@@ -270,12 +281,7 @@ class McaMapView(ft.Container):
             "y",
             (self.height or 600) / 2,
         )
-        world_x = (pointer_x - self._offset_x) / self._scale
-        world_y = (pointer_y - self._offset_y) / self._scale
-        self._scale = new_scale
-        self._offset_x = pointer_x - world_x * self._scale
-        self._offset_y = pointer_y - world_y * self._scale
-        self._schedule_rebuild()
+        self._animate_zoom_toward(zoom_factor, float(pointer_x), float(pointer_y))
 
     # ------------------------------------------------------------------ draw
     def _rebuild_canvas(self) -> None:
@@ -558,6 +564,13 @@ class McaMapView(ft.Container):
 
     def did_unmount(self) -> None:
         self._mounted = False
+        self._zoom_anim_active = False
+        try:
+            if self._zoom_anim_timer is not None:
+                self._zoom_anim_timer.cancel()
+        except Exception:
+            pass
+        self._zoom_anim_timer = None
         self._cancel_rebuild_timer()
         self._stop_update_loop()
         # Drop callback so worker threads do not touch a dead view.
@@ -682,12 +695,95 @@ class McaMapView(ft.Container):
         return self._detail_level
 
     def zoom_in(self) -> None:
-        self._scale = min(10.0, self._scale * 1.2)
-        self._request_rebuild()
+        cx = (self.width or 800) / 2
+        cy = (self.height or 600) / 2
+        self._animate_zoom_toward(1.22, cx, cy)
 
     def zoom_out(self) -> None:
-        self._scale = max(0.1, self._scale * 0.8)
-        self._request_rebuild()
+        cx = (self.width or 800) / 2
+        cy = (self.height or 600) / 2
+        self._animate_zoom_toward(0.82, cx, cy)
+
+    def _animate_zoom_toward(
+        self,
+        factor: float,
+        pivot_x: float,
+        pivot_y: float,
+        duration: float = 0.16,
+    ) -> None:
+        """Ease-out zoom around a screen-space pivot (pointer or view center)."""
+        # Use current *target* if an animation is already running so rapid
+        # wheel ticks compound instead of fighting the in-flight frame.
+        base_scale = (
+            self._zoom_anim_target_scale if self._zoom_anim_active else self._scale
+        )
+        base_ox = (
+            self._zoom_anim_target_offset_x if self._zoom_anim_active else self._offset_x
+        )
+        base_oy = (
+            self._zoom_anim_target_offset_y if self._zoom_anim_active else self._offset_y
+        )
+        new_scale = max(0.1, min(10.0, base_scale * factor))
+        if abs(new_scale - base_scale) < 1e-6:
+            return
+        world_x = (pivot_x - base_ox) / base_scale if base_scale else 0.0
+        world_y = (pivot_y - base_oy) / base_scale if base_scale else 0.0
+        target_ox = pivot_x - world_x * new_scale
+        target_oy = pivot_y - world_y * new_scale
+
+        self._zoom_anim_start_scale = self._scale
+        self._zoom_anim_start_offset_x = self._offset_x
+        self._zoom_anim_start_offset_y = self._offset_y
+        self._zoom_anim_target_scale = new_scale
+        self._zoom_anim_target_offset_x = target_ox
+        self._zoom_anim_target_offset_y = target_oy
+        self._zoom_anim_t0 = time.monotonic()
+        self._zoom_anim_duration = max(0.05, duration)
+        self._zoom_anim_active = True
+        self._kick_zoom_anim()
+
+    def _kick_zoom_anim(self) -> None:
+        try:
+            if self._zoom_anim_timer is not None:
+                self._zoom_anim_timer.cancel()
+        except Exception:
+            pass
+
+        def _tick() -> None:
+            if not self._zoom_anim_active or not self._mounted:
+                return
+            elapsed = time.monotonic() - self._zoom_anim_t0
+            t = min(1.0, elapsed / self._zoom_anim_duration)
+            # ease-out cubic
+            ease = 1.0 - (1.0 - t) ** 3
+            s0 = self._zoom_anim_start_scale
+            s1 = self._zoom_anim_target_scale
+            self._scale = s0 + (s1 - s0) * ease
+            self._offset_x = (
+                self._zoom_anim_start_offset_x
+                + (self._zoom_anim_target_offset_x - self._zoom_anim_start_offset_x) * ease
+            )
+            self._offset_y = (
+                self._zoom_anim_start_offset_y
+                + (self._zoom_anim_target_offset_y - self._zoom_anim_start_offset_y) * ease
+            )
+            self._request_rebuild()
+            if t < 1.0:
+                self._zoom_anim_timer = threading.Timer(1.0 / 60.0, _tick)
+                self._zoom_anim_timer.daemon = True
+                self._zoom_anim_timer.start()
+            else:
+                self._zoom_anim_active = False
+                self._zoom_anim_timer = None
+                # Snap exactly to target
+                self._scale = self._zoom_anim_target_scale
+                self._offset_x = self._zoom_anim_target_offset_x
+                self._offset_y = self._zoom_anim_target_offset_y
+                self._request_rebuild()
+
+        self._zoom_anim_timer = threading.Timer(0.0, _tick)
+        self._zoom_anim_timer.daemon = True
+        self._zoom_anim_timer.start()
 
     def get_selected_cell(self) -> Optional[Tuple[int, int]]:
         return self._selected_cell
