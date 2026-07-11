@@ -17,11 +17,12 @@ try:
 except ImportError:  # pragma: no cover
     PIL_AVAILABLE = False
 
-# Default overview tile (pixels per region edge).
-# 32px is enough for CELL_SIZE=32 map cells and is ~16x fewer samples than 128.
+# Progressive tile ladder (pixels per region edge).
+# 16 -> fast first paint; 32 overview; 64 region focus; 128 chunk inspection.
+PREVIEW_TILE_SIZE = 16
 DEFAULT_TILE_SIZE = 32
-# Higher-detail tile used when the user zooms into a region.
 DETAIL_TILE_SIZE = 64
+HIRES_TILE_SIZE = 128
 
 # Shared palette with map export (subset + common terrain).
 BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {

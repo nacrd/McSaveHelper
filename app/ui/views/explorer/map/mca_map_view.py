@@ -32,6 +32,8 @@ from app.ui.views.explorer.map.color_schemes import (
 from app.ui.views.explorer.map.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
+    HIRES_TILE_SIZE,
+    PREVIEW_TILE_SIZE,
 )
 
 
@@ -79,7 +81,7 @@ class McaMapView(ft.Container):
         self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         # base64 cache for canvas Image.src (derived from service PNG bytes)
-        self._tile_src_cache: Dict[Tuple[int, int], str] = {}
+        self._tile_src_cache: Dict[Any, str] = {}
         self._tile_src_generation = -1
 
         self._last_x = 0.0
@@ -148,21 +150,34 @@ class McaMapView(ft.Container):
             pass
 
     def _tile_src(self, coord: Tuple[int, int]) -> Optional[str]:
-        """Return base64 PNG for coord, caching decoded form for canvas."""
+        """Return base64 PNG for coord, caching decoded form for canvas.
+
+        Cache key includes rendered tile size so progressive upgrades
+        (16->32->64->128) invalidate the previous base64 payload.
+        """
         import base64
 
         generation = self._service.get_topview_generation()
         if generation != self._tile_src_generation:
             self._tile_src_cache.clear()
             self._tile_src_generation = generation
-        cached = self._tile_src_cache.get(coord)
+        try:
+            tile_size = int(self._service.get_topview_tile_size(coord) or 0)
+        except Exception:
+            tile_size = 0
+        cache_key = (coord, tile_size)
+        cached = self._tile_src_cache.get(cache_key)  # type: ignore[arg-type]
         if cached is not None:
             return cached
         raw = self._service.get_topview_tile(coord)
         if not raw:
             return None
         src = base64.b64encode(raw).decode("ascii")
-        self._tile_src_cache[coord] = src
+        # Drop older size variants for this coord to bound memory.
+        for k in list(self._tile_src_cache.keys()):
+            if isinstance(k, tuple) and k and k[0] == coord:
+                self._tile_src_cache.pop(k, None)
+        self._tile_src_cache[cache_key] = src  # type: ignore[index]
         return src
 
     # ------------------------------------------------------------------ UI helpers
@@ -336,15 +351,9 @@ class McaMapView(ft.Container):
         self._view_level = "chunk"
         # Ensure hi-res tile for chunk inspection.
         if self._use_topview:
-            try:
-                self._service.request_topview_tiles(
-                    [hit],
-                    tile_size=DETAIL_TILE_SIZE,
-                    force=True,
-                    priority=True,
-                )
-            except TypeError:
-                self._service.request_topview_tiles([hit], tile_size=DETAIL_TILE_SIZE)
+            self._request_tiles_progressive(
+                [hit], desired=HIRES_TILE_SIZE, priority=True
+            )
 
     def _on_secondary_tap(self, e: Any) -> None:
         """Right-click: step back overview (chunk→region→world)."""
@@ -446,18 +455,9 @@ class McaMapView(ft.Container):
                 if (coord[0] + dx, coord[1] + dz) in self._current_data
                 or (dx, dz) == (0, 0)
             ]
-            try:
-                self._service.request_topview_tiles(
-                    neighbors,
-                    tile_size=DETAIL_TILE_SIZE,
-                    force=True,
-                    priority=True,
-                )
-            except TypeError:
-                # Older service signature fallback
-                self._service.request_topview_tiles(
-                    neighbors, tile_size=DETAIL_TILE_SIZE
-                )
+            self._request_tiles_progressive(
+                neighbors, desired=self._desired_tile_size(), priority=True
+            )
 
         if animate:
             self._animate_camera_to(
@@ -490,6 +490,76 @@ class McaMapView(ft.Container):
             (self.height or 600) / 2,
         )
         self._animate_zoom_toward(zoom_factor, float(pointer_x), float(pointer_y))
+
+
+    def _desired_tile_size(self) -> int:
+        """Target tile resolution for current camera / view level."""
+        if self._view_level == "chunk" or self._scale >= 5.5:
+            return HIRES_TILE_SIZE
+        if self._view_level == "region" or self._scale >= 2.2:
+            return DETAIL_TILE_SIZE
+        if self._scale >= 1.2:
+            return DEFAULT_TILE_SIZE
+        return DEFAULT_TILE_SIZE
+
+    def _next_tile_size(self, current: int, desired: int) -> int:
+        """Step up one rung on 16->32->64->128 so first paint stays cheap."""
+        ladder = (PREVIEW_TILE_SIZE, DEFAULT_TILE_SIZE, DETAIL_TILE_SIZE, HIRES_TILE_SIZE)
+        desired = max(PREVIEW_TILE_SIZE, int(desired))
+        for s in reversed(ladder):
+            if desired >= s:
+                desired = s
+                break
+        if current <= 0:
+            return PREVIEW_TILE_SIZE
+        if current >= desired:
+            return desired
+        for s in ladder:
+            if s > current:
+                return min(s, desired)
+        return desired
+
+    def _request_tiles_progressive(
+        self,
+        coords: list,
+        *,
+        desired: int | None = None,
+        priority: bool = False,
+    ) -> None:
+        if not coords or not self._use_topview:
+            return
+        desired_i = int(desired if desired is not None else self._desired_tile_size())
+        previews: list = []
+        upgrades: list = []
+        for coord in coords:
+            have = 0
+            try:
+                have = int(self._service.get_topview_tile_size(coord) or 0)
+            except Exception:
+                have = 0 if not self._service.has_topview_tile(coord) else DEFAULT_TILE_SIZE
+            if have <= 0:
+                previews.append(coord)
+            elif have < desired_i:
+                upgrades.append((coord, self._next_tile_size(have, desired_i)))
+
+        if previews:
+            try:
+                self._service.request_topview_tiles(
+                    previews, tile_size=PREVIEW_TILE_SIZE, priority=priority
+                )
+            except TypeError:
+                self._service.request_topview_tiles(previews, tile_size=PREVIEW_TILE_SIZE)
+
+        by_size: dict = {}
+        for coord, size in upgrades:
+            by_size.setdefault(size, []).append(coord)
+        for size, group in by_size.items():
+            try:
+                self._service.request_topview_tiles(
+                    group, tile_size=size, force=True, priority=priority
+                )
+            except TypeError:
+                self._service.request_topview_tiles(group, tile_size=size)
 
     # ------------------------------------------------------------------ draw
     def _rebuild_canvas(self) -> None:
@@ -597,7 +667,7 @@ class McaMapView(ft.Container):
                                 screen_x, screen_y, cell_size, coord
                             )
                         )
-                    if self._use_topview and not self._service.has_topview_tile(coord):
+                    if self._use_topview:
                         missing.append(coord)
                 elif self._show_empty_regions:
                     shapes.append(
@@ -615,34 +685,22 @@ class McaMapView(ft.Container):
                     )
 
         if missing:
-            self._service.request_topview_tiles(
-                missing, tile_size=DEFAULT_TILE_SIZE
-            )
-        # While zoomed in, upgrade selected/nearby tiles to detail resolution.
-        if self._use_topview and self._selected_cell is not None and self._scale >= 2.2:
+            # Progressive: 16 preview first, then step toward desired for visible cells.
+            self._request_tiles_progressive(missing, desired=self._desired_tile_size())
+        # Prioritize selected region + neighbors at higher LOD.
+        if self._use_topview and self._selected_cell is not None:
             sel = self._selected_cell
-            upgrade = [
+            hot = [
                 (sel[0] + dx, sel[1] + dz)
                 for dz in (-1, 0, 1)
                 for dx in (-1, 0, 1)
                 if (sel[0] + dx, sel[1] + dz) in self._current_data
             ]
-            need = [
-                c for c in upgrade
-                if not self._service.has_topview_tile(c, min_size=DETAIL_TILE_SIZE)
-            ]
-            if need:
-                try:
-                    self._service.request_topview_tiles(
-                        need,
-                        tile_size=DETAIL_TILE_SIZE,
-                        force=True,
-                        priority=True,
-                    )
-                except TypeError:
-                    self._service.request_topview_tiles(
-                        need, tile_size=DETAIL_TILE_SIZE
-                    )
+            self._request_tiles_progressive(
+                hot,
+                desired=self._desired_tile_size(),
+                priority=True,
+            )
 
         shapes.extend(self._build_info_overlay())
         self._apply_shapes(shapes)

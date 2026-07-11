@@ -1,3 +1,21 @@
+## 2026-07-11 (progressive LOD 16/32/64/128)
+
+### Behavior
+
+- Visible tiles first request PREVIEW 16px (~0.6s cold)
+- Then step up: 16->32->64->128 based on zoom/view level
+- Selected region + neighbors prioritized
+- Disk cache still used per size; warm hits ~1ms
+- base64 canvas cache invalidates on size upgrade
+
+### Zoom mapping
+
+- overview: target 32 (via 16 first)
+- region focus (scale>=2.2): target 64
+- chunk view (scale>=5.5): target 128
+
+---
+
 ## 2026-07-11 (topview cache + LOD)
 
 ### Changes
