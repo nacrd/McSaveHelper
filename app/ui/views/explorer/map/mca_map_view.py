@@ -129,6 +129,7 @@ class McaMapView(ft.Container):
         self._gesture = ft.GestureDetector(
             on_pan_start=self._on_pan_start,
             on_pan_update=self._on_pan_update,
+            on_pan_end=self._on_pan_end,
             on_tap=self._on_tap,
             on_double_tap=self._on_double_tap,
             on_secondary_tap=self._on_secondary_tap,
@@ -324,9 +325,52 @@ class McaMapView(ft.Container):
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
         self._camera_busy = True
-        # Direct UI-thread redraw (no run_on_ui queue lag).
-        self._schedule_interactive_redraw()
+        # Translate existing shapes in place — never rebuild the whole canvas
+        # while the finger is down (rebuild = lag + flicker).
+        self._nudge_shapes(dx, dy)
         self._schedule_idle_tile_pass()
+
+    def _on_pan_end(self, e: Any = None) -> None:
+        self._camera_busy = False
+        try:
+            if self._idle_tile_timer is not None:
+                self._idle_tile_timer.cancel()
+        except Exception:
+            pass
+        self._idle_tile_timer = None
+        # One authoritative rebuild (tiles + hit bounds + HUD) after the gesture.
+        self._rebuild_now()
+
+    def _nudge_shapes(self, dx: float, dy: float) -> None:
+        """Shift every canvas shape and hit-box by (dx, dy) without recreating them."""
+        if not dx and not dy:
+            return
+        shapes = getattr(self._canvas, "shapes", None) or []
+        for s in shapes:
+            try:
+                if hasattr(s, "x") and getattr(s, "x", None) is not None:
+                    s.x = float(s.x) + dx
+                if hasattr(s, "y") and getattr(s, "y", None) is not None:
+                    s.y = float(s.y) + dy
+                # Lines use x1/y1/x2/y2
+                if hasattr(s, "x1") and getattr(s, "x1", None) is not None:
+                    s.x1 = float(s.x1) + dx
+                    s.x2 = float(s.x2) + dx
+                    s.y1 = float(s.y1) + dy
+                    s.y2 = float(s.y2) + dy
+            except Exception:
+                continue
+        # Keep hit testing in sync with the visual shift.
+        if self._cell_bounds:
+            for k, (bx, by, bw, bh) in list(self._cell_bounds.items()):
+                self._cell_bounds[k] = (bx + dx, by + dy, bw, bh)
+        if self._chunk_bounds:
+            for k, (bx, by, bw, bh) in list(self._chunk_bounds.items()):
+                self._chunk_bounds[k] = (bx + dx, by + dy, bw, bh)
+        try:
+            self._canvas.update()
+        except Exception:
+            pass
 
     def _on_tap(self, e: ft.TapEvent) -> None:
         tap_x = e.local_position.x

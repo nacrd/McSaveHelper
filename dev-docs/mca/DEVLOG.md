@@ -1,3 +1,13 @@
+## 2026-07-11 (fix pan: translate shapes, no rebuild)
+
+Pan with only ~4 cells still lagged because each pan_update rebuilt the whole
+canvas (even solid rects) via a heavy path.
+
+Now pan_update only translates existing canvas shapes + hit bounds in place
+and calls canvas.update(). Full rebuild + tile work runs on pan_end.
+
+---
+
 ## 2026-07-11 (fix pan lag + flicker)
 
 ### Cause
