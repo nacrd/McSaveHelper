@@ -25,3 +25,4 @@ htmlcov/
 dev-docs/*
 !dev-docs/mca/
 !dev-docs/mca/**
+example_saves/

@@ -1,3 +1,17 @@
+## 2026-07-11 (fix)
+
+### Heightmap Y + performance
+
+User confirmed topview colors and speed OK after:
+
+- 1.18+ heightmap: block_y = value + min_y - 1 (min_y=-64)
+- Prefer MOTION_BLOCKING for map coloring
+- ChunkBlocks cache (heightmap + section palettes once per chunk)
+
+Commit: 8265164
+
+---
+
 # MCA 自研开发日志
 
 格式：`## YYYY-MM-DD` 条目，最新在上。
