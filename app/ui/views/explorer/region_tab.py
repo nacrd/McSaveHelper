@@ -278,9 +278,18 @@ class RegionTabMixin:
             border=mc_border(2),
         )
 
-        # Force explicit pixel size so canvas really fills the window.
+        # Force explicit pixel size so canvas really fills the window,
+        # and re-fit/center the world to the new viewport.
         try:
-            map_view.resize_map(map_w, map_h)
+            map_view.resize_map(map_w, map_h, refit=True)
+        except TypeError:
+            # Older signature fallback
+            try:
+                map_view.resize_map(map_w, map_h)
+                if hasattr(map_view, "fit_to_view"):
+                    map_view.fit_to_view()
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -345,7 +354,14 @@ class RegionTabMixin:
                     map_body.width = mw
                     map_body.height = mh
                     try:
-                        map_view.resize_map(mw, mh)
+                        map_view.resize_map(mw, mh, refit=True)
+                    except TypeError:
+                        try:
+                            map_view.resize_map(mw, mh)
+                            if hasattr(map_view, "fit_to_view"):
+                                map_view.fit_to_view()
+                        except Exception:
+                            pass
                     except Exception:
                         pass
                 overlay.opacity = 1.0

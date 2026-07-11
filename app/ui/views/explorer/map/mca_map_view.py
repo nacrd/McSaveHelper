@@ -323,11 +323,15 @@ class McaMapView(ft.Container):
         world_h = (max_z - min_z + 1) * cell_pitch
 
         if self._scale == 1.0 and self._offset_x == 0 and self._offset_y == 0:
-            scale_x = view_w / world_w * 0.78
-            scale_y = view_h / world_h * 0.78
+            # Initial fit: center data bbox in the current viewport.
+            pad = 0.78
+            scale_x = view_w / world_w * pad
+            scale_y = view_h / world_h * pad
             self._scale = max(0.35, min(scale_x, scale_y, 3.0))
-            self._offset_x = (view_w - world_w * self._scale) / 2
-            self._offset_y = (view_h - world_h * self._scale) / 2
+            center_x = (min_x + max_x) / 2.0
+            center_z = (min_z + max_z) / 2.0
+            self._offset_x = view_w / 2.0 - center_x * cell_pitch * self._scale
+            self._offset_y = view_h / 2.0 - center_z * cell_pitch * self._scale
 
         self._cell_bounds.clear()
         origin_x = self._offset_x
@@ -639,10 +643,47 @@ class McaMapView(ft.Container):
         self._selected_cell = None
         self._request_rebuild()
 
-    def resize_map(self, width: int, height: int) -> None:
+    def fit_to_view(self, padding: float = 0.86) -> None:
+        """Recompute scale/offset so all known regions are centered in the viewport.
+
+        Used when entering app-wide fullscreen so the map doesn't keep the
+        previous (smaller) viewport camera.
+        """
+        data = self._service.get_all_data()
+        view_w = float(self.width or 800)
+        view_h = float(self.height or 600)
+        if not data or view_w <= 1 or view_h <= 1:
+            self._scale = 1.0
+            self._offset_x = 0.0
+            self._offset_y = 0.0
+            self._request_rebuild()
+            return
+
+        coords = list(data.keys())
+        min_x = min(c[0] for c in coords)
+        max_x = max(c[0] for c in coords)
+        min_z = min(c[1] for c in coords)
+        max_z = max(c[1] for c in coords)
+        cell_pitch = self.CELL_SIZE + self.CELL_GAP
+        world_w = max(cell_pitch, (max_x - min_x + 1) * cell_pitch)
+        world_h = max(cell_pitch, (max_z - min_z + 1) * cell_pitch)
+
+        pad = max(0.2, min(1.0, float(padding)))
+        scale_x = view_w / world_w * pad
+        scale_y = view_h / world_h * pad
+        self._scale = max(0.2, min(scale_x, scale_y, 8.0))
+
+        # Center the data bounding box (not just the world origin).
+        center_x = (min_x + max_x) / 2.0
+        center_z = (min_z + max_z) / 2.0
+        self._offset_x = view_w / 2.0 - center_x * cell_pitch * self._scale
+        self._offset_y = view_h / 2.0 - center_z * cell_pitch * self._scale
+        self._request_rebuild()
+
+    def resize_map(self, width: int, height: int, *, refit: bool = False) -> None:
         width = max(120, int(width))
         height = max(100, int(height))
-        if self.width == width and self.height == height:
+        if self.width == width and self.height == height and not refit:
             return
         self.width = width
         self.height = height
@@ -650,8 +691,11 @@ class McaMapView(ft.Container):
         self._canvas.height = height
         self._gesture.width = width
         self._gesture.height = height
-        # Keep camera when adapting to layout; only re-center on explicit reset.
-        self._request_rebuild()
+        if refit:
+            self.fit_to_view()
+        else:
+            # Keep camera when adapting to layout; only re-center on explicit reset/refit.
+            self._request_rebuild()
 
     def _on_canvas_resize(self, e: Any) -> None:
         """Adapt to parent layout size (border-aware fill)."""
