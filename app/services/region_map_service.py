@@ -381,40 +381,40 @@ class RegionMapService:
         chunk_count = 0
         with PerfTimer("heatmap._scan_region_meta"):
             try:
-                import anvil
-                region = anvil.Region.from_file(str(region_file))
-                sample_points = [(0, 0), (0, 16), (16, 0), (16, 16),
-                                 (8, 8), (8, 24), (24, 8), (24, 24)]
-                for cx, cz in sample_points:
-                    try:
-                        chunk = region.get_chunk(cx, cz)
-                        if chunk is None or not hasattr(chunk, "data"):
+                from core.mca import NativeRegion
+                with NativeRegion.from_file(region_file) as region:
+                    sample_points = [(0, 0), (0, 16), (16, 0), (16, 16),
+                                     (8, 8), (8, 24), (24, 8), (24, 24)]
+                    for cx, cz in sample_points:
+                        try:
+                            chunk = region.get_chunk(cx, cz)
+                            if chunk is None or chunk.data is None:
+                                continue
+                            chunk_count += 1
+                            data = chunk.data
+                            self._collect_biomes(data, biomes)
+                            self._collect_structures(
+                                data, structures, structure_positions)
+                        except Exception:
                             continue
-                        chunk_count += 1
-                        data = chunk.data
-                        self._collect_biomes(data, biomes)
-                        self._collect_structures(
-                            data, structures, structure_positions)
-                    except Exception:
-                        continue
-                if not biomes and not structures:
-                    for cx in range(0, 32, 4):
-                        for cz in range(0, 32, 4):
+                    if not biomes and not structures:
+                        for cx in range(0, 32, 4):
+                            for cz in range(0, 32, 4):
+                                if chunk_count >= 16:
+                                    break
+                                try:
+                                    chunk = region.get_chunk(cx, cz)
+                                    if chunk is None or chunk.data is None:
+                                        continue
+                                    chunk_count += 1
+                                    data = chunk.data
+                                    self._collect_biomes(data, biomes)
+                                    self._collect_structures(
+                                        data, structures, structure_positions)
+                                except Exception:
+                                    continue
                             if chunk_count >= 16:
                                 break
-                            try:
-                                chunk = region.get_chunk(cx, cz)
-                                if chunk is None or not hasattr(chunk, "data"):
-                                    continue
-                                chunk_count += 1
-                                data = chunk.data
-                                self._collect_biomes(data, biomes)
-                                self._collect_structures(
-                                    data, structures, structure_positions)
-                            except Exception:
-                                continue
-                        if chunk_count >= 16:
-                            break
             except Exception:
                 pass
 

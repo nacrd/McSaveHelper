@@ -5,8 +5,6 @@ from typing import Dict, List, Optional, Tuple, Any
 from collections import Counter
 from dataclasses import dataclass, field
 
-import anvil
-
 from core.scanner import scan_all_regions
 from core.region_utils import parse_region_coords
 from core.types import LogCallback
@@ -88,24 +86,24 @@ class WorldStatsService:
                         raise ValueError(f"无效的区域文件名: {region_path.name}")
                     stats.region_sizes[coords] = region_path.stat().st_size
 
-                    region = anvil.Region.from_file(str(region_path))
+                    from core.mca import NativeRegion
+                    with NativeRegion.from_file(region_path) as region:
+                        for x in range(32):
+                            for z in range(32):
+                                try:
+                                    chunk = region.get_chunk(x, z)
+                                    if chunk is not None:
+                                        stats.total_chunks += 1
+                                        stats.loaded_chunks += 1
 
-                    for x in range(32):
-                        for z in range(32):
-                            try:
-                                chunk = region.get_chunk(x, z)
-                                if chunk is not None:
-                                    stats.total_chunks += 1
-                                    stats.loaded_chunks += 1
-
-                                    chunk_blocks, chunk_entities = self._analyze_chunk(
-                                        chunk)
-                                    block_counter.update(chunk_blocks)
-                                    entity_counter.update(chunk_entities)
-                                else:
+                                        chunk_blocks, chunk_entities = self._analyze_chunk(
+                                            chunk)
+                                        block_counter.update(chunk_blocks)
+                                        entity_counter.update(chunk_entities)
+                                    else:
+                                        stats.empty_chunks += 1
+                                except Exception:
                                     stats.empty_chunks += 1
-                            except Exception:
-                                stats.empty_chunks += 1
 
                     if progress_callback:
                         progress_callback(idx + 1, len(region_files))

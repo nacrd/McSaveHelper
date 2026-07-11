@@ -46,8 +46,8 @@ def get_block_name(block: Any) -> str:
 
 def get_section_range(chunk: Any) -> range:
     try:
-        from anvil.chunk import _section_height_range
-        result = _section_height_range(chunk.version)
+        from core.mca import section_range_for_chunk
+        result = section_range_for_chunk(chunk)
         return result if isinstance(result, range) else range(-4, 20)
     except Exception:
         return range(-4, 20)
