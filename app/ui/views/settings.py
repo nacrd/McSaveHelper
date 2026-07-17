@@ -8,12 +8,13 @@ from typing import Callable
 import flet as ft
 
 from app.models.config import ApplicationSettings
-from app.ui.theme import THEME, mc_border
+from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.fields import text_field, checkbox, label, dropdown
 from app.ui.components.cards import card
 from app.ui.components.layout import page_header
+from app.ui.views.settings_sections import collapsible_section as _collapsible_section
 
 
 Translate = Callable[..., str]
@@ -36,104 +37,6 @@ class SettingsViewDependencies:
     set_performance_interval: Callable[[float], None]
     info_dialog: DialogCallback
     error_dialog: DialogCallback
-
-
-def _collapsible_section(
-    title: str,
-    content: ft.Control,
-    expanded: bool = False,
-) -> ft.Container:
-    """Wrap a section content in a collapsible card.
-
-    点击标题栏切换展开/收起；收起时仅显示标题行，节省纵向空间。
-
-    Args:
-        title: Section title text
-        content: Section body (a ft.Column or any control)
-        expanded: Initial state
-
-    Returns:
-        ft.Container: Complete collapsible card
-    """
-    # Arrow indicator
-    arrow = ft.Icon(
-        ft.Icons.KEYBOARD_ARROW_DOWN if expanded else ft.Icons.KEYBOARD_ARROW_RIGHT,
-        size=18,
-        color=THEME.text_secondary,
-    )
-
-    # Title bar row
-    title_row = ft.Row(
-        [
-            ft.Container(
-                content=ft.Text("▣", size=13, color=THEME.text_primary),
-                width=24, height=24,
-                alignment=ft.alignment.Alignment(0, 0),
-                bgcolor=THEME.mc_grass,
-                border_radius=4,
-                border=mc_border(1),
-            ),
-            ft.Text(
-                title,
-                size=14,
-                weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary,
-                font_family="monospace",
-                expand=True,
-            ),
-            arrow,
-        ],
-        spacing=10,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-
-    title_bar = ft.Container(
-        content=title_row,
-        padding=ft.Padding(left=16, right=16, top=12, bottom=12),
-        ink=True,
-        border_radius=6,
-    )
-
-    # Content wrapper — hidden when collapsed
-    body_wrapper = ft.Container(
-        content=content,
-        padding=ft.Padding(left=4, right=4, top=0, bottom=4),
-        animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        animate_size=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        clip_behavior=ft.ClipBehavior.HARD_EDGE,
-    )
-
-    # Track expanded state on the body container
-    body_wrapper.visible = expanded
-    body_wrapper.opacity = 1.0 if expanded else 0.0
-
-    def _toggle() -> None:
-        is_visible = body_wrapper.visible
-        body_wrapper.visible = not is_visible
-        body_wrapper.opacity = 0.0 if is_visible else 1.0
-        arrow.icon = (
-            ft.Icons.KEYBOARD_ARROW_DOWN if not is_visible
-            else ft.Icons.KEYBOARD_ARROW_RIGHT
-        )
-        body_wrapper.update()
-        arrow.update()
-
-    title_bar.on_click = _toggle
-
-    card_container = ft.Container(
-        content=ft.Column(
-            [title_bar, body_wrapper],
-            spacing=0,
-        ),
-        bgcolor=THEME.bg_card,
-        border=mc_border(),
-        border_radius=8,
-    )
-
-    return ft.Container(
-        content=card_container,
-        padding=ft.Padding(bottom=12),
-    )
 
 
 class SettingsView(ft.Column):

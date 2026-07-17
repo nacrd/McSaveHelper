@@ -5,11 +5,11 @@ Supports two states:
   - Collapsed (60px):  brand icon + tabs (icon only, tooltip text) + expand button
 """
 import traceback
-from typing import Callable, List, Dict, Any, Optional, cast
+from typing import Callable, List, Dict, Any, Optional
 
 import flet as ft
 
-from app.ui.theme import THEME, mc_border, mc_shadow_glow
+from app.ui.theme import THEME, mc_border
 from app.ui.sidebar_tabs import (
     apply_style_collapsed,
     apply_style_expanded,
@@ -17,8 +17,13 @@ from app.ui.sidebar_tabs import (
     handle_hover_collapsed,
     handle_hover_expanded,
 )
+from app.ui.sidebar_chrome import (
+    build_footer,
+    build_header_collapsed,
+    build_header_expanded,
+    build_toggle_button,
+)
 from app.ui.icons import IconSet
-from core.version import APP_VERSION
 
 
 _EMPTY_BORDER_SIDE = ft.BorderSide(0, ft.Colors.TRANSPARENT)
@@ -152,236 +157,28 @@ class Sidebar(ft.Container):
     def _rebuild_header(self) -> None:
         """Build the header section (branding + current save + recent saves)."""
         if self._collapsed:
-            self._header_container.content = self._build_header_collapsed()
+            self._header_container.content = build_header_collapsed()
         else:
-            self._header_container.content = self._build_header_expanded()
+            self._header_container.content = build_header_expanded(
+                current_save_name=self._current_save_name,
+                recent_arrow=self._recent_arrow,
+                recent_body=self._recent_body,
+                on_set_current_save=self._handle_set_current_save,
+                on_toggle_recent=self._toggle_recent,
+            )
         self._header_container.padding = 0
-
-    def _build_header_collapsed(self) -> ft.Container:
-        """Collapsed header: just the brand icon."""
-        return ft.Container(
-            content=ft.Container(
-                content=ft.Icon(IconSet.PICKAXE, size=22, color=THEME.mc_gold),
-                width=40,
-                height=40,
-                alignment=ft.alignment.Alignment(0, 0),
-                bgcolor=THEME.bg_secondary,
-                border=mc_border(2),
-                border_radius=6,
-            ),
-            alignment=ft.alignment.Alignment(0, 0),
-            padding=ft.Padding(left=0, right=0, top=16, bottom=16),
-            bgcolor=THEME.mc_dirt,
-            border=ft.Border(
-                left=_EMPTY_BORDER_SIDE,
-                top=_EMPTY_BORDER_SIDE,
-                right=_EMPTY_BORDER_SIDE,
-                bottom=ft.BorderSide(3, THEME.mc_grass),
-            ),
-        )
-
-    def _build_header_expanded(self) -> ft.Container:
-        """Expanded header: branding + current save + import button + recent saves."""
-        return ft.Container(
-            content=ft.Column(
-                cast(List[ft.Control], [
-                    # ─── Branding ───
-                    ft.Row(
-                        [
-                            ft.Container(
-                                content=ft.Icon(
-                                    IconSet.PICKAXE, size=20, color=THEME.mc_gold,
-                                ),
-                                width=36, height=36,
-                                alignment=ft.alignment.Alignment(0, 0),
-                                bgcolor=THEME.bg_secondary,
-                                border=mc_border(2),
-                                border_radius=6,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        "MCSaveHelper",
-                                        size=15,
-                                        weight=ft.FontWeight.BOLD,
-                                        color=THEME.mc_gold,
-                                        font_family="monospace",
-                                    ),
-                                    ft.Text(
-                                        "Minecraft Save Toolkit",
-                                        size=10,
-                                        color=THEME.text_muted,
-                                        font_family="monospace",
-                                    ),
-                                ],
-                                spacing=2,
-                                expand=True,
-                            ),
-                        ],
-                        spacing=10,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    # ─── Divider ───
-                    ft.Container(
-                        height=1,
-                        bgcolor=THEME.border_subtle,
-                        margin=ft.Margin(top=12, bottom=12, left=0, right=0),
-                    ),
-                    # ─── Current Save ───
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Icon(
-                                            IconSet.SAVE, size=14, color=THEME.mc_grass,
-                                        ),
-                                        ft.Text(
-                                            "当前存档",
-                                            size=11,
-                                            weight=ft.FontWeight.W_600,
-                                            color=THEME.text_secondary,
-                                            font_family="monospace",
-                                        ),
-                                    ],
-                                    spacing=6,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                self._current_save_name,
-                            ],
-                            spacing=6,
-                        ),
-                        padding=8,
-                        bgcolor=THEME.bg_secondary,
-                        border_radius=6,
-                        border=mc_border(1),
-                    ),
-                    # ─── Set Current Save Button ───
-                    ft.Container(
-                        content=ft.Row(
-                            [
-                                ft.Icon(
-                                    IconSet.FOLDER_OPEN, size=16, color=THEME.text_primary,
-                                ),
-                                ft.Text(
-                                    "设置当前存档",
-                                    size=12,
-                                    weight=ft.FontWeight.W_600,
-                                    color=THEME.text_primary,
-                                ),
-                            ],
-                            spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            alignment=ft.MainAxisAlignment.CENTER,
-                        ),
-                        padding=ft.Padding(left=12, right=12, top=10, bottom=10),
-                        bgcolor=THEME.mc_grass,
-                        border_radius=6,
-                        border=mc_border(2),
-                        ink=True,
-                        on_click=self._handle_set_current_save,
-                        margin=ft.Margin(top=10, bottom=0, left=0, right=0),
-                        shadow=mc_shadow_glow(THEME.shadow_accent, 6),
-                    ),
-                    # ─── Recent Saves ───
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Container(
-                                    content=ft.Row(
-                                        [
-                                            ft.Icon(
-                                                IconSet.CLOCK, size=12, color=THEME.text_secondary,
-                                            ),
-                                            ft.Text(
-                                                "最近存档",
-                                                size=11,
-                                                weight=ft.FontWeight.W_600,
-                                                color=THEME.text_primary,
-                                                font_family="monospace",
-                                            ),
-                                            ft.Container(expand=True),
-                                            self._recent_arrow,
-                                        ],
-                                        spacing=6,
-                                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                    ),
-                                    ink=True,
-                                    border_radius=4,
-                                    on_click=self._toggle_recent,
-                                ),
-                                self._recent_body,
-                            ],
-                            spacing=8,
-                        ),
-                        padding=ft.Padding(left=0, right=0, top=12, bottom=0),
-                    ),
-                ]),
-                spacing=0,
-            ),
-            padding=ft.Padding(left=16, right=16, top=16, bottom=16),
-            bgcolor=THEME.mc_dirt,
-            border=ft.Border(
-                left=_EMPTY_BORDER_SIDE,
-                top=_EMPTY_BORDER_SIDE,
-                right=_EMPTY_BORDER_SIDE,
-                bottom=ft.BorderSide(3, THEME.mc_grass),
-            ),
-        )
 
     def _rebuild_footer(self) -> None:
         """Build the footer section."""
-        if self._collapsed:
-            self._footer_container.content = ft.Container(height=0)
-            self._footer_container.padding = 0
-        else:
-            self._footer_container.content = ft.Container(
-                content=ft.Row(
-                    [
-                        ft.Text(
-                            APP_VERSION,
-                            size=10, color=THEME.text_secondary,
-                            font_family="monospace",
-                        ),
-                        ft.Container(expand=True),
-                        ft.Text(
-                            "▣ stone edition",
-                            size=10, color=THEME.text_muted,
-                            font_family="monospace",
-                        ),
-                    ],
-                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                ),
-                padding=ft.Padding(left=16, top=12, right=16, bottom=12),
-                bgcolor=THEME.bg_secondary,
-            )
-            self._footer_container.padding = 0
+        self._footer_container.content = build_footer(self._collapsed)
+        self._footer_container.padding = 0
 
     def _rebuild_toggle_btn(self) -> None:
         """Build the expand/collapse toggle button."""
-        if self._collapsed:
-            icon = IconSet.ARROW_RIGHT  # ▶ expand
-            tooltip = "展开侧边栏"
-        else:
-            icon = IconSet.ARROW_LEFT   # ◀ collapse
-            tooltip = "收起侧边栏"
-
-        self._toggle_btn.content = ft.Container(
-            content=ft.Icon(icon, size=16, color=THEME.text_secondary),
-            alignment=ft.alignment.Alignment(0, 0),
-            padding=8,
-            bgcolor=THEME.bg_secondary,
-            border=ft.Border(
-                left=_EMPTY_BORDER_SIDE,
-                top=ft.BorderSide(1, THEME.border_subtle),
-                right=_EMPTY_BORDER_SIDE,
-                bottom=_EMPTY_BORDER_SIDE,
-            ),
-            ink=True,
-            on_click=self._handle_toggle,
-            tooltip=tooltip,
+        self._toggle_btn.content = build_toggle_button(
+            collapsed=self._collapsed,
+            on_toggle=lambda e: self._handle_toggle(),
         )
-        self._toggle_btn.padding = 0
 
     # ════════════════════════════════════════════
     #  Tab buttons
