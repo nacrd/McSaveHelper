@@ -6,23 +6,13 @@ WorldScanner - 存档文件扫描器
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Set, Callable
-from ..region_utils import scan_region_dir
+from ..region_utils import discover_dimension_region_dirs
 from ..scanner import scan_all_regions
 from ..utils import find_player_data_dirs, find_data_dirs
 
 
 class WorldScanner:
     """存档文件扫描器"""
-
-    _VANILLA_DIMENSION_NAMES = {
-        "overworld": "🌍 主世界",
-        "the_nether": "🔥 下界",
-        "the_end": "🌌 末地",
-    }
-    _LEGACY_DIMENSION_IDS = {
-        "DIM-1": "minecraft:the_nether",
-        "DIM1": "minecraft:the_end",
-    }
 
     def __init__(self, world_path: Path, log_callback: Optional[Callable] = None):
         self.world_path = world_path
@@ -204,139 +194,18 @@ class WorldScanner:
         Returns:
             维度信息列表，每项包含 id, name, region_dir
         """
-        dimensions: List[Dict[str, str]] = []
-        seen: Set[str] = set()
-        known_region_dirs = {path.parent for path in region_files.values()}
-
-        self._scan_modern_minecraft_dimensions(
-            dimensions,
-            seen,
-            known_region_dirs,
-        )
-        self._add_dimension(
-            dimensions,
-            seen,
-            known_region_dirs,
-            dim_id="overworld",
-            display_name=self._VANILLA_DIMENSION_NAMES["overworld"],
-            region_dir=self.world_path / "region",
-        )
-        self._scan_legacy_dimensions(dimensions, seen, known_region_dirs)
-        self._scan_custom_dimensions(dimensions, seen, known_region_dirs)
-
+        # region_files remains part of the public scan contract for callers.
+        del region_files
+        dimensions = [
+            {
+                "id": dimension.id,
+                "name": dimension.name,
+                "region_dir": str(dimension.region_dir),
+            }
+            for dimension in discover_dimension_region_dirs(self.world_path)
+        ]
         self._log(f"发现 {len(dimensions)} 个维度", "SCAN")
         return dimensions
-
-    def _scan_modern_minecraft_dimensions(
-        self,
-        dimensions: List[Dict[str, str]],
-        seen: Set[str],
-        known_region_dirs: Set[Path],
-    ) -> None:
-        dimensions_root = self.world_path / "dimensions" / "minecraft"
-        for dimension_dir in self._iter_directories(dimensions_root):
-            dimension_name = dimension_dir.name
-            dim_id = (
-                "overworld"
-                if dimension_name == "overworld"
-                else f"minecraft:{dimension_name}"
-            )
-            self._add_dimension(
-                dimensions,
-                seen,
-                known_region_dirs,
-                dim_id=dim_id,
-                display_name=self._VANILLA_DIMENSION_NAMES.get(
-                    dimension_name,
-                    f"📦 minecraft:{dimension_name}",
-                ),
-                region_dir=dimension_dir / "region",
-            )
-
-    def _scan_legacy_dimensions(
-        self,
-        dimensions: List[Dict[str, str]],
-        seen: Set[str],
-        known_region_dirs: Set[Path],
-    ) -> None:
-        for dimension_dir in self._iter_directories(self.world_path):
-            if not dimension_dir.name.startswith("DIM"):
-                continue
-            dim_id = self._LEGACY_DIMENSION_IDS.get(
-                dimension_dir.name,
-                dimension_dir.name.lower(),
-            )
-            display_name = {
-                "DIM-1": self._VANILLA_DIMENSION_NAMES["the_nether"],
-                "DIM1": self._VANILLA_DIMENSION_NAMES["the_end"],
-            }.get(dimension_dir.name, f"📦 {dimension_dir.name}")
-            self._add_dimension(
-                dimensions,
-                seen,
-                known_region_dirs,
-                dim_id=dim_id,
-                display_name=display_name,
-                region_dir=dimension_dir / "region",
-            )
-
-    def _scan_custom_dimensions(
-        self,
-        dimensions: List[Dict[str, str]],
-        seen: Set[str],
-        known_region_dirs: Set[Path],
-    ) -> None:
-        dimensions_root = self.world_path / "dimensions"
-        for namespace_dir in self._iter_directories(dimensions_root):
-            if namespace_dir.name == "minecraft":
-                continue
-            for dimension_dir in self._iter_directories(namespace_dir):
-                dim_id = f"{namespace_dir.name}:{dimension_dir.name}"
-                self._add_dimension(
-                    dimensions,
-                    seen,
-                    known_region_dirs,
-                    dim_id=dim_id,
-                    display_name=f"📦 {dim_id}",
-                    region_dir=dimension_dir / "region",
-                )
-
-    def _add_dimension(
-        self,
-        dimensions: List[Dict[str, str]],
-        seen: Set[str],
-        known_region_dirs: Set[Path],
-        *,
-        dim_id: str,
-        display_name: str,
-        region_dir: Path,
-    ) -> None:
-        if dim_id in seen or not self._has_regions(
-            region_dir,
-            known_region_dirs,
-        ):
-            return
-        dimensions.append({
-            "id": dim_id,
-            "name": display_name,
-            "region_dir": str(region_dir),
-        })
-        seen.add(dim_id)
-
-    @staticmethod
-    def _has_regions(region_dir: Path, known_region_dirs: Set[Path]) -> bool:
-        return region_dir in known_region_dirs or bool(scan_region_dir(region_dir))
-
-    @staticmethod
-    def _iter_directories(parent: Path) -> List[Path]:
-        if not parent.is_dir():
-            return []
-        try:
-            return sorted(
-                (path for path in parent.iterdir() if path.is_dir()),
-                key=lambda path: path.name,
-            )
-        except OSError:
-            return []
 
     @staticmethod
     def _normalize_uuid(uuid: str) -> str:
