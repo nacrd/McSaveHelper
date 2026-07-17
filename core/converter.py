@@ -9,7 +9,7 @@ import tempfile
 import nbtlib
 from dataclasses import dataclass, field
 from nbtlib import File, Compound, String, List
-from typing import Dict, Any, Optional, List as TList
+from typing import Dict, Any, Optional, Tuple, List as TList
 from pathlib import Path
 
 from .utils import replace_directory_tree
@@ -283,9 +283,131 @@ class VersionDowngrader:
         return tag
 
 
-def convert_world(src_path: Path, dst_path: Path,
-                  target_platform: str = "java",
-                  target_version: Optional[int] = None) -> ConversionResult:
+def _prepare_work_path(src_path: Path, dst_path: Path) -> Path:
+    if src_path.resolve() == dst_path.resolve():
+        return src_path
+    try:
+        import shutil
+
+        replace_directory_tree(
+            src_path,
+            dst_path,
+            ignore=shutil.ignore_patterns("*.tmp", "*.bak", "*.old"),
+        )
+    except Exception as exc:
+        raise ConversionError(f"复制世界目录失败: {exc}") from exc
+    return dst_path
+
+
+def _transform_nbt(
+    data: Any,
+    target_platform: str,
+    target_version: Optional[int],
+) -> None:
+    if target_platform != "java":
+        convert_block_ids_in_nbt(data, target_platform == "bedrock")
+    if target_version is not None:
+        VersionDowngrader.strip_data_components(data)
+        VersionDowngrader.replace_unknown_blocks(data, target_version)
+
+
+def _iter_nbt_files(work_path: Path) -> TList[Path]:
+    paths: TList[Path] = []
+    for root, _dirs, files in os.walk(work_path):
+        for file_name in files:
+            if os.path.splitext(file_name)[1] in {".dat", ".nbt"}:
+                paths.append(Path(root) / file_name)
+    return paths
+
+
+def _convert_nbt_files(
+    work_path: Path,
+    target_platform: str,
+    target_version: Optional[int],
+    target_byteorder: str,
+    result: ConversionResult,
+    tracker: Any,
+    log_warning: Any,
+) -> None:
+    for file_path in _iter_nbt_files(work_path):
+        try:
+            source_byteorder = detect_endian(file_path)
+            data = load_nbt(file_path, byteorder=source_byteorder)
+            _transform_nbt(data, target_platform, target_version)
+            save_nbt(file_path, data, byteorder=target_byteorder)
+            tracker.increment_files(1)
+            result.converted_files += 1
+        except Exception as exc:
+            message = f"转换文件 {file_path} 时出错: {exc}"
+            result.errors.append(message)
+            log_warning(message, module="Converter")
+            tracker.increment_errors(1)
+
+
+def _convert_one_region(
+    mca_path: Path,
+    target_platform: str,
+    target_version: Optional[int],
+) -> Tuple[bool, Optional[str]]:
+    from core.mca import WritableRegion
+
+    try:
+        region = WritableRegion.open(mca_path)
+        region_modified = False
+        for _x, _z, data in region.iter_chunks():
+            if not isinstance(data, nbtlib.tag.Compound):
+                continue
+            _transform_nbt(data, target_platform, target_version)
+            if target_platform != "java" or target_version is not None:
+                region_modified = True
+        if region_modified:
+            region.save(mca_path, backup=True)
+            return True, None
+        return False, None
+    except Exception as exc:
+        return False, f"转换区域文件 {mca_path} 时出错: {exc}"
+
+
+def _convert_region_files(
+    work_path: Path,
+    target_platform: str,
+    target_version: Optional[int],
+    result: ConversionResult,
+    tracker: Any,
+    log_warning: Any,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from .scanner import scan_all_regions
+
+    mca_files = scan_all_regions(work_path)
+    workers = min(8, max(1, len(mca_files)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(
+                _convert_one_region,
+                path,
+                target_platform,
+                target_version,
+            )
+            for path in mca_files
+        ]
+        for future in as_completed(futures):
+            converted, error = future.result()
+            if error:
+                result.errors.append(error)
+                log_warning(error, module="Converter")
+                tracker.increment_errors(1)
+            elif converted:
+                tracker.increment_files(1)
+                result.converted_files += 1
+
+
+def convert_world(
+    src_path: Path,
+    dst_path: Path,
+    target_platform: str = "java",
+    target_version: Optional[int] = None,
+) -> ConversionResult:
     """
     转换整个世界存档（高级接口）。
 
@@ -307,103 +429,28 @@ def convert_world(src_path: Path, dst_path: Path,
         "src": str(src_path), "dst": str(dst_path),
         "platform": target_platform, "version": str(target_version),
     }):
-        # 1. 如果源路径与目标路径不同，则复制世界结构
-        if src_path.resolve() != dst_path.resolve():
-            try:
-                import shutil
-                replace_directory_tree(
-                    src_path, dst_path, ignore=shutil.ignore_patterns(
-                        '*.tmp', '*.bak', '*.old'))
-            except Exception as e:
-                raise ConversionError(f"复制世界目录失败: {e}")
-            work_path = dst_path
-        else:
-            work_path = src_path  # 原地转换
-
-        # 2. 确定目标字节序
+        work_path = _prepare_work_path(src_path, dst_path)
         target_byteorder = "big" if target_platform == "java" else "little"
+        _convert_nbt_files(
+            work_path,
+            target_platform,
+            target_version,
+            target_byteorder,
+            result,
+            tracker,
+            _logger.warning,
+        )
 
-        # 3. 遍历所有 NBT 文件进行转换
-        nbt_extensions = {".dat", ".nbt"}
-        for root, dirs, files in os.walk(work_path):
-            for file in files:
-                suffix = os.path.splitext(file)[1]
-                if suffix in nbt_extensions:
-                    file_path = Path(root) / file
-                    try:
-                        src_byteorder = detect_endian(file_path)
-                        data = load_nbt(file_path, byteorder=src_byteorder)
-
-                        if target_platform != "java":
-                            to_bedrock = (target_platform == "bedrock")
-                            convert_block_ids_in_nbt(data, to_bedrock)
-
-                        if target_version is not None:
-                            VersionDowngrader.strip_data_components(data)
-                            VersionDowngrader.replace_unknown_blocks(
-                                data, target_version)
-
-                        save_nbt(file_path, data, byteorder=target_byteorder)
-                        tracker.increment_files(1)
-                        result.converted_files += 1
-                    except Exception as e:
-                        message = f"转换文件 {file_path} 时出错: {e}"
-                        result.errors.append(message)
-                        _logger.warning(message, module="Converter")
-                        tracker.increment_errors(1)
-
-        # 4. 处理区域文件（.mca）中的方块/物品 ID 转换
-        #    region 级并发（各处理独立文件，写回安全）
         if target_platform != "java" or target_version is not None:
             try:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-                from .scanner import scan_all_regions
-                from core.mca import WritableRegion
-
-                mca_files = scan_all_regions(work_path)
-
-                def _convert_one_mca(mca_path: Path):
-                    # Process one .mca; return (ok, err|None).
-                    try:
-                        region = WritableRegion.open(mca_path)
-                        region_modified = False
-                        for x, z, data in region.iter_chunks():
-                            if not isinstance(data, nbtlib.tag.Compound):
-                                continue
-
-                            if target_platform != "java":
-                                to_bedrock = (target_platform == "bedrock")
-                                convert_block_ids_in_nbt(data, to_bedrock)
-                                region_modified = True
-
-                            if target_version is not None:
-                                VersionDowngrader.strip_data_components(
-                                    data)
-                                VersionDowngrader.replace_unknown_blocks(
-                                    data, target_version)
-                                region_modified = True
-
-                        if region_modified:
-                            region.save(mca_path, backup=True)
-                            return True, None
-                        return False, None
-                    except Exception as e:
-                        return False, f"转换区域文件 {mca_path} 时出错: {e}"
-
-                workers = min(8, max(1, len(mca_files)))
-                with ThreadPoolExecutor(max_workers=workers) as executor:
-                    futures = [
-                        executor.submit(_convert_one_mca, p) for p in mca_files
-                    ]
-                    for future in as_completed(futures):
-                        ok, err = future.result()
-                        if err:
-                            result.errors.append(err)
-                            _logger.warning(err, module="Converter")
-                            tracker.increment_errors(1)
-                        elif ok:
-                            tracker.increment_files(1)
-                            result.converted_files += 1
+                _convert_region_files(
+                    work_path,
+                    target_platform,
+                    target_version,
+                    result,
+                    tracker,
+                    _logger.warning,
+                )
             except ImportError:
                 message = "区域文件转换模块不可用，跳过区域文件转换"
                 result.warnings.append(message)
