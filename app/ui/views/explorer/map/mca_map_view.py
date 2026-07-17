@@ -29,17 +29,14 @@ from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,
     ORIGIN_COLOR,
-    SELECTED_BORDER_COLOR,
-    get_mode_title,
     get_region_color,
 )
+from app.ui.views.explorer.map import map_shapes
 from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
 )
 from core.mca.map_coordinates import (
-    format_chunk_block_range,
-    format_region_block_range,
     format_region_coordinate_label,
 )
 from core.mca.map_navigation import (
@@ -257,15 +254,11 @@ class McaMapView(ft.Container):
 
     # ------------------------------------------------------------------ UI helpers
     def _empty_shapes(self) -> List[cv.Shape]:
-        return [
-            cv.Rect(
-                0,
-                0,
-                self.width or 800,
-                self.height or 600,
-                paint=ft.Paint(color=self.BACKGROUND_COLOR),
-            )
-        ]
+        return map_shapes.empty_background(
+            self.width or 800,
+            self.height or 600,
+            self.BACKGROUND_COLOR,
+        )
 
     def _request_rebuild(self) -> None:
         """Marshal canvas rebuild onto the Flet UI thread.
@@ -753,20 +746,7 @@ class McaMapView(ft.Container):
         self._needs_initial_draw = False
 
     def _build_empty_state(self, view_w: float, view_h: float) -> List[cv.Shape]:
-        return [
-            cv.Text(
-                x=view_w / 2 - 90,
-                y=view_h / 2 - 30,
-                value="🗺️",
-                style=ft.TextStyle(size=48, color="#888888"),
-            ),
-            cv.Text(
-                x=view_w / 2 - 95,
-                y=view_h / 2 + 30,
-                value="设置当前存档后显示区域地图",
-                style=ft.TextStyle(size=16, color="#CCCCCC"),
-            ),
-        ]
+        return map_shapes.empty_state(view_w, view_h)
 
     def _prepare_visible_bounds(
         self,
@@ -870,18 +850,7 @@ class McaMapView(ft.Container):
         self,
         rect: Tuple[float, float, float, float],
     ) -> cv.Rect:
-        x, y, width, height = rect
-        return cv.Rect(
-            x,
-            y,
-            width,
-            height,
-            paint=ft.Paint(
-                color=self.EMPTY_REGION_COLOR,
-                style=ft.PaintingStyle.STROKE,
-                stroke_width=0.5,
-            ),
-        )
+        return map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
 
     def _request_visible_tiles(self, missing: List[Tuple[int, int]]) -> None:
         if missing:
@@ -946,65 +915,19 @@ class McaMapView(ft.Container):
         coord: Tuple[int, int],
         file_size: int,
     ) -> List[cv.Shape]:
-        shapes: List[cv.Shape] = []
-        tile_src = self._tile_src(coord) if self._use_topview else None
-        if tile_src:
-            shapes.append(
-                cv.Image(
-                    src=tile_src,
-                    x=x,
-                    y=y,
-                    width=size,
-                    height=size,
-                )
-            )
-        else:
-            # Placeholder until topview tile is ready
-            shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
-        selected = coord == self._selected_cell
-        shapes.append(
-            cv.Rect(
-                x,
-                y,
-                size,
-                size,
-                paint=ft.Paint(
-                    color=SELECTED_BORDER_COLOR if selected else "#00000055",
-                    style=ft.PaintingStyle.STROKE,
-                    stroke_width=3 if selected else 1,
-                ),
-            )
+        del file_size
+        return map_shapes.region_cell(
+            x,
+            y,
+            size,
+            color,
+            coord,
+            selected=coord == self._selected_cell,
+            view_level=self._view_level,
+            show_coordinates=self._show_coordinates,
+            tile_src=self._tile_src(coord) if self._use_topview else None,
+            coord_label=self._coord_label_for_region,
         )
-        # Hide region labels once inside a single chunk — they clutter the mesh.
-        if self._show_coordinates and size >= 22 and self._view_level != "block":
-            label = self._coord_label_for_region(coord, size)
-            # Multi-line for mid/near ranges when space allows.
-            if "\n" in label:
-                for i, line in enumerate(label.split("\n")[:2]):
-                    shapes.append(
-                        cv.Text(
-                            x=x + 4,
-                            y=y + 4 + i * 12,
-                            value=line,
-                            style=ft.TextStyle(
-                                size=9 if size < 70 else 10,
-                                color="#FFFFFF" if tile_src else "#F5F5DC",
-                            ),
-                        )
-                    )
-            else:
-                shapes.append(
-                    cv.Text(
-                        x=x + 4,
-                        y=y + 5,
-                        value=label,
-                        style=ft.TextStyle(
-                            size=9 if size < 70 else 11,
-                            color="#FFFFFF" if tile_src else "#F5F5DC",
-                        ),
-                    )
-                )
-        return shapes
 
     def _build_chunk_grid(
         self,
@@ -1015,239 +938,40 @@ class McaMapView(ft.Container):
         *,
         show_block_grid: bool = False,
     ) -> List[cv.Shape]:
-        """Draw 32×32 chunk mesh inside a region; optionally 16×16 block mesh."""
-        shapes: List[cv.Shape] = []
-        chunk_size = size / 32.0
-        if chunk_size < 2.5:
-            return shapes
-        rx, rz = region_coord
-        line_color = "#00000066" if chunk_size >= 4 else "#00000040"
-        # Grid lines (skip outer edge; region border already drawn).
-        for i in range(1, 32):
-            pos = i * chunk_size
-            shapes.append(
-                cv.Line(
-                    x + pos,
-                    y,
-                    x + pos,
-                    y + size,
-                    paint=ft.Paint(color=line_color, stroke_width=0.6),
-                )
-            )
-            shapes.append(
-                cv.Line(
-                    x,
-                    y + pos,
-                    x + size,
-                    y + pos,
-                    paint=ft.Paint(color=line_color, stroke_width=0.6),
-                )
-            )
-        # Hit bounds for every chunk; labels only when large enough.
-        for local_z in range(32):
-            for local_x in range(32):
-                cx = rx * 32 + local_x
-                cz = rz * 32 + local_z
-                bx = x + local_x * chunk_size
-                by = y + local_z * chunk_size
-                self._chunk_bounds[(cx, cz)] = (bx, by, chunk_size, chunk_size)
-                if self._show_coordinates and chunk_size >= 14 and not show_block_grid:
-                    # Game block coords of chunk origin.
-                    shapes.append(
-                        cv.Text(
-                            x=bx + 1,
-                            y=by + 1,
-                            value=f"{cx * 16},{cz * 16}",
-                            style=ft.TextStyle(size=8, color="#FFECB3"),
-                        )
-                    )
-
-        if show_block_grid and chunk_size >= 24:
-            shapes.extend(
-                self._build_block_grid_for_region(x, y, chunk_size, region_coord)
-            )
-
-        # Highlight selected chunk.
-        if self._selected_chunk is not None:
-            scx, scz = self._selected_chunk
-            if scx // 32 == rx and scz // 32 == rz:
-                lx = scx - rx * 32
-                lz = scz - rz * 32
-                shapes.append(
-                    cv.Rect(
-                        x + lx * chunk_size,
-                        y + lz * chunk_size,
-                        chunk_size,
-                        chunk_size,
-                        paint=ft.Paint(
-                            color="#FFD54F",
-                            style=ft.PaintingStyle.STROKE,
-                            stroke_width=max(1.5, min(3.0, chunk_size / 3)),
-                        ),
-                    )
-                )
-        return shapes
-
-    def _build_block_grid_for_region(
-        self,
-        region_x: float,
-        region_y: float,
-        chunk_size: float,
-        region_coord: Tuple[int, int],
-    ) -> List[cv.Shape]:
-        """Draw 16×16 block mesh for the selected (or center) chunk."""
-        shapes: List[cv.Shape] = []
-        block_px = chunk_size / 16.0
-        if block_px < 2.0:
-            return shapes
-
-        rx, rz = region_coord
-        targets: List[Tuple[int, int]] = []
-        if self._selected_chunk is not None:
-            scx, scz = self._selected_chunk
-            if scx // 32 == rx and scz // 32 == rz:
-                targets.append((scx - rx * 32, scz - rz * 32))
-        if not targets:
-            targets.append((15, 15))
-
-        for local_x, local_z in targets:
-            bx = region_x + local_x * chunk_size
-            by = region_y + local_z * chunk_size
-            line_color = "#FFFFFF33" if block_px >= 4 else "#FFFFFF22"
-            for i in range(1, 16):
-                pos = i * block_px
-                shapes.append(
-                    cv.Line(
-                        bx + pos,
-                        by,
-                        bx + pos,
-                        by + chunk_size,
-                        paint=ft.Paint(color=line_color, stroke_width=0.5),
-                    )
-                )
-                shapes.append(
-                    cv.Line(
-                        bx,
-                        by + pos,
-                        bx + chunk_size,
-                        by + pos,
-                        paint=ft.Paint(color=line_color, stroke_width=0.5),
-                    )
-                )
-            if self._show_coordinates and block_px >= 6:
-                cx = rx * 32 + local_x
-                cz = rz * 32 + local_z
-                shapes.append(
-                    cv.Text(
-                        x=bx + 2,
-                        y=by + 2,
-                        value=f"{cx * 16},{cz * 16}",
-                        style=ft.TextStyle(size=10, color="#FFF59D"),
-                    )
-                )
-            if block_px >= 4:
-                for bz in range(16):
-                    for bx_i in range(16):
-                        world_bx = (rx * 32 + local_x) * 16 + bx_i
-                        world_bz = (rz * 32 + local_z) * 16 + bz
-                        self._block_bounds[(world_bx, world_bz)] = (
-                            bx + bx_i * block_px,
-                            by + bz * block_px,
-                            block_px,
-                            block_px,
-                        )
+        shapes, chunk_bounds, block_bounds = map_shapes.chunk_grid(
+            x,
+            y,
+            size,
+            region_coord,
+            show_block_grid=show_block_grid,
+            show_coordinates=self._show_coordinates,
+            selected_chunk=self._selected_chunk,
+        )
+        self._chunk_bounds.update(chunk_bounds)
+        self._block_bounds.update(block_bounds)
         return shapes
 
     def _build_origin_marker(self, x: float, y: float) -> List[cv.Shape]:
-        width = self.width or 800
-        height = self.height or 600
-        return [
-            cv.Rect(x, 0, 2, height, paint=ft.Paint(color=self.ORIGIN_COLOR)),
-            cv.Rect(0, y, width, 2, paint=ft.Paint(color=self.ORIGIN_COLOR)),
-        ]
+        return map_shapes.origin_marker(
+            x,
+            y,
+            self.width or 800,
+            self.height or 600,
+            self.ORIGIN_COLOR,
+        )
 
     def _build_info_overlay(self) -> List[cv.Shape]:
-        shapes: List[cv.Shape] = []
-        width = self.width or 800
-        height = self.height or 600
-        title = (
-            f"{get_mode_title(self._display_mode)} · "
-            f"{self._view_level_title()} · {self._scale:.1f}x"
+        return map_shapes.info_overlay(
+            width=self.width or 800,
+            height=self.height or 600,
+            display_mode=self._display_mode,
+            view_level=self._view_level,
+            scale=self._scale,
+            is_scanning=self._service.is_scanning,
+            scan_progress=self._service.scan_progress,
+            selected_region=self._selected_cell,
+            selected_chunk=self._selected_chunk,
         )
-        shapes.append(cv.Rect(10, 10, 260, 26, paint=ft.Paint(color="#00000099")))
-        shapes.append(
-            cv.Text(
-                x=15,
-                y=15,
-                value=title,
-                style=ft.TextStyle(size=12, color="#D7CCC8"),
-            )
-        )
-        shapes.append(cv.Rect(10, 42, 310, 24, paint=ft.Paint(color="#00000066")))
-        shapes.append(
-            cv.Text(
-                x=15,
-                y=47,
-                value="拖拽平移 · 滚轮缩放切层级 · 双击深入 · 右键返回",
-                style=ft.TextStyle(size=11, color="#A5D6A7"),
-            )
-        )
-
-        if self._service.is_scanning:
-            progress = self._service.scan_progress
-            shapes.append(
-                cv.Rect(10, height - 34, 120, 24, paint=ft.Paint(color="#00000088"))
-            )
-            shapes.append(
-                cv.Text(
-                    x=15,
-                    y=height - 29,
-                    value=f"扫描中: {int(progress * 100)}%",
-                    style=ft.TextStyle(size=12, color="#64B5F6"),
-                )
-            )
-
-        if self._selected_cell:
-            coord = self._selected_cell
-            if self._selected_chunk is not None:
-                cx, cz = self._selected_chunk
-                prefix = "区块内" if self._view_level == "block" else "区块"
-                info = (
-                    f"{prefix} ({cx},{cz}) · "
-                    f"{format_chunk_block_range(self._selected_chunk)}"
-                )
-            else:
-                info = (
-                    f"r.{coord[0]}.{coord[1]}.mca · "
-                    f"{format_region_block_range(coord)}"
-                )
-            text_w = max(140, len(info) * 7 + 20)
-            shapes.append(
-                cv.Rect(
-                    width - text_w - 10,
-                    10,
-                    text_w,
-                    24,
-                    paint=ft.Paint(color="#00000088"),
-                )
-            )
-            shapes.append(
-                cv.Text(
-                    x=width - text_w - 5,
-                    y=15,
-                    value=info,
-                    style=ft.TextStyle(size=12, color="#64B5F6"),
-                )
-            )
-        return shapes
-
-    def _view_level_title(self) -> str:
-        return {
-            "world": "世界",
-            "region": "区域",
-            "chunk": "区块",
-            "block": "区块内",
-        }.get(self._view_level, "世界")
 
     # ------------------------------------------------------------------ lifecycle / scan
     async def _update_loop(self) -> None:

@@ -1,0 +1,403 @@
+"""Canvas shape builders for the MCA region map.
+
+Keeps pure layout/label drawing out of the interactive Flet container.
+"""
+from __future__ import annotations
+
+from typing import Callable, Dict, List, Optional, Tuple
+
+import flet as ft
+
+try:
+    import flet.canvas as cv
+except ImportError as exc:  # pragma: no cover
+    raise ImportError("flet.canvas is not available in this Flet version") from exc
+
+from app.ui.views.explorer.map.color_schemes import (
+    EMPTY_REGION_COLOR,
+    ORIGIN_COLOR,
+    SELECTED_BORDER_COLOR,
+    get_mode_title,
+)
+from core.mca.map_coordinates import (
+    format_chunk_block_range,
+    format_region_block_range,
+)
+from core.mca.viewport import MapViewLevel
+
+
+Coord = Tuple[int, int]
+ScreenRect = Tuple[float, float, float, float]
+TileSource = Callable[[Coord], Optional[str]]
+CoordLabel = Callable[[Coord, float], str]
+
+
+def empty_background(
+    width: float,
+    height: float,
+    color: str,
+) -> List[cv.Shape]:
+    return [cv.Rect(0, 0, width, height, paint=ft.Paint(color=color))]
+
+
+def empty_state(view_w: float, view_h: float) -> List[cv.Shape]:
+    return [
+        cv.Text(
+            x=view_w / 2 - 90,
+            y=view_h / 2 - 30,
+            value="🗺️",
+            style=ft.TextStyle(size=48, color="#888888"),
+        ),
+        cv.Text(
+            x=view_w / 2 - 95,
+            y=view_h / 2 + 30,
+            value="设置当前存档后显示区域地图",
+            style=ft.TextStyle(size=16, color="#CCCCCC"),
+        ),
+    ]
+
+
+def empty_region(rect: ScreenRect, color: str = EMPTY_REGION_COLOR) -> cv.Rect:
+    x, y, width, height = rect
+    return cv.Rect(
+        x,
+        y,
+        width,
+        height,
+        paint=ft.Paint(
+            color=color,
+            style=ft.PaintingStyle.STROKE,
+            stroke_width=0.5,
+        ),
+    )
+
+
+def origin_marker(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    color: str = ORIGIN_COLOR,
+) -> List[cv.Shape]:
+    return [
+        cv.Rect(x, 0, 2, height, paint=ft.Paint(color=color)),
+        cv.Rect(0, y, width, 2, paint=ft.Paint(color=color)),
+    ]
+
+
+def region_cell(
+    x: float,
+    y: float,
+    size: float,
+    color: str,
+    coord: Coord,
+    *,
+    selected: bool,
+    view_level: MapViewLevel,
+    show_coordinates: bool,
+    tile_src: Optional[str],
+    coord_label: CoordLabel,
+) -> List[cv.Shape]:
+    shapes: List[cv.Shape] = []
+    if tile_src:
+        shapes.append(
+            cv.Image(
+                src=tile_src,
+                x=x,
+                y=y,
+                width=size,
+                height=size,
+            )
+        )
+    else:
+        shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
+    shapes.append(
+        cv.Rect(
+            x,
+            y,
+            size,
+            size,
+            paint=ft.Paint(
+                color=SELECTED_BORDER_COLOR if selected else "#00000055",
+                style=ft.PaintingStyle.STROKE,
+                stroke_width=3 if selected else 1,
+            ),
+        )
+    )
+    if show_coordinates and size >= 22 and view_level != "block":
+        label = coord_label(coord, size)
+        text_color = "#FFFFFF" if tile_src else "#F5F5DC"
+        if "\n" in label:
+            for index, line in enumerate(label.split("\n")[:2]):
+                shapes.append(
+                    cv.Text(
+                        x=x + 4,
+                        y=y + 4 + index * 12,
+                        value=line,
+                        style=ft.TextStyle(
+                            size=9 if size < 70 else 10,
+                            color=text_color,
+                        ),
+                    )
+                )
+        else:
+            shapes.append(
+                cv.Text(
+                    x=x + 4,
+                    y=y + 5,
+                    value=label,
+                    style=ft.TextStyle(
+                        size=9 if size < 70 else 11,
+                        color=text_color,
+                    ),
+                )
+            )
+    return shapes
+
+
+def chunk_grid(
+    x: float,
+    y: float,
+    size: float,
+    region_coord: Coord,
+    *,
+    show_block_grid: bool,
+    show_coordinates: bool,
+    selected_chunk: Optional[Coord],
+) -> Tuple[List[cv.Shape], Dict[Coord, ScreenRect], Dict[Coord, ScreenRect]]:
+    shapes: List[cv.Shape] = []
+    chunk_bounds: Dict[Coord, ScreenRect] = {}
+    block_bounds: Dict[Coord, ScreenRect] = {}
+    chunk_size = size / 32.0
+    if chunk_size < 2.5:
+        return shapes, chunk_bounds, block_bounds
+
+    rx, rz = region_coord
+    line_color = "#00000066" if chunk_size >= 4 else "#00000040"
+    for index in range(1, 32):
+        pos = index * chunk_size
+        shapes.append(
+            cv.Line(
+                x + pos,
+                y,
+                x + pos,
+                y + size,
+                paint=ft.Paint(color=line_color, stroke_width=0.6),
+            )
+        )
+        shapes.append(
+            cv.Line(
+                x,
+                y + pos,
+                x + size,
+                y + pos,
+                paint=ft.Paint(color=line_color, stroke_width=0.6),
+            )
+        )
+
+    for local_z in range(32):
+        for local_x in range(32):
+            cx = rx * 32 + local_x
+            cz = rz * 32 + local_z
+            bx = x + local_x * chunk_size
+            by = y + local_z * chunk_size
+            chunk_bounds[(cx, cz)] = (bx, by, chunk_size, chunk_size)
+            if show_coordinates and chunk_size >= 14 and not show_block_grid:
+                shapes.append(
+                    cv.Text(
+                        x=bx + 1,
+                        y=by + 1,
+                        value=f"{cx * 16},{cz * 16}",
+                        style=ft.TextStyle(size=8, color="#FFECB3"),
+                    )
+                )
+
+    if show_block_grid and chunk_size >= 24:
+        block_shapes, block_bounds = block_grid_for_region(
+            x,
+            y,
+            chunk_size,
+            region_coord,
+            show_coordinates=show_coordinates,
+            selected_chunk=selected_chunk,
+        )
+        shapes.extend(block_shapes)
+
+    if selected_chunk is not None:
+        scx, scz = selected_chunk
+        if scx // 32 == rx and scz // 32 == rz:
+            local_x = scx - rx * 32
+            local_z = scz - rz * 32
+            shapes.append(
+                cv.Rect(
+                    x + local_x * chunk_size,
+                    y + local_z * chunk_size,
+                    chunk_size,
+                    chunk_size,
+                    paint=ft.Paint(
+                        color="#FFD54F",
+                        style=ft.PaintingStyle.STROKE,
+                        stroke_width=max(1.5, min(3.0, chunk_size / 3)),
+                    ),
+                )
+            )
+    return shapes, chunk_bounds, block_bounds
+
+
+def block_grid_for_region(
+    region_x: float,
+    region_y: float,
+    chunk_size: float,
+    region_coord: Coord,
+    *,
+    show_coordinates: bool,
+    selected_chunk: Optional[Coord],
+) -> Tuple[List[cv.Shape], Dict[Coord, ScreenRect]]:
+    shapes: List[cv.Shape] = []
+    block_bounds: Dict[Coord, ScreenRect] = {}
+    block_px = chunk_size / 16.0
+    if block_px < 2.0:
+        return shapes, block_bounds
+
+    rx, rz = region_coord
+    targets: List[Tuple[int, int]] = []
+    if selected_chunk is not None:
+        scx, scz = selected_chunk
+        if scx // 32 == rx and scz // 32 == rz:
+            targets.append((scx - rx * 32, scz - rz * 32))
+    if not targets:
+        targets.append((15, 15))
+
+    for local_x, local_z in targets:
+        bx = region_x + local_x * chunk_size
+        by = region_y + local_z * chunk_size
+        line_color = "#FFFFFF33" if block_px >= 4 else "#FFFFFF22"
+        for index in range(1, 16):
+            pos = index * block_px
+            shapes.append(
+                cv.Line(
+                    bx + pos,
+                    by,
+                    bx + pos,
+                    by + chunk_size,
+                    paint=ft.Paint(color=line_color, stroke_width=0.5),
+                )
+            )
+            shapes.append(
+                cv.Line(
+                    bx,
+                    by + pos,
+                    bx + chunk_size,
+                    by + pos,
+                    paint=ft.Paint(color=line_color, stroke_width=0.5),
+                )
+            )
+        if show_coordinates and block_px >= 6:
+            cx = rx * 32 + local_x
+            cz = rz * 32 + local_z
+            shapes.append(
+                cv.Text(
+                    x=bx + 2,
+                    y=by + 2,
+                    value=f"{cx * 16},{cz * 16}",
+                    style=ft.TextStyle(size=10, color="#FFF59D"),
+                )
+            )
+        if block_px >= 4:
+            for block_z in range(16):
+                for block_x in range(16):
+                    world_bx = (rx * 32 + local_x) * 16 + block_x
+                    world_bz = (rz * 32 + local_z) * 16 + block_z
+                    block_bounds[(world_bx, world_bz)] = (
+                        bx + block_x * block_px,
+                        by + block_z * block_px,
+                        block_px,
+                        block_px,
+                    )
+    return shapes, block_bounds
+
+
+def info_overlay(
+    *,
+    width: float,
+    height: float,
+    display_mode: str,
+    view_level: MapViewLevel,
+    scale: float,
+    is_scanning: bool,
+    scan_progress: float,
+    selected_region: Optional[Coord],
+    selected_chunk: Optional[Coord],
+) -> List[cv.Shape]:
+    shapes: List[cv.Shape] = []
+    level_title = {
+        "world": "世界",
+        "region": "区域",
+        "chunk": "区块",
+        "block": "区块内",
+    }.get(view_level, "世界")
+    title = f"{get_mode_title(display_mode)} · {level_title} · {scale:.1f}x"
+    shapes.append(cv.Rect(10, 10, 260, 26, paint=ft.Paint(color="#00000099")))
+    shapes.append(
+        cv.Text(
+            x=15,
+            y=15,
+            value=title,
+            style=ft.TextStyle(size=12, color="#D7CCC8"),
+        )
+    )
+    shapes.append(cv.Rect(10, 42, 310, 24, paint=ft.Paint(color="#00000066")))
+    shapes.append(
+        cv.Text(
+            x=15,
+            y=47,
+            value="拖拽平移 · 滚轮缩放切层级 · 双击深入 · 右键返回",
+            style=ft.TextStyle(size=11, color="#A5D6A7"),
+        )
+    )
+
+    if is_scanning:
+        shapes.append(
+            cv.Rect(10, height - 34, 120, 24, paint=ft.Paint(color="#00000088"))
+        )
+        shapes.append(
+            cv.Text(
+                x=15,
+                y=height - 29,
+                value=f"扫描中: {int(scan_progress * 100)}%",
+                style=ft.TextStyle(size=12, color="#64B5F6"),
+            )
+        )
+
+    if selected_region:
+        if selected_chunk is not None:
+            cx, cz = selected_chunk
+            prefix = "区块内" if view_level == "block" else "区块"
+            info = (
+                f"{prefix} ({cx},{cz}) · "
+                f"{format_chunk_block_range(selected_chunk)}"
+            )
+        else:
+            info = (
+                f"r.{selected_region[0]}.{selected_region[1]}.mca · "
+                f"{format_region_block_range(selected_region)}"
+            )
+        text_w = max(140, len(info) * 7 + 20)
+        shapes.append(
+            cv.Rect(
+                width - text_w - 10,
+                10,
+                text_w,
+                24,
+                paint=ft.Paint(color="#00000088"),
+            )
+        )
+        shapes.append(
+            cv.Text(
+                x=width - text_w - 5,
+                y=15,
+                value=info,
+                style=ft.TextStyle(size=12, color="#64B5F6"),
+            )
+        )
+    return shapes
