@@ -4,8 +4,9 @@
 """
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Tuple, Set
+from typing import Callable, List, Optional, Set
 
 import nbtlib
 from core.mca import NativeRegion as Region
@@ -26,6 +27,12 @@ from .validation_utils import (
 # 游戏模式和难度名称映射
 _GAME_TYPE_NAMES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
 _DIFFICULTY_NAMES = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
+
+
+@dataclass(frozen=True)
+class RegionDetectionResult:
+    damaged_chunks: int = 0
+    unreadable_error: Optional[str] = None
 
 
 def _read_int_tag(
@@ -207,69 +214,63 @@ class WorldDetector:
         log(f"找到 {total} 个区域文件，开始逐块检测...", "INFO")
         report.chunks_checked = total * self.CHUNKS_PER_REGION
 
-        completed = 0
-        lock = threading.Lock()
+        max_workers = min(max(1, (total + 3) // 4), 8)
 
-        def detect_region(idx: int, region_file: Path) -> Tuple[int, List[str]]:
-            """检测单个区域文件"""
-            if self.is_cancelled:
-                return 0, []
-
-            damaged = 0
-            problems: List[str] = []
-
-            try:
-                region = Region.from_file(str(region_file))
-
-                for chunk_x in range(32):
-                    for chunk_z in range(32):
-                        if self.is_cancelled:
-                            return damaged, problems
-                        try:
-                            chunk = region.get_chunk(chunk_x, chunk_z)
-                            if chunk is not None:
-                                if not validate_chunk(chunk):
-                                    damaged += 1
-                                    problems.append(f"区块({chunk_x},{chunk_z})数据无效")
-                        except Exception:
-                            damaged += 1
-
-                if damaged > 0:
-                    log(f"{region_file.name}: {damaged} 个损坏区块", "WARNING")
-
-            except Exception as e:
-                problems.append(f"无法读取: {e}")
-                log(f"无法读取区域文件 {region_file.name}: {e}", "ERROR")
-                with lock:
-                    report.unreadable_regions.append(region_file.name)
-
-            with lock:
-                nonlocal completed
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(self._detect_region, region_file, log): region_file
+                for region_file in region_files
+            }
+            completed = 0
+            for future in as_completed(futures):
+                if self.is_cancelled:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+                try:
+                    result = future.result(timeout=120)
+                    report.chunks_damaged += result.damaged_chunks
+                    if result.unreadable_error is not None:
+                        report.unreadable_regions.append(futures[future].name)
+                except Exception as e:
+                    rf = futures[future]
+                    log(f"检测 {rf.name} 异常: {e}", "ERROR")
                 completed += 1
                 progress(
                     0.15 + (completed / total) * 0.65,
                     f"检测区块文件 {completed}/{total}",
                 )
 
-            return damaged, problems
+    def _detect_region(
+        self,
+        region_file: Path,
+        log: Callable[[str, str], None],
+    ) -> RegionDetectionResult:
+        if self.is_cancelled:
+            return RegionDetectionResult()
+        try:
+            damaged = self._count_damaged_chunks(region_file)
+            if damaged:
+                log(f"{region_file.name}: {damaged} 个损坏区块", "WARNING")
+            return RegionDetectionResult(damaged)
+        except Exception as exc:
+            message = f"无法读取: {exc}"
+            log(f"无法读取区域文件 {region_file.name}: {exc}", "ERROR")
+            return RegionDetectionResult(unreadable_error=message)
 
-        max_workers = min(max(1, (total + 3) // 4), 8)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(detect_region, idx, rf): rf
-                for idx, rf in enumerate(region_files)
-            }
-            for future in as_completed(futures):
-                if self.is_cancelled:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    break
-                try:
-                    d, _ = future.result(timeout=120)
-                    report.chunks_damaged += d
-                except Exception as e:
-                    rf = futures[future]
-                    log(f"检测 {rf.name} 异常: {e}", "ERROR")
+    def _count_damaged_chunks(self, region_file: Path) -> int:
+        damaged = 0
+        with Region.from_file(str(region_file)) as region:
+            for chunk_x in range(32):
+                for chunk_z in range(32):
+                    if self.is_cancelled:
+                        return damaged
+                    try:
+                        chunk = region.get_chunk(chunk_x, chunk_z)
+                        if chunk is not None and not validate_chunk(chunk):
+                            damaged += 1
+                    except Exception:
+                        damaged += 1
+        return damaged
 
     def _detect_players(
         self,

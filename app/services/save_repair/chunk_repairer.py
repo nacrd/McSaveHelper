@@ -5,16 +5,23 @@
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Tuple, Any, List
+from typing import Callable
 
-import nbtlib
 from core.mca import NativeRegion as Region
 
 from core.scanner import scan_all_regions
 
-from .models import RepairReport, IssueLevel, RepairIssue
+from .models import RepairReport
 from .validation_utils import validate_chunk
+
+
+@dataclass(frozen=True)
+class ChunkRepairResult:
+    checked_regions: int = 0
+    damaged_chunks: int = 0
+    quarantined_regions: int = 0
 
 
 class ChunkRepairer:
@@ -46,79 +53,68 @@ class ChunkRepairer:
 
         log(f"找到 {total} 个区块文件", "INFO")
 
-        completed = 0
-        lock = threading.Lock()
+        max_workers = min(max(1, (len(region_files) + 3) // 4), 8)
 
-        def process_region(idx: int, region_file: Path) -> Tuple[int, int, int]:
-            """处理单个区域文件，返回 (checked, damaged, quarantined_flag)"""
-            if self.is_cancelled:
-                return 0, 0, 0
-
-            checked = 0
-            damaged = 0
-            quarantined = 0
-
-            try:
-                region = Region.from_file(str(region_file))
-                region_damaged = 0
-
-                for chunk_x in range(32):
-                    for chunk_z in range(32):
-                        if self.is_cancelled:
-                            return checked, damaged, quarantined
-                        try:
-                            chunk = region.get_chunk(chunk_x, chunk_z)
-                            if chunk is not None:
-                                ok = validate_chunk(chunk)
-                                if not ok:
-                                    region_damaged += 1
-                                    damaged += 1
-                        except Exception:
-                            region_damaged += 1
-                            damaged += 1
-
-                checked = 1
-
-                if region_damaged > 0:
-                    log(
-                        f"区块文件 {region_file.name} 包含 {region_damaged} 个损坏区块",
-                        "WARNING",
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(self._repair_region, region_file, log): region_file
+                for region_file in region_files
+            }
+            completed = 0
+            for future in as_completed(futures):
+                if self.is_cancelled:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    break
+                try:
+                    result = future.result(timeout=120)
+                    report.chunks_checked += result.checked_regions
+                    report.chunks_damaged += result.damaged_chunks
+                    report.chunks_quarantined_regions += (
+                        result.quarantined_regions
                     )
-
-            except Exception as e:
-                log(f"无法读取区块文件 {region_file.name}: {e}", "ERROR")
-                self._quarantine_file(region_file, log)
-                quarantined = 1
-
-            with lock:
-                nonlocal completed
+                except Exception as e:
+                    rf = futures[future]
+                    log(f"处理 {rf.name} 异常: {e}", "ERROR")
                 completed += 1
                 progress(
                     0.10 + (completed / total) * 0.65,
                     f"检查区块文件 {completed}/{total}",
                 )
 
-            return checked, damaged, quarantined
+    def _repair_region(
+        self,
+        region_file: Path,
+        log: Callable[[str, str], None],
+    ) -> ChunkRepairResult:
+        if self.is_cancelled:
+            return ChunkRepairResult()
+        try:
+            damaged, completed = self._count_damaged_chunks(region_file)
+            if damaged:
+                log(
+                    f"区块文件 {region_file.name} 包含 {damaged} 个损坏区块",
+                    "WARNING",
+                )
+            return ChunkRepairResult(1 if completed else 0, damaged, 0)
+        except Exception as exc:
+            log(f"无法读取区块文件 {region_file.name}: {exc}", "ERROR")
+            self._quarantine_file(region_file, log)
+            return ChunkRepairResult(0, 0, 1)
 
-        max_workers = min(max(1, (len(region_files) + 3) // 4), 8)
-
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(process_region, idx, rf): rf
-                for idx, rf in enumerate(region_files)
-            }
-            for future in as_completed(futures):
-                if self.is_cancelled:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    break
-                try:
-                    c, d, q = future.result(timeout=120)
-                    report.chunks_checked += c
-                    report.chunks_damaged += d
-                    report.chunks_quarantined_regions += q
-                except Exception as e:
-                    rf = futures[future]
-                    log(f"处理 {rf.name} 异常: {e}", "ERROR")
+    def _count_damaged_chunks(self, region_file: Path) -> tuple[int, bool]:
+        damaged = 0
+        with Region.from_file(str(region_file)) as region:
+            for chunk_x in range(32):
+                for chunk_z in range(32):
+                    if self.is_cancelled:
+                        return damaged, False
+                    try:
+                        chunk = region.get_chunk(chunk_x, chunk_z)
+                        if chunk is not None and not validate_chunk(chunk):
+                            damaged += 1
+                    except Exception:
+                        damaged += 1
+        return damaged, True
 
     def _quarantine_file(
         self,
