@@ -32,6 +32,7 @@ from app.ui.views.explorer.map.color_schemes import (
     get_region_color,
 )
 from app.ui.views.explorer.map import map_shapes
+from app.ui.views.explorer.map.map_hit_testing import hit_bounds, rect_contains
 from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
@@ -346,8 +347,7 @@ class McaMapView(ft.Container):
         # Chunk/block-level selection when deeply zoomed into a region.
         if self._view_level in {"chunk", "block"} and self._chunk_bounds:
             for chunk_coord, bounds in self._chunk_bounds.items():
-                bx, by, bw, bh = bounds
-                if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+                if rect_contains(tap_x, tap_y, bounds):
                     level = "block" if self._view_level == "block" else "chunk"
                     notification = self._navigator.select_chunk(
                         chunk_coord,
@@ -365,8 +365,7 @@ class McaMapView(ft.Container):
                     return
 
         for coord, bounds in self._cell_bounds.items():
-            bx, by, bw, bh = bounds
-            if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
+            if rect_contains(tap_x, tap_y, bounds):
                 if coord not in self._current_data:
                     break
                 notification = self._navigator.select_region(
@@ -446,19 +445,15 @@ class McaMapView(ft.Container):
         self._emit_selection(notification)
 
     def _hit_region(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
-        for coord, bounds in self._cell_bounds.items():
-            bx, by, bw, bh = bounds
-            if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
-                if coord in self._current_data:
-                    return coord
-        return None
+        return hit_bounds(
+            tap_x,
+            tap_y,
+            self._cell_bounds,
+            allowed=self._current_data,
+        )
 
     def _hit_chunk(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
-        for chunk_coord, bounds in self._chunk_bounds.items():
-            bx, by, bw, bh = bounds
-            if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
-                return chunk_coord
-        return None
+        return hit_bounds(tap_x, tap_y, self._chunk_bounds)
 
     def _coord_label_for_region(self, coord: Tuple[int, int], cell_size: float) -> str:
         return format_region_coordinate_label(
