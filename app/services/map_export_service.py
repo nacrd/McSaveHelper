@@ -3,6 +3,7 @@
 将存档地图导出为 PNG 图片（俯视图/地形图）
 """
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Tuple, List
 import traceback
@@ -15,6 +16,13 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+
+@dataclass(frozen=True)
+class MapImageSpec:
+    width: int
+    height: int
+    estimated_mb: float
 
 
 class MapExportService:
@@ -127,7 +135,6 @@ class MapExportService:
             # 创建地图图像
             progress(0.25, "创建地图图像...")
             image = self._create_map_image(
-                world_path,
                 region_files,
                 bounds,
                 map_type,
@@ -199,7 +206,6 @@ class MapExportService:
 
     def _create_map_image(
         self,
-        world_path: Path,
         region_files: List[Path],
         bounds: Dict[str, int],
         map_type: str,
@@ -221,94 +227,146 @@ class MapExportService:
         Returns:
             PIL 图像对象
         """
-        # 计算图像尺寸（每个区块文件 32x32 区块，每个区块 16x16 方块）
-        width = (bounds["max_x"] - bounds["min_x"] + 1) * 32 * 16
-        height = (bounds["max_z"] - bounds["min_z"] + 1) * 32 * 16
-
-        # 应用缩放
-        width = width // scale
-        height = height // scale
-
-        MAX_DIMENSION = 32768
-        if width > MAX_DIMENSION or height > MAX_DIMENSION:
-            needed_scale = max(
-                ((bounds["max_x"] - bounds["min_x"] + 1) * 32 * 16) // MAX_DIMENSION + 1,
-                ((bounds["max_z"] - bounds["min_z"] + 1) * 32 * 16) // MAX_DIMENSION + 1,
-            )
-            raise ValueError(
-                f"图像尺寸过大 ({width}x{height})，超出限制 ({MAX_DIMENSION}px)。"
-                f"请将缩放比例调整为至少 1:{needed_scale}"
-            )
-
-        pixel_count = width * height
-        estimated_mb = pixel_count * 3 / (1024 * 1024)
-        if estimated_mb > 2048:
-            raise ValueError(
-                f"预计图像内存占用约 {estimated_mb:.0f} MB，超出安全限制 (2048 MB)。"
-                f"请增大缩放比例以减小图像尺寸"
-            )
-
-        log(f"创建 {width}x{height} 的图像 (预计 {estimated_mb:.0f} MB)", "INFO")
-
-        # 创建图像
+        spec = self._calculate_image_spec(bounds, scale)
+        log(
+            f"创建 {spec.width}x{spec.height} 的图像 "
+            f"(预计 {spec.estimated_mb:.0f} MB)",
+            "INFO",
+        )
         image = Image.new(
-            "RGB", (width, height), color=(
-                135, 206, 235))  # 天蓝色背景
-
+            "RGB",
+            (spec.width, spec.height),
+            color=(135, 206, 235),
+        )
         try:
-            from core.mca import NativeRegion
-
-            # 使用像素访问对象，比逐个 putpixel 调用快得多
-            pixels = image.load()
-
-            total = len(region_files)
-            for idx, region_file in enumerate(region_files):
-                # 更新进度 (25% - 95%)
-                progress(0.25 + (idx / total) * 0.70,
-                         f"渲染区块 {idx + 1}/{total}")
-
-                try:
-                    # 解析区块坐标
-                    coords = parse_region_coords(region_file)
-                    if coords is None:
-                        continue
-
-                    rx, rz = coords
-
-                    with NativeRegion.from_file(region_file) as region:
-                        for cx in range(32):
-                            for cz in range(32):
-                                try:
-                                    chunk = region.get_chunk(cx, cz)
-                                    if chunk is not None:
-                                        self._render_chunk(
-                                            image,
-                                            chunk,
-                                            rx,
-                                            rz,
-                                            cx,
-                                            cz,
-                                            bounds,
-                                            map_type,
-                                            scale,
-                                            pixels,
-                                        )
-                                except Exception:
-                                    pass  # 跳过损坏的区块
-
-                except Exception as e:
-                    log(f"处理区块文件 {region_file.name} 失败: {e}", "WARNING")
-
+            self._render_regions(
+                image,
+                region_files,
+                bounds,
+                map_type,
+                scale,
+                log,
+                progress,
+            )
         except ImportError:
             log("地图渲染后端不可用，使用简化渲染", "WARNING")
-            # 简化渲染：绘制网格
-            draw = ImageDraw.Draw(image)
-            for i in range(0, width, 16 // scale):
-                draw.line([(i, 0), (i, height)], fill=(200, 200, 200), width=1)
-            for i in range(0, height, 16 // scale):
-                draw.line([(0, i), (width, i)], fill=(200, 200, 200), width=1)
-
+            self._draw_fallback_grid(image, scale)
         return image
+
+    @staticmethod
+    def _calculate_image_spec(
+        bounds: Dict[str, int],
+        scale: int,
+    ) -> MapImageSpec:
+        region_width = bounds["max_x"] - bounds["min_x"] + 1
+        region_height = bounds["max_z"] - bounds["min_z"] + 1
+        full_width = region_width * 32 * 16
+        full_height = region_height * 32 * 16
+        width = full_width // scale
+        height = full_height // scale
+        max_dimension = 32768
+        if width > max_dimension or height > max_dimension:
+            needed_scale = max(
+                full_width // max_dimension + 1,
+                full_height // max_dimension + 1,
+            )
+            raise ValueError(
+                f"图像尺寸过大 ({width}x{height})，超出限制 ({max_dimension}px)。"
+                f"请将缩放比例调整为至少 1:{needed_scale}"
+            )
+        estimated_mb = width * height * 3 / (1024 * 1024)
+        if estimated_mb > 2048:
+            raise ValueError(
+                f"预计图像内存占用约 {estimated_mb:.0f} MB，"
+                "超出安全限制 (2048 MB)。请增大缩放比例以减小图像尺寸"
+            )
+        return MapImageSpec(width, height, estimated_mb)
+
+    def _render_regions(
+        self,
+        image: Image.Image,
+        region_files: List[Path],
+        bounds: Dict[str, int],
+        map_type: str,
+        scale: int,
+        log: Callable[[str, str], None],
+        progress: Callable[[float, str], None],
+    ) -> None:
+        from core.mca import NativeRegion
+
+        pixels = image.load()
+        total = len(region_files)
+        for index, region_file in enumerate(region_files):
+            progress(
+                0.25 + (index / total) * 0.70,
+                f"渲染区块 {index + 1}/{total}",
+            )
+            try:
+                coords = parse_region_coords(region_file)
+                if coords is None:
+                    continue
+                region_x, region_z = coords
+                with NativeRegion.from_file(region_file) as region:
+                    self._render_region_chunks(
+                        image,
+                        pixels,
+                        region,
+                        region_x,
+                        region_z,
+                        bounds,
+                        map_type,
+                        scale,
+                    )
+            except Exception as exc:
+                log(f"处理区块文件 {region_file.name} 失败: {exc}", "WARNING")
+
+    def _render_region_chunks(
+        self,
+        image: Image.Image,
+        pixels: Any,
+        region: Any,
+        region_x: int,
+        region_z: int,
+        bounds: Dict[str, int],
+        map_type: str,
+        scale: int,
+    ) -> None:
+        for chunk_x in range(32):
+            for chunk_z in range(32):
+                try:
+                    chunk = region.get_chunk(chunk_x, chunk_z)
+                    if chunk is not None:
+                        self._render_chunk(
+                            image,
+                            chunk,
+                            region_x,
+                            region_z,
+                            chunk_x,
+                            chunk_z,
+                            bounds,
+                            map_type,
+                            scale,
+                            pixels,
+                        )
+                except Exception:
+                    continue
+
+    @staticmethod
+    def _draw_fallback_grid(image: Image.Image, scale: int) -> None:
+        draw = ImageDraw.Draw(image)
+        step = max(1, 16 // scale)
+        for offset in range(0, image.width, step):
+            draw.line(
+                [(offset, 0), (offset, image.height)],
+                fill=(200, 200, 200),
+                width=1,
+            )
+        for offset in range(0, image.height, step):
+            draw.line(
+                [(0, offset), (image.width, offset)],
+                fill=(200, 200, 200),
+                width=1,
+            )
 
     def _render_chunk(
         self,
@@ -372,51 +430,73 @@ class MapExportService:
     def _get_highest_block_y(self, chunk: Any, x: int,
                              z: int) -> Optional[int]:
         try:
-            blocks = getattr(chunk, "_blocks", None)
-            if blocks is not None and hasattr(blocks, "surface_y"):
-                return int(blocks.surface_y(x, z))
-
-            cache_attr = "_mcsh_non_air_sections"
-            non_air_sections = getattr(chunk, cache_attr, None)
-            if non_air_sections is None:
-                try:
-                    from core.mca import section_range_for_chunk
-                    section_range = section_range_for_chunk(chunk)
-                except Exception:
-                    section_range = range(-4, 20)
-
-                non_air_sections = []
-                for section_y in reversed(list(section_range)):
-                    try:
-                        palette = chunk.get_palette(section_y)
-                        if palette is None:
-                            continue
-                        has_non_air = any(
-                            p is not None and not str(getattr(p, "id", "")).endswith("air")
-                            for p in palette
-                        )
-                        if has_non_air:
-                            non_air_sections.append(section_y)
-                    except Exception:
-                        continue
-                try:
-                    setattr(chunk, cache_attr, non_air_sections)
-                except Exception:
-                    pass
-
-            for section_y in non_air_sections:
-                y_start = section_y * 16
-                for y in range(y_start + 15, y_start - 1, -1):
-                    try:
-                        block = chunk.get_block(x, y, z)
-                        bid = str(getattr(block, "id", ""))
-                        if block and not bid.endswith("air"):
-                            return y
-                    except Exception:
-                        continue
-            return None
+            surface_y = self._native_surface_y(chunk, x, z)
+            if surface_y is not None:
+                return surface_y
+            return self._scan_highest_block(
+                chunk,
+                self._get_non_air_sections(chunk),
+                x,
+                z,
+            )
         except Exception:
             return None
+
+    @staticmethod
+    def _native_surface_y(chunk: Any, x: int, z: int) -> Optional[int]:
+        blocks = getattr(chunk, "_blocks", None)
+        if blocks is None or not hasattr(blocks, "surface_y"):
+            return None
+        value = blocks.surface_y(x, z)
+        return int(value) if value is not None else None
+
+    @staticmethod
+    def _get_non_air_sections(chunk: Any) -> List[int]:
+        cache_attr = "_mcsh_non_air_sections"
+        cached = getattr(chunk, cache_attr, None)
+        if isinstance(cached, list):
+            return [int(section) for section in cached]
+        try:
+            from core.mca import section_range_for_chunk
+            section_range = section_range_for_chunk(chunk)
+        except Exception:
+            section_range = range(-4, 20)
+        sections = []
+        for section_y in reversed(list(section_range)):
+            try:
+                palette = chunk.get_palette(section_y)
+                if palette and any(
+                    block is not None
+                    and not str(getattr(block, "id", "")).endswith("air")
+                    for block in palette
+                ):
+                    sections.append(section_y)
+            except Exception:
+                continue
+        try:
+            setattr(chunk, cache_attr, sections)
+        except Exception:
+            pass
+        return sections
+
+    @staticmethod
+    def _scan_highest_block(
+        chunk: Any,
+        sections: List[int],
+        x: int,
+        z: int,
+    ) -> Optional[int]:
+        for section_y in sections:
+            y_start = section_y * 16
+            for y in range(y_start + 15, y_start - 1, -1):
+                try:
+                    block = chunk.get_block(x, y, z)
+                    block_id = str(getattr(block, "id", ""))
+                    if block and not block_id.endswith("air"):
+                        return y
+                except Exception:
+                    continue
+        return None
 
     def _get_block_color(self, block: Any, y: int,
                          map_type: str) -> Tuple[int, int, int]:
