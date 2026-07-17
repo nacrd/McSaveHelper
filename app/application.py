@@ -28,11 +28,12 @@ from app.controllers.migration_controller import (
     MigrationControllerDependencies,
 )
 
-from app.ui.theme import THEME, mc_border, mc_shadow, get_theme_manager
-from app.ui.icons import IconSet
-from app.ui.sidebar import Sidebar
+from app.ui.theme import THEME, get_theme_manager
 from app.ui.view_catalog import create_default_view_catalog
-from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
+from app.ui.application_shell import (
+    ApplicationShellDependencies,
+    build_application_shell,
+)
 
 # 导入管理器
 from app.core.window_manager import (
@@ -329,153 +330,43 @@ class Application:
     # ════════════════════════════════════════════
 
     def _build_ui(self) -> None:
-        """构建应用主界面 - Modernized Minecraft aesthetic"""
-        # 标签页定义
-        self._tab_defs = [
-            {
-                "id": "explorer",
-                "label": self._t("sidebar.explorer", "存档浏览器"),
-                "icon": IconSet.MAP,
-            },
-            {
-                "id": "migrator",
-                "label": self._t("sidebar.migrator", "存档转换"),
-                "icon": IconSet.PACKAGE,
-            },
-            {
-                "id": "save_repair",
-                "label": self._t("sidebar.save_repair", "存档修复"),
-                "icon": IconSet.BUILD,
-            },
-            {
-                "id": "map_export",
-                "label": self._t("sidebar.map_export", "地图导出"),
-                "icon": IconSet.EXPORT,
-            },
-            {
-                "id": "compare",
-                "label": self._t("sidebar.compare", "存档对比"),
-                "icon": IconSet.BALANCE,
-            },
-            {
-                "id": "mappings",
-                "label": self._t("sidebar.mappings", "映射管理"),
-                "icon": IconSet.LINK,
-            },
-            {
-                "id": "server_properties",
-                "label": self._t("sidebar.server_properties", "服务器配置"),
-                "icon": IconSet.CLIPBOARD,
-            },
-            {
-                "id": "settings",
-                "label": self._t("sidebar.settings", "设置"),
-                "icon": IconSet.SETTINGS,
-            },
-        ]
-
-        # 创建内容容器 - Enhanced with better styling
-        self._content: ft.Container = ft.Container(
-            padding=20,
-            bgcolor=THEME.bg_card,
-            border=mc_border(3),
-            border_radius=8,
-            expand=True,
-        )
-
-        # 创建顶部操作按钮容器
+        """构建并绑定应用主壳层。"""
         self._top_actions = ft.Row(
             spacing=10,
             scroll=ft.ScrollMode.AUTO,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
         self._top_actions.visible = False
-
-        self.view_manager.attach_host(ViewHost(
-            content=self._content,
-            top_actions=self._top_actions,
-        ))
-
-        # 创建侧边栏
-        self._sidebar = Sidebar(
-            tabs=self._tab_defs,
+        shell = build_application_shell(ApplicationShellDependencies(
+            page=self.page,
+            translate=self._t,
             on_tab_select=self.view_manager.switch_view,
             on_tabs_reorder=self._on_tabs_reorder,
             on_import_save=self.save_context_manager.on_import_save,
-            on_set_current_save=self.save_context_manager.on_import_save,
-            on_recent_save_select=self.save_context_manager.on_recent_save_select,
-            recent_saves=self.save_context_manager.get_recent_saves(),
-            default_tab="explorer",
-        )
-
-        # 构建顶部栏
-        top_bar = self._build_top_bar()
-
-        # 可滚动内容区域 - Enhanced padding
-        self._scrollable_content = ft.Container(
-            content=self._content,
-            padding=16,
-            expand=True,
-        )
-
-        content_area = ft.Column(
-            [top_bar, self._scrollable_content],
-            spacing=0,
-            expand=True,
-        )
-
-        # 日志面板设置
-        self.floating_log_panel = FloatingLogPanel(
-            page=self.page,
-            title=self._t("log_panel.title", "日志"),
-        )
-
-        # 日志悬浮球按钮
-        self._log_fab = FloatingLogButton(
-            floating_panel=self.floating_log_panel,
-            page=self.page,
-        )
-
-        # 初始化时根据配置设置可见性
-        show_log = self.config.ui_settings.get("show_log_panel", True)
-        self._log_fab.set_visible(show_log)
-        self.floating_log_panel.set_visible(False)
-
-        # 右侧面板（内容 + 日志）
-        right_panel = ft.Stack(
-            [
-                content_area,
-                self.floating_log_panel,
-                self._log_fab,
-            ],
-            expand=True,
-        )
-
-        # 主行 - Enhanced spacing
-        self._main_row = ft.Row(
-            [self._sidebar, right_panel],
-            spacing=14,
-            vertical_alignment=ft.CrossAxisAlignment.START,
-            expand=True,
-        )
-
-        # 外壳 - Modernized with subtle gradient effect
-        self._shell = ft.Container(
-            content=self._main_row,
-            padding=14,
-            margin=ft.Margin(left=14, right=14, top=0, bottom=14),
-            bgcolor=THEME.bg_primary,
-            border=ft.Border(
-                left=ft.BorderSide(4, THEME.border_light),
-                top=ft.BorderSide(0, ft.Colors.TRANSPARENT),
-                right=ft.BorderSide(4, THEME.border_dark),
-                bottom=ft.BorderSide(4, THEME.border_dark),
+            on_recent_save_select=(
+                self.save_context_manager.on_recent_save_select
             ),
-            border_radius=10,
-            shadow=mc_shadow(6),
-            expand=True,
-        )
-
+            recent_saves=self.save_context_manager.get_recent_saves(),
+            show_log_panel=self.config.ui_settings.get(
+                "show_log_panel",
+                True,
+            ),
+            top_actions=self._top_actions,
+            progress_control=self.progress_manager.create_progress_ui(),
+            title_bar=self.window_manager.build_title_bar(),
+        ))
+        self._tab_defs = shell.tab_defs
+        self._content = shell.content
+        self._sidebar = shell.sidebar
+        self._scrollable_content = shell.scrollable_content
+        self.floating_log_panel = shell.floating_log_panel
+        self._log_fab = shell.log_button
+        self._main_row = shell.main_row
+        self._shell = shell.shell
+        self.view_manager.attach_host(ViewHost(
+            content=shell.content,
+            top_actions=self._top_actions,
+        ))
         self.window_manager.attach_responsive_host(ResponsiveShellHost(
             sidebar=self._sidebar,
             main_row=self._main_row,
@@ -483,118 +374,7 @@ class Application:
             scrollable_content=self._scrollable_content,
             content=self._content,
         ))
-
-        # 底部进度条 - Enhanced styling
-        progress_container = self.progress_manager.create_progress_ui()
-        bottom_bar = ft.Container(
-            content=ft.Container(
-                content=progress_container,
-                padding=ft.Padding(left=20, right=20, top=10, bottom=10),
-                bgcolor=THEME.mc_wood,
-                border_radius=6,
-            ),
-            bgcolor=THEME.mc_wood,
-            border=ft.Border(
-                left=ft.BorderSide(3, THEME.border_light),
-                top=ft.BorderSide(0, ft.Colors.TRANSPARENT),
-                right=ft.BorderSide(3, THEME.border_dark),
-                bottom=ft.BorderSide(3, THEME.border_dark),
-            ),
-            border_radius=8,
-            margin=ft.Margin(left=14, right=14, top=0, bottom=14),
-        )
-
-        # 应用框架 - Enhanced layout
-        app_frame = ft.Column(
-            [self.window_manager.build_title_bar(), self._shell, bottom_bar],
-            spacing=0,
-            expand=True,
-        )
-
-        self.page.add(app_frame)
-
-    def _build_top_bar(self) -> ft.Container:
-        """构建顶部栏 - Modernized Minecraft aesthetic
-
-        Returns:
-            ft.Container: 顶部栏容器
-        """
-        return ft.Container(
-            content=ft.Column(
-                [
-                    # Grass strip (Minecraft signature)
-                    ft.Container(
-                        height=6,
-                        bgcolor=THEME.mc_grass,
-                        border_radius=ft.BorderRadius(
-                            top_left=8,
-                            top_right=8,
-                            bottom_left=0,
-                            bottom_right=0,
-                        ),
-                    ),
-                    # Main header content
-                    ft.Container(
-                        content=ft.Row(
-                            [
-                                # App identity
-                                ft.Row(
-                                    [
-                                        ft.Container(
-                                            content=ft.Icon(
-                                                IconSet.PICKAXE,
-                                                size=24,
-                                                color=THEME.mc_gold,
-                                            ),
-                                            width=48,
-                                            height=48,
-                                            alignment=ft.alignment.Alignment(0, 0),
-                                            bgcolor=THEME.bg_secondary,
-                                            border=mc_border(2),
-                                            border_radius=8,
-                                        ),
-                                        ft.Column(
-                                            [
-                                                ft.Text(
-                                                    "MCSaveHelper",
-                                                    size=20,
-                                                    weight=ft.FontWeight.BOLD,
-                                                    color=THEME.text_primary,
-                                                    font_family="monospace",
-                                                ),
-                                                ft.Text(
-                                                    self._t("app.subtitle", "存档管理工具"),
-                                                    size=11,
-                                                    color=THEME.mc_grass,
-                                                    font_family="monospace",
-                                                ),
-                                            ],
-                                            spacing=3,
-                                        ),
-                                    ],
-                                    spacing=14,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                # Action buttons
-                                ft.Row(
-                                    [self._top_actions],
-                                    spacing=15,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                            ],
-                            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        ),
-                        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
-                        bgcolor=THEME.mc_wood,
-                    ),
-                ],
-                spacing=0,
-            ),
-            bgcolor=THEME.mc_wood,
-            border=mc_border(3),
-            border_radius=8,
-        )
+        self.page.add(shell.frame)
 
     def _on_tabs_reorder(self, tabs: list) -> None:
         """侧边栏标签页排序变更回调
