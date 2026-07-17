@@ -32,7 +32,7 @@ from app.ui.views.explorer.map.color_schemes import (
     get_region_color,
 )
 from app.ui.views.explorer.map import map_shapes
-from app.ui.views.explorer.map.map_hit_testing import hit_bounds, rect_contains
+from app.ui.views.explorer.map.map_hit_testing import hit_bounds
 from app.ui.views.explorer.map.camera_animator import MapCameraAnimator
 from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
@@ -44,6 +44,12 @@ from core.mca.map_coordinates import (
 from core.mca.map_navigation import (
     McaMapNavigator,
     SelectionNotification,
+)
+from core.mca.map_gestures import (
+    MapGestureResult,
+    decide_double_tap,
+    decide_secondary_tap,
+    decide_tap,
 )
 from core.mca.viewport import (
     MAX_SCALE,
@@ -342,108 +348,73 @@ class McaMapView(ft.Container):
         local_position = e.local_position
         if local_position is None:
             return
-        tap_x = local_position.x
-        tap_y = local_position.y
-
-        # Chunk/block-level selection when deeply zoomed into a region.
-        if self._view_level in {"chunk", "block"} and self._chunk_bounds:
-            for chunk_coord, bounds in self._chunk_bounds.items():
-                if rect_contains(tap_x, tap_y, bounds):
-                    level = "block" if self._view_level == "block" else "chunk"
-                    notification = self._navigator.select_chunk(
-                        chunk_coord,
-                        self._current_data,
-                        level,
-                    )
-                    self._emit_selection(notification)
-                    if (
-                        self._view_level == "block"
-                        or self._scale >= self.SCALE_BLOCK * 0.85
-                    ):
-                        self._focus_chunk(chunk_coord, animate=True, target_fill=0.78)
-                        self._view_level = "block"
-                    self._request_rebuild()
-                    return
-
-        for coord, bounds in self._cell_bounds.items():
-            if rect_contains(tap_x, tap_y, bounds):
-                if coord not in self._current_data:
-                    break
-                notification = self._navigator.select_region(
-                    coord,
-                    self._current_data,
-                )
-                self._emit_selection(notification)
-                # Single click: local zoom into the region (not full chunk level).
-                self._focus_region(coord, animate=True, target_fill=0.72)
-                self._view_level = "region"
-                break
+        result = decide_tap(
+            navigator=self._navigator,
+            region_sizes=self._current_data,
+            view_level=self._view_level,
+            scale=self._scale,
+            scale_block=self.SCALE_BLOCK,
+            hit_chunk=self._hit_chunk(local_position.x, local_position.y),
+            hit_region=self._hit_region(local_position.x, local_position.y),
+        )
+        self._apply_gesture_result(result)
 
     def _on_double_tap(self, e: Any) -> None:
         """Double-click: zoom to chunk level, or deeper into a single chunk."""
         tap_x = getattr(getattr(e, "local_position", None), "x", None)
         tap_y = getattr(getattr(e, "local_position", None), "y", None)
         if tap_x is None or tap_y is None:
-            # Some Flet versions only provide local_x/local_y on double tap.
             tap_x = getattr(e, "local_x", (self.width or 800) / 2)
             tap_y = getattr(e, "local_y", (self.height or 600) / 2)
-
-        # If already at chunk/block and a chunk is under the pointer, dive in.
-        hit_chunk = self._hit_chunk(float(tap_x), float(tap_y))
-        if hit_chunk is not None and self._view_level in {"chunk", "block"}:
-            notification = self._navigator.select_chunk(
-                hit_chunk,
-                self._current_data,
-                "block",
-            )
-            self._emit_selection(notification)
-            self._focus_chunk(hit_chunk, animate=True, target_fill=0.85)
-            self._view_level = "block"
-            return
-
-        hit = self._hit_region(float(tap_x), float(tap_y))
-        if hit is None:
-            # If already focused on a region, deepen into chunk level there.
-            if self._selected_cell is not None:
-                hit = self._selected_cell
-            else:
-                return
-
-        notification = self._navigator.select_region(
-            hit,
-            self._current_data,
-            "chunk",
+        result = decide_double_tap(
+            navigator=self._navigator,
+            region_sizes=self._current_data,
+            view_level=self._view_level,
+            hit_chunk=self._hit_chunk(float(tap_x), float(tap_y)),
+            hit_region=self._hit_region(float(tap_x), float(tap_y)),
+            selected_region=self._selected_cell,
         )
-        self._emit_selection(notification)
-        # Stronger zoom so one region fills almost the whole view → chunk grid readable.
-        self._focus_region(hit, animate=True, target_fill=0.92)
-        self._view_level = "chunk"
-        # Ensure hi-res tile for chunk inspection.
-        if self._use_topview:
-            self._request_detail_tiles([hit], force=True, priority=True)
+        self._apply_gesture_result(result)
 
     def _on_secondary_tap(self, e: Any) -> None:
         """Right-click: step back overview (block→chunk→region→world)."""
-        previous_level = self._view_level
-        notification = self._navigator.step_back(self._current_data)
-        if previous_level == "block":
-            if self._selected_cell is not None:
-                self._focus_region(self._selected_cell, animate=True, target_fill=0.88)
-            self._emit_selection(notification)
-            return
+        result = decide_secondary_tap(
+            navigator=self._navigator,
+            region_sizes=self._current_data,
+            previous_level=self._view_level,
+            selected_region=self._selected_cell,
+        )
+        self._apply_gesture_result(result)
 
-        if previous_level == "chunk":
-            if self._selected_cell is not None:
-                self._focus_region(self._selected_cell, animate=True, target_fill=0.55)
-            else:
-                self.fit_to_view(padding=0.82)
-            self._emit_selection(notification)
+    def _apply_gesture_result(self, result: Optional[MapGestureResult]) -> None:
+        if result is None:
             return
-
-        # region / world → full overview
-        # Keep selected region highlight, but zoom out to whole map.
-        self.fit_to_view(padding=0.82)
-        self._emit_selection(notification)
+        if result.notification is not None:
+            self._emit_selection(result.notification)
+        if result.focus_chunk is not None:
+            self._focus_chunk(
+                result.focus_chunk,
+                animate=True,
+                target_fill=result.focus_fill,
+            )
+        elif result.focus_region is not None:
+            self._focus_region(
+                result.focus_region,
+                animate=True,
+                target_fill=result.focus_fill,
+            )
+        if result.set_level is not None:
+            self._view_level = result.set_level
+        if result.request_detail is not None and self._use_topview:
+            self._request_detail_tiles(
+                [result.request_detail],
+                force=True,
+                priority=True,
+            )
+        if result.fit_to_view:
+            self.fit_to_view(padding=result.fit_padding)
+        if result.rebuild:
+            self._request_rebuild()
 
     def _hit_region(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
         return hit_bounds(
