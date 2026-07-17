@@ -28,27 +28,17 @@ class PerformanceMetric:
 
 
 class PerformanceMonitor:
-    """性能监控器（单例）
+    """性能监控器。
 
     核心职责：
     - 记录和存储性能指标
     - 提供指标查询和统计
     - 获取系统资源使用情况
+
+    应用默认实例通过模块级 perf_monitor 暴露；测试可直接构造新实例。
     """
 
-    _instance: Optional['PerformanceMonitor'] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self):
-        if getattr(self, '_initialized', False):
-            return
-
-        self._initialized = True
+    def __init__(self) -> None:
         self.enabled: bool = False
         self.metrics: Dict[str, deque] = {}
         self.max_samples: int = 1000

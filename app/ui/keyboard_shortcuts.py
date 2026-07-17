@@ -82,23 +82,14 @@ class KeyBinding:
 
 
 class KeyboardShortcutManager:
-    """键盘快捷键管理器（单例）"""
+    """键盘快捷键管理器。
 
-    _instance: Optional['KeyboardShortcutManager'] = None
+    应用默认实例通过模块级 shortcut_manager 暴露；测试可直接构造新实例。
+    """
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self):
-        if getattr(self, '_initialized', False):
-            return
-
+    def __init__(self) -> None:
         self.bindings: Dict[str, KeyBinding] = {}
         self.enabled: bool = True
-        self._initialized = True
 
     def register(
         self,

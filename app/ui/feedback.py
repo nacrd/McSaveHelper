@@ -58,28 +58,18 @@ class UsageEvent:
 
 
 class FeedbackCollector:
-    """反馈收集器（单例）"""
+    """反馈收集器。
 
-    _instance: Optional['FeedbackCollector'] = None
+    应用默认实例通过模块级 feedback_collector 暴露；测试可直接构造新实例。
+    """
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
-    def __init__(self):
-        if getattr(self, '_initialized', False):
-            return
-
+    def __init__(self) -> None:
         self.enabled: bool = True
         self.feedback_dir: Path = Path.home() / ".mcsavehelper" / "feedback"
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
 
         self.feedback_file: Path = self.feedback_dir / "feedback.jsonl"
         self.usage_file: Path = self.feedback_dir / "usage.jsonl"
-
-        self._initialized = True
 
     def collect_feedback(
         self,

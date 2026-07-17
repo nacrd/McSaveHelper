@@ -43,8 +43,7 @@ class Timer:
 
             if self.auto_record:
                 # 延迟导入，避免循环依赖
-                from app.ui.performance.monitor import PerformanceMonitor
-                perf_monitor = PerformanceMonitor()
+                from app.ui.performance import perf_monitor
                 perf_monitor.record(self.name, self.elapsed, "ms")
 
             if self.callback:
@@ -89,8 +88,7 @@ def log_slow_operation(threshold_ms: float = 100):
                     f"{elapsed:.2f}ms (阈值: {threshold_ms}ms)"
                 )
                 # 延迟导入，避免循环依赖
-                from app.ui.performance.monitor import PerformanceMonitor
-                perf_monitor = PerformanceMonitor()
+                from app.ui.performance import perf_monitor
                 perf_monitor.record(
                     f"slow_operation_{func.__name__}",
                     elapsed,
@@ -140,8 +138,7 @@ class AsyncOperationTracker:
             self.completed[operation_id] = elapsed
 
             # 记录到性能监控器
-            from app.ui.performance.monitor import PerformanceMonitor
-            perf_monitor = PerformanceMonitor()
+            from app.ui.performance import perf_monitor
             perf_monitor.record(
                 "async_operation",
                 elapsed * 1000,  # 转换为毫秒

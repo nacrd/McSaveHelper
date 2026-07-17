@@ -125,11 +125,11 @@ class ResourceUsageMonitor:
         self,
     ) -> tuple[PerformanceMonitorPort, HealthMonitorPort]:
         if self._performance_monitor is None:
-            from app.ui.performance.monitor import PerformanceMonitor
-            self._performance_monitor = PerformanceMonitor()
+            from app.ui.performance import perf_monitor
+            self._performance_monitor = perf_monitor
         if self._health_monitor is None:
-            from app.ui.performance.health import HealthMonitor
-            self._health_monitor = HealthMonitor()
+            from app.ui.performance import health_monitor
+            self._health_monitor = health_monitor
         return self._performance_monitor, self._health_monitor
 
     def _sample_metrics(self) -> None:
