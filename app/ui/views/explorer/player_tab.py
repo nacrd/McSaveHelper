@@ -43,7 +43,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._hud_card = card(self._player_hud, padding=15)
         left.controls.append(self._hud_card)
 
-        self._equipment = EquipmentPreview()
+        self._equipment = EquipmentPreview(self.app.item, self.app.texture)
         self._equip_card = card(self._equipment, padding=15)
         left.controls.append(self._equip_card)
 
@@ -51,7 +51,7 @@ class PlayerTabMixin(ExplorerMixinHost):
 
         right = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
         right.expand = True
-        self._inventory = InventoryGrid()
+        self._inventory = InventoryGrid(self.app.item, self.app.texture)
         right.controls.append(self._inventory)
 
         self._player_left_panel = ft.Container(content=left, width=340)
@@ -240,9 +240,7 @@ class PlayerTabMixin(ExplorerMixinHost):
                 file_types=[("JSON 文件 (*.json)", "*.json")],
             )
             if path:
-                from app.services.item_service import get_item_service
-                item_service = get_item_service()
-                count = item_service.load_language_file(Path(path))
+                count = self.app.item.load_language_file(Path(path))
                 if count > 0:
                     self.app.info_dialog(
                         "成功", f"成功导入 {count} 个物品/附魔名称。\n物品栏和装备预览将使用新名称。")

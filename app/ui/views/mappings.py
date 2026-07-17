@@ -23,6 +23,7 @@ class MappingsView(ft.Column):
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app: "Application" = app
+        self._item_service = app.item
         self._build()
 
     @property
@@ -97,9 +98,6 @@ class MappingsView(ft.Column):
                     bottom=16)))
 
     def _build_item_section(self) -> None:
-        from app.services.item_service import get_item_service
-        self._item_service = get_item_service()
-
         s = ft.Column(spacing=0)
         s.controls.append(section_title("物品 ID 映射"))
 

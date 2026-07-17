@@ -152,6 +152,23 @@ def test_config_service_has_no_hidden_singleton_lifetime() -> None:
     assert "_instance" not in source
 
 
+def test_item_and_texture_services_are_application_scoped() -> None:
+    for relative_path in (
+        "app/services/item_service.py",
+        "app/services/texture_service.py",
+    ):
+        source = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+        assert "def __new__" not in source, relative_path
+        assert "_instance" not in source, relative_path
+
+    view_sources = "\n".join(
+        source_path.read_text(encoding="utf-8")
+        for source_path in (PROJECT_ROOT / "app/ui/views").rglob("*.py")
+    )
+    assert "get_item_service" not in view_sources
+    assert "get_texture_service" not in view_sources
+
+
 def test_application_does_not_mutate_migrator_private_controls() -> None:
     application_source = (
         PROJECT_ROOT / "app" / "application.py"

@@ -16,15 +16,7 @@ from .item.parser import format_item_tooltip as _format_tooltip, parse_item as _
 class ItemService:
     """物品服务 - 处理物品名称映射和属性解析"""
 
-    _instance: Optional['ItemService'] = None
-
-    def __new__(cls) -> 'ItemService':
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init()
-        return cls._instance
-
-    def _init(self) -> None:
+    def __init__(self) -> None:
         self._name_map: Dict[str, str] = _VANILLA_ITEM_NAMES.copy()
         self._enchantment_names: Dict[str, str] = _ENCHANTMENT_NAMES.copy()
         self._max_durability: Dict[str, Optional[int]] = _MAX_DURABILITY.copy()
@@ -96,8 +88,3 @@ class ItemService:
 
     def format_item_tooltip(self, item_info: ItemInfo) -> str:
         return _format_tooltip(item_info)
-
-
-def get_item_service() -> ItemService:
-    """获取物品服务单例"""
-    return ItemService()

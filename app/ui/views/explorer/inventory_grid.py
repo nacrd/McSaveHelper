@@ -2,10 +2,10 @@
 import flet as ft
 from typing import Any, Dict, List, Optional
 
+from app.services.item_service import ItemService
+from app.services.texture_service import TextureService
 from app.ui.theme import THEME
 from app.ui.views.explorer.utils import safe_update
-from app.services.item_service import get_item_service
-from app.services.texture_service import get_texture_service
 from app.ui.views.explorer.item_slot import (
     ItemSlotControl,
     create_item_slot,
@@ -18,13 +18,18 @@ from app.ui.views.explorer.item_slot import (
 class InventoryGrid(ft.Column):
     """Minecraft 原版物品栏布局：3×9 主物品栏 + 间隔 + 1×9 快捷栏"""
 
-    def __init__(self, slot_size: int = 48) -> None:
+    def __init__(
+        self,
+        item_service: ItemService,
+        texture_service: TextureService,
+        slot_size: int = 48,
+    ) -> None:
         super().__init__(spacing=0)
         self._slot_size = slot_size
         self._slots: Dict[int, ft.Container] = {}
         self._slot_controls: Dict[int, ItemSlotControl] = {}
-        self._item_service = get_item_service()
-        self._texture_service = get_texture_service()
+        self._item_service = item_service
+        self._texture_service = texture_service
 
         def make_slot(nbt_slot: int) -> ft.Container:
             slot = create_item_slot(slot_size)

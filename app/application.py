@@ -53,7 +53,9 @@ from app.core.save_context_manager import SaveContextManager
 if TYPE_CHECKING:
     from app.services.config_service import ConfigService
     from app.services.i18n_service import I18nService
+    from app.services.item_service import ItemService
     from app.services.migration_service import MigrationService
+    from app.services.texture_service import TextureService
     from app.services.uuid_service import UUIDService
 
 
@@ -996,6 +998,14 @@ class Application:
     @property
     def uuid(self) -> UUIDService:
         return self.services.uuid
+
+    @property
+    def item(self) -> ItemService:
+        return self.services.item
+
+    @property
+    def texture(self) -> TextureService:
+        return self.services.texture
 
     @property
     def selected_view_id(self) -> Optional[str]:

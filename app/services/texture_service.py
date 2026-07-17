@@ -78,15 +78,7 @@ class TextureService:
     优先级: 内存缓存 > 本地文件缓存 > JAR提取 > 在线API
     """
 
-    _instance: Optional['TextureService'] = None
-
-    def __new__(cls) -> 'TextureService':
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init()
-        return cls._instance
-
-    def _init(self) -> None:
+    def __init__(self) -> None:
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._jar_cache_dir = Path.home() / ".mc_save_helper" / "jars"
@@ -555,7 +547,3 @@ class TextureService:
                             deleted_size / 1024 / 1024:.1f} MB)")
             except Exception as e:
                 logger.warning(f"清理 JAR 缓存失败: {e}")
-
-
-def get_texture_service() -> TextureService:
-    return TextureService()

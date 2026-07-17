@@ -1,6 +1,16 @@
 from app.services.item_service import ItemService
 
 
+def test_item_service_instances_do_not_share_custom_state():
+    left = ItemService()
+    right = ItemService()
+
+    left.set_item_mapping("testmod:isolated", "Only Left")
+
+    assert "testmod:isolated" in left.get_custom_item_mappings()
+    assert "testmod:isolated" not in right.get_custom_item_mappings()
+
+
 def test_delete_custom_item_mapping_removes_non_vanilla_mapping():
     service = ItemService()
     item_id = "testmod:custom_item"

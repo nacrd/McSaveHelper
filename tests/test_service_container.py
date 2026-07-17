@@ -9,7 +9,9 @@ from app.bootstrap.services import (
 )
 from app.services.config_service import ConfigService
 from app.services.i18n_service import I18nService
+from app.services.item_service import ItemService
 from app.services.migration_service import MigrationService
+from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
 
 
@@ -19,6 +21,8 @@ def test_service_container_builds_in_dependency_order() -> None:
     i18n = cast(I18nService, object())
     migration = cast(MigrationService, object())
     uuid = cast(UUIDService, object())
+    item = cast(ItemService, object())
+    texture = cast(TextureService, object())
 
     def create_config():
         events.append("config")
@@ -36,12 +40,22 @@ def test_service_container_builds_in_dependency_order() -> None:
         events.append("uuid")
         return uuid
 
+    def create_item():
+        events.append("item")
+        return item
+
+    def create_texture():
+        events.append("texture")
+        return texture
+
     services = create_app_services(
         ServiceFactories(
             config=create_config,
             i18n=create_i18n,
             migration=create_migration,
             uuid=create_uuid,
+            item=create_item,
+            texture=create_texture,
         )
     )
 
@@ -49,11 +63,15 @@ def test_service_container_builds_in_dependency_order() -> None:
     assert services.i18n is i18n
     assert services.migration is migration
     assert services.uuid is uuid
+    assert services.item is item
+    assert services.texture is texture
     assert events == [
         "config",
         ("i18n", config),
         ("migration", config),
         "uuid",
+        "item",
+        "texture",
     ]
 
 
