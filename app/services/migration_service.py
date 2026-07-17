@@ -133,7 +133,11 @@ class MigrationService:
                     manual,
                     log_cb)
             else:
-                custom_mappings = self._config.custom_uuid_mappings if self._config.use_custom_mapping else None
+                custom_mappings = (
+                    self._config.custom_uuid_mappings
+                    if self._config.use_custom_mapping
+                    else None
+                )
                 run_full(
                     src_path,
                     dest_path,
@@ -191,7 +195,11 @@ class MigrationService:
         self._batch_processor = BatchProcessor(
             max_concurrent,
             version_detector=self._config.detect_minecraft_version,
-            custom_mappings=self._config.custom_uuid_mappings if self._config.use_custom_mapping else None,
+            custom_mappings=(
+                self._config.custom_uuid_mappings
+                if self._config.use_custom_mapping
+                else None
+            ),
         )
         results = self._batch_processor.process_batch(
             self._batch_worlds, dest_path, world_names, mode,
@@ -229,7 +237,10 @@ class MigrationService:
         from core.converter import ConversionError, convert_world
 
         log_cb(
-            f"开始应用版本/平台转换: platform={target_platform}, version={version_value or 'keep'}", "CONVERT")
+            f"开始应用版本/平台转换: platform={target_platform}, "
+            f"version={version_value or 'keep'}",
+            "CONVERT",
+        )
         try:
             result = convert_world(
                 world_path,

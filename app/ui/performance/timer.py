@@ -143,7 +143,7 @@ class AsyncOperationTracker:
             from app.ui.performance.monitor import PerformanceMonitor
             perf_monitor = PerformanceMonitor()
             perf_monitor.record(
-                f"async_operation",
+                "async_operation",
                 elapsed * 1000,  # 转换为毫秒
                 "ms",
                 operation_id=operation_id

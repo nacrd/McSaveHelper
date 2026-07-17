@@ -160,7 +160,12 @@ class NbtLoader:
             self._log(f"加载玩家数据 {uuid} 失败: {e}", "ERROR")
             return None
 
-    def load_chunk_nbt(self, region_path: Path, chunk_x: int, chunk_z: int) -> Optional[Tuple[Any, Path]]:
+    def load_chunk_nbt(
+        self,
+        region_path: Path,
+        chunk_x: int,
+        chunk_z: int,
+    ) -> Optional[Tuple[Any, Path]]:
         """加载指定区块的 NBT 数据
 
         Args:

@@ -1,9 +1,9 @@
 """
 数据模型定义 - WorldSession 相关的数据类
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Callable
+from typing import Dict, List, Optional, Any, Callable
 
 
 @dataclass
@@ -39,7 +39,7 @@ class WorldInfo:
 @dataclass
 class Action:
     """代表一个待执行的操作"""
-    type: str  # 'modify_nbt', 'delete_region', 'rename_player', 'custom', 'modify_chunk', 'modify_json'
+    type: str  # NBT/JSON edit, region delete, player rename, custom, or chunk edit.
     target: Any  # 文件路径、坐标、UUID 等
     data: Any = None
     callback: Optional[Callable] = None

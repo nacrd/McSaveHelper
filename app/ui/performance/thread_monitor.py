@@ -22,8 +22,10 @@ class ThreadMonitoringMixin:
     def _process_thread(self, thread_id: int, frame, now: float) -> None:
         """处理单个线程的检查"""
         thread_name = self._get_thread_name(thread_id)
-        if (thread_id == threading.get_ident() or
-            self._is_exempt_thread(thread_name)):
+        if (
+            thread_id == threading.get_ident()
+            or self._is_exempt_thread(thread_name)
+        ):
             self._thread_snapshots.pop(thread_id, None)
             self._blocked_threads.discard(thread_id)
             return
@@ -106,12 +108,17 @@ class ThreadMonitoringMixin:
     ) -> None:
         """检查线程超时"""
         elapsed = now - snapshot["timestamp"]
-        threshold = (self.thread_block_timeout * 2 if is_benign_wait
-                   else self.thread_block_timeout)
+        threshold = (
+            self.thread_block_timeout * 2
+            if is_benign_wait
+            else self.thread_block_timeout
+        )
 
         if elapsed >= threshold:
-            if (not snapshot["alerted"] and
-                self._should_alert(f"thread_block_{thread_id}")):
+            if (
+                not snapshot["alerted"]
+                and self._should_alert(f"thread_block_{thread_id}")
+            ):
                 self._alert_blocked_thread(
                     snapshot, thread_id, is_benign_wait,
                     elapsed, threshold, frame
@@ -200,8 +207,10 @@ class ThreadMonitoringMixin:
                 file_name = f.f_code.co_filename
 
                 # 常见的良性等待模式
-                if func_name in ('sleep', 'wait', 'join', 'select',
-                               'poll', 'recv', 'accept'):
+                if func_name in (
+                    'sleep', 'wait', 'join', 'select',
+                    'poll', 'recv', 'accept',
+                ):
                     return True
 
                 # threading 模块的等待

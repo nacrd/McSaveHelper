@@ -12,7 +12,6 @@ from .worker import process_regions_parallel
 from .utils import (
     safe_destination_world, update_server_properties, replace_directory_tree,
     find_player_data_dirs, find_stats_dirs, find_advancements_dirs, find_data_dirs,
-    get_write_player_data_dir, get_write_stats_dir, get_write_advancements_dir,
 )
 from .types import LogCallback, ProgressCallback, UUIDMapping
 

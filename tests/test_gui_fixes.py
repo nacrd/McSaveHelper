@@ -2,7 +2,7 @@
 import sys
 
 from app.ui.icons import IconSet
-from app.ui.theme import THEME, mc_border, mc_focus_border
+from app.ui.theme import THEME, mc_focus_border
 
 
 def _check_icons() -> bool:
@@ -43,7 +43,7 @@ def _check_theme_contrast() -> bool:
     def calculate_relative_luminance(hex_color):
         """计算相对亮度"""
         hex_color = hex_color.lstrip('#')
-        r, g, b = [int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4)]
+        r, g, b = [int(hex_color[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]
 
         def adjust(c):
             return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4

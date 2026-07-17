@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
-from app.services.entity_block_search.container_searcher import ContainerSearcher, extract_container_info
+from app.services.entity_block_search.container_searcher import (
+    ContainerSearcher,
+    extract_container_info,
+)
 from app.services.entity_block_search.entity_searcher import EntitySearcher
 from app.services.entity_block_search.models import SearchCondition, SearchResult, SearchSummary
 from app.services.entity_block_search.utils import get_dimension_region_files, matches_target

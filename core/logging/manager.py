@@ -36,7 +36,11 @@ class LogManager:
 
     def _start_worker(self) -> None:
         self._running = True
-        self._worker_thread = threading.Thread(target=self._process_queue, name="LogManager-Worker", daemon=True)
+        self._worker_thread = threading.Thread(
+            target=self._process_queue,
+            name="LogManager-Worker",
+            daemon=True,
+        )
         self._worker_thread.start()
 
     def _process_queue(self) -> None:
@@ -92,19 +96,34 @@ class LogManager:
     def info(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
         self.log(LogLevel.INFO, message, module, extra)
 
-    def success(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def success(
+        self,
+        message: str,
+        module: str = "",
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.log(LogLevel.SUCCESS, message, module, extra)
 
     def api(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
         self.log(LogLevel.API, message, module, extra)
 
-    def warning(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def warning(
+        self,
+        message: str,
+        module: str = "",
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.log(LogLevel.WARNING, message, module, extra)
 
     def error(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
         self.log(LogLevel.ERROR, message, module, extra)
 
-    def critical(self, message: str, module: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    def critical(
+        self,
+        message: str,
+        module: str = "",
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.log(LogLevel.CRITICAL, message, module, extra)
 
     def flush(self) -> None:

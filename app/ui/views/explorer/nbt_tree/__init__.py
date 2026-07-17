@@ -26,7 +26,12 @@ class NBTTreeView(ft.Column):
     MAX_CHILDREN = MAX_CHILDREN
     _TYPE_INFO = TYPE_INFO
 
-    def __init__(self, on_stage_change: Optional[Callable[[List[Union[str, int]], Any, Any, str], None]] = None) -> None:
+    def __init__(
+        self,
+        on_stage_change: Optional[
+            Callable[[List[Union[str, int]], Any, Any, str], None]
+        ] = None,
+    ) -> None:
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._root_data: Any = None
@@ -37,10 +42,19 @@ class NBTTreeView(ft.Column):
         self._show_all_children = False
         self._on_stage_change = on_stage_change
         self._editable = True
-        self._placeholder = placeholder(icon=IconSet.DOCUMENT, title="NBT 数据未加载", subtitle="请通过上方数据源选择玩家或 level.dat，或输入区块坐标加载", height=180)
+        self._placeholder = placeholder(
+            icon=IconSet.DOCUMENT,
+            title="NBT 数据未加载",
+            subtitle="请通过上方数据源选择玩家或 level.dat，或输入区块坐标加载",
+            height=180,
+        )
         self.controls.append(self._placeholder)
         self._editor = NbtTreeEditor(self, on_stage_change)
-        self._renderer = NbtTreeRenderer({"edit": self._open_edit_dialog, "add": self._open_add_field_dialog, "delete": self._confirm_delete})
+        self._renderer = NbtTreeRenderer({
+            "edit": self._open_edit_dialog,
+            "add": self._open_add_field_dialog,
+            "delete": self._confirm_delete,
+        })
         self._add_field_callbacks: List[Callable] = []
         self._delete_field_callbacks: List[Callable] = []
 
@@ -77,7 +91,11 @@ class NBTTreeView(ft.Column):
 
     def search(self, query: str) -> None:
         self._search_query = query.strip().lower()
-        self._matched_keys = collect_matches(self._root_data, self._search_query) if self._root_data is not None else set()
+        self._matched_keys = (
+            collect_matches(self._root_data, self._search_query)
+            if self._root_data is not None
+            else set()
+        )
         self._rebuild_tree()
 
     def get_modified_data(self) -> Any:

@@ -1,7 +1,7 @@
 """Small nbtlib tree helpers shared by heightmaps / block palette."""
 from __future__ import annotations
 
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 
 def tag_value(node: Any) -> Any:

@@ -132,9 +132,11 @@ class KeyboardShortcutManager:
 
         # 检查冲突
         for existing_id, existing_binding in self.bindings.items():
-            if (existing_binding.key == key and
-                set(existing_binding.modifiers) == set(modifiers) and
-                    existing_id != binding_id):
+            if (
+                existing_binding.key == key
+                and set(existing_binding.modifiers) == set(modifiers)
+                and existing_id != binding_id
+            ):
                 print(
                     f"[WARNING] 快捷键冲突: {
                         binding.to_string()} 已被 {existing_id} 使用")

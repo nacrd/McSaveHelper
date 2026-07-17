@@ -247,8 +247,10 @@ class HealthMonitor(ThreadMonitoringMixin):
 
         return {
             "cpu_latest": cpu_list[-1] if cpu_list else 0.0,
-            "cpu_avg_5": (sum(cpu_list[-5:]) / min(5, len(cpu_list))
-                        if cpu_list else 0.0),
+            "cpu_avg_5": (
+                sum(cpu_list[-5:]) / min(5, len(cpu_list))
+                if cpu_list else 0.0
+            ),
             "memory_latest_mb": mem_list[-1] if mem_list else 0.0,
             "heartbeat_age_s": heartbeat_age,
             "hang_alerted": self._hang_alerted,

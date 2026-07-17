@@ -1,7 +1,12 @@
 """Item service package."""
 from .constants import _ENCHANTMENT_NAMES, _VANILLA_ITEM_NAMES
 from .models import ItemInfo
-from .language_loader import extract_language_from_jar, load_custom_mapping, load_language_file, save_custom_mapping
+from .language_loader import (
+    extract_language_from_jar,
+    load_custom_mapping,
+    load_language_file,
+    save_custom_mapping,
+)
 from .parser import format_item_tooltip, parse_item
 
 __all__ = [

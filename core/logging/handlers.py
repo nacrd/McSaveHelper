@@ -1,7 +1,7 @@
 """Log handlers: base, console, file, UI."""
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 from core.types import LogCallback
 from .models import LogLevel, LogRecord

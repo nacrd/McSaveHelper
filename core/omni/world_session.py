@@ -7,7 +7,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
 
-from .models import WorldInfo, Action, ChunkTarget
+from .models import WorldInfo
 from .world_scanner import WorldScanner
 from .nbt_loader import NbtLoader
 from .player_manager import PlayerManager
@@ -179,7 +179,12 @@ class WorldSession:
         self._nbt_loader.cache_region(x, z, path)
         return path
 
-    def load_chunk_nbt(self, region_path: Path, chunk_x: int, chunk_z: int) -> Optional[Tuple[Any, Path]]:
+    def load_chunk_nbt(
+        self,
+        region_path: Path,
+        chunk_x: int,
+        chunk_z: int,
+    ) -> Optional[Tuple[Any, Path]]:
         """加载指定区块的 NBT 数据
 
         Args:
@@ -228,12 +233,21 @@ class WorldSession:
         """队列化一个自定义操作"""
         self._action_queue.queue_custom(callback)
 
-    def queue_conversion(self, target_platform: str = "java", target_version: Optional[int] = None) -> None:
+    def queue_conversion(
+        self,
+        target_platform: str = "java",
+        target_version: Optional[int] = None,
+    ) -> None:
         """队列化一个存档转换操作"""
         self._action_queue.queue_conversion(target_platform, target_version)
 
-    def queue_modify_chunk(self, region_path: Path, chunk_x: int, chunk_z: int,
-                          full_chunk_data: Any) -> None:
+    def queue_modify_chunk(
+        self,
+        region_path: Path,
+        chunk_x: int,
+        chunk_z: int,
+        full_chunk_data: Any,
+    ) -> None:
         """队列化区块修改操作"""
         self._action_queue.queue_modify_chunk(region_path, chunk_x, chunk_z, full_chunk_data)
 

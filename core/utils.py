@@ -187,10 +187,10 @@ def replace_directory_tree(
     if dst_resolved.exists():
         if not dst_resolved.is_dir():
             raise ValueError(f"目标路径不是目录: {dst_resolved}")
-        if any(
-                dst_resolved.iterdir()) and not (
-                dst_resolved /
-                "level.dat").exists():
+        if (
+            any(dst_resolved.iterdir())
+            and not (dst_resolved / "level.dat").exists()
+        ):
             raise ValueError(f"目标目录不是 Minecraft 存档目录，拒绝删除: {dst_resolved}")
 
     dst_resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -208,8 +208,7 @@ def replace_directory_tree(
         # 复制源目录到临时目录
         shutil.copytree(
             src_resolved,
-            temp_path /
-            dst_resolved.name,
+            temp_path / dst_resolved.name,
             ignore=ignore)
 
         # 原子替换：先删除旧目录（如果存在），再移动临时目录

@@ -42,10 +42,8 @@ class WorldCompareService:
         world_info = self._compare_world_info(left, right)
         players = self._compare_players(left, right)
         regions = self._compare_regions(left_path, right_path)
-        changed = sum(
-            1 for item in world_info +
-            players +
-            regions if not item.same)
+        comparisons = world_info + players + regions
+        changed = sum(1 for item in comparisons if not item.same)
         return WorldCompareResult(
             summary={
                 "world_info": len(world_info),

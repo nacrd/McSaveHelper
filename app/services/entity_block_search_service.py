@@ -74,7 +74,11 @@ class EntityBlockSearchService:
             log_callback=log_callback,
         )
 
-    def export_results_to_text(self, output_path: Path, results: Optional[List[SearchResult]] = None) -> None:
+    def export_results_to_text(
+        self,
+        output_path: Path,
+        results: Optional[List[SearchResult]] = None,
+    ) -> None:
         """将搜索结果导出为文本文件。"""
         export_text(output_path, self.summary, self.results, results)
 
@@ -82,10 +86,23 @@ class EntityBlockSearchService:
         """导出搜索结果（匹配视图调用签名）。"""
         self.export_results_to_text(output_path, results)
 
-    def _run_search(self, world_path: Path, search_type: str, target: str, dimensions: List[str], log: Callable[[str, str], None], progress: Callable[[float, str], None]) -> None:
+    def _run_search(
+        self,
+        world_path: Path,
+        search_type: str,
+        target: str,
+        dimensions: List[str],
+        log: Callable[[str, str], None],
+        progress: Callable[[float, str], None],
+    ) -> None:
         from core.performance import get_tracker
         tracker = get_tracker()
-        with tracker.track("实体方块搜索", {"world": world_path.name, "type": search_type, "target": target}):
+        metadata = {
+            "world": world_path.name,
+            "type": search_type,
+            "target": target,
+        }
+        with tracker.track("实体方块搜索", metadata):
             log(f"开始搜索 {search_type}: {target}", "INFO")
             log(f"搜索维度: {', '.join(dimensions)}", "INFO")
             self._search_dimensions(world_path, search_type, target, dimensions, log, progress)
@@ -96,7 +113,15 @@ class EntityBlockSearchService:
             tracker.add_metadata("chunks", self.summary.scanned_chunks)
             self._add_entity_storage_warning(search_type, log)
 
-    def _search_dimensions(self, world_path: Path, search_type: str, target: str, dimensions: List[str], log: Callable[[str, str], None], progress: Callable[[float, str], None]) -> None:
+    def _search_dimensions(
+        self,
+        world_path: Path,
+        search_type: str,
+        target: str,
+        dimensions: List[str],
+        log: Callable[[str, str], None],
+        progress: Callable[[float, str], None],
+    ) -> None:
         step = 1.0 / len(dimensions)
         total_progress = 0.0
         for dimension in dimensions:
@@ -126,25 +151,43 @@ class EntityBlockSearchService:
             return BlockSearcher(self.results, self.summary)
         return ContainerSearcher(self.results, self.summary)
 
-    def _validate_request(self, world_path: Path, search_type: str, target: str, dimensions: Optional[List[str]]) -> List[str]:
+    def _validate_request(
+        self,
+        world_path: Path,
+        search_type: str,
+        target: str,
+        dimensions: Optional[List[str]],
+    ) -> List[str]:
         if not world_path.exists():
             raise FileNotFoundError(f"存档路径不存在: {world_path}")
         if search_type not in VALID_SEARCH_TYPES:
             raise ValueError(f"不支持的搜索类型: {search_type}")
         if not target:
             raise ValueError("搜索目标不能为空")
-        valid_dimensions = [d for d in (dimensions or ["overworld", "nether", "end"]) if d in VALID_DIMENSIONS]
+        selected_dimensions = dimensions or ["overworld", "nether", "end"]
+        valid_dimensions = [
+            dimension
+            for dimension in selected_dimensions
+            if dimension in VALID_DIMENSIONS
+        ]
         if not valid_dimensions:
             raise ValueError("未选择有效维度")
         return valid_dimensions
 
-    def _add_entity_storage_warning(self, search_type: str, log: Callable[[str, str], None]) -> None:
+    def _add_entity_storage_warning(
+        self,
+        search_type: str,
+        log: Callable[[str, str], None],
+    ) -> None:
         if search_type == "entity" and not self.results:
             warning = "提示: 1.18+ 存档的实体数据可能存储在独立 entities/ 区域文件中"
             self.summary.warnings.append(warning)
             log(warning, "WARNING")
 
-    def _make_logger(self, callback: Optional[Callable[[str, str], None]]) -> Callable[[str, str], None]:
+    def _make_logger(
+        self,
+        callback: Optional[Callable[[str, str], None]],
+    ) -> Callable[[str, str], None]:
         def log(msg: str, level: str = "INFO") -> None:
             logger.info(msg, module="EntityBlockSearch")
             if callback:
@@ -152,7 +195,9 @@ class EntityBlockSearchService:
         return log
 
     @staticmethod
-    def _make_progress(callback: Optional[Callable[[float, str], None]]) -> Callable[[float, str], None]:
+    def _make_progress(
+        callback: Optional[Callable[[float, str], None]],
+    ) -> Callable[[float, str], None]:
         def progress(value: float, msg: str) -> None:
             if callback:
                 callback(value, msg)

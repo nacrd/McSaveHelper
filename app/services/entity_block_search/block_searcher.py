@@ -35,12 +35,22 @@ class BlockSearcher(BaseSearcher):
                 matches.append(section_y)
         return matches
 
-    def _section_palette_matches(self, chunk: Any, section_y: int, target: str, target_block: Any) -> bool:
+    def _section_palette_matches(
+        self,
+        chunk: Any,
+        section_y: int,
+        target: str,
+        target_block: Any,
+    ) -> bool:
         try:
             palette = chunk.get_palette(section_y)
             if palette is None:
                 return False
-            return any(self._block_matches(block, target, target_block) for block in palette if block is not None)
+            return any(
+                self._block_matches(block, target, target_block)
+                for block in palette
+                if block is not None
+            )
         except Exception:
             return False
 
@@ -67,14 +77,34 @@ class BlockSearcher(BaseSearcher):
                     except Exception:
                         continue
 
-    def _check_block_at(self, chunk: Any, target: str, dimension: str, x: int, y: int, z: int) -> None:
+    def _check_block_at(
+        self,
+        chunk: Any,
+        target: str,
+        dimension: str,
+        x: int,
+        y: int,
+        z: int,
+    ) -> None:
         # 保留向后兼容：内部已内联到 _scan_section，减少一次函数调用开销
         try:
             block = chunk.get_block(x, y, z)
             if block is None or not self._block_matches(block, target, None):
                 return
             world_x, world_z = chunk.x * 16 + x, chunk.z * 16 + z
-            self.results.append(SearchResult("block", get_block_name(block), (world_x, y, world_z), dimension, self.container_helper.get_container_info_at(chunk, world_x, y, world_z)))
+            container_info = self.container_helper.get_container_info_at(
+                chunk,
+                world_x,
+                y,
+                world_z,
+            )
+            self.results.append(SearchResult(
+                "block",
+                get_block_name(block),
+                (world_x, y, world_z),
+                dimension,
+                container_info,
+            ))
         except Exception:
             pass
 

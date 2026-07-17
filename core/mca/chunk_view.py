@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 from core.mca.block_palette import ChunkBlocks, get_chunk_blocks
-from core.mca.errors import ChunkMissing, CorruptChunk, McaError
+from core.mca.errors import ChunkMissing
 from core.mca.nbt_access import as_int, first_key
 from core.mca.region_file import RegionFile
 from core.mca.versions import section_y_range
@@ -29,7 +29,13 @@ class NamedBlock:
 class ChunkView:
     __slots__ = ("data", "x", "z", "version", "_blocks")
 
-    def __init__(self, nbt: Any, world_cx: int, world_cz: int, blocks: Optional[ChunkBlocks] = None) -> None:
+    def __init__(
+        self,
+        nbt: Any,
+        world_cx: int,
+        world_cz: int,
+        blocks: Optional[ChunkBlocks] = None,
+    ) -> None:
         self.data = nbt
         self.x = int(world_cx)
         self.z = int(world_cz)

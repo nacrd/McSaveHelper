@@ -29,14 +29,20 @@ class EntitySearcher(BaseSearcher):
             if len(pos) < 3:
                 return
             from .models import SearchResult
-            result = SearchResult("entity", entity_id, self._entity_pos(pos), dimension, self._entity_info(entity, entity_id))
+            result = SearchResult(
+                "entity",
+                entity_id,
+                self._entity_pos(pos),
+                dimension,
+                self._entity_info(entity, entity_id),
+            )
             self.results.append(result)
         except Exception:
             pass
 
     @staticmethod
     def _entity_pos(pos: Any) -> tuple:
-        return (int(float(tag_value(pos[0]))), int(float(tag_value(pos[1]))), int(float(tag_value(pos[2]))))
+        return tuple(int(float(tag_value(value))) for value in pos[:3])
 
     def _entity_info(self, entity: Any, entity_id: str) -> dict:
         extra_info = {}

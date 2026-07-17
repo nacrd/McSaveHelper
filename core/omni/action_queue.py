@@ -141,7 +141,11 @@ class ActionQueue:
         self._action_queue.append(action)
         self._log("已队列化自定义操作", "QUEUE")
 
-    def queue_conversion(self, target_platform: str = "java", target_version: Optional[int] = None) -> None:
+    def queue_conversion(
+        self,
+        target_platform: str = "java",
+        target_version: Optional[int] = None,
+    ) -> None:
         """队列化一个存档转换操作
 
         Args:
@@ -167,8 +171,13 @@ class ActionQueue:
         self.queue_custom(conversion_callback)
         self._log(f"已队列化转换操作到平台 {target_platform}", "QUEUE")
 
-    def queue_modify_chunk(self, region_path: Path, chunk_x: int, chunk_z: int,
-                          full_chunk_data: Any) -> None:
+    def queue_modify_chunk(
+        self,
+        region_path: Path,
+        chunk_x: int,
+        chunk_z: int,
+        full_chunk_data: Any,
+    ) -> None:
         """队列化区块修改操作
 
         Args:

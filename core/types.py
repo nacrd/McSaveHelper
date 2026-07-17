@@ -3,7 +3,7 @@
 
 定义项目中使用的通用类型别名，提高代码可读性和类型安全。
 """
-from typing import Callable, Dict, List, Optional, Tuple, Any, Union
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Tuple, Union
 from pathlib import Path
 
 # 日志回调类型
@@ -37,8 +37,6 @@ FileScanResult = List[Path]
 
 # NBT 标签类型（延迟导入：避免 types 模块在启动期就拉入 nbtlib 重库。
 # 类型注解在运行时无需真实类型，用 TYPE_CHECKING 守卫即可。）
-from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:
     import nbtlib
     NBTTag = Union[

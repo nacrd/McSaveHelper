@@ -46,8 +46,14 @@ def save_custom_mapping(path: Path, name_map: Dict[str, str],
                         vanilla_enchants: Dict[str, str]) -> None:
     items = {k: v for k, v in name_map.items() if vanilla_items.get(k) != v}
     enchants = {k: v for k, v in enchantment_names.items() if vanilla_enchants.get(k) != v}
-    path.write_text(json.dumps({"items": items, "enchantments": enchants},
-                                ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {"items": items, "enchantments": enchants},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 def extract_language_from_jar(jar_path: Path, name_map: Dict[str, str],

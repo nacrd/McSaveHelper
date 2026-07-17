@@ -94,7 +94,11 @@ def format_primitive(value: Any, type_name: str) -> str:
 
 def coerce_value(raw: str, original: Any, type_name: str) -> Any:
     value_type = type(original)
-    if type_name in ("Byte", "Short", "Int", "Long", "TAG_Byte", "TAG_Short", "TAG_Int", "TAG_Long"):
+    integer_types = (
+        "Byte", "Short", "Int", "Long",
+        "TAG_Byte", "TAG_Short", "TAG_Int", "TAG_Long",
+    )
+    if type_name in integer_types:
         return value_type(int(raw.strip()))
     if type_name in ("Float", "Double", "TAG_Float", "TAG_Double"):
         return value_type(float(raw.strip()))
@@ -142,7 +146,11 @@ def create_default_value(type_name: str, raw_value: str) -> Any:
         "String": lambda: nbtlib.String(raw_value),
         "Compound": lambda: nbtlib.Compound({}),
         "List": lambda: [],
-        "Boolean": lambda: nbtlib.Byte(1 if raw_value.strip().lower() in ("true", "1", "yes", "y", "是") else 0),
+        "Boolean": lambda: nbtlib.Byte(
+            1
+            if raw_value.strip().lower() in ("true", "1", "yes", "y", "是")
+            else 0
+        ),
     }
     if type_name in factories:
         return factories[type_name]()

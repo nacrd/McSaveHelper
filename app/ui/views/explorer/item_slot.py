@@ -70,8 +70,18 @@ def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
 
     stack = ft.Stack(
         [
-            ft.Container(content=image, alignment=ft.alignment.Alignment(0, 0), width=slot_size, height=slot_size),
-            ft.Container(content=icon, alignment=ft.alignment.Alignment(0, 0), width=slot_size, height=slot_size),
+            ft.Container(
+                content=image,
+                alignment=ft.alignment.Alignment(0, 0),
+                width=slot_size,
+                height=slot_size,
+            ),
+            ft.Container(
+                content=icon,
+                alignment=ft.alignment.Alignment(0, 0),
+                width=slot_size,
+                height=slot_size,
+            ),
             ft.Container(
                 content=count_text,
                 alignment=ft.alignment.Alignment(1, 1),

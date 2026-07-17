@@ -111,7 +111,13 @@ def _palette_index(data: List[int], index: int, bits: int, stretch: bool) -> int
 class _SectionData:
     __slots__ = ("palette", "data", "bits", "stretch", "legacy_blocks")
 
-    def __init__(self, palette: List[str], data: Optional[List[int]], stretch: bool, legacy_blocks: Optional[List[int]] = None) -> None:
+    def __init__(
+        self,
+        palette: List[str],
+        data: Optional[List[int]],
+        stretch: bool,
+        legacy_blocks: Optional[List[int]] = None,
+    ) -> None:
         self.palette = palette
         self.data = data
         self.bits = _bits_per_entry(len(palette)) if palette else 0
@@ -122,7 +128,10 @@ class _SectionData:
 class ChunkBlocks:
     """Parsed chunk view with lazy section decoding for topview speed."""
 
-    __slots__ = ("root", "version", "sections", "heightmap", "section_ys_desc", "_section_raw", "_stretch", "_legacy")
+    __slots__ = (
+        "root", "version", "sections", "heightmap", "section_ys_desc",
+        "_section_raw", "_stretch", "_legacy",
+    )
 
     def __init__(self, chunk_nbt: Any) -> None:
         self.root, self.version = chunk_root_and_version(chunk_nbt)

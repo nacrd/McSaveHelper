@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from core.scanner import scan_all_regions
-from core.utils import replace_directory_tree, safe_destination_world, update_server_properties, validate_world_name
+from core.utils import (
+    replace_directory_tree,
+    safe_destination_world,
+    update_server_properties,
+    validate_world_name,
+)
 from core.worker import process_regions_parallel
 
 

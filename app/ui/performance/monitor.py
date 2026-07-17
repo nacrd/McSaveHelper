@@ -184,9 +184,9 @@ class PerformanceMonitor:
         """打印性能摘要到控制台"""
         summary = self.summary()
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("性能监控摘要")
-        print("="*60)
+        print("=" * 60)
 
         for metric_name, stats in summary.items():
             print(f"\n{metric_name}:")
@@ -198,4 +198,4 @@ class PerformanceMonitor:
 
         print(f"\n内存使用: {self.get_memory_usage():.2f} MB")
         print(f"CPU 使用率: {self.get_cpu_percent():.1f}%")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")

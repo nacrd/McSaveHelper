@@ -1,6 +1,6 @@
 """Container extraction and search helpers."""
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict
 
 from .base_searcher import BaseSearcher
 from .models import SearchResult
@@ -44,7 +44,13 @@ class ContainerSearcher(BaseSearcher):
             position = get_block_entity_position(block_entity)
             if position is None:
                 return
-            self.results.append(SearchResult("container", container_id, position, dimension, extract_container_info(block_entity)))
+            self.results.append(SearchResult(
+                "container",
+                container_id,
+                position,
+                dimension,
+                extract_container_info(block_entity),
+            ))
         except Exception:
             pass
 
@@ -60,7 +66,10 @@ def extract_container_info(block_entity: Any) -> Dict[str, Any]:
             parsed_items.append(f"{prefix}{item_id} x{count}")
         except Exception:
             pass
-    info = {"item_count": len(parsed_items), "items": "; ".join(parsed_items) if parsed_items else "空"}
+    info = {
+        "item_count": len(parsed_items),
+        "items": "; ".join(parsed_items) if parsed_items else "空",
+    }
     custom_name = block_entity.get("CustomName", None) if hasattr(block_entity, "get") else None
     if custom_name:
         info["custom_name"] = tag_to_str(custom_name)
