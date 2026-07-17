@@ -1,13 +1,15 @@
 """纹理服务 - 管理 Minecraft 物品纹理的获取、缓存和提供"""
 import base64
+import hashlib
 import logging
 import os
 import platform
 import threading
 import zipfile
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
@@ -18,6 +20,15 @@ _RESOURCE_BASE_URL = "https://resources.download.minecraft.net"
 _JAR_TEXTURE_PREFIX = "assets/minecraft/textures/"
 _REQUEST_TIMEOUT = 10
 _MAX_MEMORY_CACHE = 500
+
+
+@dataclass(frozen=True)
+class ClientJarInfo:
+    version_id: str
+    url: str
+    sha1: Optional[str]
+    size: int
+
 
 _BLOCK_SUFFIXES = (
     "_block", "_ore", "_log", "_wood", "_stem", "_planks", "_stone",
@@ -331,97 +342,112 @@ class TextureService:
         """从 Mojang 官方下载客户端 JAR，并自动清理旧版本"""
         try:
             logger.info("开始下载 Minecraft 客户端 JAR...")
-
-            # 0. 清理旧版本 JAR（保留最新的 1-2 个版本）
             self._cleanup_old_jars(keep_count=1)
-
-            # 1. 获取版本清单
-            resp = requests.get(_ASSET_INDEX_URL, timeout=_REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                logger.warning("无法获取版本清单")
+            info = self._resolve_latest_client_jar()
+            if info is None:
                 return None
+            jar_path = self._jar_cache_dir / (
+                f"minecraft-{info.version_id}-client.jar"
+            )
+            if self._is_cached_jar_valid(jar_path, info.sha1):
+                logger.info(f"使用缓存的 JAR: {jar_path}")
+                return jar_path
+            if self._stream_client_jar(info, jar_path):
+                logger.info(f"JAR 下载完成: {jar_path}")
+                return jar_path
+        except Exception as exc:
+            logger.error(f"下载 JAR 失败: {exc}")
+        return None
 
-            manifest = resp.json()
-            latest_id = manifest.get("latest", {}).get("release")
-            if not latest_id:
-                logger.warning("无法获取最新版本 ID")
-                return None
-
-            logger.info(f"最新版本: {latest_id}")
-
-            # 2. 获取版本 URL
-            version_url = None
-            for v in manifest.get("versions", []):
-                if v.get("id") == latest_id:
-                    version_url = v.get("url")
-                    break
-
-            if not version_url:
-                logger.warning("无法获取版本 URL")
-                return None
-
-            # 3. 获取版本数据
-            resp2 = requests.get(version_url, timeout=_REQUEST_TIMEOUT)
-            if resp2.status_code != 200:
-                logger.warning("无法获取版本数据")
-                return None
-
-            version_data = resp2.json()
-            client_info = version_data.get("downloads", {}).get("client")
-            if not client_info:
-                logger.warning("无法获取客户端下载信息")
-                return None
-
-            jar_url = client_info.get("url")
-            jar_sha1 = client_info.get("sha1")
-            jar_size = client_info.get("size", 0)
-
-            if not jar_url:
-                logger.warning("无法获取 JAR 下载 URL")
-                return None
-
-            # 4. 检查缓存
-            jar_path = self._jar_cache_dir / \
-                f"minecraft-{latest_id}-client.jar"
-            if jar_path.exists():
-                # 验证 SHA1
-                import hashlib
-                with open(jar_path, "rb") as f:
-                    file_hash = hashlib.sha1(f.read()).hexdigest()
-                if file_hash == jar_sha1:
-                    logger.info(f"使用缓存的 JAR: {jar_path}")
-                    return jar_path
-                else:
-                    logger.warning("缓存的 JAR SHA1 校验失败，重新下载")
-                    jar_path.unlink()
-
-            # 5. 下载 JAR
-            logger.info(f"开始下载 JAR ({jar_size / 1024 / 1024:.1f} MB)...")
-            resp3 = requests.get(jar_url, timeout=300, stream=True)
-            if resp3.status_code != 200:
-                logger.warning(f"下载失败: HTTP {resp3.status_code}")
-                return None
-
-            # 流式写入文件
-            with open(jar_path, "wb") as f:
-                downloaded = 0
-                for chunk in resp3.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if downloaded % (1024 * 1024) == 0:  # 每 1MB 记录一次
-                            logger.debug(
-                                f"已下载: {
-                                    downloaded /
-                                    1024 /
-                                    1024:.1f} MB")
-
-            logger.info(f"JAR 下载完成: {jar_path}")
-            return jar_path
-
-        except Exception as e:
-            logger.error(f"下载 JAR 失败: {e}")
+    def _resolve_latest_client_jar(self) -> Optional[ClientJarInfo]:
+        manifest = self._request_json(_ASSET_INDEX_URL, "无法获取版本清单")
+        if manifest is None:
             return None
+        latest_id = manifest.get("latest", {}).get("release")
+        if not latest_id:
+            logger.warning("无法获取最新版本 ID")
+            return None
+        logger.info(f"最新版本: {latest_id}")
+        version_url = next(
+            (
+                version.get("url")
+                for version in manifest.get("versions", [])
+                if version.get("id") == latest_id
+            ),
+            None,
+        )
+        if not version_url:
+            logger.warning("无法获取版本 URL")
+            return None
+        version_data = self._request_json(version_url, "无法获取版本数据")
+        if version_data is None:
+            return None
+        client = version_data.get("downloads", {}).get("client")
+        if not client:
+            logger.warning("无法获取客户端下载信息")
+            return None
+        jar_url = client.get("url")
+        if not jar_url:
+            logger.warning("无法获取 JAR 下载 URL")
+            return None
+        return ClientJarInfo(
+            version_id=str(latest_id),
+            url=str(jar_url),
+            sha1=client.get("sha1"),
+            size=int(client.get("size", 0)),
+        )
+
+    @staticmethod
+    def _request_json(url: str, warning: str) -> Optional[Dict[str, Any]]:
+        response = requests.get(url, timeout=_REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            logger.warning(warning)
+            return None
+        data = response.json()
+        return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _file_sha1(path: Path) -> str:
+        digest = hashlib.sha1()
+        with open(path, "rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def _is_cached_jar_valid(self, jar_path: Path, expected_sha1: Optional[str]) -> bool:
+        if not jar_path.exists():
+            return False
+        if expected_sha1 and self._file_sha1(jar_path) == expected_sha1:
+            return True
+        logger.warning("缓存的 JAR SHA1 校验失败，重新下载")
+        jar_path.unlink(missing_ok=True)
+        return False
+
+    @staticmethod
+    def _stream_client_jar(info: ClientJarInfo, jar_path: Path) -> bool:
+        logger.info(f"开始下载 JAR ({info.size / 1024 / 1024:.1f} MB)...")
+        response = requests.get(info.url, timeout=300, stream=True)
+        if response.status_code != 200:
+            logger.warning(f"下载失败: HTTP {response.status_code}")
+            return False
+        temp_path = jar_path.with_suffix(jar_path.suffix + ".part")
+        try:
+            with open(temp_path, "wb") as file:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    file.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (1024 * 1024) == 0:
+                        logger.debug(
+                            f"已下载: {downloaded / 1024 / 1024:.1f} MB"
+                        )
+            temp_path.replace(jar_path)
+            return True
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def _cleanup_old_jars(self, keep_count: int = 1) -> None:
         """清理旧版本 JAR 文件，只保留最新的 N 个版本"""
