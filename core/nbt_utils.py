@@ -3,6 +3,64 @@ from typing import List, Optional, Tuple, Any
 
 from .types import UUIDMapping
 
+_UUID_STRING_KEYS = {
+    "owner",
+    "uuid",
+    "trusted",
+    "target",
+    "id",
+    "owneruuid",
+    "playeruuid",
+}
+
+
+def _replace_int_array(tag: Any, mappings: List[UUIDMapping]) -> Optional[Tuple[Any, int]]:
+    if not isinstance(tag, nbtlib.tag.IntArray):
+        return None
+    current = list(tag)
+    for mapping in mappings:
+        if current == mapping[0]:
+            return nbtlib.tag.IntArray(mapping[1]), 1
+    return None
+
+
+def _replace_string(
+    tag: Any,
+    mappings: List[UUIDMapping],
+    key_name: Optional[str],
+) -> Optional[Tuple[Any, int]]:
+    if not isinstance(tag, nbtlib.tag.String):
+        return None
+    if not key_name or key_name.lower() not in _UUID_STRING_KEYS:
+        return None
+    current = str(tag)
+    for mapping in mappings:
+        if current == mapping[2]:
+            return nbtlib.tag.String(mapping[3]), 1
+    return None
+
+
+def _replace_compound_pairs(tag: dict, mappings: List[UUIDMapping]) -> int:
+    changes = 0
+    for mapping in mappings:
+        old_most, old_least = mapping[4]
+        new_most, new_least = mapping[5]
+        for key in list(tag.keys()):
+            if "Most" not in key:
+                continue
+            least_key = f"{key.replace('Most', '')}Least"
+            if least_key not in tag:
+                continue
+            try:
+                matches = int(tag[key]) == old_most and int(tag[least_key]) == old_least
+            except (ValueError, TypeError, KeyError):
+                matches = False
+            if matches:
+                tag[key] = nbtlib.tag.Long(new_most)
+                tag[least_key] = nbtlib.tag.Long(new_least)
+                changes += 1
+    return changes
+
 
 def patch_nbt(
     tag: Any,
@@ -19,57 +77,25 @@ def patch_nbt(
     Returns:
         (修改后的 tag, 修改次数)
     """
-    changes = 0
+    replacement = _replace_int_array(tag, mappings)
+    if replacement is not None:
+        return replacement
+    replacement = _replace_string(tag, mappings, key_name)
+    if replacement is not None:
+        return replacement
 
-    # IntArray (1.16+)
-    if isinstance(tag, nbtlib.tag.IntArray):
-        curr = list(tag)
-        for m in mappings:
-            if curr == m[0]:
-                return nbtlib.tag.IntArray(m[1]), 1
-
-    # String (白名单内)
-    if isinstance(tag, nbtlib.tag.String):
-        if key_name and key_name.lower() in {
-            'owner',
-            'uuid',
-            'trusted',
-            'target',
-            'id',
-            'owneruuid',
-                'playeruuid'}:
-            curr = str(tag)
-            for m in mappings:
-                if curr == m[2]:
-                    return nbtlib.tag.String(m[3]), 1
-
-    # Compound (Most/Least)
     if isinstance(tag, dict):
-        for m in mappings:
-            old_m, old_l = m[4]
-            new_m, new_l = m[5]
-            for k in list(tag.keys()):
-                if 'Most' in k:
-                    suffix = k.replace('Most', '')
-                    least_k = f"{suffix}Least"
-                    if least_k in tag:
-                        try:
-                            if int(
-                                    tag[k]) == old_m and int(
-                                    tag[least_k]) == old_l:
-                                tag[k] = nbtlib.tag.Long(new_m)
-                                tag[least_k] = nbtlib.tag.Long(new_l)
-                                changes += 1
-                        except (ValueError, TypeError, KeyError):
-                            pass
+        changes = _replace_compound_pairs(tag, mappings)
         for k in tag:
             tag[k], c = patch_nbt(tag[k], mappings, k)
             changes += c
+        return tag, changes
 
-    # List
-    elif isinstance(tag, list):
+    if isinstance(tag, list):
+        changes = 0
         for i in range(len(tag)):
             tag[i], c = patch_nbt(tag[i], mappings, key_name)
             changes += c
+        return tag, changes
 
-    return tag, changes
+    return tag, 0

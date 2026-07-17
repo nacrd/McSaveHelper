@@ -45,6 +45,58 @@ def test_patch_nbt_matches_signed_int_array_uuid():
     assert list(patched["Owner"]) == uuid_to_ints(new_uuid)
 
 
+def test_patch_nbt_updates_string_and_most_least_forms():
+    old_uuid = "11111111-2222-3333-4444-555555555555"
+    new_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    mapping = (
+        uuid_to_ints(old_uuid),
+        uuid_to_ints(new_uuid),
+        old_uuid,
+        new_uuid,
+        uuid_to_most_least(old_uuid),
+        uuid_to_most_least(new_uuid),
+    )
+    old_most, old_least = mapping[4]
+    new_most, new_least = mapping[5]
+    tag = nbtlib.tag.Compound({
+        "OwnerUUID": nbtlib.tag.String(old_uuid),
+        "OwnerMost": nbtlib.tag.Long(old_most),
+        "OwnerLeast": nbtlib.tag.Long(old_least),
+    })
+
+    patched, changes = patch_nbt(tag, [mapping])
+
+    assert changes == 2
+    assert str(patched["OwnerUUID"]) == new_uuid
+    assert int(patched["OwnerMost"]) == new_most
+    assert int(patched["OwnerLeast"]) == new_least
+
+
+def test_patch_nbt_recurses_through_lists_and_respects_string_key_whitelist():
+    old_uuid = "11111111-2222-3333-4444-555555555555"
+    new_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    mapping = (
+        uuid_to_ints(old_uuid),
+        uuid_to_ints(new_uuid),
+        old_uuid,
+        new_uuid,
+        uuid_to_most_least(old_uuid),
+        uuid_to_most_least(new_uuid),
+    )
+    tag = nbtlib.tag.Compound({
+        "Trusted": nbtlib.tag.List[nbtlib.tag.String]([
+            nbtlib.tag.String(old_uuid),
+        ]),
+        "DisplayName": nbtlib.tag.String(old_uuid),
+    })
+
+    patched, changes = patch_nbt(tag, [mapping])
+
+    assert changes == 1
+    assert str(patched["Trusted"][0]) == new_uuid
+    assert str(patched["DisplayName"]) == old_uuid
+
+
 def test_build_mappings_uses_injected_custom_mapping(tmp_path: Path):
     world = tmp_path / "world"
     playerdata = world / "playerdata"

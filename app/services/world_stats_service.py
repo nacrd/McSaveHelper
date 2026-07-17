@@ -167,42 +167,46 @@ class WorldStatsService:
         """分析单个区块的方块和实体"""
         block_counter: Counter[str] = Counter()
         entity_counter: Counter[str] = Counter()
-
         try:
-            if hasattr(chunk, 'data') and chunk.data:
-                data = chunk.data
-
-                sections = data.get('sections', [])
-                if sections:
-                    for section in sections:
-                        if section is None:
-                            continue
-                        block_states = section.get('block_states', {})
-                        if block_states:
-                            palette = block_states.get('palette', [])
-                            for block in palette:
-                                block_id = str(block.get('Name', ''))
-                                if block_id and block_id not in self.AIR_BLOCKS:
-                                    block_counter[block_id] += 1
-
-                entities = data.get('entities', [])
-                if entities:
-                    for entity in entities:
-                        entity_id = str(entity.get('id', ''))
-                        if entity_id:
-                            entity_counter[entity_id] += 1
-
-                block_entities = data.get('block_entities', [])
-                if block_entities:
-                    for be in block_entities:
-                        be_id = str(be.get('id', ''))
-                        if be_id:
-                            entity_counter[f"block:{be_id}"] += 1
-
+            data = getattr(chunk, 'data', None)
+            if not data:
+                return block_counter, entity_counter
+            block_counter.update(self._count_palette_blocks(data))
+            entity_counter.update(self._count_entities(data, 'entities'))
+            entity_counter.update(self._count_entities(
+                data,
+                'block_entities',
+                prefix='block:',
+            ))
         except Exception:
             pass
-
         return block_counter, entity_counter
+
+    def _count_palette_blocks(self, data: Any) -> Counter[str]:
+        counter: Counter[str] = Counter()
+        for section in data.get('sections', []):
+            if section is None:
+                continue
+            block_states = section.get('block_states', {})
+            for block in block_states.get('palette', []):
+                block_id = str(block.get('Name', ''))
+                if block_id and block_id not in self.AIR_BLOCKS:
+                    counter[block_id] += 1
+        return counter
+
+    @staticmethod
+    def _count_entities(
+        data: Any,
+        key: str,
+        *,
+        prefix: str = '',
+    ) -> Counter[str]:
+        counter: Counter[str] = Counter()
+        for entity in data.get(key, []):
+            entity_id = str(entity.get('id', ''))
+            if entity_id:
+                counter[f"{prefix}{entity_id}"] += 1
+        return counter
 
 
 def get_world_stats_service(

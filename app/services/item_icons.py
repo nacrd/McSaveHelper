@@ -99,6 +99,25 @@ ITEM_EMOJI_MAP = {
     "minecraft:jukebox": "📻",
 }
 
+_EMOJI_FALLBACK_RULES = (
+    (("sword",), "⚔️"),
+    (("pickaxe",), "⛏️"),
+    (("axe",), "🪓"),
+    (("shovel", "spade"), "🥄"),
+    (("hoe",), "🚜"),
+    (("helmet",), "🪖"),
+    (("chestplate",), "👔"),
+    (("leggings",), "👖"),
+    (("boots",), "👢"),
+    (("_ore",), "⛰️"),
+    (("_log", "wood"), "🪵"),
+    (("_planks",), "🟫"),
+    (("stone",), "🪨"),
+    (("dirt", "grass"), "🟫"),
+    (("glass",), "🔲"),
+    (("food", "cooked", "bread", "stew"), "🍖"),
+)
+
 
 def get_item_emoji(item_id: str) -> str:
     """获取物品对应的 Emoji，如果没有则返回默认图标"""
@@ -111,45 +130,7 @@ def get_item_emoji(item_id: str) -> str:
 
     _, local_id = item_id.split(":", 1)
 
-    # 工具类
-    if "sword" in local_id:
-        return "⚔️"
-    if "pickaxe" in local_id:
-        return "⛏️"
-    if "axe" in local_id:
-        return "🪓"
-    if "shovel" in local_id or "spade" in local_id:
-        return "🥄"
-    if "hoe" in local_id:
-        return "🚜"
-
-    # 盔甲类
-    if "helmet" in local_id:
-        return "🪖"
-    if "chestplate" in local_id:
-        return "👔"
-    if "leggings" in local_id:
-        return "👖"
-    if "boots" in local_id:
-        return "👢"
-
-    # 方块类
-    if "_ore" in local_id:
-        return "⛰️"
-    if "_log" in local_id or "wood" in local_id:
-        return "🪵"
-    if "_planks" in local_id:
-        return "🟫"
-    if "stone" in local_id:
-        return "🪨"
-    if "dirt" in local_id or "grass" in local_id:
-        return "🟫"
-    if "glass" in local_id:
-        return "🔲"
-
-    # 食物类
-    if "food" in local_id or "cooked" in local_id or "bread" in local_id or "stew" in local_id:
-        return "🍖"
-
-    # 默认
+    for needles, emoji in _EMOJI_FALLBACK_RULES:
+        if any(needle in local_id for needle in needles):
+            return emoji
     return "📦"
