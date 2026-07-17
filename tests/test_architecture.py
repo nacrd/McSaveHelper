@@ -272,7 +272,21 @@ def test_region_map_service_is_not_a_global_singleton() -> None:
 
     assert "def __new__" not in source
     assert "_region_map_service_instance" not in source
+    assert "get_region_map_service" not in source
     assert "def close(self)" in source
+
+    map_view_source = (
+        PROJECT_ROOT / "app/ui/views/explorer/map/mca_map_view.py"
+    ).read_text(encoding="utf-8")
+    explorer_source = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    application_source = (
+        PROJECT_ROOT / "app/application.py"
+    ).read_text(encoding="utf-8")
+    assert "get_region_map_service" not in map_view_source
+    assert "get_region_map_service" not in explorer_source
+    assert "create_region_map_service" in application_source
 
 
 def test_lightweight_operation_services_are_not_global_singletons() -> None:

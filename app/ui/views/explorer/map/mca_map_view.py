@@ -15,7 +15,7 @@ import asyncio
 import threading
 import time
 from concurrent.futures import Future as ConcurrentFuture
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
 import flet as ft
 
@@ -24,7 +24,6 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.services.region_map_service import RegionMapService, get_region_map_service
 from app.ui.utils import run_on_ui
 from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
@@ -38,6 +37,11 @@ from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
 )
+from core.mca.map_coordinates import (
+    format_chunk_block_range,
+    format_region_block_range,
+    format_region_coordinate_label,
+)
 from core.mca.viewport import (
     MAX_SCALE,
     MIN_SCALE,
@@ -50,6 +54,9 @@ from core.mca.viewport import (
     ViewportTarget,
     view_level_from_scale,
 )
+
+if TYPE_CHECKING:
+    from app.services.region_map_service import RegionMapService
 
 
 MapSelectionCallback = Callable[
@@ -75,7 +82,7 @@ class McaMapView(ft.Container):
 
     def __init__(
         self,
-        map_service: Optional[RegionMapService] = None,
+        map_service: RegionMapService,
         on_selection_changed: Optional[MapSelectionCallback] = None,
         width: int = 700,
         height: int = 450,
@@ -83,7 +90,7 @@ class McaMapView(ft.Container):
     ) -> None:
         super().__init__(**kwargs)
 
-        self._service = map_service or get_region_map_service()
+        self._service = map_service
         self._on_selection_changed = on_selection_changed
 
         self._viewport = McaViewport(
@@ -355,7 +362,7 @@ class McaMapView(ft.Container):
                             {
                                 "level": level,
                                 "chunk_coord": chunk_coord,
-                                "block_range": self._chunk_block_range(chunk_coord),
+                                "block_range": format_chunk_block_range(chunk_coord),
                             },
                         )
                     if (
@@ -381,7 +388,7 @@ class McaMapView(ft.Container):
                         size,
                         {
                             "level": "region",
-                            "block_range": self._region_block_range(coord),
+                            "block_range": format_region_block_range(coord),
                         },
                     )
                 # Single click: local zoom into the region (not full chunk level).
@@ -412,7 +419,7 @@ class McaMapView(ft.Container):
                     {
                         "level": "block",
                         "chunk_coord": hit_chunk,
-                        "block_range": self._chunk_block_range(hit_chunk),
+                        "block_range": format_chunk_block_range(hit_chunk),
                     },
                 )
             self._focus_chunk(hit_chunk, animate=True, target_fill=0.85)
@@ -436,7 +443,7 @@ class McaMapView(ft.Container):
                 size,
                 {
                     "level": "chunk",
-                    "block_range": self._region_block_range(hit),
+                    "block_range": format_region_block_range(hit),
                 },
             )
         # Stronger zoom so one region fills almost the whole view → chunk grid readable.
@@ -464,11 +471,13 @@ class McaMapView(ft.Container):
                 size = self._current_data.get(self._selected_cell, 0)
                 detail: Dict[str, Any] = {
                     "level": "chunk",
-                    "block_range": self._region_block_range(self._selected_cell),
+                    "block_range": format_region_block_range(self._selected_cell),
                 }
                 if self._selected_chunk is not None:
                     detail["chunk_coord"] = self._selected_chunk
-                    detail["block_range"] = self._chunk_block_range(self._selected_chunk)
+                    detail["block_range"] = format_chunk_block_range(
+                        self._selected_chunk
+                    )
                 self._on_selection_changed(self._selected_cell, size, detail)
             return
 
@@ -486,7 +495,9 @@ class McaMapView(ft.Container):
                     size,
                     {
                         "level": "region",
-                        "block_range": self._region_block_range(self._selected_cell),
+                        "block_range": format_region_block_range(
+                            self._selected_cell
+                        ),
                     },
                 )
             return
@@ -515,33 +526,13 @@ class McaMapView(ft.Container):
                 return chunk_coord
         return None
 
-    def _region_block_range(self, coord: Tuple[int, int]) -> str:
-        rx, rz = coord
-        return f"X {rx * 512}~{rx * 512 + 511}, Z {rz * 512}~{rz * 512 + 511}"
-
-    def _chunk_block_range(self, chunk_coord: Tuple[int, int]) -> str:
-        cx, cz = chunk_coord
-        return f"X {cx * 16}~{cx * 16 + 15}, Z {cz * 16}~{cz * 16 + 15}"
-
     def _coord_label_for_region(self, coord: Tuple[int, int], cell_size: float) -> str:
-        """Progressively reveal real game coordinates as the user zooms in.
-
-        - far: region index ``rx,rz``
-        - mid: block range of the region (two lines when space allows)
-        - near/chunk: center block coords (actual game X/Z)
-        """
-        rx, rz = coord
-        if self._view_level in {"chunk", "block"} or self._scale >= 6.0 or cell_size >= 180:
-            bx = rx * 512 + 256
-            bz = rz * 512 + 256
-            return f"{bx}, {bz}"
-        if self._scale >= 2.4 or cell_size >= 70:
-            x0, x1 = rx * 512, rx * 512 + 511
-            z0, z1 = rz * 512, rz * 512 + 511
-            if cell_size >= 90:
-                return f"X{x0}~{x1}\nZ{z0}~{z1}"
-            return f"{x0}~{x1}"
-        return f"{rx},{rz}"
+        return format_region_coordinate_label(
+            coord,
+            view_level=self._view_level,
+            scale=self._scale,
+            cell_size=cell_size,
+        )
 
     def _focus_region(
         self,
@@ -777,9 +768,11 @@ class McaMapView(ft.Container):
         detail: Dict[str, Any] = {"level": level}
         if self._selected_chunk is not None and level in {"chunk", "block"}:
             detail["chunk_coord"] = self._selected_chunk
-            detail["block_range"] = self._chunk_block_range(self._selected_chunk)
+            detail["block_range"] = format_chunk_block_range(
+                self._selected_chunk
+            )
         else:
-            detail["block_range"] = self._region_block_range(region)
+            detail["block_range"] = format_region_block_range(region)
         self._on_selection_changed(region, size, detail)
 
     # ------------------------------------------------------------------ draw
@@ -1281,12 +1274,12 @@ class McaMapView(ft.Container):
                 prefix = "区块内" if self._view_level == "block" else "区块"
                 info = (
                     f"{prefix} ({cx},{cz}) · "
-                    f"{self._chunk_block_range(self._selected_chunk)}"
+                    f"{format_chunk_block_range(self._selected_chunk)}"
                 )
             else:
                 info = (
                     f"r.{coord[0]}.{coord[1]}.mca · "
-                    f"{self._region_block_range(coord)}"
+                    f"{format_region_block_range(coord)}"
                 )
             text_w = max(140, len(info) * 7 + 20)
             shapes.append(

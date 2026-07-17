@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     from app.application import Application
 
 from core.omni.world_session import WorldSession
-from app.services.region_map_service import get_region_map_service
-
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
 from app.ui.views.explorer.player_tab import PlayerTabMixin
@@ -57,7 +55,7 @@ class ExplorerView(
         self._current_edit_format: NbtEditFormat = "nbt"
         self._current_chunk_target: Optional[ChunkNbtTarget] = None
         self._nbt_stage_store = NbtStageStore()
-        self._map_service = get_region_map_service()
+        self._map_service = self.app.create_region_map_service()
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None

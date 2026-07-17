@@ -15,6 +15,14 @@ from core.mca.errors import (
 )
 from core.mca.editor import ChunkInfo, RegionEditor, RegionInfo
 from core.mca.heightmaps import surface_y_from_heightmap
+from core.mca.map_coordinates import (
+    BlockBounds,
+    chunk_block_bounds,
+    format_chunk_block_range,
+    format_region_block_range,
+    format_region_coordinate_label,
+    region_block_bounds,
+)
 from core.mca.region_file import RegionFile
 from core.mca.surface import sample_region_surface_colors, sample_region_surface_ids
 from core.mca.topview_renderer import (
@@ -43,6 +51,7 @@ __all__ = [
     "ChunkInfo",
     "ChunkView",
     "CorruptChunk",
+    "BlockBounds",
     "DEFAULT_TILE_SIZE",
     "DETAIL_TILE_SIZE",
     "HIRES_TILE_SIZE",
@@ -60,11 +69,16 @@ __all__ = [
     "WritableRegion",
     "block_id_at",
     "copy_chunk_record",
+    "chunk_block_bounds",
     "delete_chunk_entries",
+    "format_chunk_block_range",
+    "format_region_block_range",
+    "format_region_coordinate_label",
     "sample_region_surface_colors",
     "sample_region_surface_ids",
     "render_region_topview",
     "render_region_topview_base64",
+    "region_block_bounds",
     "section_range_for_chunk",
     "surface_block_id",
     "surface_y_from_heightmap",

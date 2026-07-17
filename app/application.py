@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from app.services.i18n_service import I18nService
     from app.services.item_service import ItemService
     from app.services.migration_service import MigrationService
+    from app.services.region_map_service import RegionMapService
     from app.services.texture_service import TextureService
     from app.services.uuid_service import UUIDService
 
@@ -1006,6 +1007,12 @@ class Application:
     @property
     def texture(self) -> TextureService:
         return self.services.texture
+
+    def create_region_map_service(self) -> RegionMapService:
+        """Create a map service owned by one Explorer view lifecycle."""
+        from app.services.region_map_service import RegionMapService
+
+        return RegionMapService()
 
     @property
     def selected_view_id(self) -> Optional[str]:

@@ -716,8 +716,3 @@ class RegionMapService:
             self._cached_stats = stats
             self._stats_dirty = False
             return stats
-
-
-def get_region_map_service() -> RegionMapService:
-    """Compatibility factory returning a fresh session-scoped service."""
-    return RegionMapService()

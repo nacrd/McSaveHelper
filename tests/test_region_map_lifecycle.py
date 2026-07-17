@@ -2,10 +2,7 @@ import asyncio
 
 import pytest
 
-from app.services.region_map_service import (
-    RegionMapService,
-    get_region_map_service,
-)
+from app.services.region_map_service import RegionMapService
 
 
 def test_region_map_services_do_not_share_mutable_state() -> None:
@@ -21,9 +18,9 @@ def test_region_map_services_do_not_share_mutable_state() -> None:
     second.close()
 
 
-def test_compatibility_factory_returns_fresh_service() -> None:
-    first = get_region_map_service()
-    second = get_region_map_service()
+def test_region_map_service_instances_are_fresh() -> None:
+    first = RegionMapService()
+    second = RegionMapService()
 
     assert first is not second
 
