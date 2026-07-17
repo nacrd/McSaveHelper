@@ -42,6 +42,10 @@ from core.mca.map_coordinates import (
     format_region_block_range,
     format_region_coordinate_label,
 )
+from core.mca.map_navigation import (
+    McaMapNavigator,
+    SelectionNotification,
+)
 from core.mca.viewport import (
     MAX_SCALE,
     MIN_SCALE,
@@ -106,6 +110,7 @@ class McaMapView(ft.Container):
         self._use_topview = True
 
         self._selection = McaMapSelection()
+        self._navigator = McaMapNavigator(self._selection)
         self._current_data: Dict[Tuple[int, int], int] = {}
         self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
@@ -350,21 +355,13 @@ class McaMapView(ft.Container):
             for chunk_coord, bounds in self._chunk_bounds.items():
                 bx, by, bw, bh = bounds
                 if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
-                    self._selected_chunk = chunk_coord
-                    region = (chunk_coord[0] // 32, chunk_coord[1] // 32)
-                    self._selected_cell = region
-                    size = self._current_data.get(region, 0)
                     level = "block" if self._view_level == "block" else "chunk"
-                    if self._on_selection_changed:
-                        self._on_selection_changed(
-                            region,
-                            size,
-                            {
-                                "level": level,
-                                "chunk_coord": chunk_coord,
-                                "block_range": format_chunk_block_range(chunk_coord),
-                            },
-                        )
+                    notification = self._navigator.select_chunk(
+                        chunk_coord,
+                        self._current_data,
+                        level,
+                    )
+                    self._emit_selection(notification)
                     if (
                         self._view_level == "block"
                         or self._scale >= self.SCALE_BLOCK * 0.85
@@ -379,18 +376,11 @@ class McaMapView(ft.Container):
             if bx <= tap_x <= bx + bw and by <= tap_y <= by + bh:
                 if coord not in self._current_data:
                     break
-                self._selected_cell = coord
-                self._selected_chunk = None
-                size = self._current_data[coord]
-                if self._on_selection_changed:
-                    self._on_selection_changed(
-                        coord,
-                        size,
-                        {
-                            "level": "region",
-                            "block_range": format_region_block_range(coord),
-                        },
-                    )
+                notification = self._navigator.select_region(
+                    coord,
+                    self._current_data,
+                )
+                self._emit_selection(notification)
                 # Single click: local zoom into the region (not full chunk level).
                 self._focus_region(coord, animate=True, target_fill=0.72)
                 self._view_level = "region"
@@ -408,20 +398,12 @@ class McaMapView(ft.Container):
         # If already at chunk/block and a chunk is under the pointer, dive in.
         hit_chunk = self._hit_chunk(float(tap_x), float(tap_y))
         if hit_chunk is not None and self._view_level in {"chunk", "block"}:
-            region = (hit_chunk[0] // 32, hit_chunk[1] // 32)
-            self._selected_cell = region
-            self._selected_chunk = hit_chunk
-            size = self._current_data.get(region, 0)
-            if self._on_selection_changed:
-                self._on_selection_changed(
-                    region,
-                    size,
-                    {
-                        "level": "block",
-                        "chunk_coord": hit_chunk,
-                        "block_range": format_chunk_block_range(hit_chunk),
-                    },
-                )
+            notification = self._navigator.select_chunk(
+                hit_chunk,
+                self._current_data,
+                "block",
+            )
+            self._emit_selection(notification)
             self._focus_chunk(hit_chunk, animate=True, target_fill=0.85)
             self._view_level = "block"
             return
@@ -434,18 +416,12 @@ class McaMapView(ft.Container):
             else:
                 return
 
-        self._selected_cell = hit
-        self._selected_chunk = None
-        size = self._current_data.get(hit, 0)
-        if self._on_selection_changed:
-            self._on_selection_changed(
-                hit,
-                size,
-                {
-                    "level": "chunk",
-                    "block_range": format_region_block_range(hit),
-                },
-            )
+        notification = self._navigator.select_region(
+            hit,
+            self._current_data,
+            "chunk",
+        )
+        self._emit_selection(notification)
         # Stronger zoom so one region fills almost the whole view → chunk grid readable.
         self._focus_region(hit, animate=True, target_fill=0.92)
         self._view_level = "chunk"
@@ -463,53 +439,26 @@ class McaMapView(ft.Container):
 
     def _on_secondary_tap(self, e: Any) -> None:
         """Right-click: step back overview (block→chunk→region→world)."""
-        if self._view_level == "block":
-            self._view_level = "chunk"
+        previous_level = self._view_level
+        notification = self._navigator.step_back(self._current_data)
+        if previous_level == "block":
             if self._selected_cell is not None:
                 self._focus_region(self._selected_cell, animate=True, target_fill=0.88)
-            if self._on_selection_changed and self._selected_cell is not None:
-                size = self._current_data.get(self._selected_cell, 0)
-                detail: Dict[str, Any] = {
-                    "level": "chunk",
-                    "block_range": format_region_block_range(self._selected_cell),
-                }
-                if self._selected_chunk is not None:
-                    detail["chunk_coord"] = self._selected_chunk
-                    detail["block_range"] = format_chunk_block_range(
-                        self._selected_chunk
-                    )
-                self._on_selection_changed(self._selected_cell, size, detail)
+            self._emit_selection(notification)
             return
 
-        if self._view_level == "chunk":
-            self._view_level = "region"
-            self._selected_chunk = None
+        if previous_level == "chunk":
             if self._selected_cell is not None:
                 self._focus_region(self._selected_cell, animate=True, target_fill=0.55)
             else:
                 self.fit_to_view(padding=0.82)
-            if self._on_selection_changed and self._selected_cell is not None:
-                size = self._current_data.get(self._selected_cell, 0)
-                self._on_selection_changed(
-                    self._selected_cell,
-                    size,
-                    {
-                        "level": "region",
-                        "block_range": format_region_block_range(
-                            self._selected_cell
-                        ),
-                    },
-                )
+            self._emit_selection(notification)
             return
 
         # region / world → full overview
-        self._view_level = "world"
-        self._selected_chunk = None
         # Keep selected region highlight, but zoom out to whole map.
         self.fit_to_view(padding=0.82)
-        if self._on_selection_changed:
-            # Clear side-panel detail to overview status.
-            self._on_selection_changed(None, None, {"level": "world"})
+        self._emit_selection(notification)
 
     def _hit_region(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
         for coord, bounds in self._cell_bounds.items():
@@ -682,23 +631,15 @@ class McaMapView(ft.Container):
             px = float(self.width or 800) / 2.0
             py = float(self.height or 600) / 2.0
 
-        prev = self._view_level
         new_level = view_level_from_scale(self._scale)
-        level_order = {"world": 0, "region": 1, "chunk": 2, "block": 3}
-        going_deeper = level_order.get(new_level, 0) > level_order.get(prev, 0)
-        going_out = level_order.get(new_level, 0) < level_order.get(prev, 0)
+        transition = self._navigator.transition_to(new_level)
 
-        if new_level == prev:
+        if not transition.changed:
             if new_level in {"chunk", "block"}:
                 self._auto_select_under_pointer(px, py, new_level, notify=False)
             return False
 
-        self._view_level = new_level
-
-        if going_out and new_level in {"world", "region"}:
-            self._selected_chunk = None
-
-        if going_deeper or new_level in {"chunk", "block"}:
+        if transition.going_deeper or new_level in {"chunk", "block"}:
             self._auto_select_under_pointer(px, py, new_level, notify=False)
             if self._use_topview and self._selected_cell is not None:
                 try:
@@ -713,7 +654,9 @@ class McaMapView(ft.Container):
                         [self._selected_cell], tile_size=DETAIL_TILE_SIZE
                     )
 
-        if notify and (new_level != prev or new_level != self._last_notified_level):
+        if notify and (
+            transition.changed or new_level != self._last_notified_level
+        ):
             self._notify_level_selection(new_level)
         return True
 
@@ -757,23 +700,20 @@ class McaMapView(ft.Container):
         return self._viewport.chunk_at_screen(px, py, self._current_data)
 
     def _notify_level_selection(self, level: str) -> None:
-        if not self._on_selection_changed:
-            return
         self._last_notified_level = level
-        if level == "world" or self._selected_cell is None:
-            self._on_selection_changed(None, None, {"level": "world"})
-            return
-        region = self._selected_cell
-        size = self._current_data.get(region, 0)
-        detail: Dict[str, Any] = {"level": level}
-        if self._selected_chunk is not None and level in {"chunk", "block"}:
-            detail["chunk_coord"] = self._selected_chunk
-            detail["block_range"] = format_chunk_block_range(
-                self._selected_chunk
+        notification = self._navigator.current_notification(
+            self._current_data,
+            cast(MapViewLevel, level),
+        )
+        self._emit_selection(notification)
+
+    def _emit_selection(self, notification: SelectionNotification) -> None:
+        if self._on_selection_changed:
+            self._on_selection_changed(
+                notification.region,
+                notification.size,
+                notification.detail,
             )
-        else:
-            detail["block_range"] = format_region_block_range(region)
-        self._on_selection_changed(region, size, detail)
 
     # ------------------------------------------------------------------ draw
     def _rebuild_canvas(self) -> None:

@@ -23,6 +23,11 @@ from core.mca.map_coordinates import (
     format_region_coordinate_label,
     region_block_bounds,
 )
+from core.mca.map_navigation import (
+    LevelChange,
+    McaMapNavigator,
+    SelectionNotification,
+)
 from core.mca.region_file import RegionFile
 from core.mca.surface import sample_region_surface_colors, sample_region_surface_ids
 from core.mca.topview_renderer import (
@@ -57,14 +62,17 @@ __all__ = [
     "HIRES_TILE_SIZE",
     "McaError",
     "McaMapSelection",
+    "McaMapNavigator",
     "McaViewport",
     "NamedBlock",
     "NativeRegion",
     "RegionFile",
     "RegionEditor",
     "RegionInfo",
+    "LevelChange",
     "PREVIEW_TILE_SIZE",
     "UnsupportedCompression",
+    "SelectionNotification",
     "ViewportTarget",
     "WritableRegion",
     "block_id_at",
