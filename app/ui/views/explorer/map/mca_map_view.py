@@ -33,6 +33,7 @@ from app.ui.views.explorer.map.color_schemes import (
 )
 from app.ui.views.explorer.map import map_shapes
 from app.ui.views.explorer.map.map_hit_testing import hit_bounds, rect_contains
+from app.ui.views.explorer.map.camera_animator import MapCameraAnimator
 from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
@@ -53,7 +54,6 @@ from core.mca.viewport import (
     SCALE_CHUNK,
     SCALE_REGION,
     McaViewport,
-    ViewportTarget,
     view_level_from_scale,
 )
 
@@ -129,17 +129,18 @@ class McaMapView(ft.Container):
         self._rebuild_timer: Optional[threading.Timer] = None
         self._last_rebuild_ts = 0.0
         self._min_rebuild_interval = 1.0 / 60.0
-        # Smooth zoom animation state (world-space pivot + ease-out)
-        self._zoom_anim_timer: Optional[threading.Timer] = None
-        self._zoom_anim_active = False
-        self._zoom_anim_start = self._viewport.current_target
-        self._zoom_anim_target = self._viewport.current_target
-        self._zoom_anim_t0 = 0.0
-        self._zoom_anim_duration = 0.16
         # Pointer used for level auto-switch while zooming.
         self._zoom_pivot_x = 0.0
         self._zoom_pivot_y = 0.0
         self._last_notified_level: Optional[str] = None
+        self._camera = MapCameraAnimator(
+            self._viewport,
+            min_scale=self.MIN_SCALE,
+            max_scale=self.MAX_SCALE,
+            on_frame=self._on_camera_frame,
+            on_complete=self._on_camera_complete,
+            is_alive=lambda: self._mounted,
+        )
 
         self.width = width
         self.height = height
@@ -496,7 +497,7 @@ class McaMapView(ft.Container):
             self._request_detail_tiles(neighbors, force=True, priority=True)
 
         if animate:
-            self._animate_camera_to(
+            self._camera.animate_to(
                 target.scale,
                 target.offset_x,
                 target.offset_y,
@@ -537,7 +538,7 @@ class McaMapView(ft.Container):
             self._request_detail_tiles([(rx, rz)], force=True, priority=True)
 
         if animate:
-            self._animate_camera_to(
+            self._camera.animate_to(
                 target.scale,
                 target.offset_x,
                 target.offset_y,
@@ -569,7 +570,7 @@ class McaMapView(ft.Container):
         )
         self._zoom_pivot_x = float(pointer_x)
         self._zoom_pivot_y = float(pointer_y)
-        self._animate_zoom_toward(zoom_factor, float(pointer_x), float(pointer_y))
+        self._camera.animate_zoom_about(zoom_factor, float(pointer_x), float(pointer_y))
 
     def _sync_view_level_from_scale(
         self,
@@ -982,13 +983,7 @@ class McaMapView(ft.Container):
 
     def did_unmount(self) -> None:
         self._mounted = False
-        self._zoom_anim_active = False
-        try:
-            if self._zoom_anim_timer is not None:
-                self._zoom_anim_timer.cancel()
-        except Exception:
-            pass
-        self._zoom_anim_timer = None
+        self._camera.cancel()
         self._cancel_rebuild_timer()
         self._stop_update_loop()
         # Drop callback so worker threads do not touch a dead view.
@@ -1164,106 +1159,28 @@ class McaMapView(ft.Container):
         cy = (self.height or 600) / 2
         self._zoom_pivot_x = cx
         self._zoom_pivot_y = cy
-        self._animate_zoom_toward(1.22, cx, cy)
+        self._camera.animate_zoom_about(1.22, cx, cy)
 
     def zoom_out(self) -> None:
         cx = (self.width or 800) / 2
         cy = (self.height or 600) / 2
         self._zoom_pivot_x = cx
         self._zoom_pivot_y = cy
-        self._animate_zoom_toward(0.82, cx, cy)
+        self._camera.animate_zoom_about(0.82, cx, cy)
 
-    def _animate_zoom_toward(
-        self,
-        factor: float,
-        pivot_x: float,
-        pivot_y: float,
-        duration: float = 0.16,
-    ) -> None:
-        """Ease-out zoom around a screen-space pivot (pointer or view center)."""
-        # Use current *target* if an animation is already running so rapid
-        # wheel ticks compound instead of fighting the in-flight frame.
-        base = (
-            self._zoom_anim_target
-            if self._zoom_anim_active
-            else self._viewport.current_target
-        )
-        target = self._viewport.zoom_about(
-            factor,
-            pivot_x,
-            pivot_y,
-            base,
-        )
-        if abs(target.scale - base.scale) < 1e-6:
-            return
-        self._zoom_pivot_x = pivot_x
-        self._zoom_pivot_y = pivot_y
-        self._animate_camera_to(
-            target.scale,
-            target.offset_x,
-            target.offset_y,
-            duration=duration,
-        )
-
-    def _animate_camera_to(
-        self,
-        target_scale: float,
-        target_offset_x: float,
-        target_offset_y: float,
-        duration: float = 0.22,
-    ) -> None:
-        """Animate scale + offset toward an absolute camera target."""
-        self._zoom_anim_start = self._viewport.current_target
-        self._zoom_anim_target = ViewportTarget(
-            max(self.MIN_SCALE, min(self.MAX_SCALE, float(target_scale))),
-            float(target_offset_x),
-            float(target_offset_y),
-        )
-        self._zoom_anim_t0 = time.monotonic()
-        self._zoom_anim_duration = max(0.05, duration)
-        self._zoom_anim_active = True
-        self._kick_zoom_anim()
-
-    def _kick_zoom_anim(self) -> None:
+    def _on_camera_frame(self) -> None:
         try:
-            if self._zoom_anim_timer is not None:
-                self._zoom_anim_timer.cancel()
+            self._sync_view_level_from_scale(notify=False)
         except Exception:
             pass
+        self._request_rebuild()
 
-        def _tick() -> None:
-            if not self._zoom_anim_active or not self._mounted:
-                return
-            elapsed = time.monotonic() - self._zoom_anim_t0
-            t = min(1.0, elapsed / self._zoom_anim_duration)
-            # ease-out cubic
-            ease = 1.0 - (1.0 - t) ** 3
-            self._viewport.apply(
-                self._zoom_anim_start.interpolate(self._zoom_anim_target, ease)
-            )
-            try:
-                self._sync_view_level_from_scale(notify=False)
-            except Exception:
-                pass
-            self._request_rebuild()
-            if t < 1.0:
-                self._zoom_anim_timer = threading.Timer(1.0 / 60.0, _tick)
-                self._zoom_anim_timer.daemon = True
-                self._zoom_anim_timer.start()
-            else:
-                self._zoom_anim_active = False
-                self._zoom_anim_timer = None
-                # Snap exactly to target
-                self._viewport.apply(self._zoom_anim_target)
-                try:
-                    self._sync_view_level_from_scale(notify=True)
-                except Exception:
-                    pass
-                self._request_rebuild()
-
-        self._zoom_anim_timer = threading.Timer(0.0, _tick)
-        self._zoom_anim_timer.daemon = True
-        self._zoom_anim_timer.start()
+    def _on_camera_complete(self) -> None:
+        try:
+            self._sync_view_level_from_scale(notify=True)
+        except Exception:
+            pass
+        self._request_rebuild()
 
     def get_selected_cell(self) -> Optional[Tuple[int, int]]:
         return self._selected_cell
