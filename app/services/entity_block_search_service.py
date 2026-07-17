@@ -5,6 +5,7 @@ from typing import Callable, List, Optional
 import traceback
 
 from core.logger import logger
+from .entity_block_search.base_searcher import BaseSearcher
 from .entity_block_search.block_searcher import BlockSearcher
 from .entity_block_search.constants import (
     COMMON_BLOCKS,
@@ -85,11 +86,11 @@ class EntityBlockSearchService:
         from core.performance import get_tracker
         tracker = get_tracker()
         with tracker.track("实体方块搜索", {"world": world_path.name, "type": search_type, "target": target}):
-            log(f"开始搜索 {search_type}: {target}")
-            log(f"搜索维度: {', '.join(dimensions)}")
+            log(f"开始搜索 {search_type}: {target}", "INFO")
+            log(f"搜索维度: {', '.join(dimensions)}", "INFO")
             self._search_dimensions(world_path, search_type, target, dimensions, log, progress)
             progress(1.0, f"搜索完成，找到 {len(self.results)} 个结果")
-            log(f"搜索完成，共找到 {len(self.results)} 个 {target}")
+            log(f"搜索完成，共找到 {len(self.results)} 个 {target}", "INFO")
             tracker.add_metadata("results", len(self.results))
             tracker.add_metadata("regions", self.summary.scanned_regions)
             tracker.add_metadata("chunks", self.summary.scanned_chunks)
@@ -101,13 +102,24 @@ class EntityBlockSearchService:
         for dimension in dimensions:
             progress(total_progress, f"搜索维度: {dimension}")
             searcher = self._create_searcher(search_type)
-            searcher.search_dimension(world_path, dimension, target, log, lambda v, m, base=total_progress: progress(base + v * step, m))
+            base_progress = total_progress
+
+            def update_dimension_progress(value: float, message: str) -> None:
+                progress(base_progress + value * step, message)
+
+            searcher.search_dimension(
+                world_path,
+                dimension,
+                target,
+                log,
+                update_dimension_progress,
+            )
             if self._is_result_limit_reached():
                 log(f"结果数量达到上限 {self.MAX_RESULTS}，已停止继续扫描", "WARNING")
                 break
             total_progress += step
 
-    def _create_searcher(self, search_type: str):
+    def _create_searcher(self, search_type: str) -> BaseSearcher:
         if search_type == "entity":
             return EntitySearcher(self.results, self.summary)
         if search_type == "block":

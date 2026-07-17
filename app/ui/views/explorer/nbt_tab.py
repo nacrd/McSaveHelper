@@ -19,10 +19,11 @@ from app.ui.views.explorer.nbt import (
     ChunkOperations,
     NbtCommitHandler,
 )
+from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from core.omni.world_session import WorldSession
 
 
-class NbtTabMixin:
+class NbtTabMixin(ExplorerMixinHost):
     """NBT 页签主协调器 - 三栏布局：左侧导航 + 中央查看器 + 右侧暂存区"""
 
     def _build_nbt_tab(self) -> None:
@@ -119,7 +120,7 @@ class NbtTabMixin:
             store=self._nbt_stage_store,
             get_world_session=lambda: self.world_session,
             replace_world_session=self._replace_world_session,
-            get_page=lambda: self.page,
+            get_page=lambda: self.app.page,
             refresh_stage=self._stage_manager.update_stage_status,
             reload_current_target=self._data_loader.reload_current_nbt_target,
             warn=self.app.warn_dialog,

@@ -120,7 +120,7 @@ def reset_item_slot(slot: ItemSlotControl) -> None:
     slot.container.bgcolor = SLOT_BG_EMPTY
     slot.container.tooltip = None
     slot.image.visible = False
-    slot.image.src = None
+    slot.image.src = ""
     slot.icon.value = ""
     slot.icon.visible = True
     slot.count_text.value = ""

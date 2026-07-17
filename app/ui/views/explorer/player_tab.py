@@ -13,9 +13,10 @@ from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.player_hud import PlayerHUDCard
 from app.ui.views.explorer.equipment_preview import EquipmentPreview
 from app.ui.views.explorer.inventory_grid import InventoryGrid
+from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 
 
-class PlayerTabMixin:
+class PlayerTabMixin(ExplorerMixinHost):
     """Build and handle Explorer player tab interactions."""
 
     def _build_player_tab(self) -> None:

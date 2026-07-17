@@ -66,7 +66,7 @@ class IconSet:
 
 
 def icon(
-    name: str,
+    name: ft.IconData,
     size: Optional[float] = None,
     color: Optional[str] = None,
 ) -> ft.Icon:
@@ -88,7 +88,7 @@ def icon(
 
 
 def icon_text(
-    icon_name: str,
+    icon_name: ft.IconData,
     text: str,
     icon_size: float = 16,
     text_size: float = 13,

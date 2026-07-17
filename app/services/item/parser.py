@@ -1,11 +1,15 @@
 """Item parsing and formatting logic."""
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from .constants import _MAX_DURABILITY, _roman_numeral
 from .models import ItemInfo
 
 
-def parse_item(item_data: Dict[str, Any], get_item_name, get_enchantment_name) -> ItemInfo:
+def parse_item(
+    item_data: Dict[str, Any],
+    get_item_name: Callable[[str], str],
+    get_enchantment_name: Callable[[str], str],
+) -> ItemInfo:
     """Parse item data and extract full info."""
     item_id = item_data.get("id", "")
     count = item_data.get("count", 1)
@@ -50,7 +54,10 @@ def parse_item(item_data: Dict[str, Any], get_item_name, get_enchantment_name) -
     )
 
 
-def _parse_enchantments(tag, get_enchantment_name) -> List[Dict[str, Any]]:
+def _parse_enchantments(
+    tag: Any,
+    get_enchantment_name: Callable[[str], str],
+) -> List[Dict[str, Any]]:
     result = []
     for key in ("Enchantments", "StoredEnchantments"):
         ench_tag = tag.get(key)

@@ -1,7 +1,7 @@
 """Tests for the typed NBT staging and commit boundary."""
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import flet as ft
 
@@ -225,14 +225,15 @@ def test_dimension_region_directory_mapping() -> None:
 
 class NbtTabHarness(NbtTabMixin):
     def __init__(self) -> None:
-        self.app = SimpleNamespace(
+        self.app = cast(Any, SimpleNamespace(
+            page=None,
             warn_dialog=lambda title, message: None,
             info_dialog=lambda title, message: None,
             error_dialog=lambda title, message: None,
             handle_exception=lambda error, title=None: None,
             log=lambda message, level="INFO": None,
             save_file=lambda **kwargs: None,
-        )
+        ))
         self.page = None
         self.world_session = None
         self.current_uuid = None

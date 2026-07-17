@@ -374,7 +374,7 @@ class MapExportService:
         try:
             blocks = getattr(chunk, "_blocks", None)
             if blocks is not None and hasattr(blocks, "surface_y"):
-                return blocks.surface_y(x, z)
+                return int(blocks.surface_y(x, z))
 
             cache_attr = "_mcsh_non_air_sections"
             non_air_sections = getattr(chunk, cache_attr, None)
@@ -434,15 +434,19 @@ class MapExportService:
             block_name = block.name()
 
             if block_name in self.BLOCK_COLORS:
-                color = self.BLOCK_COLORS[block_name]
+                color: Tuple[int, int, int] = self.BLOCK_COLORS[block_name]
             else:
                 color = self._generate_color_from_name(block_name)
 
             # 地形图：根据高度调整亮度
             if map_type == "terrain":
                 factor = (y + 64) / 383.0  # 归一化到 [0, 1]
-                color = tuple(int(c * (0.5 + factor * 0.5))
-                              for c in color)  # type: ignore[assignment]
+                scale_factor = 0.5 + factor * 0.5
+                color = (
+                    int(color[0] * scale_factor),
+                    int(color[1] * scale_factor),
+                    int(color[2] * scale_factor),
+                )
 
             return color
 

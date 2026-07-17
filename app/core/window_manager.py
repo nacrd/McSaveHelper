@@ -275,7 +275,7 @@ class WindowManager:
         """
         self.shutdown()
 
-    def _on_window_event(self, e) -> None:
+    def _on_window_event(self, e: Any) -> None:
         """处理系统窗口事件
 
         Args:
@@ -290,7 +290,7 @@ class WindowManager:
         except Exception:
             pass
 
-    def _on_window_resize(self, e) -> None:
+    def _on_window_resize(self, e: Any) -> None:
         """窗口大小变化时的响应（带防抖）
 
         Args:
@@ -433,7 +433,7 @@ class WindowManager:
     def _destroy_window_async(self) -> None:
         """异步销毁窗口"""
         try:
-            async def _destroy_window():
+            async def _destroy_window() -> None:
                 try:
                     self.page.window.prevent_close = False
                     await self.page.window.destroy()

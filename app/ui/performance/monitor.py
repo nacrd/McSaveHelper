@@ -53,7 +53,11 @@ class PerformanceMonitor:
         self.metrics: Dict[str, deque] = {}
         self.max_samples: int = 1000
         self._start_time: float = time.time()
-        self._process = psutil.Process() if _PSUTIL_AVAILABLE else None
+        self._process: Any = (
+            psutil.Process()
+            if _PSUTIL_AVAILABLE and psutil is not None
+            else None
+        )
         self._lock = threading.Lock()
 
     def enable(self) -> None:

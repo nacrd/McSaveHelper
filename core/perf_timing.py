@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 from threading import Lock
+from types import TracebackType
 from typing import List, Optional, Tuple
 
 PERF_ENABLED: bool = os.environ.get("MCSH_PERF", "") == "1"
@@ -90,7 +91,12 @@ class PerfTimer:
             self._start = time.perf_counter()
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc: Optional[BaseException],
+        tb: Optional[TracebackType],
+    ) -> None:
         if not PERF_ENABLED:
             return
         elapsed_ms = (time.perf_counter() - self._start) * 1000.0

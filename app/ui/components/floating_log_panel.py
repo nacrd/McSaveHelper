@@ -43,9 +43,6 @@ class FloatingLogPanel(ft.Container):
         self._last_x = 0.0
         self._last_y = 0.0
 
-        # 加载保存的位置
-        self._load_position()
-
         # 创建日志列表（使用ListView以获得更好的滚动体验）
         self._log_col = ft.ListView(
             spacing=2,
@@ -164,24 +161,39 @@ class FloatingLogPanel(ft.Container):
             left=self._offset_left,
             top=self._offset_top,
         )
+        self._load_position()
 
     def _load_position(self) -> None:
-        """从 client_storage 加载保存的位置"""
+        """从共享偏好加载保存的位置。"""
         try:
-            pos = self._page.client_storage.get(self.STORAGE_KEY)
-            if pos:
-                self._offset_left = pos.get("left", 50.0)
-                self._offset_top = pos.get("top", 200.0)
+            async def _load() -> None:
+                pos = await self._page.shared_preferences.get(self.STORAGE_KEY)
+                if isinstance(pos, list) and len(pos) >= 2:
+                    self._offset_left = float(pos[0])
+                    self._offset_top = float(pos[1])
+                    self.left = self._offset_left
+                    self.top = self._offset_top
+
+            self._page.run_task(_load)
         except Exception:
             pass
 
     def _save_position(self) -> None:
-        """保存位置到 client_storage"""
+        """保存位置到共享偏好。"""
         try:
-            self._page.client_storage.set(self.STORAGE_KEY, {
-                "left": self._offset_left,
-                "top": self._offset_top,
-            })
+            async def _save() -> None:
+                await self._page.shared_preferences.set(
+                    self.STORAGE_KEY,
+                    [str(self._offset_left), str(self._offset_top)],
+                )
+
+            self._page.run_task(_save)
+        except Exception:
+            pass
+
+    def _scroll_to_end(self) -> None:
+        try:
+            self._page.run_task(self._log_col.scroll_to, offset=-1)
         except Exception:
             pass
 
@@ -203,10 +215,14 @@ class FloatingLogPanel(ft.Container):
 
                 self._offset_left += dx
                 self._offset_top += dy
-                self._offset_left = max(
-                    0, min(self._page.width - self.width, self._offset_left))
-                self._offset_top = max(
-                    0, min(self._page.height - self.height, self._offset_top))
+                max_left = float(self._page.width or 1024) - float(
+                    self.width or self.DEFAULT_WIDTH
+                )
+                max_top = float(self._page.height or 768) - float(
+                    self.height or self.DEFAULT_HEIGHT
+                )
+                self._offset_left = max(0, min(max_left, self._offset_left))
+                self._offset_top = max(0, min(max_top, self._offset_top))
 
                 self.left = self._offset_left
                 self.top = self._offset_top
@@ -241,7 +257,7 @@ class FloatingLogPanel(ft.Container):
         except Exception:
             pass
 
-    def _toggle_auto_scroll(self, e: ft.ControlEvent = None) -> None:
+    def _toggle_auto_scroll(self) -> None:
         """切换自动滚动"""
         try:
             self._auto_scroll = not self._auto_scroll
@@ -254,12 +270,12 @@ class FloatingLogPanel(ft.Container):
             self._auto_scroll_btn.update()
 
             if self._auto_scroll and self._log_col.controls:
-                self._log_col.scroll_to(index=-1)
+                self._scroll_to_end()
                 self.update()
         except Exception:
             pass
 
-    def _expand(self, e: ft.ControlEvent = None) -> None:
+    def _expand(self) -> None:
         """展开面板"""
         try:
             self.visible = True
@@ -268,7 +284,7 @@ class FloatingLogPanel(ft.Container):
         except Exception:
             pass
 
-    def _collapse(self, e: ft.ControlEvent = None) -> None:
+    def _collapse(self) -> None:
         """收起面板"""
         try:
             # 清理定时器
@@ -283,7 +299,7 @@ class FloatingLogPanel(ft.Container):
         except Exception:
             pass
 
-    def _clear(self, e: ft.ControlEvent = None) -> None:
+    def _clear(self) -> None:
         """清除日志"""
         try:
             self._log_col.controls.clear()
@@ -347,7 +363,7 @@ class FloatingLogPanel(ft.Container):
                     if self.visible:
                         self.update()
                         if self._auto_scroll:
-                            self._log_col.scroll_to(index=-1)
+                            self._scroll_to_end()
                 except Exception:
                     pass
                 self._log_flush_scheduled = False
@@ -395,9 +411,6 @@ class FloatingLogButton(ft.Container):
         self._last_y = 0.0
         self._storage_key = "floating_log_button_position"
 
-        # 加载保存的位置
-        self._load_position()
-
         # 按钮容器 — Material Icon 代替 emoji
         self._button = ft.Container(
             content=ft.Icon(IconSet.DOCUMENT, size=22, color=THEME.mc_gold),
@@ -427,24 +440,35 @@ class FloatingLogButton(ft.Container):
             right=self._offset_right,
             bottom=self._offset_bottom,
         )
+        self._load_position()
 
     def _load_position(self) -> None:
         """加载保存的位置"""
         try:
-            pos = self._page.client_storage.get(self._storage_key)
-            if pos:
-                self._offset_right = pos.get("right", 20.0)
-                self._offset_bottom = pos.get("bottom", 20.0)
+            async def _load() -> None:
+                pos = await self._page.shared_preferences.get(
+                    self._storage_key
+                )
+                if isinstance(pos, list) and len(pos) >= 2:
+                    self._offset_right = float(pos[0])
+                    self._offset_bottom = float(pos[1])
+                    self.right = self._offset_right
+                    self.bottom = self._offset_bottom
+
+            self._page.run_task(_load)
         except Exception:
             pass
 
     def _save_position(self) -> None:
         """保存位置"""
         try:
-            self._page.client_storage.set(self._storage_key, {
-                "right": self._offset_right,
-                "bottom": self._offset_bottom,
-            })
+            async def _save() -> None:
+                await self._page.shared_preferences.set(
+                    self._storage_key,
+                    [str(self._offset_right), str(self._offset_bottom)],
+                )
+
+            self._page.run_task(_save)
         except Exception:
             pass
 
@@ -466,10 +490,14 @@ class FloatingLogButton(ft.Container):
 
                 self._offset_right -= dx  # 修正左右方向
                 self._offset_bottom -= dy
+                max_right = float(self._page.width or 1024) - 48
+                max_bottom = float(self._page.height or 768) - 48
                 self._offset_right = max(
-                    0, min(self._page.width - 48, self._offset_right))
+                    0, min(max_right, self._offset_right)
+                )
                 self._offset_bottom = max(
-                    0, min(self._page.height - 48, self._offset_bottom))
+                    0, min(max_bottom, self._offset_bottom)
+                )
 
                 self.right = self._offset_right
                 self.bottom = self._offset_bottom
@@ -488,7 +516,7 @@ class FloatingLogButton(ft.Container):
         except Exception:
             pass
 
-    def _click(self, e: ft.TapEvent = None) -> None:
+    def _click(self) -> None:
         """点击事件 - 如果不是拖拽就触发点击"""
         if self._is_dragging:
             return  # 正在拖拽，不触发点击

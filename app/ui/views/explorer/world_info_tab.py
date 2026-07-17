@@ -6,14 +6,15 @@ import flet as ft
 
 from app.ui.theme import THEME
 from app.ui.views.explorer.world_info_panel import WorldInfoPanel
+from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 
 
-class WorldInfoTabMixin:
+class WorldInfoTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer world-info tab."""
 
     def _build_world_info_tab(self) -> None:
         self._world_info_panel = WorldInfoPanel(
-            self._t,
+            self.app.translate,
             on_backup_click=self._create_backup,
             on_restore_click=self._restore_backup,
         )
@@ -40,7 +41,8 @@ class WorldInfoTabMixin:
             if not self.world_session:
                 self.app.warn_dialog("提示", "请先设置当前存档")
                 return
-            backups = self.world_session.list_backups()
+            session = self.world_session
+            backups = session.list_backups()
             if not backups:
                 self.app.info_dialog("提示", "未找到可用的备份")
                 return
@@ -84,12 +86,16 @@ class WorldInfoTabMixin:
 
                 def _do_restore(_: Any) -> None:
                     try:
-                        selected_backup = Path(backup_dropdown.value)
+                        selected_value = backup_dropdown.value
+                        if not selected_value:
+                            self.app.warn_dialog("提示", "请选择要恢复的备份")
+                            return
+                        selected_backup = Path(selected_value)
                         replace = replace_switch.value
-                        if self.world_session.restore_backup(
+                        if session.restore_backup(
                                 selected_backup, replace):
                             dialog.open = False
-                            self.page.update()
+                            self.app.page.update()
                             if replace:
                                 self.app.info_dialog("恢复成功", "已从备份恢复，当前存档已更新")
                                 self._load_world()
@@ -102,15 +108,15 @@ class WorldInfoTabMixin:
 
                 def _cancel(_: Any) -> None:
                     dialog.open = False
-                    self.page.update()
+                    self.app.page.update()
 
                 dialog.actions = [
                     ft.TextButton("取消", on_click=_cancel),
                     ft.TextButton("恢复", on_click=_do_restore),
                 ]
-                self.page.overlay.append(dialog)
+                self.app.page.overlay.append(dialog)
                 dialog.open = True
-                self.page.update()
+                self.app.page.update()
 
             _show_backup_dialog()
         except Exception as ex:

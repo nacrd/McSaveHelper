@@ -332,7 +332,7 @@ class ShortcutHint(ft.Container):
                 color="grey",
                 font_family="monospace",
             ),
-            padding=ft.padding.symmetric(horizontal=4, vertical=2),
+            padding=ft.Padding.symmetric(horizontal=4, vertical=2),
             border_radius=3,
             bgcolor="rgba(255, 255, 255, 0.1)",
             **kwargs

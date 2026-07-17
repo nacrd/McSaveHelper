@@ -135,6 +135,8 @@ class TestSaveNbtResourceManagement:
 
     def test_temp_file_cleanup_on_failure(self):
         """测试保存失败时临时文件被正确清理"""
+        from typing import Any, cast
+
         from core.converter import save_nbt
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -145,7 +147,7 @@ class TestSaveNbtResourceManagement:
             invalid_data = "not a valid nbt"
 
             try:
-                save_nbt(test_file, invalid_data)
+                save_nbt(test_file, cast(Any, invalid_data))
                 assert False, "Expected exception"
             except Exception:
                 pass

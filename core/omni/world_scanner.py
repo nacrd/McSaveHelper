@@ -5,7 +5,7 @@ WorldScanner - 存档文件扫描器
 """
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set, Callable
+from typing import Any, Dict, List, Optional, Tuple, Set, Callable
 from ..scanner import scan_all_regions
 from ..utils import find_player_data_dirs, find_data_dirs
 
@@ -17,7 +17,7 @@ class WorldScanner:
         self.world_path = world_path
         self._log = log_callback or (lambda msg, lvl="INFO": None)
 
-    def scan_all(self) -> Dict[str, any]:
+    def scan_all(self) -> Dict[str, Any]:
         """扫描所有文件并返回扫描结果
 
         Returns:

@@ -10,18 +10,8 @@ from pathlib import Path
 from typing import Callable, Dict, Any, Optional, Set, List, Tuple
 from enum import Enum
 
-try:
-    from enum import StrEnum
-except ImportError:
-    try:
-        from typing_extensions import StrEnum
-    except ImportError:
-        class _StrEnum(str, Enum):
-            """自定义字符串枚举，兼容 Python <3.11"""
-        StrEnum = _StrEnum
 
-
-class Language(StrEnum):
+class Language(str, Enum):
     """支持的语言枚举
 
     包含预定义语言和动态创建的语言。
@@ -67,8 +57,9 @@ class TranslationManager:
             language_saver: 当前语言配置保存函数
         """
         if translations_dir is None:
-            if hasattr(sys, '_MEIPASS'):
-                base_dir = Path(sys._MEIPASS)
+            bundle_dir = getattr(sys, "_MEIPASS", None)
+            if bundle_dir is not None:
+                base_dir = Path(bundle_dir)
             else:
                 base_dir = Path(__file__).parent.parent
             self.translations_dir: Path = base_dir / "translations"

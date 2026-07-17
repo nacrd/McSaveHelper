@@ -1,10 +1,10 @@
 """Minecraft-style button components"""
 import asyncio
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, cast
 
 import flet as ft
 
-from app.ui.theme import THEME, mc_focus_border
+from app.ui.theme import THEME
 
 
 class McButton(ft.Container):
@@ -20,7 +20,7 @@ class McButton(ft.Container):
         on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
         width: Optional[int] = None,
         height: int = 42,
-        icon: Optional[str] = None,
+        icon: Optional[ft.IconData] = None,
         text_color: Optional[str] = None,
     ) -> None:
         self._text = text
@@ -104,7 +104,7 @@ class McButton(ft.Container):
         except Exception:
             pass
 
-    def _handle_click(self, e: ft.ControlEvent) -> None:
+    def _handle_click(self, e: Any = None) -> None:
         """Handle click event with pressed animation"""
         if self._disabled:
             return
@@ -139,8 +139,9 @@ class McButton(ft.Container):
 
     def _schedule_reset_pressed_state(self) -> None:
         try:
-            if self.page is not None:
-                self.page.run_task(self._reset_pressed_state)
+            page = self.page
+            if page is not None and hasattr(page, "run_task"):
+                cast(ft.Page, page).run_task(self._reset_pressed_state)
                 return
             asyncio.get_running_loop().create_task(self._reset_pressed_state())
         except RuntimeError:
@@ -186,8 +187,7 @@ class McButton(ft.Container):
 
         controls: list[ft.Control] = []
         if self._icon:
-            controls.append(ft.Icon(ft.Icons[self._icon.upper()] if hasattr(ft.Icons, self._icon.upper(
-            )) else self._icon, size=16, color=icon_color))  # type: ignore[arg-type]
+            controls.append(ft.Icon(self._icon, size=16, color=icon_color))
         else:
             controls.append(ft.Container(width=0))
         controls.append(ft.Text(
@@ -230,7 +230,7 @@ def _mc_button(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 42,
-    icon: Optional[str] = None,
+    icon: Optional[ft.IconData] = None,
     text_color: Optional[str] = None,
 ) -> McButton:
     """Create a Minecraft-style button with beveled borders
@@ -255,8 +255,8 @@ def btn_primary(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 42,
-    icon: Optional[str] = None,
-) -> ft.Container:
+    icon: Optional[ft.IconData] = None,
+) -> McButton:
     """Primary button - grass green
 
     Args:
@@ -277,7 +277,7 @@ def btn_ghost(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 42,
-) -> ft.Container:
+) -> McButton:
     """Secondary button - stone gray
 
     Args:
@@ -298,7 +298,7 @@ def btn_success(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 42,
-) -> ft.Container:
+) -> McButton:
     """Success button - emerald green
 
     Args:
@@ -318,7 +318,7 @@ def btn_danger(
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
     height: int = 42,
-) -> ft.Container:
+) -> McButton:
     """Danger button - redstone red
 
     Args:

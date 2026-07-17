@@ -5,17 +5,17 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, Optional, List, Tuple, Set, Any
+from typing import Callable, List, Tuple, Set
 
 import nbtlib
 from core.mca import NativeRegion as Region
 
-from core.logger import logger
 from core.scanner import scan_all_regions
 from core.constants import MinecraftConstants
 from core.utils import find_player_data_dirs
 
-from .models import DetectReport, WorldInfo, IssueLevel, RepairIssue
+from .level_repairer import LEVEL_DAT_REQUIRED_FIELDS
+from .models import DetectReport, WorldInfo
 from .validation_utils import (
     validate_chunk,
     validate_player_data,
@@ -26,6 +26,21 @@ from .validation_utils import (
 # 游戏模式和难度名称映射
 _GAME_TYPE_NAMES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
 _DIFFICULTY_NAMES = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
+
+
+def _read_int_tag(
+    compound: nbtlib.tag.Compound,
+    key: str,
+    default: int,
+) -> int:
+    """读取可能缺失或损坏的整数标签。"""
+    value = compound.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 class WorldDetector:
@@ -120,23 +135,23 @@ class WorldDetector:
         """从 level.dat 读取世界信息"""
         try:
             nbt_data = nbtlib.load(str(world_path / "level.dat"))
-            data = nbt_data.get("Data", {})
+            data = nbt_data.get("Data")
             if isinstance(data, nbtlib.tag.Compound):
-                info.data_version = int(data.get("DataVersion", 0))
+                info.data_version = _read_int_tag(data, "DataVersion", 0)
                 info.version_name = MinecraftConstants.VERSION_MAP.get(
                     info.data_version, f"未知({info.data_version})"
                 )
-                info.game_type = int(data.get("GameType", 0))
+                info.game_type = _read_int_tag(data, "GameType", 0)
                 info.game_type_name = _GAME_TYPE_NAMES.get(info.game_type, "未知")
-                info.difficulty = int(data.get("Difficulty", 2))
+                info.difficulty = _read_int_tag(data, "Difficulty", 2)
                 info.difficulty_name = _DIFFICULTY_NAMES.get(info.difficulty, "未知")
-                info.seed = int(data.get("RandomSeed", 0))
+                info.seed = _read_int_tag(data, "RandomSeed", 0)
                 info.spawn_pos = (
-                    int(data.get("SpawnX", 0)),
-                    int(data.get("SpawnY", 64)),
-                    int(data.get("SpawnZ", 0)),
+                    _read_int_tag(data, "SpawnX", 0),
+                    _read_int_tag(data, "SpawnY", 64),
+                    _read_int_tag(data, "SpawnZ", 0),
                 )
-                info.play_time_ticks = int(data.get("Time", 0))
+                info.play_time_ticks = _read_int_tag(data, "Time", 0)
         except Exception as e:
             log(f"无法读取 level.dat 基本信息: {e}", "WARNING")
 
@@ -149,7 +164,7 @@ class WorldDetector:
         for rf in region_files:
             rel = rf.relative_to(world_path)
             parts = rel.parts
-            if len(parts) >= 3 and parts[0] == "region":
+            if len(parts) >= 2 and parts[0] == "region":
                 dimensions.add("minecraft:overworld")
             elif len(parts) >= 3 and parts[0] == "DIM-1":
                 dimensions.add("minecraft:the_nether")
@@ -299,8 +314,6 @@ class WorldDetector:
         log: Callable[[str, str], None],
     ) -> None:
         """检测 level.dat"""
-        from .level_repairer import LEVEL_DAT_REQUIRED_FIELDS
-
         level_dat = world_path / "level.dat"
         level_dat_old = world_path / "level.dat_old"
 
@@ -337,7 +350,6 @@ class WorldDetector:
             return
 
         # 检查必需字段和范围
-        from .level_repairer import LEVEL_DAT_REQUIRED_FIELDS
         issues = validate_level_dat_data(data, LEVEL_DAT_REQUIRED_FIELDS)
         report.level_dat_issues = issues
         report.level_dat_ok = len(issues) == 0

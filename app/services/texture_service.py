@@ -7,7 +7,7 @@ import threading
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import requests
 
@@ -160,13 +160,13 @@ class TextureService:
     def load_textures_async(
         self,
         item_ids: List[str],
-        on_loaded: Optional[callable] = None,
+        on_loaded: Optional[Callable[[str, Optional[str]], None]] = None,
     ) -> None:
         """在后台线程中批量加载纹理，每完成一个回调 (item_id, base64_uri_or_None)"""
-        def _worker():
+        def _worker() -> None:
             for item_id in item_ids:
                 uri = self.get_texture_base64(item_id)
-                if on_loaded:
+                if on_loaded is not None:
                     try:
                         on_loaded(item_id, uri)
                     except Exception:

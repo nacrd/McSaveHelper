@@ -191,7 +191,7 @@ class DialogManager:
         Returns:
             List[ft.Control]: 按钮列表
         """
-        actions = []
+        actions: List[ft.Control] = []
 
         if include_details and exception:
             actions.append(

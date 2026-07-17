@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 
 from app.bootstrap.services import (
@@ -5,14 +7,18 @@ from app.bootstrap.services import (
     ServiceInitializationError,
     create_app_services,
 )
+from app.services.config_service import ConfigService
+from app.services.i18n_service import I18nService
+from app.services.migration_service import MigrationService
+from app.services.uuid_service import UUIDService
 
 
 def test_service_container_builds_in_dependency_order() -> None:
     events = []
-    config = object()
-    i18n = object()
-    migration = object()
-    uuid = object()
+    config = cast(ConfigService, object())
+    i18n = cast(I18nService, object())
+    migration = cast(MigrationService, object())
+    uuid = cast(UUIDService, object())
 
     def create_config():
         events.append("config")
@@ -54,18 +60,25 @@ def test_service_container_builds_in_dependency_order() -> None:
 def test_service_container_reports_failed_service_and_stops() -> None:
     uuid_created = False
 
-    def fail_migration(config):
+    def fail_migration(config: ConfigService) -> MigrationService:
         del config
         raise OSError("migration unavailable")
 
-    def create_uuid():
+    def create_uuid() -> UUIDService:
         nonlocal uuid_created
         uuid_created = True
-        return object()
+        return cast(UUIDService, object())
+
+    def create_config() -> ConfigService:
+        return cast(ConfigService, object())
+
+    def create_i18n(config: ConfigService) -> I18nService:
+        del config
+        return cast(I18nService, object())
 
     factories = ServiceFactories(
-        config=lambda: object(),
-        i18n=lambda config: object(),
+        config=create_config,
+        i18n=create_i18n,
         migration=fail_migration,
         uuid=create_uuid,
     )

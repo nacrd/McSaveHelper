@@ -5,13 +5,16 @@ Supports two states:
   - Collapsed (60px):  brand icon + tabs (icon only, tooltip text) + expand button
 """
 import traceback
-from typing import Callable, List, Dict, Any, Optional
+from typing import Callable, List, Dict, Any, Optional, cast
 
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow_glow
 from app.ui.icons import IconSet
 from core.version import APP_VERSION
+
+
+_EMPTY_BORDER_SIDE = ft.BorderSide(0, ft.Colors.TRANSPARENT)
 
 
 class Sidebar(ft.Container):
@@ -119,10 +122,10 @@ class Sidebar(ft.Container):
             width=effective_width,
             bgcolor=THEME.bg_primary,
             border=ft.Border(
-                left=None,
-                top=None,
+                left=_EMPTY_BORDER_SIDE,
+                top=_EMPTY_BORDER_SIDE,
                 right=ft.BorderSide(3, THEME.bg_secondary),
-                bottom=None,
+                bottom=_EMPTY_BORDER_SIDE,
             ),
             animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
         )
@@ -163,7 +166,9 @@ class Sidebar(ft.Container):
             padding=ft.Padding(left=0, right=0, top=16, bottom=16),
             bgcolor=THEME.mc_dirt,
             border=ft.Border(
-                left=None, top=None, right=None,
+                left=_EMPTY_BORDER_SIDE,
+                top=_EMPTY_BORDER_SIDE,
+                right=_EMPTY_BORDER_SIDE,
                 bottom=ft.BorderSide(3, THEME.mc_grass),
             ),
         )
@@ -172,7 +177,7 @@ class Sidebar(ft.Container):
         """Expanded header: branding + current save + import button + recent saves."""
         return ft.Container(
             content=ft.Column(
-                [
+                cast(List[ft.Control], [
                     # ─── Branding ───
                     ft.Row(
                         [
@@ -304,13 +309,15 @@ class Sidebar(ft.Container):
                         ),
                         padding=ft.Padding(left=0, right=0, top=12, bottom=0),
                     ),
-                ],
+                ]),
                 spacing=0,
             ),
             padding=ft.Padding(left=16, right=16, top=16, bottom=16),
             bgcolor=THEME.mc_dirt,
             border=ft.Border(
-                left=None, top=None, right=None,
+                left=_EMPTY_BORDER_SIDE,
+                top=_EMPTY_BORDER_SIDE,
+                right=_EMPTY_BORDER_SIDE,
                 bottom=ft.BorderSide(3, THEME.mc_grass),
             ),
         )
@@ -358,8 +365,10 @@ class Sidebar(ft.Container):
             padding=8,
             bgcolor=THEME.bg_secondary,
             border=ft.Border(
-                left=None, top=ft.BorderSide(1, THEME.border_subtle),
-                right=None, bottom=None,
+                left=_EMPTY_BORDER_SIDE,
+                top=ft.BorderSide(1, THEME.border_subtle),
+                right=_EMPTY_BORDER_SIDE,
+                bottom=_EMPTY_BORDER_SIDE,
             ),
             ink=True,
             on_click=self._handle_toggle,
@@ -388,6 +397,8 @@ class Sidebar(ft.Container):
         """
         selected = tab["id"] == self._selected_id
         icon_name = tab.get("icon", IconSet.GRID)
+        if not isinstance(icon_name, ft.IconData):
+            icon_name = IconSet.GRID
         label_text = tab.get("label", tab["id"])
 
         if self._collapsed:
@@ -396,7 +407,7 @@ class Sidebar(ft.Container):
 
     def _build_tab_collapsed(
         self, tab: Dict[str, Any], selected: bool,
-        icon_name: str, label_text: str,
+        icon_name: ft.IconData, label_text: str,
     ) -> ft.Container:
         """Collapsed tab: centered icon with tooltip."""
         icon_ctrl = ft.Icon(
@@ -424,7 +435,7 @@ class Sidebar(ft.Container):
 
     def _build_tab_expanded(
         self, tab: Dict[str, Any], selected: bool,
-        icon_name: str, label_text: str,
+        icon_name: ft.IconData, label_text: str,
     ) -> ft.Container:
         """Expanded tab: icon + text label + selection arrow."""
         icon_slot = ft.Container(
@@ -474,7 +485,7 @@ class Sidebar(ft.Container):
     #  Hover handlers
     # ════════════════════════════════════════════
 
-    def _handle_hover(self, e: ft.ControlEvent, tab_id: str) -> None:
+    def _handle_hover(self, e: ft.Event[ft.Container], tab_id: str) -> None:
         """Hover handler for expanded tab buttons."""
         try:
             if tab_id not in self._buttons:
@@ -503,7 +514,11 @@ class Sidebar(ft.Container):
         except Exception:
             pass
 
-    def _handle_hover_collapsed(self, e: ft.ControlEvent, tab_id: str) -> None:
+    def _handle_hover_collapsed(
+        self,
+        e: ft.Event[ft.Container],
+        tab_id: str,
+    ) -> None:
         """Hover handler for collapsed tab buttons."""
         try:
             if tab_id not in self._buttons:
@@ -580,9 +595,19 @@ class Sidebar(ft.Container):
             if isinstance(text_group, ft.Column) and len(text_group.controls) >= 2:
                 tc = text_group.controls[0]
                 marker = text_group.controls[1]
-                tc.color = THEME.text_primary if selected else THEME.text_secondary
-                tc.weight = ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
-                marker.value = "▶" if selected else ""
+                if isinstance(tc, ft.Text):
+                    tc.color = (
+                        THEME.text_primary
+                        if selected
+                        else THEME.text_secondary
+                    )
+                    tc.weight = (
+                        ft.FontWeight.BOLD
+                        if selected
+                        else ft.FontWeight.W_500
+                    )
+                if isinstance(marker, ft.Text):
+                    marker.value = "▶" if selected else ""
         container.bgcolor = THEME.mc_stone if selected else THEME.bg_card
         container.shadow = mc_shadow_glow(THEME.shadow_glow, 4) if selected else None
 
@@ -590,7 +615,7 @@ class Sidebar(ft.Container):
     #  Toggle collapse/expand
     # ════════════════════════════════════════════
 
-    def _handle_toggle(self, e: ft.ControlEvent = None) -> None:
+    def _handle_toggle(self) -> None:
         """Toggle between collapsed and expanded states."""
         self.set_collapsed(not self._collapsed)
 
@@ -689,7 +714,7 @@ class Sidebar(ft.Container):
     #  Recent saves expand/collapse
     # ════════════════════════════════════════════
 
-    def _toggle_recent(self, e: ft.ControlEvent = None) -> None:
+    def _toggle_recent(self) -> None:
         """Toggle the recent saves section expanded/collapsed."""
         self._recent_expanded = not self._recent_expanded
         self._recent_body.visible = self._recent_expanded
@@ -728,7 +753,7 @@ class Sidebar(ft.Container):
     #  Event handlers
     # ════════════════════════════════════════════
 
-    def _handle_set_current_save(self, e: ft.ControlEvent) -> None:
+    def _handle_set_current_save(self) -> None:
         """Handle 'set current save' button click."""
         try:
             if self._on_set_current_save:
@@ -738,9 +763,9 @@ class Sidebar(ft.Container):
         except Exception:
             pass
 
-    def _handle_import_save(self, e: ft.ControlEvent) -> None:
+    def _handle_import_save(self) -> None:
         """Backward-compat alias for set current save."""
-        self._handle_set_current_save(e)
+        self._handle_set_current_save()
 
     # ════════════════════════════════════════════
     #  Public API

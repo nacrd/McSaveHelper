@@ -13,9 +13,10 @@ from app.ui.components.cards import card
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
 from app.ui.views.explorer.map.fullscreen import MapFullscreenController
+from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 
 
-class RegionTabMixin:
+class RegionTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer region / map tab."""
 
     def _build_region_tab(self) -> None:
@@ -45,7 +46,12 @@ class RegionTabMixin:
             map_view = ft.Container(
                 content=ft.Column([
                     ft.Icon(ft.Icons.WARNING, size=48, color="#FF9800"),
-                    ft.Text("区域地图组件不可用", size=16, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                    ft.Text(
+                        "区域地图组件不可用",
+                        size=16,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary,
+                    ),
                     ft.Text("请升级 Flet 版本以启用区域地图功能", size=13, color=THEME.text_muted),
                 ], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
                 padding=50,
@@ -70,7 +76,7 @@ class RegionTabMixin:
             options=[
                 ft.dropdown.Option("topview", "方块俯视"),
             ],
-            on_select=self._change_region_display_mode,
+            on_select=lambda: self._change_region_display_mode(),
             border_color=THEME.border_light,
             focused_border_color=THEME.accent,
             color=THEME.text_primary,
@@ -232,7 +238,7 @@ class RegionTabMixin:
             ("#FFD54F", "选中", "边框"),
         ]
 
-    def _change_region_display_mode(self, e: ft.ControlEvent) -> None:
+    def _change_region_display_mode(self) -> None:
         mode = self._region_display_mode_dropdown.value or "topview"
         self._region_display_mode = mode
         if self._map_view is not None and hasattr(self._map_view, "set_display_mode"):
@@ -340,11 +346,13 @@ class RegionTabMixin:
 
     def _delete_selected_region(self, e: Any) -> None:
         try:
-            if not self.world_session or not self._selected_region_coord:
+            if self.world_session is None or self._selected_region_coord is None:
                 self.app.warn_dialog("提示", "请先在区域地图中选择一个区域。")
                 return
-            region_dir = Path(
-                self._dimension_region_dirs.get(self._current_dimension, ""))
+            region_dir = self._get_current_region_dir()
+            if region_dir is None:
+                self.app.warn_dialog("提示", "当前维度没有可用的 region 目录。")
+                return
             coord = self._selected_region_coord
             region_path = region_dir / f"r.{coord[0]}.{coord[1]}.mca"
             if not region_path.exists():
@@ -364,12 +372,11 @@ class RegionTabMixin:
 
     def _fill_selected_region_for_nbt(self, e: Any = None) -> None:
         try:
-            if not self.world_session or not self._selected_region_coord:
+            if self.world_session is None or self._selected_region_coord is None:
                 self.app.warn_dialog("提示", "请先在区域地图中选择一个区域。")
                 return
-            region_dir = Path(
-                self._dimension_region_dirs.get(self._current_dimension, ""))
-            if not region_dir:
+            region_dir = self._get_current_region_dir()
+            if region_dir is None:
                 self.app.warn_dialog("提示", "当前维度没有可用的 region 目录。")
                 return
             coord = self._selected_region_coord
@@ -394,15 +401,18 @@ class RegionTabMixin:
             if not self.world_session:
                 self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return False
-            region_dir = Path(
-                self._dimension_region_dirs.get(self._current_dimension, ""))
-            if not region_dir:
+            region_dir = self._get_current_region_dir()
+            if region_dir is None:
                 self.app.warn_dialog("提示", "当前维度没有可用的 region 目录。")
                 return False
             world_x = int(float((self._world_x_field.value or "0").strip()))
             world_z = int(float((self._world_z_field.value or "0").strip()))
-            region_x, region_z, local_chunk_x, local_chunk_z = self._world_coords_to_region_chunk(
-                world_x, world_z)
+            (
+                region_x,
+                region_z,
+                local_chunk_x,
+                local_chunk_z,
+            ) = self._world_coords_to_region_chunk(world_x, world_z)
             region_path = region_dir / f"r.{region_x}.{region_z}.mca"
             relative_path = region_path.resolve().relative_to(
                 self.world_session.world_path.resolve())
@@ -427,6 +437,10 @@ class RegionTabMixin:
     def _load_chunk_from_world_coords(self, e: Any = None) -> None:
         if self._fill_chunk_from_world_coords(e):
             self._load_chunk_nbt(e)
+
+    def _get_current_region_dir(self) -> Optional[Path]:
+        region_dir = self._dimension_region_dirs.get(self._current_dimension)
+        return Path(region_dir) if region_dir else None
 
     def _refresh_map(self) -> None:
         try:

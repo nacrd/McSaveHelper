@@ -8,9 +8,10 @@ import flet.canvas as cv
 from app.ui.theme import THEME
 from app.ui.components.cards import card
 from app.ui.views.explorer.utils import safe_update, format_size
+from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 
 
-class StatsTabMixin:
+class StatsTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer statistics tab."""
 
     def _build_stats_tab(self) -> None:
@@ -260,7 +261,8 @@ class StatsTabMixin:
     def _analyze_world_stats(self, e: Any) -> None:
         """后台分析世界统计数据"""
         try:
-            if not self.world_session:
+            session = self.world_session
+            if session is None:
                 self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
 
@@ -272,14 +274,18 @@ class StatsTabMixin:
             def _run():
                 try:
                     stats = service.analyze_world(
-                        self.world_session.world_path)
+                        session.world_path)
 
                     async def _update_ui():
                         try:
+                            chunk_slots = (
+                                stats.loaded_chunks + stats.empty_chunks
+                            )
                             loaded_ratio = (
-                                stats.loaded_chunks /
-                                (stats.loaded_chunks + stats.empty_chunks) * 100
-                            ) if (stats.loaded_chunks + stats.empty_chunks) else 0
+                                stats.loaded_chunks / chunk_slots * 100
+                                if chunk_slots
+                                else 0
+                            )
                             total_size = sum(stats.region_sizes.values())
                             self._stats_summary.value = (
                                 f"区域: {stats.total_regions}\n"

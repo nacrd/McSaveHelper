@@ -159,7 +159,7 @@ class UUIDMappingTable(ft.Column):
         )
         uf.expand = 3
 
-        def on_change(e: ft.ControlEvent) -> None:
+        def on_change() -> None:
             self._sync()
 
         nf.on_change = on_change

@@ -9,6 +9,16 @@ from typing import Dict, Any
 class ThreadMonitoringMixin:
     """线程监控混入类，提供线程阻塞检测功能"""
 
+    _thread_snapshots: Dict[int, Dict[str, Any]]
+    _blocked_threads: set[int]
+    thread_block_timeout: float
+
+    def _should_alert(self, key: str) -> bool:
+        raise NotImplementedError
+
+    def _fire_alert(self, alert: Any) -> None:
+        raise NotImplementedError
+
     def _process_thread(self, thread_id: int, frame, now: float) -> None:
         """处理单个线程的检查"""
         thread_name = self._get_thread_name(thread_id)

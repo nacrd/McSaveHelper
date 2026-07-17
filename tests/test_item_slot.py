@@ -16,7 +16,7 @@ def test_item_slot_applies_and_resets_item_state():
         count=2,
         slot=0,
         durability_percent=50,
-        enchantments=["minecraft:sharpness"],
+        enchantments=[{"id": "minecraft:sharpness", "level": 1}],
     )
 
     apply_item_to_slot(slot, item, "tooltip")

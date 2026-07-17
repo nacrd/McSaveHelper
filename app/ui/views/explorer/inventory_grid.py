@@ -35,14 +35,16 @@ class InventoryGrid(ft.Column):
 
         main_rows: List[ft.Control] = []
         for row in range(3):
-            slots_row = [make_slot(9 + row * 9 + col) for col in range(9)]
+            slots_row: List[ft.Control] = [
+                make_slot(9 + row * 9 + col) for col in range(9)
+            ]
             main_rows.append(
                 ft.Row(
                     slots_row,
                     spacing=2,
                     alignment=ft.MainAxisAlignment.START))
 
-        hotbar_slots = [make_slot(col) for col in range(9)]
+        hotbar_slots: List[ft.Control] = [make_slot(col) for col in range(9)]
         hotbar_row = ft.Row(
             hotbar_slots,
             spacing=2,

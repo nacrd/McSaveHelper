@@ -1,13 +1,18 @@
 """Result export for entity/block/container search."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, TextIO
 
 from core.logger import logger
 from .models import SearchResult, SearchSummary
 
 
-def export_results_to_text(output_path: Path, summary: SearchSummary, stored_results: List[SearchResult], results: Optional[List[SearchResult]] = None) -> None:
+def export_results_to_text(
+    output_path: Path,
+    summary: SearchSummary,
+    stored_results: List[SearchResult],
+    results: Optional[List[SearchResult]] = None,
+) -> None:
     """将搜索结果导出为文本文件。"""
     try:
         export_results = results if results is not None else stored_results
@@ -19,7 +24,7 @@ def export_results_to_text(output_path: Path, summary: SearchSummary, stored_res
         logger.error(f"导出结果失败: {e}", module="EntityBlockSearch")
 
 
-def _write_header(f, summary: SearchSummary, total: int) -> None:
+def _write_header(f: TextIO, summary: SearchSummary, total: int) -> None:
     f.write(f"搜索结果 - 共 {total} 个\n")
     f.write(f"扫描区域: {summary.scanned_regions}\n")
     f.write(f"扫描区块: {summary.scanned_chunks}\n")
@@ -27,7 +32,7 @@ def _write_header(f, summary: SearchSummary, total: int) -> None:
     f.write("=" * 80 + "\n\n")
 
 
-def _write_result(f, idx: int, result: SearchResult) -> None:
+def _write_result(f: TextIO, idx: int, result: SearchResult) -> None:
     f.write(f"{idx}. {result.name}\n")
     f.write(f"   类型: {result.result_type}\n")
     f.write(f"   位置: X={result.x}, Y={result.y}, Z={result.z}\n")

@@ -1,5 +1,5 @@
 """Item service models."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 
@@ -12,13 +12,7 @@ class ItemInfo:
     damage: Optional[int] = None
     max_damage: Optional[int] = None
     durability_percent: Optional[float] = None
-    enchantments: List[Dict[str, Any]] = None
+    enchantments: List[Dict[str, Any]] = field(default_factory=list)
     custom_name: Optional[str] = None
-    lore: List[str] = None
+    lore: List[str] = field(default_factory=list)
     slot: int = -1
-
-    def __post_init__(self):
-        if self.enchantments is None:
-            self.enchantments = []
-        if self.lore is None:
-            self.lore = []

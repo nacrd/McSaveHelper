@@ -1,7 +1,7 @@
 """Rendering helpers for NBT tree controls."""
 
 import logging
-from typing import Any, Callable, Dict, List, Set
+from typing import Any, Callable, Dict, List
 
 import flet as ft
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class NbtTreeRenderer:
     """Builds Flet controls for NBT-like data."""
 
-    def __init__(self, callbacks: Dict[str, Callable[[], Any]]) -> None:
+    def __init__(self, callbacks: Dict[str, Callable[..., Any]]) -> None:
         self.callbacks = callbacks
 
     def build_nodes(self, data: Any, path_prefix: str, depth: int, state: Dict[str, Any]) -> List[ft.Control]:

@@ -27,7 +27,7 @@ class ItemService:
     def _init(self) -> None:
         self._name_map: Dict[str, str] = _VANILLA_ITEM_NAMES.copy()
         self._enchantment_names: Dict[str, str] = _ENCHANTMENT_NAMES.copy()
-        self._max_durability: Dict[str, int] = _MAX_DURABILITY.copy()
+        self._max_durability: Dict[str, Optional[int]] = _MAX_DURABILITY.copy()
         self._custom_slots: Dict[int, str] = {}
 
     def load_language_file(self, path: Path, namespace: str = "minecraft") -> int:

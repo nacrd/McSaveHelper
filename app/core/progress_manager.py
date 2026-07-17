@@ -96,7 +96,7 @@ class ProgressManager:
         if container is None or progress_bar is None or progress_label is None:
             return
 
-        def _update():
+        def _update() -> None:
             # 确保进度条可见
             if not container.visible:
                 container.visible = True
@@ -124,7 +124,7 @@ class ProgressManager:
         if container is None or progress_bar is None or progress_label is None:
             return
 
-        def _update():
+        def _update() -> None:
             container.visible = True
 
             if task_name:
@@ -145,7 +145,7 @@ class ProgressManager:
         if container is None or progress_bar is None or progress_label is None:
             return
 
-        def _update():
+        def _update() -> None:
             container.visible = False
             progress_label.value = self._translate("top_bar.ready", "就绪")
             progress_bar.set_value(0.0)
@@ -166,7 +166,7 @@ class ProgressManager:
         if container is None or progress_bar is None or progress_label is None:
             return
 
-        def _update():
+        def _update() -> None:
             # 确保进度条可见
             if not container.visible:
                 container.visible = True
@@ -193,7 +193,7 @@ class ProgressManager:
         if container is None or progress_label is None:
             return
 
-        def _update():
+        def _update() -> None:
             # 确保进度条可见
             if not container.visible:
                 container.visible = True
@@ -213,7 +213,7 @@ class ProgressManager:
         if progress_bar is None:
             return
 
-        def _update():
+        def _update() -> None:
             progress_bar.set_value(value)
             self.page.update()
 

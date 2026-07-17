@@ -65,6 +65,7 @@ class BlockDataService:
     def _invalidate_cache(self, block_states: Any) -> None:
         if block_states is not None:
             self._indices_cache.pop(id(block_states), None)
+
     def get_block_at(
             self,
             chunk_data: Any,
@@ -228,10 +229,10 @@ class BlockDataService:
                 entry["Properties"] = props
             return entry
         except ImportError:
-            entry = {"Name": block_name}
+            fallback_entry: Dict[str, Any] = {"Name": block_name}
             if properties:
-                entry["Properties"] = properties
-            return entry
+                fallback_entry["Properties"] = properties
+            return fallback_entry
 
     def _decode_all_indices(self, data: Any, palette_size: int) -> List[int]:
         if data is None or palette_size <= 1:
@@ -326,7 +327,7 @@ class BlockDataService:
         except (ImportError, Exception):
             pass
         try:
-            from nbt.nbt import TAG_Long_Array
+            from nbt.nbt import TAG_Long_Array  # type: ignore[import-untyped]
             tag = TAG_Long_Array(longs)
             block_states["data"] = tag
             return

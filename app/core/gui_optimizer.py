@@ -141,7 +141,7 @@ class GUIOptimizer:
         except Exception as ex:
             logger.error(f"键盘事件处理失败: {ex}", module="GUIOptimizer")
 
-    def _shortcut_save_config(self, e) -> None:
+    def _shortcut_save_config(self, e: Any) -> None:
         """快捷键：保存配置 (Ctrl+S)
 
         Args:
@@ -158,7 +158,7 @@ class GUIOptimizer:
             if self.notification_manager:
                 self.notification_manager.show_error("保存配置失败")
 
-    def _shortcut_show_help(self, e) -> None:
+    def _shortcut_show_help(self, e: Any) -> None:
         """快捷键：显示帮助 (F1)
 
         Args:
@@ -170,7 +170,7 @@ class GUIOptimizer:
         except Exception as ex:
             logger.error(f"显示帮助失败: {ex}", module="GUIOptimizer")
 
-    def _shortcut_refresh(self, e) -> None:
+    def _shortcut_refresh(self, e: Any) -> None:
         """快捷键：刷新页面 (F5)
 
         Args:
@@ -184,7 +184,7 @@ class GUIOptimizer:
         except Exception as ex:
             logger.error(f"刷新页面失败: {ex}", module="GUIOptimizer")
 
-    def _shortcut_show_feedback(self, e) -> None:
+    def _shortcut_show_feedback(self, e: Any) -> None:
         """快捷键：显示反馈对话框 (Ctrl+F)
 
         Args:
@@ -197,7 +197,7 @@ class GUIOptimizer:
         except Exception as ex:
             logger.error(f"显示反馈对话框失败: {ex}", module="GUIOptimizer")
 
-    def _on_health_alert(self, alert) -> None:
+    def _on_health_alert(self, alert: Any) -> None:
         """健康告警回调
 
         Args:
@@ -217,11 +217,11 @@ class GUIOptimizer:
 
         try:
             if alert.level == AlertLevel.CRITICAL:
-                async def _show_error(message: str):
+                async def _show_error(message: str) -> None:
                     notification_manager.show_error(message, duration_ms=8000)
                 self.page.run_task(_show_error, alert.message)
             else:
-                async def _show_warning(message: str):
+                async def _show_warning(message: str) -> None:
                     notification_manager.show_warning(message, duration_ms=5000)
                 self.page.run_task(_show_warning, alert.message)
         except Exception:
