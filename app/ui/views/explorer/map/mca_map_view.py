@@ -420,15 +420,7 @@ class McaMapView(ft.Container):
         self._view_level = "chunk"
         # Ensure hi-res tile for chunk inspection.
         if self._use_topview:
-            try:
-                self._service.request_topview_tiles(
-                    [hit],
-                    tile_size=DETAIL_TILE_SIZE,
-                    force=True,
-                    priority=True,
-                )
-            except TypeError:
-                self._service.request_topview_tiles([hit], tile_size=DETAIL_TILE_SIZE)
+            self._request_detail_tiles([hit], force=True, priority=True)
 
     def _on_secondary_tap(self, e: Any) -> None:
         """Right-click: step back overview (block→chunk→region→world)."""
@@ -506,18 +498,7 @@ class McaMapView(ft.Container):
                 if (coord[0] + dx, coord[1] + dz) in self._current_data
                 or (dx, dz) == (0, 0)
             ]
-            try:
-                self._service.request_topview_tiles(
-                    neighbors,
-                    tile_size=DETAIL_TILE_SIZE,
-                    force=True,
-                    priority=True,
-                )
-            except TypeError:
-                # Older service signature fallback
-                self._service.request_topview_tiles(
-                    neighbors, tile_size=DETAIL_TILE_SIZE
-                )
+            self._request_detail_tiles(neighbors, force=True, priority=True)
 
         if animate:
             self._animate_camera_to(
@@ -558,17 +539,7 @@ class McaMapView(ft.Container):
         self._selected_chunk = chunk_coord
 
         if self._use_topview:
-            try:
-                self._service.request_topview_tiles(
-                    [(rx, rz)],
-                    tile_size=DETAIL_TILE_SIZE,
-                    force=True,
-                    priority=True,
-                )
-            except TypeError:
-                self._service.request_topview_tiles(
-                    [(rx, rz)], tile_size=DETAIL_TILE_SIZE
-                )
+            self._request_detail_tiles([(rx, rz)], force=True, priority=True)
 
         if animate:
             self._animate_camera_to(
@@ -635,17 +606,11 @@ class McaMapView(ft.Container):
         if transition.going_deeper or new_level in {"chunk", "block"}:
             self._auto_select_under_pointer(px, py, new_level, notify=False)
             if self._use_topview and self._selected_cell is not None:
-                try:
-                    self._service.request_topview_tiles(
-                        [self._selected_cell],
-                        tile_size=DETAIL_TILE_SIZE,
-                        force=True,
-                        priority=True,
-                    )
-                except TypeError:
-                    self._service.request_topview_tiles(
-                        [self._selected_cell], tile_size=DETAIL_TILE_SIZE
-                    )
+                self._request_detail_tiles(
+                    [self._selected_cell],
+                    force=True,
+                    priority=True,
+                )
 
         if notify and (
             transition.changed or new_level != self._last_notified_level
@@ -883,16 +848,27 @@ class McaMapView(ft.Container):
         ]
         if not missing:
             return
+        self._request_detail_tiles(missing, force=True, priority=True)
+
+    def _request_detail_tiles(
+        self,
+        coords: List[Tuple[int, int]],
+        *,
+        force: bool = False,
+        priority: bool = False,
+    ) -> None:
+        if not coords:
+            return
         try:
             self._service.request_topview_tiles(
-                missing,
+                coords,
                 tile_size=DETAIL_TILE_SIZE,
-                force=True,
-                priority=True,
+                force=force,
+                priority=priority,
             )
         except TypeError:
             self._service.request_topview_tiles(
-                missing,
+                coords,
                 tile_size=DETAIL_TILE_SIZE,
             )
 
