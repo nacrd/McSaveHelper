@@ -146,8 +146,14 @@ class BlockDataService:
                 False, "", block_name, -1, False, f"未找到 section Y={section_y}")
         block_states = self._get(section, "block_states")
         if block_states is None:
-            return SetBlockResult(False, "", block_name, -
-                                  1, False, "section 无 block_states（旧版格式暂不支持写入）")
+            return SetBlockResult(
+                False,
+                "",
+                block_name,
+                -1,
+                False,
+                "section 无 block_states（旧版格式暂不支持写入）",
+            )
         palette = self._get(block_states, "palette")
         data = self._get(block_states, "data")
         if palette is None or len(palette) == 0:
@@ -157,8 +163,14 @@ class BlockDataService:
         old_index = self._decode_palette_index(
             data, old_palette_size, local_x, local_y, local_z)
         if old_index < 0 or old_index >= old_palette_size:
-            return SetBlockResult(False, "", block_name, -
-                                  1, False, f"当前 palette_index={old_index} 越界")
+            return SetBlockResult(
+                False,
+                "",
+                block_name,
+                -1,
+                False,
+                f"当前 palette_index={old_index} 越界",
+            )
         old_state = palette[old_index]
         old_name = self._value(self._get(old_state, "Name", "unknown"))
         new_palette_index = self._find_or_add_palette_entry(
@@ -270,8 +282,10 @@ class BlockDataService:
             self,
             indices: List[int],
             palette_size: int) -> List[int]:
-        bits = max(4, (palette_size - 1).bit_length()
-                   ) if palette_size > 1 else 4
+        bits = (
+            max(4, (palette_size - 1).bit_length())
+            if palette_size > 1 else 4
+        )
         values_per_long = 64 // bits
         num_longs = (4096 + values_per_long - 1) // values_per_long
         longs = [0] * num_longs
@@ -279,9 +293,8 @@ class BlockDataService:
             long_index = i // values_per_long
             bit_offset = (i % values_per_long) * bits
             longs[long_index] |= (
-                palette_index & (
-                    (1 << bits) -
-                    1)) << bit_offset
+                palette_index & ((1 << bits) - 1)
+            ) << bit_offset
         for j in range(num_longs):
             if longs[j] >= (1 << 63):
                 longs[j] -= (1 << 64)
@@ -291,55 +304,62 @@ class BlockDataService:
             self,
             block_states: Any,
             longs: List[int]) -> None:
-        # First check if we already have a data array and can modify in-place
         current_data = self._get(block_states, "data")
-        if current_data is not None:
-            # Try modifying existing array in-place first
-            try:
-                # Check if it's an array-like object with setitem and len
-                if hasattr(
-                        current_data,
-                        "__len__") and hasattr(
-                        current_data,
-                        "__setitem__"):
-                    # In-place replacement: either overwrite all elements or
-                    # resize if needed
-                    if len(current_data) == len(longs):
-                        for i in range(len(longs)):
-                            current_data[i] = longs[i]
-                        return
-                    elif hasattr(current_data, "clear") and hasattr(current_data, "extend"):
-                        current_data.clear()
-                        if hasattr(current_data, "append"):
-                            for v in longs:
-                                current_data.append(v)
-                        elif hasattr(current_data, "extend"):
-                            current_data.extend(longs)
-                        return
-            except Exception:
-                pass  # If in-place fails, fall back to replacing the array
+        if current_data is not None and self._update_existing_data(
+                current_data, longs):
+            return
+        if self._set_nbtlib_long_array(block_states, longs):
+            return
+        if self._set_legacy_long_array(block_states, longs):
+            return
+        self._set_plain_long_array(block_states, longs)
 
-        # Fall back to replacing the data field
+    @staticmethod
+    def _update_existing_data(current_data: Any, longs: List[int]) -> bool:
+        if not hasattr(current_data, "__len__") or not hasattr(
+                current_data, "__setitem__"):
+            return False
+        try:
+            if len(current_data) == len(longs):
+                for index, value in enumerate(longs):
+                    current_data[index] = value
+                return True
+            clear = getattr(current_data, "clear", None)
+            extend = getattr(current_data, "extend", None)
+            if callable(clear) and callable(extend):
+                clear()
+                extend(longs)
+                return True
+        except Exception:
+            return False
+        return False
+
+    @staticmethod
+    def _set_nbtlib_long_array(block_states: Any, longs: List[int]) -> bool:
         try:
             from nbtlib.tag import LongArray
+
             block_states["data"] = LongArray(longs)
-            return
-        except (ImportError, Exception):
-            pass
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _set_legacy_long_array(block_states: Any, longs: List[int]) -> bool:
         try:
             from nbt.nbt import TAG_Long_Array  # type: ignore[import-untyped]
-            tag = TAG_Long_Array(longs)
-            block_states["data"] = tag
-            return
-        except (ImportError, Exception):
-            pass
-        if isinstance(block_states, dict):
+
+            block_states["data"] = TAG_Long_Array(longs)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _set_plain_long_array(block_states: Any, longs: List[int]) -> None:
+        try:
             block_states["data"] = longs
-        elif hasattr(block_states, "__setitem__"):
-            try:
-                block_states["data"] = longs
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     def _find_section(self, sections: Any, section_y: int) -> Any:
         for section in sections:
