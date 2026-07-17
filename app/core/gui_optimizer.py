@@ -4,7 +4,7 @@
 """
 from dataclasses import dataclass
 import threading
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Protocol, cast
 import flet as ft
 
 from app.ui.keyboard_shortcuts import (
@@ -26,11 +26,83 @@ from core.logger import logger
 from core.performance import PerformanceMetrics, set_metrics_sink
 
 
+class ShortcutManagerPort(Protocol):
+    def register(
+        self,
+        binding_id: str,
+        key: str,
+        callback: Callable[..., Any],
+        description: str,
+        modifiers: list[Any],
+    ) -> None:
+        ...
+
+    def handle_event(self, e: ft.KeyboardEvent) -> bool:
+        ...
+
+    def create_help_dialog(self) -> Any:
+        ...
+
+
+class PerformanceMonitorPort(Protocol):
+    enabled: bool
+
+    def enable(self) -> None:
+        ...
+
+    def disable(self) -> None:
+        ...
+
+    def record(
+        self,
+        metric_name: str,
+        value: float,
+        unit: str = "",
+        **metadata: Any,
+    ) -> None:
+        ...
+
+
+class ResourceMonitorPort(Protocol):
+    def start(self) -> None:
+        ...
+
+    def stop(self) -> None:
+        ...
+
+    def set_print_interval(self, seconds: float) -> None:
+        ...
+
+
+class HealthMonitorPort(Protocol):
+    def set_alert_callback(self, callback: Callable[[Any], None]) -> None:
+        ...
+
+    def heartbeat(self) -> None:
+        ...
+
+
 @dataclass(frozen=True)
 class GUIOptimizerDependencies:
     page: ft.Page
     get_ui_setting: Callable[[str, Any], Any]
     save_config: Callable[[], None]
+    shortcut_manager: ShortcutManagerPort = cast(
+        ShortcutManagerPort,
+        shortcut_manager,
+    )
+    performance_monitor: PerformanceMonitorPort = cast(
+        PerformanceMonitorPort,
+        perf_monitor,
+    )
+    resource_monitor: ResourceMonitorPort = cast(
+        ResourceMonitorPort,
+        resource_monitor,
+    )
+    health_monitor: HealthMonitorPort = cast(
+        HealthMonitorPort,
+        health_monitor,
+    )
 
 
 class GUIOptimizer:
@@ -47,6 +119,10 @@ class GUIOptimizer:
     def __init__(self, dependencies: GUIOptimizerDependencies) -> None:
         self._deps = dependencies
         self.page = dependencies.page
+        self._shortcut_manager = dependencies.shortcut_manager
+        self._performance_monitor = dependencies.performance_monitor
+        self._resource_monitor = dependencies.resource_monitor
+        self._health_monitor = dependencies.health_monitor
         self.notification_manager: Optional[NotificationManager] = None
         self._heartbeat_stop = threading.Event()
         self._hang_heartbeat_stop = threading.Event()
@@ -84,7 +160,7 @@ class GUIOptimizer:
             )
 
             # 注册应用特定快捷键
-            shortcut_manager.register(
+            self._shortcut_manager.register(
                 "show_feedback",
                 "f",
                 self._shortcut_show_feedback,
@@ -116,12 +192,11 @@ class GUIOptimizer:
             # 降级：不使用优化功能
             self.notification_manager = None
 
-    @staticmethod
-    def _record_business_metric(metrics: PerformanceMetrics) -> None:
+    def _record_business_metric(self, metrics: PerformanceMetrics) -> None:
         """Adapt core business metrics to the optional GUI monitor."""
-        if not perf_monitor.enabled:
+        if not self._performance_monitor.enabled:
             return
-        perf_monitor.record(
+        self._performance_monitor.record(
             f"biz_{metrics.operation}",
             metrics.duration_seconds * 1000,
             "ms",
@@ -137,7 +212,7 @@ class GUIOptimizer:
             e: 键盘事件
         """
         try:
-            shortcut_manager.handle_event(e)
+            self._shortcut_manager.handle_event(e)
         except Exception as ex:
             logger.error(f"键盘事件处理失败: {ex}", module="GUIOptimizer")
 
@@ -165,7 +240,7 @@ class GUIOptimizer:
             e: 事件对象
         """
         try:
-            help_dialog = shortcut_manager.create_help_dialog()
+            help_dialog = self._shortcut_manager.create_help_dialog()
             self.page.show_dialog(help_dialog)
         except Exception as ex:
             logger.error(f"显示帮助失败: {ex}", module="GUIOptimizer")
@@ -235,20 +310,19 @@ class GUIOptimizer:
         """统一启停性能监控及其心跳资源。"""
         self.set_performance_print_interval(print_interval)
         if enabled:
-            perf_monitor.enable()
-            health_monitor.set_alert_callback(self._on_health_alert)
-            resource_monitor.start()
+            self._performance_monitor.enable()
+            self._health_monitor.set_alert_callback(self._on_health_alert)
+            self._resource_monitor.start()
             self._start_heartbeat()
             return
 
-        perf_monitor.disable()
-        resource_monitor.stop()
+        self._performance_monitor.disable()
+        self._resource_monitor.stop()
         self._stop_performance_heartbeat()
 
-    @staticmethod
-    def set_performance_print_interval(seconds: float) -> None:
+    def set_performance_print_interval(self, seconds: float) -> None:
         """更新资源监控的日志打印间隔。"""
-        resource_monitor.set_print_interval(max(5.0, seconds))
+        self._resource_monitor.set_print_interval(max(5.0, seconds))
 
     def _start_heartbeat(self) -> None:
         """启动UI心跳线程，用于性能监控"""
@@ -260,7 +334,7 @@ class GUIOptimizer:
 
         def _beat_loop() -> None:
             while not self._heartbeat_stop.is_set():
-                health_monitor.heartbeat()
+                self._health_monitor.heartbeat()
                 self._heartbeat_stop.wait(3.0)
 
         self._heartbeat_thread = threading.Thread(

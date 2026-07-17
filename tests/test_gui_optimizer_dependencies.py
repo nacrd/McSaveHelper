@@ -1,6 +1,6 @@
 """Tests for GUIOptimizer's explicit configuration dependencies."""
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import flet as ft
 
@@ -30,36 +30,30 @@ def test_gui_optimizer_saves_config_without_application() -> None:
 
 def test_gui_optimizer_owns_performance_monitor_lifecycle(monkeypatch) -> None:
     calls = []
+    performance = SimpleNamespace(
+        enable=lambda: calls.append("enable"),
+        disable=lambda: calls.append("disable"),
+        enabled=False,
+        record=lambda *args, **kwargs: None,
+    )
+    resources = SimpleNamespace(
+        start=lambda: calls.append("start"),
+        stop=lambda: calls.append("stop"),
+        set_print_interval=lambda value: calls.append(("interval", value)),
+    )
+    health = SimpleNamespace(
+        set_alert_callback=lambda callback: calls.append("callback"),
+        heartbeat=lambda: None,
+    )
     optimizer = GUIOptimizer(GUIOptimizerDependencies(
         page=cast(ft.Page, SimpleNamespace()),
         get_ui_setting=lambda key, default: default,
         save_config=lambda: None,
+        performance_monitor=cast(Any, performance),
+        resource_monitor=cast(Any, resources),
+        health_monitor=cast(Any, health),
     ))
 
-    monkeypatch.setattr(
-        "app.core.gui_optimizer.perf_monitor.enable",
-        lambda: calls.append("enable"),
-    )
-    monkeypatch.setattr(
-        "app.core.gui_optimizer.perf_monitor.disable",
-        lambda: calls.append("disable"),
-    )
-    monkeypatch.setattr(
-        "app.core.gui_optimizer.resource_monitor.start",
-        lambda: calls.append("start"),
-    )
-    monkeypatch.setattr(
-        "app.core.gui_optimizer.resource_monitor.stop",
-        lambda: calls.append("stop"),
-    )
-    monkeypatch.setattr(
-        "app.core.gui_optimizer.resource_monitor.set_print_interval",
-        lambda value: calls.append(("interval", value)),
-    )
-    monkeypatch.setattr(
-        "app.core.gui_optimizer.health_monitor.set_alert_callback",
-        lambda callback: calls.append("callback"),
-    )
     monkeypatch.setattr(
         optimizer,
         "_start_heartbeat",
