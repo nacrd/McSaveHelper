@@ -10,6 +10,13 @@ from typing import Callable, List, Dict, Any, Optional, cast
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow_glow
+from app.ui.sidebar_tabs import (
+    apply_style_collapsed,
+    apply_style_expanded,
+    build_tab_button,
+    handle_hover_collapsed,
+    handle_hover_expanded,
+)
 from app.ui.icons import IconSet
 from core.version import APP_VERSION
 
@@ -390,100 +397,15 @@ class Sidebar(ft.Container):
             self._tab_col.controls.append(btn)
 
     def _build_tab_button(self, tab: Dict[str, Any]) -> ft.Container:
-        """Build a single tab button.
-
-        In collapsed mode: icon only with tooltip.
-        In expanded mode: icon + text label + selection indicator.
-        """
-        selected = tab["id"] == self._selected_id
-        icon_name = tab.get("icon", IconSet.GRID)
-        if not isinstance(icon_name, ft.IconData):
-            icon_name = IconSet.GRID
-        label_text = tab.get("label", tab["id"])
-
-        if self._collapsed:
-            return self._build_tab_collapsed(tab, selected, icon_name, label_text)
-        return self._build_tab_expanded(tab, selected, icon_name, label_text)
-
-    def _build_tab_collapsed(
-        self, tab: Dict[str, Any], selected: bool,
-        icon_name: ft.IconData, label_text: str,
-    ) -> ft.Container:
-        """Collapsed tab: centered icon with tooltip."""
-        icon_ctrl = ft.Icon(
-            icon_name,
-            size=20,
-            color=THEME.mc_obsidian if selected else THEME.text_secondary,
+        """Build a single tab button for the current collapsed state."""
+        return build_tab_button(
+            tab,
+            selected=tab["id"] == self._selected_id,
+            collapsed=self._collapsed,
+            on_select=self._safe_select,
+            on_hover=self._handle_hover,
+            on_hover_collapsed=self._handle_hover_collapsed,
         )
-        container = ft.Container(
-            content=icon_ctrl,
-            width=40,
-            height=40,
-            alignment=ft.alignment.Alignment(0, 0),
-            bgcolor=THEME.mc_gold if selected else THEME.bg_card,
-            border=mc_border(2),
-            border_radius=6,
-            ink=True,
-            on_click=lambda e, tid=tab["id"]: self._safe_select(tid),
-            on_hover=lambda e, tid=tab["id"]: self._handle_hover_collapsed(e, tid),
-            tooltip=label_text,
-            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        )
-        if selected:
-            container.shadow = mc_shadow_glow(THEME.shadow_glow, 4)
-        return container
-
-    def _build_tab_expanded(
-        self, tab: Dict[str, Any], selected: bool,
-        icon_name: ft.IconData, label_text: str,
-    ) -> ft.Container:
-        """Expanded tab: icon + text label + selection arrow."""
-        icon_slot = ft.Container(
-            content=ft.Icon(
-                icon_name, size=18,
-                color=THEME.mc_obsidian if selected else THEME.text_secondary,
-            ),
-            width=34, height=34,
-            alignment=ft.alignment.Alignment(0, 0),
-            bgcolor=THEME.mc_gold if selected else THEME.bg_secondary,
-            border=mc_border(2),
-            border_radius=4,
-        )
-        text_ctrl = ft.Text(
-            label_text,
-            size=13,
-            color=THEME.text_primary if selected else THEME.text_secondary,
-            weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500,
-            font_family="monospace",
-        )
-        marker = ft.Text(
-            "▶" if selected else "",
-            size=10,
-            color=THEME.mc_grass,
-        )
-        row = ft.Row(
-            [icon_slot, ft.Column([text_ctrl, marker], spacing=0, expand=True)],
-            spacing=10,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        container = ft.Container(
-            content=row,
-            padding=10,
-            border_radius=6,
-            bgcolor=THEME.mc_stone if selected else THEME.bg_card,
-            border=mc_border(2),
-            ink=True,
-            on_click=lambda e, tid=tab["id"]: self._safe_select(tid),
-            on_hover=lambda e, tid=tab["id"]: self._handle_hover(e, tid),
-            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        )
-        if selected:
-            container.shadow = mc_shadow_glow(THEME.shadow_glow, 4)
-        return container
-
-    # ════════════════════════════════════════════
-    #  Hover handlers
-    # ════════════════════════════════════════════
 
     def _handle_hover(self, e: ft.Event[ft.Container], tab_id: str) -> None:
         """Hover handler for expanded tab buttons."""
@@ -491,25 +413,11 @@ class Sidebar(ft.Container):
             if tab_id not in self._buttons:
                 return
             container = self._buttons[tab_id]
-            is_selected = tab_id == self._selected_id
-            if e.data == "true":
-                if not is_selected:
-                    container.bgcolor = THEME.bg_card_hover
-                    container.shadow = mc_shadow_glow(THEME.shadow_glow, 6)
-                    row = container.content
-                    if isinstance(row, ft.Row) and len(row.controls) >= 1:
-                        icon_slot = row.controls[0]
-                        if isinstance(icon_slot, ft.Container):
-                            icon_slot.bgcolor = THEME.mc_iron
-            else:
-                if not is_selected:
-                    container.bgcolor = THEME.bg_card
-                    container.shadow = None
-                    row = container.content
-                    if isinstance(row, ft.Row) and len(row.controls) >= 1:
-                        icon_slot = row.controls[0]
-                        if isinstance(icon_slot, ft.Container):
-                            icon_slot.bgcolor = THEME.bg_secondary
+            handle_hover_expanded(
+                container,
+                selected=tab_id == self._selected_id,
+                hovering=e.data == "true",
+            )
             container.update()
         except Exception:
             pass
@@ -524,22 +432,14 @@ class Sidebar(ft.Container):
             if tab_id not in self._buttons:
                 return
             container = self._buttons[tab_id]
-            is_selected = tab_id == self._selected_id
-            if e.data == "true":
-                if not is_selected:
-                    container.bgcolor = THEME.mc_iron
-                    container.shadow = mc_shadow_glow(THEME.shadow_glow, 4)
-            else:
-                if not is_selected:
-                    container.bgcolor = THEME.bg_card
-                    container.shadow = None
+            handle_hover_collapsed(
+                container,
+                selected=tab_id == self._selected_id,
+                hovering=e.data == "true",
+            )
             container.update()
         except Exception:
             pass
-
-    # ════════════════════════════════════════════
-    #  Selection
-    # ════════════════════════════════════════════
 
     def _safe_select(self, tab_id: str) -> None:
         """Safe tab selection with exception guard."""
@@ -567,49 +467,9 @@ class Sidebar(ft.Container):
     def _apply_style(self, container: ft.Container, selected: bool) -> None:
         """Apply selected/unselected visual style to a tab button."""
         if self._collapsed:
-            self._apply_style_collapsed(container, selected)
+            apply_style_collapsed(container, selected)
         else:
-            self._apply_style_expanded(container, selected)
-
-    def _apply_style_collapsed(self, container: ft.Container, selected: bool) -> None:
-        """Style collapsed tab button."""
-        if container.content and isinstance(container.content, ft.Icon):
-            container.content.color = (
-                THEME.mc_obsidian if selected else THEME.text_secondary
-            )
-        container.bgcolor = THEME.mc_gold if selected else THEME.bg_card
-        container.shadow = mc_shadow_glow(THEME.shadow_glow, 4) if selected else None
-
-    def _apply_style_expanded(self, container: ft.Container, selected: bool) -> None:
-        """Style expanded tab button."""
-        row = container.content
-        if isinstance(row, ft.Row) and len(row.controls) >= 2:
-            icon_slot = row.controls[0]
-            text_group = row.controls[1]
-            if isinstance(icon_slot, ft.Container):
-                icon_slot.bgcolor = THEME.mc_gold if selected else THEME.bg_secondary
-                if icon_slot.content and isinstance(icon_slot.content, ft.Icon):
-                    icon_slot.content.color = (
-                        THEME.mc_obsidian if selected else THEME.text_secondary
-                    )
-            if isinstance(text_group, ft.Column) and len(text_group.controls) >= 2:
-                tc = text_group.controls[0]
-                marker = text_group.controls[1]
-                if isinstance(tc, ft.Text):
-                    tc.color = (
-                        THEME.text_primary
-                        if selected
-                        else THEME.text_secondary
-                    )
-                    tc.weight = (
-                        ft.FontWeight.BOLD
-                        if selected
-                        else ft.FontWeight.W_500
-                    )
-                if isinstance(marker, ft.Text):
-                    marker.value = "▶" if selected else ""
-        container.bgcolor = THEME.mc_stone if selected else THEME.bg_card
-        container.shadow = mc_shadow_glow(THEME.shadow_glow, 4) if selected else None
+            apply_style_expanded(container, selected)
 
     # ════════════════════════════════════════════
     #  Toggle collapse/expand
