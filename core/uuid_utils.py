@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from core.types import LogCallback
+from core.types import LogCallback, UUIDMapping
 from core.constants import MinecraftConstants
 from core.utils import find_player_data_dirs
 
@@ -161,10 +161,9 @@ def load_usercache(world_path: Path) -> dict:
     """
     cache: dict = {}
     for p in [
-        world_path.parent /
-        "usercache.json",
-        world_path.parent.parent /
-            "usercache.json"]:
+        world_path.parent / "usercache.json",
+        world_path.parent.parent / "usercache.json",
+    ]:
         if p.exists():
             try:
                 with open(p, 'r', encoding='utf-8') as f:
@@ -177,6 +176,65 @@ def load_usercache(world_path: Path) -> dict:
     return cache
 
 
+def _make_uuid_mapping(old_uuid: str, new_uuid: str) -> UUIDMapping:
+    return (
+        uuid_to_ints(old_uuid),
+        uuid_to_ints(new_uuid),
+        old_uuid,
+        new_uuid,
+        uuid_to_most_least(old_uuid),
+        uuid_to_most_least(new_uuid),
+    )
+
+
+def _resolve_player_name(
+    old_uuid: str,
+    cache: dict,
+    offline_mode: bool,
+    manual_names: Optional[List[str]],
+    log: LogCallback,
+) -> Optional[str]:
+    name = cache.get(old_uuid)
+    if not name and not offline_mode:
+        name = get_name_from_uuid(old_uuid, log)
+    if not name and manual_names:
+        name = manual_names[0]
+        log(f"使用手动输入的玩家名: {name}", "MANUAL")
+    return name
+
+
+def _target_uuid_for_name(
+    name: str,
+    custom_mappings: Dict[str, str],
+    log: LogCallback,
+) -> str:
+    custom_uuid = custom_mappings.get(name)
+    if custom_uuid:
+        log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
+        return custom_uuid
+    return get_offline_uuid_str(name)
+
+
+def _append_unmatched_manual_names(
+    maps: List[UUIDMapping],
+    manual_names: Optional[List[str]],
+    processed_names: set[str],
+    custom_mappings: Dict[str, str],
+    log: LogCallback,
+) -> None:
+    for name in manual_names or []:
+        if name in processed_names:
+            continue
+        offline_uuid = get_offline_uuid_str(name)
+        new_uuid = custom_mappings.get(name)
+        if new_uuid:
+            log(f"为手动玩家 {name} 使用自定义UUID: {new_uuid}", "SUCCESS")
+        else:
+            new_uuid = offline_uuid
+            log(f"为手动玩家 {name} 生成离线UUID: {new_uuid}", "INFO")
+        maps.append(_make_uuid_mapping(offline_uuid, new_uuid))
+
+
 def build_mappings(
     world_path: Path,
     cache: dict,
@@ -184,7 +242,7 @@ def build_mappings(
     manual_names: Optional[List[str]],
     log: LogCallback,
     custom_mappings: Optional[Dict[str, str]] = None,
-) -> List[Tuple[List[int], List[int], str, str, Tuple[int, int], Tuple[int, int]]]:
+) -> List[UUIDMapping]:
     """构建 UUID 映射列表
 
     Args:
@@ -204,10 +262,9 @@ def build_mappings(
         all_dat_files.extend(pd.glob("*.dat"))
     if not all_dat_files:
         return []
-    maps: List[Tuple[List[int], List[int], str,
-                     str, Tuple[int, int], Tuple[int, int]]] = []
-    new_uuids = set()
-    processed_names = set()
+    maps: List[UUIDMapping] = []
+    new_uuids: set[str] = set()
+    processed_names: set[str] = set()
 
     # 处理自定义UUID映射
     custom_mappings = custom_mappings or {}
@@ -219,66 +276,28 @@ def build_mappings(
         if old_u in new_uuids:
             continue
 
-        name = cache.get(old_u)
-        if not name and not offline_mode:
-            name = get_name_from_uuid(old_u, log)
-
-        # 检查是否有自定义UUID映射
-        custom_uuid = None
-        if name and name in custom_mappings:
-            custom_uuid = custom_mappings[name]
-            log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
-
-        if not name and manual_names:
-            name = manual_names[0]
-            log(f"使用手动输入的玩家名: {name}", "MANUAL")
-            # 检查手动输入的玩家名是否有自定义映射
-            if name in custom_mappings:
-                custom_uuid = custom_mappings[name]
-                log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
+        name = _resolve_player_name(
+            old_u,
+            cache,
+            offline_mode,
+            manual_names,
+            log,
+        )
 
         if name:
             processed_names.add(name)
-            # 优先使用自定义UUID，否则使用离线UUID
-            if custom_uuid:
-                new_u = custom_uuid
-            else:
-                new_u = get_offline_uuid_str(name)
-
-            maps.append((
-                uuid_to_ints(old_u),
-                uuid_to_ints(new_u),
-                old_u,
-                new_u,
-                uuid_to_most_least(old_u),
-                uuid_to_most_least(new_u)
-            ))
+            new_u = _target_uuid_for_name(name, custom_mappings, log)
+            maps.append(_make_uuid_mapping(old_u, new_u))
             new_uuids.add(new_u)
             log(f"映射: {name} ({old_u} -> {new_u})", "INFO")
         else:
             log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
 
-    # 处理手动输入但不在玩家数据目录中的玩家
-    if manual_names:
-        for name in manual_names:
-            if name not in processed_names:  # 检查是否已经处理过
-                custom_uuid = custom_mappings.get(name)
-                if custom_uuid:
-                    new_u = custom_uuid
-                    log(f"为手动玩家 {name} 使用自定义UUID: {new_u}", "SUCCESS")
-                else:
-                    new_u = get_offline_uuid_str(name)
-                    log(f"为手动玩家 {name} 生成离线UUID: {new_u}", "INFO")
-
-                # 添加一个虚拟映射（仅用于生成双UUID文件）
-                offline_uuid = get_offline_uuid_str(name)
-                maps.append((
-                    uuid_to_ints(offline_uuid),
-                    uuid_to_ints(new_u),
-                    offline_uuid,
-                    new_u,
-                    uuid_to_most_least(offline_uuid),
-                    uuid_to_most_least(new_u)
-                ))
-
+    _append_unmatched_manual_names(
+        maps,
+        manual_names,
+        processed_names,
+        custom_mappings,
+        log,
+    )
     return maps

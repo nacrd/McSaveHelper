@@ -117,3 +117,55 @@ def test_build_mappings_uses_injected_custom_mapping(tmp_path: Path):
     assert len(mappings) == 1
     assert mappings[0][2] == old_uuid
     assert mappings[0][3] == custom_uuid
+
+
+def test_build_mappings_uses_first_manual_name_and_appends_unmatched_names(
+    tmp_path: Path,
+):
+    world = tmp_path / "world"
+    playerdata = world / "playerdata"
+    playerdata.mkdir(parents=True)
+    old_uuid = "11111111-1111-1111-1111-111111111111"
+    (playerdata / f"{old_uuid}.dat").touch()
+    logs = []
+
+    mappings = build_mappings(
+        world,
+        {},
+        offline_mode=True,
+        manual_names=["Alice", "Bob"],
+        log=lambda message, level: logs.append((message, level)),
+    )
+
+    alice_uuid = get_offline_uuid_str("Alice")
+    bob_uuid = get_offline_uuid_str("Bob")
+    assert [(mapping[2], mapping[3]) for mapping in mappings] == [
+        (old_uuid, alice_uuid),
+        (bob_uuid, bob_uuid),
+    ]
+    assert any(level == "MANUAL" for _message, level in logs)
+
+
+def test_build_mappings_prefers_cached_name_over_manual_name(tmp_path: Path):
+    world = tmp_path / "world"
+    playerdata = world / "playerdata"
+    playerdata.mkdir(parents=True)
+    old_uuid = "11111111-1111-1111-1111-111111111111"
+    custom_uuid = "22222222-2222-2222-2222-222222222222"
+    (playerdata / f"{old_uuid}.dat").touch()
+
+    mappings = build_mappings(
+        world,
+        {old_uuid: "CachedPlayer"},
+        offline_mode=True,
+        manual_names=["ManualPlayer"],
+        log=lambda _message, _level: None,
+        custom_mappings={"CachedPlayer": custom_uuid},
+    )
+
+    assert mappings[0][2:] == (
+        old_uuid,
+        custom_uuid,
+        uuid_to_most_least(old_uuid),
+        uuid_to_most_least(custom_uuid),
+    )
