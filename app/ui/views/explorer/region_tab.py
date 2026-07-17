@@ -12,6 +12,7 @@ from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
 from app.ui.components.cards import card
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
+from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 
 
 class RegionTabMixin:
@@ -82,11 +83,6 @@ class RegionTabMixin:
             "显示空格", width=88, on_click=lambda e: self._toggle_map_empty_regions())
         self._map_fullscreen_btn = btn_ghost(
             "⛶ 全屏", width=88, on_click=lambda e: self._toggle_map_fullscreen())
-        self._map_fullscreen = False
-        self._map_fs_overlay: Optional[ft.Container] = None
-        self._map_fs_body: Optional[ft.Container] = None
-        self._map_inline_parent: Optional[ft.Container] = None
-        self._map_pre_fs_size: Optional[Tuple[int, int]] = None
 
         self._region_stats_text = ft.Text(
             "等待设置当前存档...", size=11, color=THEME.text_muted)
@@ -174,295 +170,42 @@ class RegionTabMixin:
         )
         self._tab_region.content = self._region_layout
         self._tab_region.expand = True
+        self._map_fullscreen_controller = (
+            MapFullscreenController(
+                page=self.app.page,
+                map_view=self._map_view,
+                inline_host=self._map_host,
+                side_panel=self._region_side_panel,
+                set_toggle_label=self._set_map_fullscreen_label,
+                refresh=self._refresh_map,
+                zoom_in=self._map_zoom_in,
+                zoom_out=self._map_zoom_out,
+                reset=self._map_reset_view,
+            )
+            if self._map_view is not None
+            else None
+        )
 
     def _toggle_map_fullscreen(self) -> None:
-        """App-wide fullscreen overlay for the map (covers sidebar + chrome)."""
-        if getattr(self, "_map_fullscreen", False):
-            self._exit_map_fullscreen()
-        else:
-            self._enter_map_fullscreen()
+        if self._map_fullscreen_controller is not None:
+            self._map_fullscreen_controller.toggle()
 
-    def _page_window_size(self, page: ft.Page) -> Tuple[int, int]:
-        """Best-effort full window content size for overlay layout."""
-        w = 0
-        h = 0
-        try:
-            w = int(getattr(page, "width", 0) or 0)
-            h = int(getattr(page, "height", 0) or 0)
-        except Exception:
-            pass
-        try:
-            win = getattr(page, "window", None)
-            if win is not None:
-                ww = int(getattr(win, "width", 0) or 0)
-                wh = int(getattr(win, "height", 0) or 0)
-                w = max(w, ww)
-                h = max(h, wh)
-        except Exception:
-            pass
-        return max(800, w or 1100), max(600, h or 800)
+    def _set_map_fullscreen_label(self, label: str) -> None:
+        self._map_fullscreen_btn.set_text(label)
+        safe_update(self._map_fullscreen_btn)
+
+    def _dispose_region_tab(self) -> None:
+        controller = getattr(self, "_map_fullscreen_controller", None)
+        if controller is not None:
+            controller.dispose()
 
     def _enter_map_fullscreen(self) -> None:
-        map_view = getattr(self, "_map_view", None)
-        page = getattr(getattr(self, "app", None), "page", None)
-        host = getattr(self, "_map_host", None)
-        if map_view is None or page is None or host is None:
-            # Fallback: tab-only fullscreen
-            self._map_fullscreen = True
-            side = getattr(self, "_region_side_panel", None)
-            if side is not None:
-                side.visible = False
-                try:
-                    side.update()
-                except Exception:
-                    pass
-            btn = getattr(self, "_map_fullscreen_btn", None)
-            if btn is not None:
-                btn.set_text("⛶ 退出")
-                safe_update(btn)
-            return
-
-        # Avoid stacking multiple overlays
-        if getattr(self, "_map_fs_overlay", None) is not None:
-            return
-
-        self._map_fullscreen = True
-        self._map_inline_parent = host
-        self._map_pre_fs_size = (
-            int(map_view.width or 900),
-            int(map_view.height or 560),
-        )
-
-        win_w, win_h = self._page_window_size(page)
-        # Full-bleed overlay; tiny inset only for edge contrast
-        pad = 0
-        bar_h = 48
-        map_w = max(400, win_w - pad * 2)
-        map_h = max(300, win_h - bar_h - pad * 2)
-
-        # Detach map from inline host
-        host.content = ft.Container(
-            content=ft.Text("地图全屏中…", size=13, color=THEME.text_muted),
-            alignment=ft.alignment.Alignment(0, 0),
-            expand=True,
-            bgcolor=THEME.bg_secondary,
-        )
-        try:
-            host.update()
-        except Exception:
-            pass
-
-        exit_btn = btn_ghost("⛶ 退出全屏", width=120, on_click=lambda e: self._exit_map_fullscreen())
-        zoom_in_btn = btn_ghost("🔍+", width=52, on_click=lambda e: self._map_zoom_in())
-        zoom_out_btn = btn_ghost("🔍−", width=52, on_click=lambda e: self._map_zoom_out())
-        reset_btn = btn_ghost("🏠", width=52, on_click=lambda e: self._map_reset_view())
-        refresh_btn = btn_primary("🔄 刷新", width=84, on_click=lambda e: self._refresh_map())
-
-        top_bar = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Text("🗺️ 区域地图 · 全屏", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-                    ft.Container(expand=True),
-                    refresh_btn,
-                    zoom_in_btn,
-                    zoom_out_btn,
-                    reset_btn,
-                    exit_btn,
-                ],
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
-            height=bar_h,
-            bgcolor=THEME.bg_card,
-            border=mc_border(2),
-        )
-
-        # Force explicit pixel size so canvas really fills the window,
-        # and re-fit/center the world to the new viewport.
-        try:
-            map_view.resize_map(map_w, map_h, refit=True)
-        except TypeError:
-            # Older signature fallback
-            try:
-                map_view.resize_map(map_w, map_h)
-                if hasattr(map_view, "fit_to_view"):
-                    map_view.fit_to_view()
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-        map_body = ft.Container(
-            content=map_view,
-            width=map_w,
-            height=map_h,
-            bgcolor=THEME.bg_secondary,
-            padding=0,
-            # Scale-in animation for enter
-            scale=0.96,
-            opacity=0.0,
-            animate_scale=ft.Animation(220, ft.AnimationCurve.EASE_OUT_CUBIC),
-            animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        )
-        self._map_fs_body = map_body
-
-        # Absolute-positioned full-window overlay (page.overlay does not stretch expand alone)
-        overlay = ft.Container(
-            content=ft.Column(
-                [top_bar, map_body],
-                spacing=0,
-                tight=True,
-            ),
-            left=0,
-            top=0,
-            width=win_w,
-            height=win_h,
-            padding=0,
-            bgcolor="#0B120B",
-            opacity=0.0,
-            animate_opacity=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
-        )
-        self._map_fs_overlay = overlay
-        self._map_fs_size = (win_w, win_h)
-
-        try:
-            # Ensure we sit on top of any other overlays
-            page.overlay.append(overlay)
-            page.update()
-        except Exception:
-            # restore if overlay fails
-            self._map_fullscreen = False
-            host.content = map_view
-            try:
-                host.update()
-            except Exception:
-                pass
-            self._map_fs_overlay = None
-            self._map_fs_body = None
-            return
-
-        def _animate_in() -> None:
-            try:
-                # Re-measure in case window size is available only after paint
-                w2, h2 = self._page_window_size(page)
-                if (w2, h2) != (win_w, win_h):
-                    overlay.width = w2
-                    overlay.height = h2
-                    mw = max(400, w2)
-                    mh = max(300, h2 - bar_h)
-                    map_body.width = mw
-                    map_body.height = mh
-                    try:
-                        map_view.resize_map(mw, mh, refit=True)
-                    except TypeError:
-                        try:
-                            map_view.resize_map(mw, mh)
-                            if hasattr(map_view, "fit_to_view"):
-                                map_view.fit_to_view()
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
-                overlay.opacity = 1.0
-                map_body.scale = 1.0
-                map_body.opacity = 1.0
-                overlay.update()
-                map_body.update()
-            except Exception:
-                pass
-
-        try:
-            page.run_task(self._async_call, _animate_in)
-        except Exception:
-            _animate_in()
-
-        btn = getattr(self, "_map_fullscreen_btn", None)
-        if btn is not None:
-            btn.set_text("⛶ 退出")
-            safe_update(btn)
+        if self._map_fullscreen_controller is not None:
+            self._map_fullscreen_controller.enter()
 
     def _exit_map_fullscreen(self) -> None:
-        page = getattr(getattr(self, "app", None), "page", None)
-        map_view = getattr(self, "_map_view", None)
-        host = getattr(self, "_map_inline_parent", None) or getattr(self, "_map_host", None)
-        overlay = getattr(self, "_map_fs_overlay", None)
-        body = getattr(self, "_map_fs_body", None)
-
-        def _restore() -> None:
-            self._map_fullscreen = False
-            # Remove overlay
-            if page is not None and overlay is not None:
-                try:
-                    if overlay in page.overlay:
-                        page.overlay.remove(overlay)
-                    page.update()
-                except Exception:
-                    pass
-            self._map_fs_overlay = None
-            self._map_fs_body = None
-
-            # Reattach map to inline host
-            if host is not None and map_view is not None:
-                host.content = map_view
-                try:
-                    host.update()
-                except Exception:
-                    pass
-            if map_view is not None:
-                pre = getattr(self, "_map_pre_fs_size", None)
-                if pre:
-                    map_view.resize_map(pre[0], pre[1])
-                elif hasattr(map_view, "_schedule_rebuild"):
-                    map_view._schedule_rebuild()
-
-            # Tab-only fallback cleanup
-            side = getattr(self, "_region_side_panel", None)
-            if side is not None and getattr(side, "visible", True) is False:
-                side.visible = True
-                try:
-                    side.update()
-                except Exception:
-                    pass
-
-            btn = getattr(self, "_map_fullscreen_btn", None)
-            if btn is not None:
-                btn.set_text("⛶ 全屏")
-                safe_update(btn)
-
-        # Animate out then restore
-        if overlay is not None and body is not None:
-            try:
-                overlay.opacity = 0.0
-                body.scale = 0.96
-                body.opacity = 0.0
-                overlay.update()
-                body.update()
-            except Exception:
-                pass
-
-            def _after() -> None:
-                import time
-                time.sleep(0.18)
-                if page is not None:
-                    from app.ui.utils import run_on_ui
-                    run_on_ui(page, _restore)
-                else:
-                    _restore()
-
-            import threading
-            threading.Thread(target=_after, daemon=True).start()
-        else:
-            _restore()
-
-    async def _async_call(self, fn) -> None:
-        """Run a sync callback after yielding to the UI loop (for enter animation)."""
-        import asyncio
-        await asyncio.sleep(0.02)
-        try:
-            fn()
-        except Exception:
-            pass
+        if self._map_fullscreen_controller is not None:
+            self._map_fullscreen_controller.exit()
 
     def _create_region_legend_content(self) -> ft.Column:
         title, items = self._get_region_display_legend()

@@ -3,7 +3,6 @@ import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
 from flet import Icons
-from app.ui.icons import IconSet
 
 
 def card(
@@ -72,7 +71,7 @@ def section_title(text: str, icon: str = "▣") -> ft.Container:
 
 
 def placeholder(
-    icon: str = Icons.MAIL_OUTLINE,
+    icon: ft.IconData = Icons.MAIL_OUTLINE,
     title: str = "暂无内容",
     subtitle: str = "请加载数据后查看",
     height: int = 150,

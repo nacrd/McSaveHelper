@@ -14,8 +14,8 @@ class I18nService:
       - 管理可用语言列表
     """
 
-    def __init__(self) -> None:
-        self._config = ConfigService()
+    def __init__(self, config: Optional[ConfigService] = None) -> None:
+        self._config = config or ConfigService()
         self._manager: TranslationManager = init_translations(
             language_loader=lambda: self._config.language,
             language_saver=self._save_language,

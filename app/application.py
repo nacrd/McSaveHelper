@@ -10,32 +10,46 @@
 - GUIOptimizer: GUI优化功能集成
 - SaveContextManager: 当前存档上下文管理
 """
+from __future__ import annotations
+
 import time
 import traceback
-from typing import Optional, List, Dict
+from typing import TYPE_CHECKING, Optional, List, Dict
 import flet as ft
 
 from core.logger import LogLevel, logger, setup_default_logging
 
-from app.models.config import MigrationConfig
-from app.services.config_service import ConfigService
-from app.services.uuid_service import UUIDService
-from app.services.migration_service import MigrationService
-from app.services.i18n_service import I18nService
-from app.controllers.migration_controller import MigrationController
+from app.bootstrap.services import AppServices, create_app_services
+from app.models.save_context import CurrentSaveContext
+from app.models.save_store import CurrentSaveStore, RecentSave
+from app.controllers.migration_controller import (
+    MigrationController,
+    MigrationControllerDependencies,
+)
 
 from app.ui.theme import THEME, mc_border, mc_shadow, get_theme_manager
 from app.ui.icons import IconSet
 from app.ui.sidebar import Sidebar
+from app.ui.view_catalog import create_default_view_catalog
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
 
 # 导入管理器
 from app.core.window_manager import WindowManager
 from app.core.dialog_manager import DialogManager
-from app.core.view_manager import ViewManager
+from app.core.view_manager import (
+    ViewHost,
+    ViewManager,
+    ViewManagerDependencies,
+)
 from app.core.progress_manager import ProgressManager
 from app.core.gui_optimizer import GUIOptimizer
 from app.core.save_context_manager import SaveContextManager
+
+if TYPE_CHECKING:
+    from app.services.config_service import ConfigService
+    from app.services.i18n_service import I18nService
+    from app.services.migration_service import MigrationService
+    from app.services.uuid_service import UUIDService
 
 
 class Application:
@@ -44,19 +58,21 @@ class Application:
     使用管理器模式协调各个功能模块。
     """
 
-    def __init__(self, page: ft.Page) -> None:
+    def __init__(
+        self,
+        page: ft.Page,
+        services: Optional[AppServices] = None,
+    ) -> None:
         """初始化应用
 
         Args:
             page: Flet 页面对象
         """
         self.page: ft.Page = page
+        self.services = services or create_app_services()
 
         # 全局异常兜底
         page.on_error = self._on_page_error
-
-        # ─── 初始化服务 ─────────────────────────────
-        self._init_services()
 
         # ─── 初始化主题 ─────────────────────────────
         self._init_theme()
@@ -68,7 +84,24 @@ class Application:
         self.gui_optimizer.initialize()
 
         # ─── 初始化控制器 ───────────────────────────
-        self.migration_controller = MigrationController(self)
+        self.migration_controller = MigrationController(
+            MigrationControllerDependencies(
+                config=self.config,
+                migration=self.migration,
+                translate=self._t,
+                warn_dialog=self.warn_dialog,
+                error_dialog=self.error_dialog,
+                handle_exception=self.handle_exception,
+                show_success=self._show_success,
+                set_start_enabled=self.set_start_button_enabled,
+                update_page=self.page.update,
+                log=self.log,
+                log_header=self.log_header,
+                update_progress=self.update_progress,
+                set_progress_label=self.set_progress_label,
+                set_progress_value=self.set_progress_value,
+            )
+        )
 
         # ─── 同步配置到迁移参数 ─────────────────────
         self._sync_config_to_migration()
@@ -82,12 +115,6 @@ class Application:
         # ─── 初始化日志 ─────────────────────────────
         self._init_logging()
 
-        # ─── 更新侧边栏最近存档 ─────────────────────
-        if hasattr(self, '_sidebar'):
-            self._sidebar.set_recent_saves(
-                self.save_context_manager.get_recent_saves()
-            )
-
         # ─── 切换到默认视图 ─────────────────────────
         self.view_manager.switch_view("explorer")
         page.update()
@@ -95,37 +122,6 @@ class Application:
     # ════════════════════════════════════════════
     #  初始化
     # ════════════════════════════════════════════
-
-    def _init_services(self) -> None:
-        """初始化服务（逐个 try，失败降级）"""
-        try:
-            self.i18n: I18nService = I18nService()
-        except Exception as e:
-            print(f"[WARN] I18nService 初始化失败: {e}")
-            self.i18n = I18nService.__new__(I18nService)
-            self.i18n._manager = None
-            self.i18n.translate = lambda key, default="", **kw: default  # type: ignore
-
-        try:
-            self.config: ConfigService = ConfigService()
-        except Exception as e:
-            print(f"[WARN] ConfigService 初始化失败: {e}")
-            self.config = ConfigService.__new__(ConfigService)
-            self.config._config = {}  # type: ignore
-            self.config._migration = MigrationConfig()  # type: ignore
-            self.config.save = lambda: None  # type: ignore
-
-        try:
-            self.migration: MigrationService = MigrationService(self.config)
-        except Exception as e:
-            print(f"[WARN] MigrationService 初始化失败: {e}")
-            self.migration = MigrationService.__new__(MigrationService)  # type: ignore
-
-        try:
-            self.uuid: UUIDService = UUIDService()
-        except Exception as e:
-            print(f"[WARN] UUIDService 初始化失败: {e}")
-            self.uuid = UUIDService.__new__(UUIDService)  # type: ignore
 
     def _init_theme(self) -> None:
         """从配置初始化主题模式"""
@@ -146,7 +142,17 @@ class Application:
         self.dialog_manager = DialogManager(self)
 
         # 视图管理器
-        self.view_manager = ViewManager(self)
+        view_catalog = create_default_view_catalog()
+        self.view_manager = ViewManager(ViewManagerDependencies(
+            create_view=lambda view_id: view_catalog.create(view_id, self),
+            get_current_save_path=lambda: self.current_save_path,
+            get_selected_view_id=lambda: self.selected_view_id,
+            build_error_placeholder=(
+                self.dialog_manager.build_error_placeholder
+            ),
+            update_page=self.page.update,
+            log=self.log,
+        ))
 
         # 进度管理器
         self.progress_manager = ProgressManager(self)
@@ -154,8 +160,63 @@ class Application:
         # GUI优化管理器
         self.gui_optimizer = GUIOptimizer(self)
 
-        # 存档上下文管理器
-        self.save_context_manager = SaveContextManager(self)
+        # 当前存档状态和用例协调器
+        self.current_save_store = CurrentSaveStore()
+        self.current_save_store.subscribe_current(
+            self._on_current_save_changed
+        )
+        self.current_save_store.subscribe_recent(
+            self._on_recent_saves_changed
+        )
+        self.save_context_manager = SaveContextManager(
+            config=self.config,
+            store=self.current_save_store,
+            pick_directory=self.dialog_manager.pick_directory,
+            warn_dialog=self.dialog_manager.warn_dialog,
+            error_dialog=self.dialog_manager.error_dialog,
+            activate_save=self._activate_current_save,
+            log=self.log,
+        )
+
+    def _on_current_save_changed(
+        self,
+        context: Optional[CurrentSaveContext],
+    ) -> None:
+        """Reflect selected-save state in UI adapters."""
+        if hasattr(self, "_sidebar"):
+            if context is None:
+                self._sidebar.set_current_save_name(None)
+            else:
+                self._sidebar.set_current_save_name(
+                    context.name,
+                    context.display_path,
+                )
+
+        if context is None or not hasattr(self, "gui_optimizer"):
+            return
+        notification_manager = self.gui_optimizer.notification_manager
+        if notification_manager:
+            notification_manager.show_success(
+                f"当前存档已设置为 {context.name}，相关功能将自动使用该存档"
+            )
+
+    def _on_recent_saves_changed(
+        self,
+        recent_saves: tuple[RecentSave, ...],
+    ) -> None:
+        """Reflect an immutable recent-save snapshot in the sidebar."""
+        if hasattr(self, "_sidebar"):
+            self._sidebar.set_recent_saves(
+                [save.to_dict() for save in recent_saves]
+            )
+
+    def _activate_current_save(self, path: str) -> None:
+        """Navigate to Explorer after the store has selected ``path``."""
+        del path
+        if hasattr(self, "_sidebar") and self._sidebar.selected_id != "explorer":
+            self._sidebar.select_tab("explorer")
+            return
+        self.view_manager.switch_view("explorer")
 
     def _sync_config_to_migration(self) -> None:
         """同步配置到迁移参数"""
@@ -169,14 +230,46 @@ class Application:
         """构建应用主界面 - Modernized Minecraft aesthetic"""
         # 标签页定义
         self._tab_defs = [
-            {"id": "explorer", "label": self._t("sidebar.explorer", "存档浏览器"), "icon": IconSet.MAP},
-            {"id": "migrator", "label": self._t("sidebar.migrator", "存档转换"), "icon": IconSet.PACKAGE},
-            {"id": "save_repair", "label": self._t("sidebar.save_repair", "存档修复"), "icon": IconSet.BUILD},
-            {"id": "map_export", "label": self._t("sidebar.map_export", "地图导出"), "icon": IconSet.EXPORT},
-            {"id": "compare", "label": self._t("sidebar.compare", "存档对比"), "icon": IconSet.BALANCE},
-            {"id": "mappings", "label": self._t("sidebar.mappings", "映射管理"), "icon": IconSet.LINK},
-            {"id": "server_properties", "label": self._t("sidebar.server_properties", "服务器配置"), "icon": IconSet.CLIPBOARD},
-            {"id": "settings", "label": self._t("sidebar.settings", "设置"), "icon": IconSet.SETTINGS},
+            {
+                "id": "explorer",
+                "label": self._t("sidebar.explorer", "存档浏览器"),
+                "icon": IconSet.MAP,
+            },
+            {
+                "id": "migrator",
+                "label": self._t("sidebar.migrator", "存档转换"),
+                "icon": IconSet.PACKAGE,
+            },
+            {
+                "id": "save_repair",
+                "label": self._t("sidebar.save_repair", "存档修复"),
+                "icon": IconSet.BUILD,
+            },
+            {
+                "id": "map_export",
+                "label": self._t("sidebar.map_export", "地图导出"),
+                "icon": IconSet.EXPORT,
+            },
+            {
+                "id": "compare",
+                "label": self._t("sidebar.compare", "存档对比"),
+                "icon": IconSet.BALANCE,
+            },
+            {
+                "id": "mappings",
+                "label": self._t("sidebar.mappings", "映射管理"),
+                "icon": IconSet.LINK,
+            },
+            {
+                "id": "server_properties",
+                "label": self._t("sidebar.server_properties", "服务器配置"),
+                "icon": IconSet.CLIPBOARD,
+            },
+            {
+                "id": "settings",
+                "label": self._t("sidebar.settings", "设置"),
+                "icon": IconSet.SETTINGS,
+            },
         ]
 
         # 创建内容容器 - Enhanced with better styling
@@ -195,6 +288,11 @@ class Application:
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
         self._top_actions.visible = False
+
+        self.view_manager.attach_host(ViewHost(
+            content=self._content,
+            top_actions=self._top_actions,
+        ))
 
         # 创建侧边栏
         self._sidebar = Sidebar(
@@ -318,7 +416,12 @@ class Application:
                     ft.Container(
                         height=6,
                         bgcolor=THEME.mc_grass,
-                        border_radius=ft.BorderRadius(top_left=8, top_right=8, bottom_left=0, bottom_right=0),
+                        border_radius=ft.BorderRadius(
+                            top_left=8,
+                            top_right=8,
+                            bottom_left=0,
+                            bottom_right=0,
+                        ),
                     ),
                     # Main header content
                     ft.Container(
@@ -576,6 +679,14 @@ class Application:
         """
         self.dialog_manager.error_dialog(title, message, exception, show_details)
 
+    def _show_success(self, title: str, message: str) -> None:
+        """Present success through notifications with a dialog fallback."""
+        notification_manager = self.gui_optimizer.notification_manager
+        if notification_manager:
+            notification_manager.show_success(message)
+            return
+        self.info_dialog(title, message)
+
     def handle_exception(
         self,
         exception: Exception,
@@ -646,16 +757,7 @@ class Application:
         Args:
             enabled: 是否启用
         """
-        try:
-            # 查找迁移视图中的开始按钮
-            if "migrator" in self.view_manager.views:
-                migrator_view = self.view_manager.views["migrator"]
-                # 如果视图有 _start_btn 属性，更新其状态
-                if hasattr(migrator_view, '_start_btn'):
-                    migrator_view._start_btn.disabled = not enabled
-                    migrator_view._start_btn.update()
-        except Exception:
-            pass
+        self.view_manager.set_top_actions_enabled(enabled)
 
     def start(self) -> None:
         """开始转换按钮回调"""
@@ -733,15 +835,14 @@ class Application:
             field_name: 字段名称
             value: 字段值
         """
-        if "migrator" in self.view_manager.views:
-            view = self.view_manager.views["migrator"]
-            field = getattr(view, field_name, None)
-            if field is not None:
-                field.value = value
-                try:
-                    field.update()
-                except RuntimeError:
-                    pass
+        view = self.view_manager.get_view("migrator")
+        field = getattr(view, field_name, None)
+        if field is not None:
+            field.value = value
+            try:
+                field.update()
+            except RuntimeError:
+                pass
 
     def _on_uuid_mappings_change(self, mappings: Dict[str, str]) -> None:
         """UUID 映射变更回调
@@ -757,6 +858,22 @@ class Application:
     # ════════════════════════════════════════════
 
     @property
+    def config(self) -> ConfigService:
+        return self.services.config
+
+    @property
+    def i18n(self) -> I18nService:
+        return self.services.i18n
+
+    @property
+    def migration(self) -> MigrationService:
+        return self.services.migration
+
+    @property
+    def uuid(self) -> UUIDService:
+        return self.services.uuid
+
+    @property
     def views(self) -> Dict[str, ft.Control]:
         """获取视图字典
 
@@ -764,6 +881,11 @@ class Application:
             Dict[str, ft.Control]: 视图字典
         """
         return self.view_manager.views
+
+    @property
+    def selected_view_id(self) -> Optional[str]:
+        """Public read-only access to the selected sidebar view."""
+        return self._sidebar.selected_id if hasattr(self, "_sidebar") else None
 
     @property
     def _current_save_context(self):
@@ -779,12 +901,17 @@ class Application:
     @property
     def _current_save_path(self) -> Optional[str]:
         """获取当前存档路径"""
-        return self.save_context_manager.get_current_save_path()
+        return self.current_save_path
 
     @_current_save_path.setter
     def _current_save_path(self, value: Optional[str]) -> None:
         """设置当前存档路径（内部使用）"""
-        self.save_context_manager._current_save_path = value
+        self.save_context_manager.set_current_save_path(value)
+
+    @property
+    def current_save_path(self) -> Optional[str]:
+        """Public read-only access to the selected save path."""
+        return self.save_context_manager.get_current_save_path()
 
     @property
     def _recent_saves(self) -> List[Dict[str, str]]:

@@ -1,5 +1,4 @@
 """存档对比服务"""
-import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from dataclasses import asdict, dataclass
@@ -126,17 +125,7 @@ class WorldCompareService:
         return {"size": st.st_size, "mtime": int(st.st_mtime)}
 
 
-_compare_service: Optional[WorldCompareService] = None
-_compare_service_lock = threading.Lock()
-
-
 def get_world_compare_service(
         log: Optional[LogCallback] = None) -> WorldCompareService:
-    """获取世界比较服务单例（线程安全）"""
-    global _compare_service
-    with _compare_service_lock:
-        if _compare_service is None:
-            _compare_service = WorldCompareService(log=log)
-        elif log is not None:
-            _compare_service.log = log
-    return _compare_service
+    """Return a comparison service scoped to one caller."""
+    return WorldCompareService(log=log)

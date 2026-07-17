@@ -1,8 +1,14 @@
 ﻿"""NBT tab mixin for ExplorerView - 三栏布局版本"""
-from typing import Any, Union, List
+from typing import Any, List, Optional
 
 import flet as ft
 
+from app.models.nbt_edit import (
+    ChunkNbtTarget,
+    NbtEditFormat,
+    NbtPathPart,
+    NbtTarget,
+)
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field
@@ -13,6 +19,7 @@ from app.ui.views.explorer.nbt import (
     ChunkOperations,
     NbtCommitHandler,
 )
+from core.omni.world_session import WorldSession
 
 
 class NbtTabMixin:
@@ -20,12 +27,6 @@ class NbtTabMixin:
 
     def _build_nbt_tab(self) -> None:
         """构建 NBT 页签 UI - 三栏布局"""
-        # 初始化功能模块
-        self._data_loader = NbtDataLoader(self)
-        self._stage_manager = NbtStageManager(self)
-        self._chunk_ops = ChunkOperations(self)
-        self._commit_handler = NbtCommitHandler(self)
-
         # 初始化折叠状态
         self._nbt_left_collapsed = False
         self._nbt_right_collapsed = False
@@ -52,6 +53,108 @@ class NbtTabMixin:
             padding=10,
             expand=True,
         )
+
+        # 控件构建完成后再装配交互协调器，依赖关系保持显式。
+        self._stage_manager = NbtStageManager(
+            store=self._nbt_stage_store,
+            status_control=self._nbt_stage_status,
+            list_control=self._nbt_stage_list,
+            get_current_target=lambda: self._current_nbt_target,
+            get_current_label=lambda: self._current_nbt_label,
+            get_current_format=lambda: self._current_edit_format,
+            reload_current_target=self._reload_current_nbt_target,
+            warn=self.app.warn_dialog,
+            info=self.app.info_dialog,
+            handle_error=lambda ex, title: self.app.handle_exception(
+                ex, title=title
+            ),
+            log=self.app.log,
+        )
+        self._chunk_ops = ChunkOperations(
+            objects_list=self._chunk_objects_list,
+            nbt_tree=self._nbt_tree,
+            target_label=self._nbt_target_label,
+            world_x_field=self._world_x_field,
+            world_z_field=self._world_z_field,
+            block_y_field=self._block_y_field,
+            block_result=self._block_query_result,
+            block_name_field=self._block_replace_name_field,
+            get_chunk_target=lambda: self._current_chunk_target,
+            set_view_state=self._set_nbt_view_state,
+            stage_change=self._stage_manager.stage_change,
+            warn=self.app.warn_dialog,
+            info=self.app.info_dialog,
+            handle_error=lambda ex, title: self.app.handle_exception(
+                ex, title=title
+            ),
+        )
+        self._data_loader = NbtDataLoader(
+            get_world_session=lambda: self.world_session,
+            get_current_uuid=lambda: self.current_uuid,
+            get_current_target=lambda: self._current_nbt_target,
+            get_current_label=lambda: self._current_nbt_label,
+            get_dimension=lambda: self._current_dimension,
+            set_target_state=self._set_nbt_target_state,
+            load_player_data=self._load_player_data,
+            render_chunk_objects=self._chunk_ops.render_chunk_objects,
+            query_current_block=lambda: (
+                self._chunk_ops.query_block_at_current_coords(silent=True)
+            ),
+            target_dropdown=self._nbt_target_dropdown,
+            target_label=self._nbt_target_label,
+            region_file_field=self._region_file_field,
+            chunk_x_field=self._chunk_x_field,
+            chunk_z_field=self._chunk_z_field,
+            world_x_field=self._world_x_field,
+            world_z_field=self._world_z_field,
+            nbt_tree=self._nbt_tree,
+            warn=self.app.warn_dialog,
+            info=self.app.info_dialog,
+            handle_error=lambda ex, title: self.app.handle_exception(
+                ex, title=title
+            ),
+            save_file=self.app.save_file,
+        )
+        self._commit_handler = NbtCommitHandler(
+            store=self._nbt_stage_store,
+            get_world_session=lambda: self.world_session,
+            replace_world_session=self._replace_world_session,
+            get_page=lambda: self.page,
+            refresh_stage=self._stage_manager.update_stage_status,
+            reload_current_target=self._data_loader.reload_current_nbt_target,
+            warn=self.app.warn_dialog,
+            info=self.app.info_dialog,
+            error=self.app.error_dialog,
+            handle_error=lambda ex, title: self.app.handle_exception(
+                ex, title=title
+            ),
+            log=self.app.log,
+        )
+        self._stage_manager.update_stage_status()
+        self._chunk_ops.render_chunk_object_rows([])
+
+    def _replace_world_session(self, session: WorldSession) -> None:
+        self.world_session = session
+
+    def _set_nbt_view_state(
+        self,
+        label: str,
+        edit_format: NbtEditFormat,
+    ) -> None:
+        self._current_nbt_label = label
+        self._current_edit_format = edit_format
+
+    def _set_nbt_target_state(
+        self,
+        target: Optional[NbtTarget],
+        label: str,
+        edit_format: NbtEditFormat,
+        chunk_target: Optional[ChunkNbtTarget],
+    ) -> None:
+        self._current_nbt_target = target
+        self._current_nbt_label = label
+        self._current_edit_format = edit_format
+        self._current_chunk_target = chunk_target
 
     # ==================== 左侧导航面板 ====================
 
@@ -110,7 +213,14 @@ class NbtTabMixin:
             ft.Text("📦 区块", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
             self._region_file_field,
             ft.Row([self._chunk_x_field, self._chunk_z_field], spacing=6),
-            ft.Container(content=btn_ghost("加载区块", on_click=self._load_chunk_nbt, height=32), expand=True),
+            ft.Container(
+                content=btn_ghost(
+                    "加载区块",
+                    on_click=self._load_chunk_nbt,
+                    height=32,
+                ),
+                expand=True,
+            ),
             ft.Text("世界坐标", size=11, color=THEME.text_muted),
             ft.Row([self._world_x_field, self._world_z_field], spacing=6),
             ft.Row([
@@ -129,24 +239,59 @@ class NbtTabMixin:
             width=250, expand=False,
         )
 
-        block_section = ft.Column([ft.Text("🧱 方块",
-                                           size=13,
-                                           weight=ft.FontWeight.BOLD,
-                                           color=THEME.text_primary),
-                                   ft.Row([self._block_y_field,
-                                           btn_ghost("查询",
-                                                     on_click=self._query_block_at_current_coords,
-                                                     height=30),
-                                           ],
-                                          spacing=6),
-                                   self._block_query_result,
-                                   self._block_replace_name_field,
-                                   ft.Container(content=btn_primary("替换",
-                                                                    on_click=self._replace_block_at_current_coords,
-                                                                    height=32),
-                                                expand=True),
-                                   ],
-                                  spacing=6)
+        block_section = ft.Column(
+            [
+                ft.Text(
+                    "🧱 方块",
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                ft.Row(
+                    [
+                        self._block_y_field,
+                        btn_ghost(
+                            "查询",
+                            on_click=self._query_block_at_current_coords,
+                            height=30,
+                        ),
+                    ],
+                    spacing=6,
+                ),
+                self._block_query_result,
+                self._block_replace_name_field,
+                ft.Container(
+                    content=btn_primary(
+                        "替换",
+                        on_click=self._replace_block_at_current_coords,
+                        height=32,
+                    ),
+                    expand=True,
+                ),
+            ],
+            spacing=6,
+        )
+
+        self._chunk_objects_list = ft.Column(spacing=4)
+        chunk_objects_section = ft.Column(
+            [
+                ft.Text(
+                    "区块对象",
+                    size=13,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                text_field(
+                    label="筛选",
+                    hint_text="实体或方块实体",
+                    width=250,
+                    expand=False,
+                    on_change=self._on_chunk_object_filter,
+                ),
+                self._chunk_objects_list,
+            ],
+            spacing=6,
+        )
 
         # 左侧面板容器
         left_content = ft.Column(
@@ -156,6 +301,8 @@ class NbtTabMixin:
                 chunk_section,
                 ft.Divider(height=1, color=THEME.border_light),
                 block_section,
+                ft.Divider(height=1, color=THEME.border_light),
+                chunk_objects_section,
             ],
             spacing=12,
             scroll=ft.ScrollMode.AUTO,
@@ -165,7 +312,7 @@ class NbtTabMixin:
             content=left_content,
             width=280,
             bgcolor=THEME.bg_card,
-            border=ft.border.all(1, THEME.border_light),
+            border=ft.Border.all(1, THEME.border_light),
             border_radius=8,
             padding=12,
         )
@@ -219,7 +366,7 @@ class NbtTabMixin:
             content=center_content,
             expand=True,
             bgcolor=THEME.bg_card,
-            border=ft.border.all(1, THEME.border_light),
+            border=ft.Border.all(1, THEME.border_light),
             border_radius=8,
             padding=12,
         )
@@ -272,7 +419,7 @@ class NbtTabMixin:
             content=right_content,
             width=300,
             bgcolor=THEME.bg_card,
-            border=ft.border.all(1, THEME.border_light),
+            border=ft.Border.all(1, THEME.border_light),
             border_radius=8,
             padding=12,
         )
@@ -317,6 +464,10 @@ class NbtTabMixin:
         if hasattr(self, '_data_loader'):
             self._data_loader.update_nbt_target_options()
 
+    def _reload_current_nbt_target(self) -> None:
+        if hasattr(self, '_data_loader'):
+            self._data_loader.reload_current_nbt_target()
+
     def _load_current_player_nbt(self, e: Any = None) -> None:
         if hasattr(self, '_data_loader'):
             self._data_loader.load_current_player_nbt(e)
@@ -346,8 +497,7 @@ class NbtTabMixin:
             self._data_loader.export_nbt_json(e)
 
     def _stage_nbt_change(self,
-                          path_parts: List[Union[str,
-                                                 int]],
+                          path_parts: List[NbtPathPart],
                           old_value: Any,
                           new_value: Any,
                           display_path: str) -> None:

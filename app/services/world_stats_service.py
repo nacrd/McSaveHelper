@@ -1,5 +1,4 @@
 """存档统计服务 - 收集和分析存档统计数据"""
-import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from collections import Counter
@@ -206,17 +205,7 @@ class WorldStatsService:
         return block_counter, entity_counter
 
 
-_world_stats_service: Optional[WorldStatsService] = None
-_world_stats_service_lock = threading.Lock()
-
-
 def get_world_stats_service(
         log: Optional[LogCallback] = None) -> WorldStatsService:
-    """获取存档统计服务单例（线程安全）"""
-    global _world_stats_service
-    with _world_stats_service_lock:
-        if _world_stats_service is None:
-            _world_stats_service = WorldStatsService(log=log)
-        elif log is not None:
-            _world_stats_service.log = log
-    return _world_stats_service
+    """Return a statistics service scoped to one analysis operation."""
+    return WorldStatsService(log=log)

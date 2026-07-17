@@ -17,6 +17,7 @@ from app.ui.icons import IconSet
 from app.ui.components.fields import text_field, dropdown
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
+from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -31,6 +32,14 @@ class ServerPropertiesView(ft.Column):
         self._fields: Dict[str, ft.Control] = {}
         self._path = Path("")
         self._build()
+
+    def get_top_actions(self) -> list[ViewAction]:
+        return [
+            ViewAction(
+                self.app._t("top_bar.read_config", "读取配置"),
+                self._load,
+            )
+        ]
 
     def _build(self) -> None:
         self.controls.clear()

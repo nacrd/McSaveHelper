@@ -20,7 +20,6 @@ import nbtlib
 from core.mca.chunk_codec import compress_chunk
 from core.mca.errors import ChunkMissing, McaError
 from core.mca.format import (
-    CHUNKS_PER_REGION,
     CHUNKS_PER_SIDE,
     COMPRESSION_ZLIB,
     HEADER_SIZE,
@@ -282,3 +281,99 @@ def delete_chunk_entries(
         f.write(loc)
         f.write(ts)
     return cleared
+
+
+def write_chunk_record(
+    destination_path: PathLike,
+    destination_coords: Tuple[int, int],
+    record: bytes,
+    *,
+    backup: bool = True,
+) -> None:
+    """Write a complete compressed chunk record using atomic replacement."""
+    destination = Path(destination_path)
+    destination_cx, destination_cz = destination_coords
+    destination_index = local_chunk_index(destination_cx, destination_cz)
+    if len(record) < 5:
+        raise McaError("Chunk record is missing its length or compression header")
+    payload_length = int.from_bytes(record[:4], "big")
+    used_length = 4 + payload_length
+    if payload_length < 1 or used_length > len(record):
+        raise McaError(f"Invalid chunk record length: {payload_length}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists():
+        data = bytearray(destination.read_bytes())
+        if len(data) < HEADER_SIZE:
+            raise McaError(f"Region file too small: {destination}")
+        if backup:
+            backup_path = destination.with_suffix(destination.suffix + ".bak")
+            if not backup_path.exists():
+                shutil.copy2(destination, backup_path)
+    else:
+        data = bytearray(HEADER_SIZE)
+
+    if len(data) % SECTOR_SIZE:
+        data.extend(b"\x00" * (SECTOR_SIZE - len(data) % SECTOR_SIZE))
+    destination_sector = len(data) // SECTOR_SIZE
+    copied_sectors = (used_length + SECTOR_SIZE - 1) // SECTOR_SIZE
+    if copied_sectors > 255:
+        raise McaError(f"Chunk record needs {copied_sectors} sectors (max 255)")
+    data.extend(record[:used_length])
+    data.extend(b"\x00" * (copied_sectors * SECTOR_SIZE - used_length))
+
+    header_offset = destination_index * 4
+    data[header_offset : header_offset + 3] = destination_sector.to_bytes(3, "big")
+    data[header_offset + 3] = copied_sectors
+    timestamp_offset = LOCATION_TABLE_SIZE + header_offset
+    data[timestamp_offset : timestamp_offset + 4] = struct.pack(
+        ">I", int(time.time()) & 0xFFFFFFFF
+    )
+
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, destination)
+    except OSError as exc:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise McaError(f"Failed to write chunk into {destination}: {exc}") from exc
+
+
+def copy_chunk_record(
+    source_path: PathLike,
+    source_coords: Tuple[int, int],
+    destination_path: PathLike,
+    destination_coords: Tuple[int, int],
+    *,
+    backup: bool = True,
+) -> None:
+    """Copy one compressed chunk record between region files atomically."""
+    source = Path(source_path)
+    source_cx, source_cz = source_coords
+    local_chunk_index(source_cx, source_cz)
+
+    with RegionFile.open(source) as region:
+        source_sector, source_sector_count = region.chunk_location(
+            source_cx, source_cz
+        )
+    if source_sector == 0 or source_sector_count == 0:
+        raise ChunkMissing(
+            f"Chunk ({source_cx}, {source_cz}) not present in {source}"
+        )
+
+    source_bytes = source.read_bytes()
+    record_start = source_sector * SECTOR_SIZE
+    record_end = record_start + source_sector_count * SECTOR_SIZE
+    if record_end > len(source_bytes):
+        raise McaError(
+            f"Chunk ({source_cx}, {source_cz}) record exceeds {source}"
+        )
+    write_chunk_record(
+        destination_path,
+        destination_coords,
+        source_bytes[record_start:record_end],
+        backup=backup,
+    )

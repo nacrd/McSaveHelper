@@ -12,6 +12,7 @@ from app.ui.components.fields import text_field, current_save_field, dropdown
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
 from app.ui.utils import run_on_ui
+from app.ui.view_actions import ViewAction
 from app.services.map_export_service import MapExportService, PIL_AVAILABLE
 
 if TYPE_CHECKING:
@@ -83,6 +84,16 @@ class MapExportView(ft.Column):
 
         # 构建 UI
         self._build_ui()
+
+    def get_top_actions(self) -> list[ViewAction]:
+        if not PIL_AVAILABLE:
+            return []
+        return [
+            ViewAction(
+                self.app._t("top_bar.start_export", "开始导出"),
+                self._start_export,
+            )
+        ]
 
     def _build_missing_dependency_ui(self) -> None:
         """构建缺少依赖时的 UI"""

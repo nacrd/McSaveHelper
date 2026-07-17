@@ -15,6 +15,7 @@ from app.ui.components.fields import checkbox, current_save_field
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
 from app.ui.utils import run_on_ui
+from app.ui.view_actions import ViewAction
 from app.services.save_repair_service import (
     SaveRepairService,
     RepairReport,
@@ -94,6 +95,14 @@ class SaveRepairView(ft.Column):
         self._cancel_btn.visible = False
 
         self._build_ui()
+
+    def get_top_actions(self) -> list[ViewAction]:
+        return [
+            ViewAction(
+                self.app._t("top_bar.detect_save", "检测存档"),
+                self._start_detect,
+            )
+        ]
 
     def _build_ui(self) -> None:
         header = page_header(

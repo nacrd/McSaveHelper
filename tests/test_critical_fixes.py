@@ -102,8 +102,9 @@ class TestConfigServiceConcurrency:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            (config_dir /
-             "config.json").write_text("{invalid json", encoding="utf-8")
+            (config_dir / "config.json").write_text(
+                "{invalid json", encoding="utf-8"
+            )
             ConfigService._instance = None
 
             config = ConfigService(config_dir)
@@ -321,7 +322,7 @@ class TestMigrationControllerPublicMethods:
 
         controller_path = Path(__file__).parent.parent / \
             "app" / "controllers" / "migration_controller.py"
-        content = controller_path.read_text()
+        content = controller_path.read_text(encoding="utf-8")
 
         # 解析 AST
         tree = ast.parse(content)
@@ -609,10 +610,9 @@ class TestOmniNbtEditing:
         index = (10 * 16 + 3) * 16 + 2
         bits = 4
         values_per_long = 64 // bits
-        data[index //
-             values_per_long] |= 1 << ((index %
-                                        values_per_long) *
-                                       bits)
+        data[index // values_per_long] |= 1 << (
+            (index % values_per_long) * bits
+        )
         chunk = {"sections": [
             {"Y": 4, "block_states": {"palette": palette, "data": data}}]}
 
@@ -705,15 +705,19 @@ class TestOmniNbtEditing:
             -512, -512) == (-1, -1, 0, 0)
 
     def test_explorer_formats_change_summary(self):
+        from app.models.nbt_edit import NbtChange
         from app.ui.views.explorer.explorer_helpers import format_change_summary
 
-        summary = format_change_summary(0, {
-            "target_label": "玩家 NBT: test",
-            "format": "json",
-            "display_path": "stats.minecraft:mined.minecraft:stone",
-            "old_value": 1,
-            "new_value": 8,
-        })
+        summary = format_change_summary(0, NbtChange(
+            target="test",
+            target_label="玩家 NBT: test",
+            format="json",
+            operation="set",
+            path=("stats", "minecraft:mined", "minecraft:stone"),
+            display_path="stats.minecraft:mined.minecraft:stone",
+            old_value=1,
+            new_value=8,
+        ))
 
         assert "#1 [JSON] 玩家 NBT: test" in summary
         assert "stats.minecraft:mined.minecraft:stone" in summary

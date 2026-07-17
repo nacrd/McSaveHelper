@@ -72,7 +72,7 @@ def decode_heightmap_raw(
             break
     if raw is None:
         try:
-            items = list(heightmaps.items())  # type: ignore[attr-defined]
+            items = list(heightmaps.items())
             if items:
                 raw = items[0][1]
         except Exception:

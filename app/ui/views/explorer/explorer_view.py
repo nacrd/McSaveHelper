@@ -1,12 +1,19 @@
 """Explorer View - 存档浏览器主视图"""
 import threading
 import flet as ft
-from typing import TYPE_CHECKING, Any, Optional, List, Dict, Tuple, Union
+from typing import TYPE_CHECKING, Any, Optional, Dict, Tuple
 from pathlib import Path
 
 from app.ui.theme import THEME
+from app.models.nbt_edit import (
+    ChunkNbtTarget,
+    NbtEditFormat,
+    NbtStageStore,
+    NbtTarget,
+)
 from app.ui.icons import IconSet
 from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_bar
+from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -45,12 +52,11 @@ class ExplorerView(
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
         self._current_player_data: Optional[Any] = None
-        self._current_nbt_target: Optional[Union[str, Path]] = None
+        self._current_nbt_target: Optional[NbtTarget] = None
         self._current_nbt_label = "未加载 NBT"
-        self._current_edit_format = "nbt"
-        self._nbt_target_options: Dict[str, Path] = {}
-        self._last_chunk_objects: List[Dict[str, Any]] = []
-        self._staged_nbt_changes: List[Dict[str, Any]] = []
+        self._current_edit_format: NbtEditFormat = "nbt"
+        self._current_chunk_target: Optional[ChunkNbtTarget] = None
+        self._nbt_stage_store = NbtStageStore()
         self._map_service = get_region_map_service()
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
@@ -62,6 +68,36 @@ class ExplorerView(
     @property
     def _t(self):
         return self.app._t
+
+    def get_top_actions(self) -> list[ViewAction]:
+        """Declare Explorer commands consumed by the application shell."""
+        return [
+            ViewAction(
+                self._t("top_bar.start_stats", "开始统计"),
+                self._analyze_world_stats,
+            ),
+            ViewAction(
+                self._t("top_bar.open_search", "打开搜索"),
+                self._start_entity_block_search,
+            ),
+            ViewAction(
+                self._t("top_bar.refresh_map", "刷新地图"),
+                lambda event: self._refresh_map(),
+            ),
+            ViewAction(
+                self._t("top_bar.stage_player", "暂存玩家"),
+                self._stage_player_edit_form,
+            ),
+            ViewAction(
+                self._t("top_bar.commit_changes", "提交变更"),
+                self._commit_nbt_changes,
+            ),
+            ViewAction(
+                self._t("top_bar.discard_changes", "丢弃暂存"),
+                self._discard_nbt_changes,
+                "danger",
+            ),
+        ]
 
     def _build(self) -> None:
         self.controls.clear()
@@ -99,9 +135,23 @@ class ExplorerView(
         # 追踪哪些标签页已构建
         self._tabs_built = [False] * 6
 
-        self._tab_bar, self._tab_labels_row, self._tab_buttons, self._tab_labels_widgets = segmented_tab_bar(
+        (
+            self._tab_bar,
+            self._tab_labels_row,
+            self._tab_buttons,
+            self._tab_labels_widgets,
+        ) = segmented_tab_bar(
             [
-                TabSpec("存档信息", IconSet.EARTH), TabSpec("玩家", IconSet.PERSON), TabSpec("地图", IconSet.GRID), TabSpec("统计", IconSet.STATS), TabSpec("搜索", IconSet.SEARCH), TabSpec("NBT", IconSet.DOCUMENT), ], selected_index=0, on_select=self._switch_tab, )
+                TabSpec("存档信息", IconSet.EARTH),
+                TabSpec("玩家", IconSet.PERSON),
+                TabSpec("地图", IconSet.GRID),
+                TabSpec("统计", IconSet.STATS),
+                TabSpec("搜索", IconSet.SEARCH),
+                TabSpec("NBT", IconSet.DOCUMENT),
+            ],
+            selected_index=0,
+            on_select=self._switch_tab,
+        )
         self._content_box = panel(
             content=self._tabs_content[0],
             padding=10,
@@ -143,9 +193,13 @@ class ExplorerView(
             self._tab_index = index
             for i, lbl in enumerate(self._tab_labels_widgets):
                 selected = i == index
-                lbl.color = THEME.text_primary if selected else THEME.text_secondary
+                lbl.color = (
+                    THEME.text_primary if selected else THEME.text_secondary
+                )
                 if i < len(self._tab_buttons):
-                    self._tab_buttons[i].bgcolor = THEME.mc_stone if selected else THEME.bg_secondary
+                    self._tab_buttons[i].bgcolor = (
+                        THEME.mc_stone if selected else THEME.bg_secondary
+                    )
             self._content_box.content = self._tabs_content[index]
             safe_update(self._content_box)
             safe_update(self._tab_bar)
@@ -211,7 +265,7 @@ class ExplorerView(
         """加载世界存档"""
         try:
             if path is None or hasattr(path, "control"):
-                path = getattr(self.app, "_current_save_path", None)
+                path = self.app.current_save_path
             if not path:
                 self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
@@ -221,48 +275,57 @@ class ExplorerView(
             self._world_label.color = THEME.mc_gold
             safe_update(self._world_label)
 
-            # 后台线程加载 WorldSession，避免阻塞 UI
-            def _load():
-                try:
-                    session = WorldSession(Path(path), log=self.app.log)
-
-                    async def _apply_loaded_world(
-                            loaded_session: WorldSession):
-                        try:
-                            self._populate_world(loaded_session)
-                        except Exception as ui_ex:
-                            self.app.handle_exception(ui_ex, title="更新存档界面失败")
-                    self.app.page.run_task(_apply_loaded_world, session)
-                except FileNotFoundError as ex:
-                    async def _show_error(err_msg: str):
-                        self._world_label.value = "❌ 无效的存档目录"
-                        self._world_label.color = THEME.error
-                        safe_update(self._world_label)
-                        self.app.error_dialog(
-                            "无效的存档", f"所选目录不是有效的 Minecraft 存档：\n\n{err_msg}\n\n请确保选择包含 level.dat 的存档根目录")
-                    self.app.page.run_task(_show_error, str(ex))
-                except RuntimeError as ex:
-                    async def _show_nbt_error(err_msg: str):
-                        self._world_label.value = "❌ NBT 解析失败"
-                        self._world_label.color = THEME.error
-                        safe_update(self._world_label)
-                        self.app.error_dialog(
-                            "NBT 解析失败",
-                            f"level.dat 文件损坏或格式不兼容：\n\n{err_msg}\n\n可能原因：\n• 存档文件损坏\n• 不支持的 Minecraft 版本\n• 文件被其他程序占用")
-                    self.app.page.run_task(_show_nbt_error, str(ex))
-                except Exception as ex:
-                    async def _show_general_error(err_msg: str, err_type: str):
-                        self._world_label.value = "❌ 加载存档失败"
-                        self._world_label.color = THEME.warning
-                        safe_update(self._world_label)
-                        self.app.error_dialog(
-                            "加载存档失败", f"{err_type}: {err_msg}")
-                    self.app.page.run_task(
-                        _show_general_error, str(ex), type(ex).__name__)
-
-            threading.Thread(target=_load, daemon=True).start()
+            threading.Thread(
+                target=self._load_world_worker,
+                args=(str(path),),
+                daemon=True,
+            ).start()
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
+
+    def _load_world_worker(self, path: str) -> None:
+        """Load a world off the UI thread and schedule one result callback."""
+        try:
+            session = WorldSession(Path(path), log=self.app.log)
+            self.app.page.run_task(self._apply_loaded_world, session)
+        except Exception as exc:
+            self.app.page.run_task(self._show_world_load_error, exc)
+
+    async def _apply_loaded_world(self, session: WorldSession) -> None:
+        try:
+            self._populate_world(session)
+        except Exception as exc:
+            self.app.handle_exception(exc, title="更新存档界面失败")
+
+    async def _show_world_load_error(self, error: Exception) -> None:
+        if isinstance(error, FileNotFoundError):
+            self._world_label.value = "❌ 无效的存档目录"
+            self._world_label.color = THEME.error
+            title = "无效的存档"
+            message = (
+                "所选目录不是有效的 Minecraft 存档：\n\n"
+                f"{error}\n\n请确保选择包含 level.dat 的存档根目录"
+            )
+        elif isinstance(error, RuntimeError):
+            self._world_label.value = "❌ NBT 解析失败"
+            self._world_label.color = THEME.error
+            title = "NBT 解析失败"
+            message = (
+                f"level.dat 文件损坏或格式不兼容：\n\n{error}\n\n"
+                "可能原因：\n• 存档文件损坏\n"
+                "• 不支持的 Minecraft 版本\n• 文件被其他程序占用"
+            )
+        else:
+            self._world_label.value = "❌ 加载存档失败"
+            self._world_label.color = THEME.warning
+            title = "加载存档失败"
+            message = f"{type(error).__name__}: {error}"
+        safe_update(self._world_label)
+        self.app.error_dialog(title, message)
+
+    def dispose(self) -> None:
+        """Release session-scoped background resources."""
+        self._map_service.close()
 
     def _populate_world(self, session: WorldSession) -> None:
         """在 WorldSession 加载完成后填充 UI（可在后台线程调用）"""
@@ -270,8 +333,9 @@ class ExplorerView(
         self._world_label.value = f"当前存档: {session.world_path.name}"
         self._world_label.color = THEME.text_muted
         self._current_nbt_target = None
+        self._current_chunk_target = None
         self._current_nbt_label = "未加载 NBT"
-        self._staged_nbt_changes.clear()
+        self._nbt_stage_store.clear()
         self._update_nbt_target_options()
         self._update_nbt_stage_status()
         safe_update(self._world_label)

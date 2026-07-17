@@ -1,0 +1,123 @@
+"""Behavioral tests for the pure MCA map viewport."""
+from core.mca.viewport import (
+    MAX_SCALE,
+    MIN_SCALE,
+    McaMapSelection,
+    McaViewport,
+    ViewportTarget,
+    view_level_from_scale,
+)
+from app.services.region_map_service import RegionMapService
+from app.ui.views.explorer.map.mca_map_view import McaMapView
+
+
+def test_view_level_thresholds() -> None:
+    assert view_level_from_scale(0.5) == "world"
+    assert view_level_from_scale(2.0) == "region"
+    assert view_level_from_scale(6.5) == "chunk"
+    assert view_level_from_scale(20.0) == "block"
+
+
+def test_map_selection_preserves_level_invariants() -> None:
+    selection = McaMapSelection()
+
+    selection.select_region((-2, 3))
+    assert selection.level == "region"
+    assert selection.region == (-2, 3)
+    assert selection.chunk is None
+
+    selection.select_chunk((-33, 127), "block")
+    assert selection.level == "block"
+    assert selection.region == (-2, 3)
+    assert selection.chunk == (-33, 127)
+
+    assert selection.set_level("region") is True
+    assert selection.chunk is None
+    assert selection.region == (-2, 3)
+
+    selection.reset()
+    assert selection == McaMapSelection()
+
+
+def test_region_and_chunk_projection_support_negative_coordinates() -> None:
+    viewport = McaViewport(scale=2.0, offset_x=100.0, offset_y=80.0)
+    rect = viewport.region_rect((-2, -1))
+    screen_x = rect[0] + rect[2] * 0.75
+    screen_y = rect[1] + rect[3] * 0.25
+
+    assert viewport.region_at_screen(screen_x, screen_y, {(-2, -1)}) == (-2, -1)
+    assert viewport.chunk_at_screen(screen_x, screen_y, {(-2, -1)}) == (-40, -24)
+
+
+def test_region_projection_rejects_cell_gap_and_missing_regions() -> None:
+    viewport = McaViewport()
+
+    assert viewport.region_at_screen(32.5, 10.0, {(0, 0), (1, 0)}) is None
+    assert viewport.region_at_screen(35.0, 10.0, {(0, 0)}) is None
+    assert viewport.region_at_screen(35.0, 10.0, {(1, 0)}) == (1, 0)
+
+
+def test_zoom_about_preserves_world_point_under_pointer_and_clamps() -> None:
+    viewport = McaViewport(scale=2.0, offset_x=10.0, offset_y=-15.0)
+    before = viewport.screen_to_world(210.0, 85.0)
+
+    target = viewport.zoom_about(3.0, 210.0, 85.0)
+    viewport.apply(target)
+
+    assert viewport.screen_to_world(210.0, 85.0) == before
+    assert viewport.zoom_about(10_000, 0, 0).scale == MAX_SCALE
+    assert viewport.zoom_about(0.00001, 0, 0).scale == MIN_SCALE
+
+
+def test_fit_centers_complete_region_extents() -> None:
+    viewport = McaViewport()
+    target = viewport.fit([(-1, -1), (0, 0)], 800, 600, padding=0.8)
+    viewport.apply(target)
+
+    left, top, _, _ = viewport.region_rect((-1, -1))
+    right_x, bottom_y, size, _ = viewport.region_rect((0, 0))
+    right = right_x + size
+    bottom = bottom_y + size
+
+    assert abs((left + right) / 2.0 - 400.0) < 1e-9
+    assert abs((top + bottom) / 2.0 - 300.0) < 1e-9
+
+
+def test_focus_chunk_and_target_interpolation() -> None:
+    viewport = McaViewport()
+    target = viewport.focus_chunk((32, -1), 1000, 600)
+
+    assert target.scale >= 20.0
+    viewport.apply(target)
+    assert viewport.chunk_at_screen(500, 300, {(1, -1)}) == (32, -1)
+
+    midpoint = ViewportTarget(1, 0, 0).interpolate(
+        ViewportTarget(3, 20, -10),
+        0.5,
+    )
+    assert midpoint == ViewportTarget(2, 10, -5)
+
+
+def test_visible_region_bounds_expand_with_margin() -> None:
+    viewport = McaViewport(scale=1.0, offset_x=0.0, offset_y=0.0)
+
+    min_x, max_x, min_z, max_z = viewport.visible_region_bounds(100, 80)
+
+    assert min_x <= -1
+    assert min_z <= -1
+    assert max_x >= 3
+    assert max_z >= 2
+
+
+def test_map_view_rebuild_consumes_core_viewport() -> None:
+    service = RegionMapService()
+    service._mca_data.update({(-1, 0): 1024, (0, 0): 2048})
+    view = McaMapView(map_service=service, width=640, height=360)
+    view._use_topview = False
+
+    view._rebuild_canvas()
+
+    assert view._viewport.is_default is False
+    assert set(view._cell_bounds) == {(-1, 0), (0, 0)}
+    assert view._region_at_screen(*view._viewport.world_to_screen(1, 1)) == (0, 0)
+    service.close()

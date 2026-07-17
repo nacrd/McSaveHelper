@@ -1,13 +1,16 @@
 """WritableRegion round-trip tests (no anvil)."""
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
 import nbtlib
-import pytest
 
-from core.mca import RegionFile, WritableRegion, delete_chunk_entries
+from core.mca import (
+    RegionFile,
+    WritableRegion,
+    copy_chunk_record,
+    delete_chunk_entries,
+)
 from core.mca.format import HEADER_SIZE
 
 
@@ -85,3 +88,27 @@ def test_mutate_chunk_nbt_in_place(tmp_path: Path) -> None:
 
     with RegionFile.open(path) as rf:
         assert str(rf.read_chunk(0, 1)["Status"]) == "new"
+
+
+def test_copy_chunk_record_preserves_source_and_updates_destination(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "r.0.0.mca"
+    destination = tmp_path / "r.1.0.mca"
+
+    source_region = WritableRegion.empty(source)
+    source_region.set_chunk(1, 2, _mini_chunk(1, 2, "copied"))
+    source_region.save(backup=False)
+
+    destination_region = WritableRegion.empty(destination)
+    destination_region.set_chunk(0, 0, _mini_chunk(0, 0, "kept"))
+    destination_region.save(backup=False)
+
+    copy_chunk_record(source, (1, 2), destination, (3, 4), backup=True)
+
+    assert destination.with_suffix(".mca.bak").is_file()
+    with RegionFile.open(source) as region:
+        assert str(region.read_chunk(1, 2)["Status"]) == "copied"
+    with RegionFile.open(destination) as region:
+        assert str(region.read_chunk(0, 0)["Status"]) == "kept"
+        assert str(region.read_chunk(3, 4)["Status"]) == "copied"

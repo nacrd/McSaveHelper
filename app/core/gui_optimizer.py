@@ -2,7 +2,7 @@
 
 负责性能监控、键盘快捷键、卡死检测、通知管理和可访问性验证的初始化和管理。
 """
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 import flet as ft
 
 from app.ui.keyboard_shortcuts import (
@@ -21,6 +21,7 @@ from app.ui.hang_detector import get_hang_detector
 from app.ui.notifications import NotificationManager
 from app.ui.accessibility import validate_theme_accessibility
 from core.logger import logger
+from core.performance import PerformanceMetrics, set_metrics_sink
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -52,8 +53,9 @@ class GUIOptimizer:
     def initialize(self) -> None:
         """初始化GUI优化功能"""
         try:
-            # 1. 初始化通知管理器
+            # 1. 初始化通知管理器和业务指标桥接
             self.notification_manager = NotificationManager(self.page)
+            set_metrics_sink(self._record_business_metric)
 
             # 2. 启用卡死检测器（静默启用）
             hang_detector = get_hang_detector()
@@ -115,6 +117,20 @@ class GUIOptimizer:
             logger.error(f"GUI 优化模块初始化失败: {e}", module="GUIOptimizer")
             # 降级：不使用优化功能
             self.notification_manager = None
+
+    @staticmethod
+    def _record_business_metric(metrics: PerformanceMetrics) -> None:
+        """Adapt core business metrics to the optional GUI monitor."""
+        if not perf_monitor.enabled:
+            return
+        perf_monitor.record(
+            f"biz_{metrics.operation}",
+            metrics.duration_seconds * 1000,
+            "ms",
+            files=metrics.files_processed,
+            bytes=metrics.bytes_processed,
+            errors=metrics.errors,
+        )
 
     def _on_keyboard_event(self, e: ft.KeyboardEvent) -> None:
         """处理键盘事件
@@ -249,6 +265,7 @@ class GUIOptimizer:
         """停止GUI优化功能"""
         self._heartbeat_active = False
         self._hang_detector_active = False
+        set_metrics_sink(None)
 
         try:
             perf_monitor.disable()

@@ -1,5 +1,4 @@
 """server.properties 编辑服务"""
-import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -127,17 +126,7 @@ class ServerPropertiesService:
         return errors
 
 
-_server_properties_service: Optional[ServerPropertiesService] = None
-_server_properties_service_lock = threading.Lock()
-
-
 def get_server_properties_service(
         log: Optional[LogCallback] = None) -> ServerPropertiesService:
-    """获取服务器属性服务单例（线程安全）"""
-    global _server_properties_service
-    with _server_properties_service_lock:
-        if _server_properties_service is None:
-            _server_properties_service = ServerPropertiesService(log=log)
-        elif log is not None:
-            _server_properties_service.log = log
-    return _server_properties_service
+    """Return a server-properties service scoped to one editor view."""
+    return ServerPropertiesService(log=log)

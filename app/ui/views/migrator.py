@@ -8,6 +8,7 @@ from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, label, current_save_field
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
+from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -45,6 +46,14 @@ class MigratorView(ft.Column):
     @property
     def _t(self):
         return self.app._t
+
+    def get_top_actions(self) -> list[ViewAction]:
+        return [
+            ViewAction(
+                self._t("top_bar.start_conversion", "开始转换"),
+                lambda event: self.app.start(),
+            )
+        ]
 
     def _build(self) -> None:
         self.controls.clear()

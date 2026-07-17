@@ -404,11 +404,6 @@ class BlockDataService:
         return str(getattr(value, "value", value))
 
 
-_block_data_service: Optional[BlockDataService] = None
-
-
 def get_block_data_service() -> BlockDataService:
-    global _block_data_service
-    if _block_data_service is None:
-        _block_data_service = BlockDataService()
-    return _block_data_service
+    """Compatibility factory returning an isolated palette cache."""
+    return BlockDataService()

@@ -391,6 +391,7 @@ class WindowManager:
         self._set_closing_flag()
         self._stop_monitoring()
         self._stop_heartbeats()
+        self._dispose_views()
         self._shutdown_logger()
         self._destroy_window_async()
         self._schedule_force_exit()
@@ -414,6 +415,13 @@ class WindowManager:
         try:
             self.app._heartbeat_active = False
             self.app._hang_detector_active = False
+        except Exception:
+            pass
+
+    def _dispose_views(self) -> None:
+        """Release resources held by cached views before closing the window."""
+        try:
+            self.app.view_manager.dispose()
         except Exception:
             pass
 

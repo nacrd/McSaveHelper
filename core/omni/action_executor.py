@@ -19,8 +19,12 @@ class ActionExecutor:
         self.world_path = world_path
         self._log = log_callback or (lambda msg, lvl="INFO": None)
 
-    def execute_all(self, actions: List[Action], dest_path: Optional[Path] = None,
-                   backup: bool = True) -> bool:
+    def execute_all(
+        self,
+        actions: List[Action],
+        dest_path: Optional[Path] = None,
+        backup: bool = True,
+    ) -> bool:
         """执行所有队列中的操作，并将结果写入目标路径
 
         Args:
@@ -69,9 +73,9 @@ class ActionExecutor:
             for idx, action in enumerate(actions):
                 try:
                     self._execute_action(action, target_world)
-                    self._log(f"操作 {idx+1}/{len(actions)} 执行成功", "ACTION")
+                    self._log(f"操作 {idx + 1}/{len(actions)} 执行成功", "ACTION")
                 except Exception as e:
-                    self._log(f"操作 {idx+1} 执行失败: {e}", "ERROR")
+                    self._log(f"操作 {idx + 1} 执行失败: {e}", "ERROR")
                     success = False
 
         if success:
@@ -155,13 +159,12 @@ class ActionExecutor:
         if not abs_region_path.exists():
             raise ValueError(f"区域文件不存在: {target.region_path}")
 
-        # 备份区域文件
-        from app.services.region_editor_service import get_region_editor_service
-        editor = get_region_editor_service(log=self._log)
-        editor._backup_region(abs_region_path, backup=True)
-
-        # 写入区块
-        self._write_chunk(abs_region_path, target.chunk_x, target.chunk_z, target.full_chunk_data)
+        self._write_chunk(
+            abs_region_path,
+            target.chunk_x,
+            target.chunk_z,
+            target.full_chunk_data,
+        )
         self._log(f"已写回区块: {target.region_path} [{target.chunk_x}, {target.chunk_z}]", "SAVE")
 
     def _execute_delete_region(self, action: Action, target_world: Path) -> None:
@@ -243,66 +246,84 @@ class ActionExecutor:
             else:
                 raise KeyError(f"路径 {key_path} 不存在于 {context}")
 
-        # 应用操作到最后一个键
         last_key = key_path[-1]
-
         if isinstance(last_key, int) and isinstance(node, list):
-            if operation == "add":
-                if last_key < 0 or last_key > len(node):
-                    raise IndexError(f"列表插入位置越界: {last_key}")
-                if last_key == len(node):
-                    node.append(value)
-                else:
-                    node.insert(last_key, value)
-            elif operation == "delete":
-                if last_key < 0 or last_key >= len(node):
-                    raise IndexError(f"列表删除位置越界: {last_key}")
-                del node[last_key]
-            else:  # set
-                if last_key < 0 or last_key >= len(node):
-                    raise IndexError(f"列表修改位置越界: {last_key}")
-                node[last_key] = value
+            self._apply_list_operation(node, last_key, value, operation)
+            return
+        if isinstance(last_key, str) and isinstance(node, dict):
+            self._apply_mapping_operation(node, last_key, value, operation)
+            return
+        raise KeyError(f"路径 {key_path} 无法应用到 {context}")
 
-        elif isinstance(last_key, str) and isinstance(node, dict):
-            if operation == "add":
-                if last_key in node:
-                    raise KeyError(f"字段已存在: {last_key}")
-                node[last_key] = value
-            elif operation == "delete":
-                if last_key not in node:
-                    raise KeyError(f"字段不存在: {last_key}")
-                del node[last_key]
-            else:  # set
-                if last_key not in node:
-                    raise KeyError(f"字段不存在: {last_key}")
-                node[last_key] = value
+    @staticmethod
+    def _apply_list_operation(
+        node: list,
+        index: int,
+        value: Any,
+        operation: str,
+    ) -> None:
+        if operation == "add":
+            if index < 0 or index > len(node):
+                raise IndexError(f"列表插入位置越界: {index}")
+            node.insert(index, value)
+            return
+        if index < 0 or index >= len(node):
+            raise IndexError(f"列表操作位置越界: {index}")
+        if operation == "delete":
+            del node[index]
         else:
-            raise KeyError(f"路径 {key_path} 无法应用到 {context}")
+            node[index] = value
 
-    def _write_chunk(self, region_path: Path, chunk_x: int, chunk_z: int, chunk_data: Any) -> None:
-        """将区块数据写回区域文件"""
-        try:
-            from app.services.region_editor_service import get_region_editor_service
-            editor = get_region_editor_service(log=self._log)
-            import io
-            import zlib
+    @staticmethod
+    def _apply_mapping_operation(
+        node: dict,
+        key: str,
+        value: Any,
+        operation: str,
+    ) -> None:
+        if operation == "add":
+            if key in node:
+                raise KeyError(f"字段已存在: {key}")
+            node[key] = value
+            return
+        if key not in node:
+            raise KeyError(f"字段不存在: {key}")
+        if operation == "delete":
+            del node[key]
+        else:
+            node[key] = value
 
-            buffer = io.BytesIO()
-            if hasattr(chunk_data, "write_file"):
-                chunk_data.write_file(buffer=buffer)
-            elif hasattr(chunk_data, "write"):
-                chunk_data.write(buffer)
-            elif hasattr(chunk_data, "save"):
-                chunk_data.save(buffer, gzipped=False)
-            else:
-                raise TypeError(f"不支持的区块 NBT 对象类型: {type(chunk_data).__name__}")
+    def _write_chunk(
+        self,
+        region_path: Path,
+        chunk_x: int,
+        chunk_z: int,
+        chunk_data: Any,
+    ) -> None:
+        """Serialize legacy or nbtlib chunk data and write it atomically."""
+        import io
+        import zlib
 
-            nbt_bytes = buffer.getvalue()
-            compressed = zlib.compress(nbt_bytes, 6)
-            length = len(compressed) + 1
-            chunk_record = length.to_bytes(4, "big") + b"\x02" + compressed
+        from core.mca import write_chunk_record
 
-            editor._write_chunk_record(region_path, chunk_x, chunk_z, chunk_record)
-        except Exception as e:
-            self._log(f"写回区块失败: {e}", "ERROR")
-            raise
+        buffer = io.BytesIO()
+        if hasattr(chunk_data, "write_file"):
+            chunk_data.write_file(buffer=buffer)
+        elif hasattr(chunk_data, "write"):
+            chunk_data.write(buffer)
+        elif hasattr(chunk_data, "save"):
+            chunk_data.save(buffer, gzipped=False)
+        else:
+            raise TypeError(
+                f"不支持的区块 NBT 对象类型: {type(chunk_data).__name__}"
+            )
+
+        compressed = zlib.compress(buffer.getvalue(), 6)
+        length = len(compressed) + 1
+        record = length.to_bytes(4, "big") + b"\x02" + compressed
+        write_chunk_record(
+            region_path,
+            (chunk_x, chunk_z),
+            record,
+            backup=True,
+        )

@@ -29,7 +29,7 @@ class ScanProgress:
 
 class RegionMapService:
     """
-    存档区域地图后台扫描服务（单例模式）
+    存档区域地图后台扫描服务（每个 Explorer 会话一个实例）
 
     职责：
     - 异步扫描 Minecraft region 目录
@@ -37,15 +37,7 @@ class RegionMapService:
     - 提供进度查询接口
     """
 
-    _instance: Optional['RegionMapService'] = None
-
-    def __new__(cls) -> 'RegionMapService':
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._init()
-        return cls._instance
-
-    def _init(self) -> None:
+    def __init__(self) -> None:
         """初始化内部状态"""
         self._mca_data: Dict[Tuple[int, int], int] = {}
         self._region_meta: Dict[Tuple[int, int], Dict[str, Any]] = {}
@@ -56,6 +48,8 @@ class RegionMapService:
         self._is_scanning: bool = False
         self._scan_progress: float = 0.0
         self._scan_task: Optional[asyncio.Task] = None
+        self._scan_generation: int = 0
+        self._closed: bool = False
         self._scanned_count: int = 0
         self._total_count: int = 0
         self._error: Optional[str] = None
@@ -84,6 +78,8 @@ class RegionMapService:
         self._topview_executor: Optional[ThreadPoolExecutor] = None
 
     def _ensure_topview_executor(self) -> ThreadPoolExecutor:
+        if self._closed:
+            raise RuntimeError("区域地图服务已关闭")
         if self._topview_executor is None:
             self._topview_executor = ThreadPoolExecutor(
                 max_workers=self._topview_max_workers,
@@ -210,7 +206,7 @@ class RegionMapService:
             force: re-render even if a tile already exists (e.g. upgrade size).
             priority: put jobs at the front of the queue (selected region).
         """
-        if not self._topview_enabled:
+        if self._closed or not self._topview_enabled:
             return
         size = int(tile_size or self._topview_tile_size)
         with self._data_lock:
@@ -315,12 +311,17 @@ class RegionMapService:
             region_dir: region 目录路径
             batch_size: 每批处理文件数量（用于进度更新）
         """
+        if self._closed:
+            raise RuntimeError("区域地图服务已关闭")
+
         # 如果正在扫描，先取消
         if self._is_scanning:
             await self.cancel_scan()
 
         # 清空旧数据
         self.clear_data()
+        self._scan_generation += 1
+        scan_generation = self._scan_generation
         self._is_scanning = True
         self._error = None
 
@@ -337,6 +338,8 @@ class RegionMapService:
                 return
 
             for mca_file in mca_files:
+                if self._closed or scan_generation != self._scan_generation:
+                    return
                 try:
                     coord = parse_region_coords(mca_file)
                     if coord is not None:
@@ -344,6 +347,11 @@ class RegionMapService:
                         # anvil 同步解析丢进线程池，await 期间 UI loop 可处理事件
                         meta = await asyncio.to_thread(
                             self._scan_region_meta, mca_file)
+                        if (
+                            self._closed
+                            or scan_generation != self._scan_generation
+                        ):
+                            return
                         with self._data_lock:
                             self._mca_data[coord] = size
                             self._region_meta[coord] = meta
@@ -364,10 +372,11 @@ class RegionMapService:
                     continue
 
             # 最终更新
-            with self._data_lock:
-                self._scan_progress = 1.0
-                self._is_scanning = False
-                self._mark_data_dirty()
+            if scan_generation == self._scan_generation:
+                with self._data_lock:
+                    self._scan_progress = 1.0
+                    self._is_scanning = False
+                    self._mark_data_dirty()
 
         except Exception as e:
             self._error = str(e)
@@ -604,6 +613,7 @@ class RegionMapService:
 
     async def cancel_scan(self) -> None:
         """取消当前扫描任务"""
+        self._scan_generation += 1
         if self._scan_task and not self._scan_task.done():
             self._scan_task.cancel()
             try:
@@ -614,6 +624,27 @@ class RegionMapService:
 
         self._is_scanning = False
         self._scan_task = None
+
+    def close(self) -> None:
+        """Release callbacks, queued jobs and worker resources idempotently."""
+        if self._closed:
+            return
+        self._closed = True
+        self._scan_generation += 1
+        self._is_scanning = False
+        scan_task = self._scan_task
+        self._scan_task = None
+        if scan_task is not None and not scan_task.done():
+            scan_task.cancel()
+        self.set_tile_ready_callback(None)
+        with self._data_lock:
+            self._topview_generation += 1
+            self._topview_queue.clear()
+            self._topview_pending.clear()
+        executor = self._topview_executor
+        self._topview_executor = None
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     async def start_scan_async(self, region_dir: str) -> None:
         """
@@ -688,15 +719,6 @@ class RegionMapService:
             return stats
 
 
-# 全局单例实例
-_region_map_service_instance: Optional[RegionMapService] = None
-_region_map_service_lock = threading.Lock()
-
-
 def get_region_map_service() -> RegionMapService:
-    """获取区域地图服务单例（线程安全）"""
-    global _region_map_service_instance
-    with _region_map_service_lock:
-        if _region_map_service_instance is None:
-            _region_map_service_instance = RegionMapService()
-    return _region_map_service_instance
+    """Compatibility factory returning a fresh session-scoped service."""
+    return RegionMapService()

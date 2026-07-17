@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Union
 
 import flet as ft
 
+from app.models.nbt_edit import NbtChange
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.fields import text_field
@@ -137,16 +138,16 @@ class PlayerTabMixin:
                 if self._tag_display_value(
                         old_value) == self._tag_display_value(new_value):
                     continue
-                self._staged_nbt_changes.append({
-                    "target": self.current_uuid,
-                    "target_label": f"玩家 NBT: {self.current_uuid}",
-                    "format": "nbt",
-                    "operation": "set",
-                    "path": path,
-                    "display_path": ".".join(str(part) for part in path),
-                    "old_value": old_value,
-                    "new_value": new_value,
-                })
+                self._nbt_stage_store.add(NbtChange(
+                    target=self.current_uuid,
+                    target_label=f"玩家 NBT: {self.current_uuid}",
+                    format="nbt",
+                    operation="set",
+                    path=tuple(path),
+                    display_path=".".join(str(part) for part in path),
+                    old_value=old_value,
+                    new_value=new_value,
+                ))
                 staged += 1
             self._update_nbt_stage_status()
             if staged:
@@ -192,6 +193,7 @@ class PlayerTabMixin:
             if not self.world_session:
                 return
             self.current_uuid = uuid
+            self._current_chunk_target = None
             player_data = self.world_session.load_player_data(uuid)
             self._current_player_data = player_data
             if hasattr(self, "_player_hud"):
@@ -248,7 +250,10 @@ class PlayerTabMixin:
                 else:
                     self.app.info_dialog(
                         "提示",
-                        "未能从文件中解析出有效的物品名称。\n\n支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n- 直接 ID 映射 (minecraft:xxx)")
+                        "未能从文件中解析出有效的物品名称。\n\n"
+                        "支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n"
+                        "- 直接 ID 映射 (minecraft:xxx)",
+                    )
         except Exception as ex:
             self.app.handle_exception(ex, title="导入语言文件失败")
 

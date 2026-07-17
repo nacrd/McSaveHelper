@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Tuple
 
 import nbtlib
 
+from app.models.nbt_edit import NbtChange
+
 
 def tag_display_value(value: Any) -> str:
     if hasattr(value, "unpack"):
@@ -59,15 +61,18 @@ def format_diff_value(value: Any) -> str:
     return text if len(text) <= 160 else text[:157] + "…"
 
 
-def format_change_summary(index: int, change: Dict[str, Any]) -> str:
-    old_text = format_diff_value(change["old_value"])
-    new_text = format_diff_value(change["new_value"])
-    target = change.get("target_label", "未知目标")
-    kind = "JSON" if change.get("format") == "json" else "NBT"
-    return f"#{
-        index +
-        1} [{kind}] {target}\n  {
-        change['display_path']}\n  - {old_text}\n  + {new_text}"
+def format_change_summary(index: int, change: NbtChange) -> str:
+    old_text = format_diff_value(change.old_value)
+    new_text = format_diff_value(change.new_value)
+    kind = {
+        "json": "JSON",
+        "chunk": "区块",
+        "chunk_readonly": "区块",
+    }.get(change.format, "NBT")
+    return (
+        f"#{index + 1} [{kind}] {change.target_label}\n"
+        f"  {change.display_path}\n  - {old_text}\n  + {new_text}"
+    )
 
 
 def _tag_value(value: Any) -> Any:

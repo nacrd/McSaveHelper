@@ -1,0 +1,30 @@
+from app.services.block_data_service import get_block_data_service
+from app.services.server_properties_service import get_server_properties_service
+from app.services.world_compare_service import get_world_compare_service
+from app.services.world_stats_service import get_world_stats_service
+
+
+def test_lightweight_service_factories_return_isolated_instances() -> None:
+    factories = (
+        get_block_data_service,
+        get_server_properties_service,
+        get_world_compare_service,
+        get_world_stats_service,
+    )
+
+    for factory in factories:
+        assert factory() is not factory()
+
+
+def test_log_callbacks_are_not_overwritten_by_another_caller() -> None:
+    def first_log(message, level) -> None:
+        del message, level
+
+    def second_log(message, level) -> None:
+        del message, level
+
+    first = get_world_stats_service(first_log)
+    second = get_world_stats_service(second_log)
+
+    assert first.log is first_log
+    assert second.log is second_log

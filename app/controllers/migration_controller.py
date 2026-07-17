@@ -1,206 +1,243 @@
-"""Migration task orchestration for the application."""
+"""Migration task orchestration with explicit application ports."""
+from __future__ import annotations
+
 import os
 import threading
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
-# 导入性能监控和反馈工具
+from app.services.config_service import ConfigService
+from app.services.migration_service import MigrationService
 from app.ui.performance import Timer, async_tracker
+from core.types import LogCallback, ProgressCallback
+
+
+Translate = Callable[..., str]
+DialogCallback = Callable[..., None]
+ExceptionCallback = Callable[..., None]
+WorkerTarget = Callable[[str], None]
+WorkerStarter = Callable[[WorkerTarget, str], None]
+
+
+def start_daemon_worker(target: WorkerTarget, argument: str) -> None:
+    threading.Thread(target=target, args=(argument,), daemon=True).start()
+
+
+@dataclass(frozen=True)
+class MigrationControllerDependencies:
+    config: ConfigService
+    migration: MigrationService
+    translate: Translate
+    warn_dialog: DialogCallback
+    error_dialog: DialogCallback
+    handle_exception: ExceptionCallback
+    show_success: Callable[[str, str], None]
+    set_start_enabled: Callable[[bool], None]
+    update_page: Callable[[], None]
+    log: LogCallback
+    log_header: Callable[[str], None]
+    update_progress: ProgressCallback
+    set_progress_label: Callable[[str], None]
+    set_progress_value: Callable[[float], None]
+    start_worker: WorkerStarter = start_daemon_worker
 
 
 class MigrationController:
-    """Coordinates single and batch migration jobs for the UI application."""
+    """Coordinate migration use cases without owning the Application object."""
 
-    def __init__(self, app: Any) -> None:
-        self.app = app
+    def __init__(self, dependencies: MigrationControllerDependencies) -> None:
+        self.dependencies = dependencies
+
+    @property
+    def config(self) -> ConfigService:
+        return self.dependencies.config
+
+    @property
+    def migration(self) -> MigrationService:
+        return self.dependencies.migration
+
+    def _t(self, key: str, default: str = "", **kwargs: Any) -> str:
+        return self.dependencies.translate(key, default, **kwargs)
 
     def sync_config_to_migration(self) -> None:
-        """Synchronize persisted config values into runtime migration config."""
-        mc = self.app.config.migration
-        mc.version_detection = self.app.config.version_detection
+        migration_config = self.config.migration
+        migration_config.version_detection = self.config.version_detection
 
     def start(self) -> None:
-        """Start the currently configured migration task."""
-        app = self.app
+        """Validate configuration and start one migration worker."""
+        deps = self.dependencies
         try:
-            mc = app.config.migration
-
-            if not mc.src_path and not mc.batch_mode:
-                app.warn_dialog(app._t("dialogs.warning", "提示"), app._t(
-                    "messages.please_select_source", "请先通过侧边栏设置客户端存档目录"), )
+            migration_config = self.config.migration
+            if not migration_config.src_path and not migration_config.batch_mode:
+                deps.warn_dialog(
+                    self._t("dialogs.warning", "提示"),
+                    self._t(
+                        "messages.please_select_source",
+                        "请先通过侧边栏设置客户端存档目录",
+                    ),
+                )
                 return
 
-            app.set_start_button_enabled(False)
-            app.page.update()
-
+            deps.set_start_enabled(False)
+            self.try_update_page()
             self.save_config()
-
-            dest_dir = mc.dest_path or os.getcwd()
-
-            # 开始跟踪异步操作
-            operation_id = "migration_batch" if mc.batch_mode else "migration_single"
+            destination = migration_config.dest_path or os.getcwd()
+            operation_id = (
+                "migration_batch"
+                if migration_config.batch_mode
+                else "migration_single"
+            )
             async_tracker.start(operation_id)
 
-            if mc.batch_mode and app.migration.batch_worlds:
-                threading.Thread(
-                    target=self.run_batch_thread,
-                    args=(dest_dir,), daemon=True,
-                ).start()
-            else:
-                threading.Thread(
-                    target=self.run_single_thread,
-                    args=(dest_dir,), daemon=True,
-                ).start()
-        except Exception as e:
-            app.handle_exception(e, title="启动转换失败")
-            app.set_start_button_enabled(True)
+            target = (
+                self.run_batch_thread
+                if migration_config.batch_mode and self.migration.batch_worlds
+                else self.run_single_thread
+            )
+            deps.start_worker(target, destination)
+        except Exception as exc:
+            deps.handle_exception(exc, title="启动转换失败")
+            deps.set_start_enabled(True)
             self.try_update_page()
 
     def try_update_page(self) -> None:
-        """Update the Flet page, ignoring lifecycle errors."""
         try:
-            self.app.page.update()
+            self.dependencies.update_page()
         except Exception:
             pass
 
     def save_config(self) -> None:
-        """Save current migration-related configuration."""
-        c = self.app.config
-        mc = c.migration
-        # 使用线程安全的批量更新方法
-        c.update_batch_config(
-            version_detection=mc.version_detection,
-            max_concurrent=c.max_concurrent,
-            custom_uuid_mappings=c.custom_uuid_mappings,
-            use_custom_mapping=c.use_custom_mapping,
+        migration_config = self.config.migration
+        self.config.update_batch_config(
+            version_detection=migration_config.version_detection,
+            max_concurrent=self.config.max_concurrent,
+            custom_uuid_mappings=self.config.custom_uuid_mappings,
+            use_custom_mapping=self.config.use_custom_mapping,
         )
 
-    def run_single_thread(self, dest_dir: str) -> None:
-        """Run a single-world migration in the current worker thread."""
-        app = self.app
-        mc = app.config.migration
-
+    def run_single_thread(self, destination: str) -> None:
+        deps = self.dependencies
+        migration_config = self.config.migration
         try:
             with Timer("single_migration"):
-                app.log_header(app._t("messages.migration_started", "开始迁移任务"))
-                output_path = app.migration.run_single(
-                    src=mc.src_path,
-                    dest=dest_dir,
-                    world_name=mc.world_name,
-                    mode=mc.mode,
-                    offline=mc.offline_mode,
-                    clean=mc.clean_mode,
-                    pure_clean=mc.pure_clean_mode,
-                    target_platform=mc.target_platform,
-                    target_version=mc.target_version,
-                    manual_names_str=mc.manual_names,
-                    log_cb=app.log,
-                    progress_cb=app.update_progress,
+                deps.log_header(
+                    self._t("messages.migration_started", "开始迁移任务")
+                )
+                output_path = self.migration.run_single(
+                    src=migration_config.src_path,
+                    dest=destination,
+                    world_name=migration_config.world_name,
+                    mode=migration_config.mode,
+                    offline=migration_config.offline_mode,
+                    clean=migration_config.clean_mode,
+                    pure_clean=migration_config.pure_clean_mode,
+                    target_platform=migration_config.target_platform,
+                    target_version=migration_config.target_version,
+                    manual_names_str=migration_config.manual_names,
+                    log_cb=deps.log,
+                    progress_cb=deps.update_progress,
                 )
 
             elapsed = async_tracker.complete("migration_single")
             if elapsed:
-                app.log(f"迁移耗时: {elapsed:.2f}秒", "INFO")
-
-            app.log_header(app._t("messages.migration_complete", "迁移完成"))
-            app.log(
-                app._t(
-                    "messages.migration_success",
-                    "迁移完成！输出目录: {output_path}",
-                    output_path=output_path),
-                "SUCCESS")
-            app.set_progress_label(app._t("top_bar.completed", "已完成"))
-
-            if hasattr(
-                    app,
-                    "notification_manager") and app.notification_manager:
-                app.notification_manager.show_success(
-                    f"迁移完成！输出目录: {output_path}")
-            else:
-                app.info_dialog(
-                    app._t(
-                        "dialogs.success",
-                        "成功"),
-                    app._t(
-                        "messages.migration_success",
-                        "迁移完成！输出目录: {output_path}",
-                        output_path=output_path),
-                )
-        except Exception as e:
+                deps.log(f"迁移耗时: {elapsed:.2f}秒", "INFO")
+            deps.log_header(
+                self._t("messages.migration_complete", "迁移完成")
+            )
+            success_message = self._t(
+                "messages.migration_success",
+                "迁移完成！输出目录: {output_path}",
+                output_path=output_path,
+            )
+            deps.log(success_message, "SUCCESS")
+            deps.set_progress_label(self._t("top_bar.completed", "已完成"))
+            deps.show_success(
+                self._t("dialogs.success", "成功"),
+                success_message,
+            )
+        except Exception as exc:
             async_tracker.complete("migration_single")
-            app.handle_exception(
-                e,
-                title=app._t(
-                    "messages.migration_exception",
-                    "迁移失败: {error}",
-                    error=str(e)),
+            error_message = self._t(
+                "messages.migration_exception",
+                "迁移失败: {error}",
+                error=str(exc),
+            )
+            deps.handle_exception(
+                exc,
+                title=error_message,
                 log=True,
                 show_dialog=False,
             )
-            app.set_progress_label(app._t("top_bar.failed", "失败"))
-            app.error_dialog(
-                app._t(
-                    "dialogs.error",
-                    "错误"),
-                app._t(
-                    "messages.migration_exception",
-                    "迁移失败: {error}",
-                    error=str(e)),
-                exception=e,
+            deps.set_progress_label(self._t("top_bar.failed", "失败"))
+            deps.error_dialog(
+                self._t("dialogs.error", "错误"),
+                error_message,
+                exception=exc,
                 show_details=True,
             )
         finally:
-            app.set_start_button_enabled(True)
-            app.set_progress_value(0)
+            deps.set_start_enabled(True)
+            deps.set_progress_value(0)
             self.try_update_page()
 
-    def run_batch_thread(self, dest_dir: str) -> None:
-        """Run batch migration in the current worker thread."""
-        app = self.app
-        mc = app.config.migration
+    def run_batch_thread(self, destination: str) -> None:
+        deps = self.dependencies
+        migration_config = self.config.migration
         try:
-            app.log_header(
-                app._t(
-                    "messages.batch_migration_started",
-                    "开始批量处理"))
-            self.save_config()
-            results = app.migration.run_batch(
-                dest_dir=dest_dir,
-                mode=mc.mode,
-                offline=mc.offline_mode,
-                clean=mc.clean_mode,
-                pure_clean=mc.pure_clean_mode,
-                target_platform=mc.target_platform,
-                target_version=mc.target_version,
-                manual_names_str=mc.manual_names,
-                max_concurrent=app.config.max_concurrent,
-                log_cb=app.log,
-                progress_cb=app.update_progress,
+            deps.log_header(
+                self._t("messages.batch_migration_started", "开始批量处理")
             )
-            success = sum(1 for r in results.values() if r["success"])
-            app.log_header(
-                app._t(
+            self.save_config()
+            results = self.migration.run_batch(
+                dest_dir=destination,
+                mode=migration_config.mode,
+                offline=migration_config.offline_mode,
+                clean=migration_config.clean_mode,
+                pure_clean=migration_config.pure_clean_mode,
+                target_platform=migration_config.target_platform,
+                target_version=migration_config.target_version,
+                manual_names_str=migration_config.manual_names,
+                max_concurrent=self.config.max_concurrent,
+                log_cb=deps.log,
+                progress_cb=deps.update_progress,
+            )
+            success = sum(1 for result in results.values() if result["success"])
+            deps.log_header(
+                self._t(
                     "messages.batch_migration_complete_header",
-                    "批量处理完成"))
-            app.log(app._t("messages.batch_migration_complete",
-                           "成功: {success}/{total}",
-                           success=success, total=len(results)), "SUCCESS")
-            app.set_progress_label(app._t("top_bar.batch_completed", "批量处理完成"))
-        except Exception as e:
-            app.handle_exception(
-                e,
-                title=app._t(
+                    "批量处理完成",
+                )
+            )
+            deps.log(
+                self._t(
+                    "messages.batch_migration_complete",
+                    "成功: {success}/{total}",
+                    success=success,
+                    total=len(results),
+                ),
+                "SUCCESS",
+            )
+            deps.set_progress_label(
+                self._t("top_bar.batch_completed", "批量处理完成")
+            )
+        except Exception as exc:
+            deps.handle_exception(
+                exc,
+                title=self._t(
                     "messages.save_failed",
                     "批量处理失败: {error}",
-                    error=str(e)),
+                    error=str(exc),
+                ),
                 log=True,
                 show_dialog=False,
             )
-            app.set_progress_label(app._t("top_bar.batch_failed", "批量处理失败"))
+            deps.set_progress_label(
+                self._t("top_bar.batch_failed", "批量处理失败")
+            )
         finally:
-            app.set_start_button_enabled(True)
-            app.set_progress_value(0)
+            deps.set_start_enabled(True)
+            deps.set_progress_value(0)
             self.try_update_page()
 
     def open_folder(self, path: str) -> None:
-        """Open a folder in the platform file manager."""
-        self.app.migration.open_folder(path)
+        self.migration.open_folder(path)

@@ -13,26 +13,47 @@ from core.mca.errors import (
     McaError,
     UnsupportedCompression,
 )
+from core.mca.editor import ChunkInfo, RegionEditor, RegionInfo
 from core.mca.heightmaps import surface_y_from_heightmap
 from core.mca.region_file import RegionFile
 from core.mca.surface import sample_region_surface_colors, sample_region_surface_ids
-from core.mca.writer import WritableRegion, delete_chunk_entries
+from core.mca.viewport import (
+    McaMapSelection,
+    McaViewport,
+    ViewportTarget,
+    view_level_from_scale,
+)
+from core.mca.writer import (
+    WritableRegion,
+    copy_chunk_record,
+    delete_chunk_entries,
+    write_chunk_record,
+)
 
 __all__ = [
     "ChunkMissing",
+    "ChunkInfo",
     "ChunkView",
     "CorruptChunk",
     "McaError",
+    "McaMapSelection",
+    "McaViewport",
     "NamedBlock",
     "NativeRegion",
     "RegionFile",
+    "RegionEditor",
+    "RegionInfo",
     "UnsupportedCompression",
+    "ViewportTarget",
     "WritableRegion",
     "block_id_at",
+    "copy_chunk_record",
     "delete_chunk_entries",
     "sample_region_surface_colors",
     "sample_region_surface_ids",
     "section_range_for_chunk",
     "surface_block_id",
     "surface_y_from_heightmap",
+    "view_level_from_scale",
+    "write_chunk_record",
 ]

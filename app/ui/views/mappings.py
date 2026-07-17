@@ -10,6 +10,7 @@ from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
 from app.ui.components.layout import page_header
 from app.ui.components.uuid_table import UUIDMappingTable
+from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -27,6 +28,14 @@ class MappingsView(ft.Column):
     @property
     def _t(self):
         return self.app._t
+
+    def get_top_actions(self) -> list[ViewAction]:
+        return [
+            ViewAction(
+                self._t("top_bar.import_lang", "导入语言文件"),
+                self._import_lang,
+            )
+        ]
 
     def _build(self) -> None:
         self.controls.clear()

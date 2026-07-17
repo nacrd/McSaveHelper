@@ -1,16 +1,11 @@
 """测试 GUI 修复 - 验证图标和主题改进"""
 import sys
-from pathlib import Path
-
-# 添加项目根目录到路径
-project_root = Path(__file__).parent
-sys.path.insert(0, str(project_root))
 
 from app.ui.icons import IconSet
 from app.ui.theme import THEME, mc_border, mc_focus_border
 
 
-def test_icons():
+def _check_icons() -> bool:
     """测试图标系统"""
     print("=" * 60)
     print("测试图标系统")
@@ -39,7 +34,7 @@ def test_icons():
     return all_passed
 
 
-def test_theme_contrast():
+def _check_theme_contrast() -> bool:
     """测试文本对比度改进"""
     print("\n" + "=" * 60)
     print("测试主题对比度")
@@ -81,7 +76,7 @@ def test_theme_contrast():
     return all_passed
 
 
-def test_focus_system():
+def _check_focus_system() -> bool:
     """测试焦点系统"""
     print("\n" + "=" * 60)
     print("测试焦点系统")
@@ -108,6 +103,18 @@ def test_focus_system():
     return all_passed
 
 
+def test_icons() -> None:
+    assert _check_icons()
+
+
+def test_theme_contrast() -> None:
+    assert _check_theme_contrast()
+
+
+def test_focus_system() -> None:
+    assert _check_focus_system()
+
+
 def main():
     """运行所有测试"""
     print("\n" + "=" * 60)
@@ -115,9 +122,9 @@ def main():
     print("=" * 60 + "\n")
 
     results = {
-        "图标系统": test_icons(),
-        "主题对比度": test_theme_contrast(),
-        "焦点系统": test_focus_system(),
+        "图标系统": _check_icons(),
+        "主题对比度": _check_theme_contrast(),
+        "焦点系统": _check_focus_system(),
     }
 
     print("\n" + "=" * 60)

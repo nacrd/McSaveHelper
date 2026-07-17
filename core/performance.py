@@ -1,11 +1,7 @@
-"""性能监控工具
-
-提供业务操作（迁移、扫描、转换等）的性能追踪、内存监控和统计功能。
-日志通过 core.logger 输出，业务指标自动同步到 UI 层 perf_monitor。
-"""
+"""UI-independent performance tracking for business operations."""
 import time
 import threading
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, Iterator
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 
@@ -100,7 +96,7 @@ class PerfTracker:
 
     - 通过 track() 上下文管理器追踪操作耗时和内存
     - 自动通过 core.logger 输出日志
-    - 自动同步指标到 UI 层 perf_monitor（如果可用）
+    - 可将完成的指标发送给调用方注入的接收器
 
     示例:
         >>> tracker = PerfTracker()
@@ -110,12 +106,16 @@ class PerfTracker:
         >>> print(tracker.get_metrics("区域文件扫描"))
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        metrics_sink: Optional[Callable[[PerformanceMetrics], None]] = None,
+    ) -> None:
         self._metrics: Dict[str, PerformanceMetrics] = {}
         self._current_operation: Optional[str] = None
         self._start_time: float = 0.0
         self._start_memory: float = 0.0
         self._lock = threading.Lock()
+        self._metrics_sink = metrics_sink
         # 尝试导入 psutil 用于内存采样
         try:
             import psutil  # type: ignore
@@ -127,25 +127,28 @@ class PerfTracker:
         """获取当前进程内存（MB）"""
         if self._process is not None:
             try:
-                return self._process.memory_info().rss / 1024 / 1024
+                return float(self._process.memory_info().rss) / 1024 / 1024
             except Exception:
                 pass
         return 0.0
 
-    def _sync_to_ui(self, metrics: PerformanceMetrics) -> None:
-        """将业务指标同步到 UI 层 perf_monitor"""
+    def set_metrics_sink(
+        self,
+        sink: Optional[Callable[[PerformanceMetrics], None]],
+    ) -> None:
+        """Set the optional adapter that consumes completed metrics."""
+        with self._lock:
+            self._metrics_sink = sink
+
+    def _publish_metrics(self, metrics: PerformanceMetrics) -> None:
+        with self._lock:
+            sink = self._metrics_sink
+        if sink is None:
+            return
         try:
-            from app.ui.performance import perf_monitor as ui_monitor
-            if ui_monitor.enabled:
-                ui_monitor.record(
-                    f"biz_{metrics.operation}",
-                    metrics.duration_seconds * 1000,
-                    "ms",
-                    files=metrics.files_processed,
-                    bytes=metrics.bytes_processed,
-                    errors=metrics.errors,
-                )
+            sink(metrics)
         except Exception:
+            # Instrumentation must never fail the operation being measured.
             pass
 
     def _log_metrics(self, metrics: PerformanceMetrics) -> None:
@@ -157,7 +160,11 @@ class PerfTracker:
             print(f"[Perf] {metrics.summary_line()}")
 
     @contextmanager
-    def track(self, operation: str, metadata: Optional[Dict[str, Any]] = None):
+    def track(
+        self,
+        operation: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Iterator["PerfTracker"]:
         """追踪操作的性能指标
 
         Args:
@@ -196,7 +203,7 @@ class PerfTracker:
                 m.memory_delta_mb = memory_delta
 
             self._log_metrics(m)
-            self._sync_to_ui(m)
+            self._publish_metrics(m)
             self._current_operation = None
 
     def increment_files(self, count: int = 1) -> None:
@@ -244,6 +251,13 @@ def get_tracker() -> PerfTracker:
         if _tracker is None:
             _tracker = PerfTracker()
     return _tracker
+
+
+def set_metrics_sink(
+    sink: Optional[Callable[[PerformanceMetrics], None]],
+) -> None:
+    """Attach an infrastructure/UI metrics adapter to the global tracker."""
+    get_tracker().set_metrics_sink(sink)
 
 
 def reset_tracker() -> None:

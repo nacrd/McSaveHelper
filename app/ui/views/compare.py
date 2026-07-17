@@ -13,6 +13,7 @@ from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui
+from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -26,6 +27,14 @@ class CompareView(ft.Column):
         self._service = get_world_compare_service(log=app.log)
         self._comparing = False
         self._build()
+
+    def get_top_actions(self) -> list[ViewAction]:
+        return [
+            ViewAction(
+                self.app._t("top_bar.start_compare", "开始对比"),
+                self._compare,
+            )
+        ]
 
     def _build(self) -> None:
         self.controls.clear()
