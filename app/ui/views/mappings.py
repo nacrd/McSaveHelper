@@ -27,7 +27,7 @@ class MappingsView(ft.Column):
 
     @property
     def _t(self):
-        return self.app._t
+        return self.app.translate
 
     def get_top_actions(self) -> list[ViewAction]:
         return [
@@ -71,7 +71,7 @@ class MappingsView(ft.Column):
 
         self._table: UUIDMappingTable = UUIDMappingTable(
             mappings=self.app.config.custom_uuid_mappings,
-            on_mappings_change=self.app._on_uuid_mappings_change,
+            on_mappings_change=self.app.update_uuid_mappings,
             on_import_click=self._on_uuid_import,
             on_export_click=self._on_uuid_export,
         )
@@ -141,7 +141,9 @@ class MappingsView(ft.Column):
         ))
 
         self._item_search_field = text_field(
-            label="搜索物品 ID 或名称", on_change=self._on_item_search)
+            label="搜索物品 ID 或名称",
+            on_change=lambda _: self._on_item_search(),
+        )
         self._item_table_container = ft.Container()
         s.controls.append(ft.Container(
             content=ft.Column([
@@ -216,19 +218,19 @@ class MappingsView(ft.Column):
             content=ft.DataTable(
                 columns=[
                     ft.DataColumn(
-                        ft.Text(
+                        label=ft.Text(
                             "物品 ID",
                             size=12,
                             weight=ft.FontWeight.BOLD,
                             color=THEME.mc_gold)),
                     ft.DataColumn(
-                        ft.Text(
+                        label=ft.Text(
                             "显示名称",
                             size=12,
                             weight=ft.FontWeight.BOLD,
                             color=THEME.mc_gold)),
                     ft.DataColumn(
-                        ft.Text(
+                        label=ft.Text(
                             "操作",
                             size=12,
                             weight=ft.FontWeight.BOLD,
@@ -258,8 +260,8 @@ class MappingsView(ft.Column):
                 40 + len(rows) * 42),
         )
 
-    def _on_item_search(self, e: ft.ControlEvent) -> None:
-        self._render_item_table(e.control.value or "")
+    def _on_item_search(self) -> None:
+        self._render_item_table(self._item_search_field.value or "")
         try:
             self._item_table_container.update()
         except RuntimeError:

@@ -13,11 +13,12 @@ class FakeConfig:
         }
         self.save_count = 0
 
-    @property
-    def config(self) -> Dict[str, object]:
-        return self._config
+    def get_recent_saves(self) -> list[Dict[str, str]]:
+        value = self._config.get("recent_saves", [])
+        return list(value) if isinstance(value, list) else []
 
-    def save(self) -> None:
+    def set_recent_saves(self, saves: list[Dict[str, str]]) -> None:
+        self._config["recent_saves"] = list(saves)
         self.save_count += 1
 
 
@@ -88,7 +89,7 @@ def test_manager_selects_valid_save_and_persists_recent(tmp_path: Path) -> None:
     assert manager.get_recent_saves() == [
         {"path": str(world), "name": "world"}
     ]
-    assert config.config["recent_saves"] == manager.get_recent_saves()
+    assert config.get_recent_saves() == manager.get_recent_saves()
     assert config.save_count == 1
     assert warnings == []
     assert errors == []
@@ -112,6 +113,6 @@ def test_manager_removes_invalid_recent_save(tmp_path: Path) -> None:
     manager.on_recent_save_select(missing)
 
     assert manager.get_recent_saves() == []
-    assert config.config["recent_saves"] == []
+    assert config.get_recent_saves() == []
     assert config.save_count == 1
     assert warnings and warnings[0][0] == "提示"

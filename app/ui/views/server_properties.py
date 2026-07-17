@@ -36,7 +36,7 @@ class ServerPropertiesView(ft.Column):
     def get_top_actions(self) -> list[ViewAction]:
         return [
             ViewAction(
-                self.app._t("top_bar.read_config", "读取配置"),
+                self.app.translate("top_bar.read_config", "读取配置"),
                 self._load,
             )
         ]

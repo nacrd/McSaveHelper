@@ -12,7 +12,7 @@ def text_field(
     hint_text: Optional[str] = None,
     expand: bool = True,
     width: Optional[int] = None,
-    on_change: Optional[Callable[[ft.ControlEvent], Any]] = None,
+    on_change: Optional[Callable[..., Any]] = None,
     password: bool = False,
     read_only: bool = False,
 ) -> ft.TextField:
@@ -82,7 +82,7 @@ def current_save_field(
 def checkbox(
     label: str,
     value: bool = False,
-    on_change: Optional[Callable[[ft.ControlEvent], Any]] = None,
+    on_change: Optional[Callable[..., Any]] = None,
 ) -> ft.Checkbox:
     """Create a Minecraft-style checkbox
 
@@ -129,7 +129,7 @@ def dropdown(
     value: Optional[str] = None,
     label: Optional[str] = None,
     hint_text: Optional[str] = None,
-    on_change: Optional[Callable[[ft.ControlEvent], Any]] = None,
+    on_change: Optional[Callable[..., Any]] = None,
     expand: bool = True,
     width: Optional[int] = None,
     text_size: int = 13,
@@ -164,7 +164,7 @@ def dropdown(
         value=value,
         label=label,
         hint_text=hint_text,
-        on_change=on_change,
+        on_select=on_change,
         bgcolor=THEME.bg_secondary,
         border_color=THEME.border_standard,
         focused_border_color=THEME.mc_diamond,

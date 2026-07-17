@@ -17,6 +17,14 @@ from core.mca.editor import ChunkInfo, RegionEditor, RegionInfo
 from core.mca.heightmaps import surface_y_from_heightmap
 from core.mca.region_file import RegionFile
 from core.mca.surface import sample_region_surface_colors, sample_region_surface_ids
+from core.mca.topview_renderer import (
+    DEFAULT_TILE_SIZE,
+    DETAIL_TILE_SIZE,
+    HIRES_TILE_SIZE,
+    PREVIEW_TILE_SIZE,
+    render_region_topview,
+    render_region_topview_base64,
+)
 from core.mca.viewport import (
     McaMapSelection,
     McaViewport,
@@ -35,6 +43,9 @@ __all__ = [
     "ChunkInfo",
     "ChunkView",
     "CorruptChunk",
+    "DEFAULT_TILE_SIZE",
+    "DETAIL_TILE_SIZE",
+    "HIRES_TILE_SIZE",
     "McaError",
     "McaMapSelection",
     "McaViewport",
@@ -43,6 +54,7 @@ __all__ = [
     "RegionFile",
     "RegionEditor",
     "RegionInfo",
+    "PREVIEW_TILE_SIZE",
     "UnsupportedCompression",
     "ViewportTarget",
     "WritableRegion",
@@ -51,6 +63,8 @@ __all__ = [
     "delete_chunk_entries",
     "sample_region_surface_colors",
     "sample_region_surface_ids",
+    "render_region_topview",
+    "render_region_topview_base64",
     "section_range_for_chunk",
     "surface_block_id",
     "surface_y_from_heightmap",

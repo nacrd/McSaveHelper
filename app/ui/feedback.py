@@ -7,7 +7,7 @@
 - 使用分析（本地匿名）
 """
 from typing import Optional, Dict, Any, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import json
@@ -23,7 +23,7 @@ class FeedbackItem:
     title: str
     description: str
     user_email: Optional[str] = None
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -44,7 +44,7 @@ class UsageEvent:
     event_type: str  # "feature_used", "view_opened", "action_completed"
     event_name: str
     duration_ms: Optional[float] = None
-    metadata: Dict[str, Any] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -112,11 +112,11 @@ class FeedbackCollector:
 
         try:
             with open(self.feedback_file, "a", encoding="utf-8") as f:
-                f.write(
-                    json.dumps(
-                        feedback.to_dict(),
-                        ensure_ascii=False) +
-                    "\n")
+                payload = json.dumps(
+                    feedback.to_dict(),
+                    ensure_ascii=False,
+                )
+                f.write(payload + "\n")
         except Exception as e:
             print(f"[ERROR] 保存反馈失败: {e}")
 
@@ -274,9 +274,7 @@ class FeedbackDialog:
 
     def show(self) -> None:
         """显示对话框"""
-        self.page.dialog = self.dialog
-        self.dialog.open = True
-        self.page.update()
+        self.page.show_dialog(self.dialog)
 
     def _on_cancel(self, e) -> None:
         """取消按钮回调"""
@@ -287,17 +285,15 @@ class FeedbackDialog:
         """提交按钮回调"""
         # 验证输入
         if not self.title_field.value or not self.description_field.value:
-            self.page.snack_bar = ft.SnackBar(
+            self.page.show_dialog(ft.SnackBar(
                 content=ft.Text("请填写标题和描述"),
                 bgcolor=THEME.error,
-            )
-            self.page.snack_bar.open = True
-            self.page.update()
+            ))
             return
 
         # 收集反馈
         feedback_collector.collect_feedback(
-            feedback_type=self.feedback_type.value,
+            feedback_type=self.feedback_type.value or "other",
             title=self.title_field.value,
             description=self.description_field.value,
             user_email=self.email_field.value or None,
@@ -307,12 +303,10 @@ class FeedbackDialog:
         self.dialog.open = False
 
         # 显示成功消息
-        self.page.snack_bar = ft.SnackBar(
+        self.page.show_dialog(ft.SnackBar(
             content=ft.Text("感谢您的反馈！"),
             bgcolor=THEME.success,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+        ))
 
         # 调用回调
         if self.on_submit_callback:
@@ -349,7 +343,7 @@ class ErrorReportDialog:
         # 对话框内容
         self.dialog = ft.AlertDialog(
             title=ft.Row([
-                ft.Icon(ft.icons.ERROR_OUTLINE, color=THEME.error, size=30),
+                ft.Icon(ft.Icons.ERROR_OUTLINE, color=THEME.error, size=30),
                 ft.Text("应用程序错误", size=20, weight=ft.FontWeight.BOLD),
             ], spacing=10),
             content=ft.Container(
@@ -384,7 +378,7 @@ class ErrorReportDialog:
                 ft.TextButton("关闭", on_click=self._on_close),
                 ft.ElevatedButton(
                     "复制错误信息",
-                    icon=ft.icons.COPY,
+                    icon=ft.Icons.COPY,
                     on_click=self._on_copy,
                 ),
             ],
@@ -400,9 +394,7 @@ class ErrorReportDialog:
             context=self.context,
         )
 
-        self.page.dialog = self.dialog
-        self.dialog.open = True
-        self.page.update()
+        self.page.show_dialog(self.dialog)
 
     def _on_close(self, e) -> None:
         """关闭对话框"""
@@ -411,13 +403,11 @@ class ErrorReportDialog:
 
     def _on_copy(self, e) -> None:
         """复制错误信息到剪贴板"""
-        self.page.set_clipboard(self.error_details)
-        self.page.snack_bar = ft.SnackBar(
+        self.page.run_task(self.page.clipboard.set, self.error_details)
+        self.page.show_dialog(ft.SnackBar(
             content=ft.Text("错误信息已复制到剪贴板"),
             bgcolor=THEME.success,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+        ))
 
 
 def track_feature_usage(feature_name: str) -> Callable:

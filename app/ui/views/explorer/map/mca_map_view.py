@@ -34,7 +34,7 @@ from app.ui.views.explorer.map.color_schemes import (
     get_mode_title,
     get_region_color,
 )
-from app.ui.views.explorer.map.topview_renderer import (
+from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
 )

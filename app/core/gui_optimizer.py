@@ -2,7 +2,9 @@
 
 负责性能监控、键盘快捷键、卡死检测、通知管理和可访问性验证的初始化和管理。
 """
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+import threading
+from typing import Any, Callable, Optional
 import flet as ft
 
 from app.ui.keyboard_shortcuts import (
@@ -23,8 +25,12 @@ from app.ui.accessibility import validate_theme_accessibility
 from core.logger import logger
 from core.performance import PerformanceMetrics, set_metrics_sink
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+@dataclass(frozen=True)
+class GUIOptimizerDependencies:
+    page: ft.Page
+    get_ui_setting: Callable[[str, Any], Any]
+    save_config: Callable[[], None]
 
 
 class GUIOptimizer:
@@ -38,17 +44,14 @@ class GUIOptimizer:
     - 可访问性验证
     """
 
-    def __init__(self, app: "Application") -> None:
-        """初始化GUI优化管理器
-
-        Args:
-            app: 应用实例
-        """
-        self.app = app
-        self.page = app.page
-        self.notification_manager = None
-        self._heartbeat_active = False
-        self._hang_detector_active = False
+    def __init__(self, dependencies: GUIOptimizerDependencies) -> None:
+        self._deps = dependencies
+        self.page = dependencies.page
+        self.notification_manager: Optional[NotificationManager] = None
+        self._heartbeat_stop = threading.Event()
+        self._hang_heartbeat_stop = threading.Event()
+        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._hang_heartbeat_thread: Optional[threading.Thread] = None
 
     def initialize(self) -> None:
         """初始化GUI优化功能"""
@@ -63,20 +66,15 @@ class GUIOptimizer:
             self._start_hang_detector_heartbeat()
 
             # 3. 根据配置启用性能监控（可选）
-            enable_perf = self.app.config.ui_settings.get(
+            enable_perf = self._deps.get_ui_setting(
                 "enable_performance_monitor", False
             )
 
             if enable_perf:
-                perf_monitor.enable()
-                resource_monitor.start()
                 interval = float(
-                    self.app.config.ui_settings.get("performance_print_interval", 60)
+                    self._deps.get_ui_setting("performance_print_interval", 60)
                 )
-                resource_monitor.set_print_interval(max(5.0, interval))
-                # 配置健康监控告警回调
-                health_monitor.set_alert_callback(self._on_health_alert)
-                self._start_heartbeat()
+                self.configure_performance_monitor(True, interval)
 
             # 4. 注册键盘快捷键
             register_default_shortcuts(
@@ -151,7 +149,7 @@ class GUIOptimizer:
         """
         try:
             with Timer("save_config"):
-                self.app.config.save()
+                self._deps.save_config()
             logger.info("配置已保存", module="GUIOptimizer")
             if self.notification_manager:
                 self.notification_manager.show_success("配置保存成功")
@@ -168,9 +166,7 @@ class GUIOptimizer:
         """
         try:
             help_dialog = shortcut_manager.create_help_dialog()
-            self.page.dialog = help_dialog
-            help_dialog.open = True
-            self.page.update()
+            self.page.show_dialog(help_dialog)
         except Exception as ex:
             logger.error(f"显示帮助失败: {ex}", module="GUIOptimizer")
 
@@ -215,60 +211,102 @@ class GUIOptimizer:
         except Exception:
             pass
 
-        if not self.notification_manager:
+        notification_manager = self.notification_manager
+        if notification_manager is None:
             return
 
         try:
             if alert.level == AlertLevel.CRITICAL:
                 async def _show_error(message: str):
-                    self.notification_manager.show_error(message, duration_ms=8000)
+                    notification_manager.show_error(message, duration_ms=8000)
                 self.page.run_task(_show_error, alert.message)
             else:
                 async def _show_warning(message: str):
-                    self.notification_manager.show_warning(message, duration_ms=5000)
+                    notification_manager.show_warning(message, duration_ms=5000)
                 self.page.run_task(_show_warning, alert.message)
         except Exception:
             pass
 
+    def configure_performance_monitor(
+        self,
+        enabled: bool,
+        print_interval: float = 60.0,
+    ) -> None:
+        """统一启停性能监控及其心跳资源。"""
+        self.set_performance_print_interval(print_interval)
+        if enabled:
+            perf_monitor.enable()
+            health_monitor.set_alert_callback(self._on_health_alert)
+            resource_monitor.start()
+            self._start_heartbeat()
+            return
+
+        perf_monitor.disable()
+        resource_monitor.stop()
+        self._stop_performance_heartbeat()
+
+    @staticmethod
+    def set_performance_print_interval(seconds: float) -> None:
+        """更新资源监控的日志打印间隔。"""
+        resource_monitor.set_print_interval(max(5.0, seconds))
+
     def _start_heartbeat(self) -> None:
         """启动UI心跳线程，用于性能监控"""
-        import threading
+        thread = self._heartbeat_thread
+        if thread is not None and thread.is_alive():
+            return
 
-        def _beat_loop():
-            while self._heartbeat_active:
+        self._heartbeat_stop.clear()
+
+        def _beat_loop() -> None:
+            while not self._heartbeat_stop.is_set():
                 health_monitor.heartbeat()
-                threading.Event().wait(3.0)
+                self._heartbeat_stop.wait(3.0)
 
-        self._heartbeat_active = True
-        t = threading.Thread(target=_beat_loop, daemon=True)
-        t.start()
+        self._heartbeat_thread = threading.Thread(
+            target=_beat_loop,
+            daemon=True,
+            name="PerformanceHeartbeat",
+        )
+        self._heartbeat_thread.start()
+
+    def _stop_performance_heartbeat(self) -> None:
+        self._heartbeat_stop.set()
+        thread = self._heartbeat_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
+        self._heartbeat_thread = None
 
     def _start_hang_detector_heartbeat(self) -> None:
         """启动独立的卡死检测器心跳线程"""
-        import threading
+        thread = self._hang_heartbeat_thread
+        if thread is not None and thread.is_alive():
+            return
 
-        def _hang_beat_loop():
+        self._hang_heartbeat_stop.clear()
+
+        def _hang_beat_loop() -> None:
             hang_detector = get_hang_detector()
-            while self._hang_detector_active:
+            while not self._hang_heartbeat_stop.is_set():
                 hang_detector.ui_heartbeat()
-                threading.Event().wait(2.0)
+                self._hang_heartbeat_stop.wait(2.0)
 
-        self._hang_detector_active = True
-        t = threading.Thread(
+        self._hang_heartbeat_thread = threading.Thread(
             target=_hang_beat_loop,
             daemon=True,
             name="HangDetectorHeartbeat"
         )
-        t.start()
+        self._hang_heartbeat_thread.start()
+
+    def _stop_hang_detector_heartbeat(self) -> None:
+        self._hang_heartbeat_stop.set()
+        thread = self._hang_heartbeat_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1.0)
+        self._hang_heartbeat_thread = None
 
     def stop(self) -> None:
         """停止GUI优化功能"""
-        self._heartbeat_active = False
-        self._hang_detector_active = False
+        self.configure_performance_monitor(False)
+        self._stop_hang_detector_heartbeat()
         set_metrics_sink(None)
-
-        try:
-            perf_monitor.disable()
-            resource_monitor.stop()
-        except Exception:
-            pass

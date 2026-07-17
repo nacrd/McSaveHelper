@@ -99,7 +99,7 @@ class SaveRepairView(ft.Column):
     def get_top_actions(self) -> list[ViewAction]:
         return [
             ViewAction(
-                self.app._t("top_bar.detect_save", "检测存档"),
+                self.app.translate("top_bar.detect_save", "检测存档"),
                 self._start_detect,
             )
         ]

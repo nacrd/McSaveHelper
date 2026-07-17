@@ -2,9 +2,12 @@
 
 每个设置分区支持点击标题栏展开/收起，减少纵向占用。
 """
-import flet as ft
-from typing import TYPE_CHECKING, List
+from dataclasses import dataclass
+from typing import Callable
 
+import flet as ft
+
+from app.models.config import ApplicationSettings
 from app.ui.theme import THEME, mc_border
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
@@ -12,8 +15,27 @@ from app.ui.components.fields import text_field, checkbox, label, dropdown
 from app.ui.components.cards import card
 from app.ui.components.layout import page_header
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+Translate = Callable[..., str]
+DialogCallback = Callable[[str, str], None]
+
+
+@dataclass(frozen=True)
+class SettingsViewDependencies:
+    """设置页与应用壳层之间的显式端口。"""
+
+    load_settings: Callable[[], ApplicationSettings]
+    save_settings: Callable[[ApplicationSettings], None]
+    reset_settings: Callable[[], None]
+    translate: Translate
+    apply_theme: Callable[[str], None]
+    apply_language: Callable[[str], None]
+    set_sidebar_mode: Callable[[str], None]
+    set_log_panel_visible: Callable[[bool], None]
+    configure_performance_monitor: Callable[[bool, float], None]
+    set_performance_interval: Callable[[float], None]
+    info_dialog: DialogCallback
+    error_dialog: DialogCallback
 
 
 def _collapsible_section(
@@ -85,11 +107,11 @@ def _collapsible_section(
     body_wrapper.visible = expanded
     body_wrapper.opacity = 1.0 if expanded else 0.0
 
-    def _toggle(e: ft.ControlEvent = None) -> None:
+    def _toggle() -> None:
         is_visible = body_wrapper.visible
         body_wrapper.visible = not is_visible
         body_wrapper.opacity = 0.0 if is_visible else 1.0
-        arrow.name = (
+        arrow.icon = (
             ft.Icons.KEYBOARD_ARROW_DOWN if not is_visible
             else ft.Icons.KEYBOARD_ARROW_RIGHT
         )
@@ -117,15 +139,18 @@ def _collapsible_section(
 class SettingsView(ft.Column):
     """配置设置视图（可折叠分区）"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, dependencies: SettingsViewDependencies) -> None:
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
-        self.app: "Application" = app
+        self._deps = dependencies
         self._build()
 
     @property
-    def _t(self):
-        return self.app._t
+    def _t(self) -> Translate:
+        return self._deps.translate
+
+    def _settings(self) -> ApplicationSettings:
+        return self._deps.load_settings()
 
     def _build(self) -> None:
         self.controls.clear()
@@ -144,13 +169,15 @@ class SettingsView(ft.Column):
     # ─── 通用设置 ───────────────────────────────
 
     def _build_general_card(self) -> None:
-        cfg = self.app.config
+        cfg = self._settings()
         body = ft.Column(spacing=0)
 
         self._version_var = checkbox(
             self._t("settings.general.version_detection", "启用版本自动检测"),
             value=cfg.version_detection,
-            on_change=lambda e: self._on_version_detection_change(e.control.value),
+            on_change=lambda _: self._on_version_detection_change(
+                bool(self._version_var.value)
+            ),
         )
         body.controls.append(ft.Container(
             content=self._version_var,
@@ -160,7 +187,7 @@ class SettingsView(ft.Column):
         self._api_timeout_field = text_field(
             value=str(cfg.api_timeout),
             width=100, expand=False,
-            on_change=lambda e: self._on_api_timeout_change(e),
+            on_change=lambda _: self._on_api_timeout_change(),
         )
         body.controls.append(ft.Container(
             content=ft.Column([
@@ -179,7 +206,7 @@ class SettingsView(ft.Column):
     # ─── 界面设置 ───────────────────────────────
 
     def _build_ui_card(self) -> None:
-        cfg = self.app.config
+        cfg = self._settings()
         body = ft.Column(spacing=0)
 
         self._theme_dropdown = dropdown(
@@ -189,7 +216,9 @@ class SettingsView(ft.Column):
             ],
             value=cfg.theme,
             width=120,
-            on_change=lambda e: self._on_theme_change(e.control.value),
+            on_change=lambda _: self._on_theme_change(
+                self._theme_dropdown.value or "dark"
+            ),
         )
         body.controls.append(ft.Container(
             content=ft.Column([
@@ -206,7 +235,9 @@ class SettingsView(ft.Column):
             ],
             value=cfg.language,
             width=120,
-            on_change=lambda e: self._on_language_change(e.control.value),
+            on_change=lambda _: self._on_language_change(
+                self._lang_dropdown.value or "zh_CN"
+            ),
         )
         body.controls.append(ft.Container(
             content=ft.Column([
@@ -222,9 +253,11 @@ class SettingsView(ft.Column):
                 ft.dropdown.Option("collapsed", "收窄"),
                 ft.dropdown.Option("auto", "自动"),
             ],
-            value=cfg.ui_settings.get("sidebar_mode", "auto"),
+            value=cfg.sidebar_mode,
             width=120,
-            on_change=lambda e: self._on_sidebar_mode_change(e.control.value),
+            on_change=lambda _: self._on_sidebar_mode_change(
+                self._sidebar_mode_dropdown.value or "auto"
+            ),
         )
         body.controls.append(ft.Container(
             content=ft.Column([
@@ -236,8 +269,10 @@ class SettingsView(ft.Column):
 
         self._auto_clear_var = checkbox(
             self._t("settings.ui.auto_clear_log", "自动清除旧日志"),
-            value=cfg.ui_settings.get("auto_clear_log", False),
-            on_change=lambda e: self._on_auto_clear_change(e.control.value),
+            value=cfg.auto_clear_log,
+            on_change=lambda _: self._on_auto_clear_change(
+                bool(self._auto_clear_var.value)
+            ),
         )
         body.controls.append(ft.Container(
             content=self._auto_clear_var,
@@ -246,8 +281,10 @@ class SettingsView(ft.Column):
 
         self._show_log_panel_var = checkbox(
             self._t("settings.ui.show_log_panel", "显示悬浮日志面板"),
-            value=cfg.ui_settings.get("show_log_panel", True),
-            on_change=lambda e: self._on_show_log_panel_change(e.control.value),
+            value=cfg.show_log_panel,
+            on_change=lambda _: self._on_show_log_panel_change(
+                bool(self._show_log_panel_var.value)
+            ),
         )
         body.controls.append(ft.Container(
             content=self._show_log_panel_var,
@@ -256,8 +293,10 @@ class SettingsView(ft.Column):
 
         self._perf_monitor_var = checkbox(
             self._t("settings.ui.enable_performance_monitor", "启用性能监控"),
-            value=cfg.ui_settings.get("enable_performance_monitor", False),
-            on_change=lambda e: self._on_perf_monitor_change(e.control.value),
+            value=cfg.enable_performance_monitor,
+            on_change=lambda _: self._on_perf_monitor_change(
+                bool(self._perf_monitor_var.value)
+            ),
         )
         body.controls.append(ft.Container(
             content=self._perf_monitor_var,
@@ -265,9 +304,9 @@ class SettingsView(ft.Column):
         ))
 
         self._perf_print_interval_field = text_field(
-            value=str(cfg.ui_settings.get("performance_print_interval", 60)),
+            value=str(cfg.performance_print_interval),
             width=100, expand=False,
-            on_change=lambda e: self._on_perf_interval_change(e),
+            on_change=lambda _: self._on_perf_interval_change(),
         )
         body.controls.append(ft.Container(
             content=ft.Column([
@@ -392,32 +431,26 @@ class SettingsView(ft.Column):
             freed = format_size(int(result.get("freed_bytes", 0) or 0))
             mem = int(result.get("memory_chunks_cleared", 0) or 0)
             self._refresh_cache_stats()
-            self.app.info_dialog(
+            self._deps.info_dialog(
                 self._t("dialogs.success", "成功"),
                 f"已清理地图缓存：{deleted} 个文件（{freed}），内存 chunk {mem} 条",
             )
         except Exception as ex:
-            try:
-                self.app.error_dialog(
-                    self._t("dialogs.error", "错误"),
-                    f"清理缓存失败: {ex}",
-                )
-            except Exception:
-                try:
-                    self.app.info_dialog("错误", f"清理缓存失败: {ex}")
-                except Exception:
-                    pass
+            self._deps.error_dialog(
+                self._t("dialogs.error", "错误"),
+                f"清理缓存失败: {ex}",
+            )
 
     # ─── 批量处理 ───────────────────────────────
 
     def _build_batch_card(self) -> None:
-        cfg = self.app.config
+        cfg = self._settings()
         body = ft.Column(spacing=0)
 
         self._max_concurrent_field = text_field(
             value=str(cfg.max_concurrent),
             width=100, expand=False,
-            on_change=lambda e: self._on_max_concurrent_change(e),
+            on_change=lambda _: self._on_max_concurrent_change(),
         )
         body.controls.append(ft.Container(
             content=ft.Column([
@@ -429,8 +462,10 @@ class SettingsView(ft.Column):
 
         self._preserve_var = checkbox(
             self._t("settings.batch.preserve_structure", "保留原始文件结构"),
-            value=cfg.batch_processing.get("preserve_structure", True),
-            on_change=lambda e: self._on_preserve_structure_change(e.control.value),
+            value=cfg.preserve_structure,
+            on_change=lambda _: self._on_preserve_structure_change(
+                bool(self._preserve_var.value)
+            ),
         )
         body.controls.append(ft.Container(
             content=self._preserve_var,
@@ -446,7 +481,7 @@ class SettingsView(ft.Column):
     # ─── 清理模式 ───────────────────────────────
 
     def _build_cleanup_card(self) -> None:
-        cfg = self.app.config
+        cfg = self._settings()
         body = ft.Column(spacing=0)
 
         body.controls.append(ft.Container(
@@ -460,7 +495,7 @@ class SettingsView(ft.Column):
 
         patterns = cfg.cleanup_patterns
         self._cleanup_field = ft.TextField(
-            value="\n".join(patterns) if isinstance(patterns, list) else "",
+            value="\n".join(patterns),
             multiline=True, min_lines=3, max_lines=6,
             border_color=THEME.border_standard, text_size=13,
             bgcolor=THEME.bg_secondary, border_radius=6,
@@ -507,71 +542,82 @@ class SettingsView(ft.Column):
 
     # ─── 回调（即时生效 + 自动保存）──────────────
 
+    @staticmethod
+    def _bounded_int(
+        value: object,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        try:
+            parsed = int(str(value or default))
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
+    def _performance_interval(self) -> int:
+        return self._bounded_int(
+            self._perf_print_interval_field.value,
+            60,
+            5,
+            86400,
+        )
+
+    def _collect_settings(self) -> ApplicationSettings:
+        """从控件读取并校验一份完整设置快照。"""
+        cleanup_value = self._cleanup_field.value or ""
+        return ApplicationSettings(
+            version_detection=bool(self._version_var.value),
+            api_timeout=self._bounded_int(
+                self._api_timeout_field.value,
+                10,
+                1,
+                60,
+            ),
+            theme=self._theme_dropdown.value or "dark",
+            language=self._lang_dropdown.value or "zh_CN",
+            sidebar_mode=self._sidebar_mode_dropdown.value or "auto",
+            auto_clear_log=bool(self._auto_clear_var.value),
+            show_log_panel=bool(self._show_log_panel_var.value),
+            enable_performance_monitor=bool(self._perf_monitor_var.value),
+            performance_print_interval=self._performance_interval(),
+            max_concurrent=self._bounded_int(
+                self._max_concurrent_field.value,
+                2,
+                1,
+                16,
+            ),
+            preserve_structure=bool(self._preserve_var.value),
+            cleanup_patterns=tuple(
+                item.strip()
+                for item in cleanup_value.splitlines()
+                if item.strip()
+            ),
+        )
+
     def _persist(self) -> None:
-        """持久化当前配置到磁盘"""
-        c = self.app.config
-        c._config["version_detection"] = self._version_var.value
-        c._config["ui_settings"]["auto_clear_log"] = self._auto_clear_var.value
-        c._config["ui_settings"]["show_log_panel"] = self._show_log_panel_var.value
-        c._config["ui_settings"]["enable_performance_monitor"] = self._perf_monitor_var.value
-        try:
-            c._config["ui_settings"]["performance_print_interval"] = max(
-                5, int(self._perf_print_interval_field.value or "60"))
-        except ValueError:
-            c._config["ui_settings"]["performance_print_interval"] = 60
-        c._config["ui_settings"]["preserve_structure"] = self._preserve_var.value
-        c._config["ui_settings"]["theme"] = self._theme_dropdown.value
-        c._config["ui_settings"]["language"] = self._lang_dropdown.value
-        c._config["batch_processing"]["max_concurrent"] = int(
-            self._max_concurrent_field.value or "2")
-        try:
-            c._config["api_timeout"] = int(self._api_timeout_field.value or "10")
-        except ValueError:
-            pass
-        c.cleanup_patterns = [
-            x.strip() for x in self._cleanup_field.value.split("\n") if x.strip()]
-        c.save()
+        """通过配置端口持久化当前设置。"""
+        self._deps.save_settings(self._collect_settings())
 
     def _on_version_detection_change(self, value: bool) -> None:
-        self.app.config.migration.version_detection = value
+        del value
         self._persist()
 
     def _on_theme_change(self, theme: str) -> None:
-        from app.ui.theme import get_theme_manager
-        self.app.config._config["ui_settings"]["theme"] = theme
-        get_theme_manager().set_mode(theme)
         self._persist()
-        try:
-            self.app.page.bgcolor = THEME.bg_primary
-            self.app.page.window.bgcolor = THEME.bg_primary
-            self.app.page.theme_mode = (
-                ft.ThemeMode.LIGHT if theme == "light" else ft.ThemeMode.DARK
-            )
-            self.app.page.update()
-        except Exception:
-            pass
+        self._deps.apply_theme(theme)
 
     def _on_sidebar_mode_change(self, mode: str) -> None:
-        self.app.config._config["ui_settings"]["sidebar_mode"] = mode
         self._persist()
-        try:
-            if hasattr(self.app, '_sidebar'):
-                if mode == "collapsed":
-                    self.app._sidebar.set_collapsed(True)
-                elif mode == "expanded":
-                    self.app._sidebar.set_collapsed(False)
-        except Exception:
-            pass
+        self._deps.set_sidebar_mode(mode)
 
     def _on_language_change(self, lang: str) -> None:
-        self.app.config.language = lang
-        self.app.i18n.set_language(lang)
         self._persist()
+        self._deps.apply_language(lang)
 
-    def _on_api_timeout_change(self, e: ft.ControlEvent) -> None:
+    def _on_api_timeout_change(self) -> None:
         try:
-            val = int(e.control.value or "10")
-            self.app.config._config["api_timeout"] = max(1, min(60, val))
+            int(self._api_timeout_field.value or "10")
         except ValueError:
             return
         self._persist()
@@ -580,41 +626,30 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _on_show_log_panel_change(self, value: bool) -> None:
-        if hasattr(self.app, 'floating_log_panel') and hasattr(self.app, '_log_fab'):
-            self.app._log_fab.set_visible(value)
-            self.app.floating_log_panel.set_visible(False)
         self._persist()
+        self._deps.set_log_panel_visible(value)
 
     def _on_perf_monitor_change(self, value: bool) -> None:
-        from app.ui.performance import perf_monitor, resource_monitor, health_monitor
-        if value:
-            perf_monitor.enable()
-            resource_monitor.start()
-            try:
-                interval = max(5.0, float(self._perf_print_interval_field.value or "60"))
-            except ValueError:
-                interval = 60.0
-            resource_monitor.set_print_interval(interval)
-            health_monitor.set_alert_callback(self.app._on_health_alert)
-            self.app._start_heartbeat()
-        else:
-            perf_monitor.disable()
-            resource_monitor.stop()
-            self.app._heartbeat_active = False
         self._persist()
+        self._deps.configure_performance_monitor(
+            value,
+            float(self._performance_interval()),
+        )
 
-    def _on_perf_interval_change(self, e: ft.ControlEvent) -> None:
-        from app.ui.performance import resource_monitor
+    def _on_perf_interval_change(self) -> None:
         try:
-            interval = max(5.0, float(e.control.value or "60"))
+            interval = max(
+                5.0,
+                float(self._perf_print_interval_field.value or "60"),
+            )
         except ValueError:
             return
-        resource_monitor.set_print_interval(interval)
+        self._deps.set_performance_interval(interval)
         self._persist()
 
-    def _on_max_concurrent_change(self, e: ft.ControlEvent) -> None:
+    def _on_max_concurrent_change(self) -> None:
         try:
-            int(e.control.value or "2")
+            int(self._max_concurrent_field.value or "2")
         except ValueError:
             return
         self._persist()
@@ -631,8 +666,8 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _reset(self) -> None:
-        self.app.config.reset_config()
-        self.app.info_dialog(
+        self._deps.reset_settings()
+        self._deps.info_dialog(
             self._t("dialogs.success", "成功"),
             self._t("settings.messages.reset_success", "已恢复默认设置"),
         )

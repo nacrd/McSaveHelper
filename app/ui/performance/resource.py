@@ -4,7 +4,7 @@
 """
 import time
 import threading
-from typing import Optional
+from typing import Any, Optional, Protocol
 
 try:
     import psutil  # type: ignore
@@ -12,6 +12,36 @@ try:
 except ImportError:
     psutil = None  # type: ignore
     _PSUTIL_AVAILABLE = False
+
+
+class PerformanceMonitorPort(Protocol):
+    def record(
+        self,
+        metric_name: str,
+        value: float,
+        unit: str = "",
+        **metadata: Any,
+    ) -> None:
+        ...
+
+    def summary(self) -> dict:
+        ...
+
+    def get_memory_usage(self) -> float:
+        ...
+
+    def get_cpu_percent(self) -> float:
+        ...
+
+
+class HealthMonitorPort(Protocol):
+    def check(
+        self,
+        cpu_percent: float,
+        memory_mb: float,
+        check_threads: bool = True,
+    ) -> None:
+        ...
 
 
 class ResourceUsageMonitor:
@@ -23,13 +53,22 @@ class ResourceUsageMonitor:
     def __init__(
         self,
         sample_interval: float = 2.0,
-        print_interval: float = 120.0
-    ):
+        print_interval: float = 120.0,
+        *,
+        performance_monitor: Optional[PerformanceMonitorPort] = None,
+        health_monitor: Optional[HealthMonitorPort] = None,
+    ) -> None:
         self.sample_interval = sample_interval
         self.print_interval = print_interval
+        self._performance_monitor = performance_monitor
+        self._health_monitor = health_monitor
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        self._process = psutil.Process() if _PSUTIL_AVAILABLE else None
+        self._process: Any = (
+            psutil.Process()
+            if _PSUTIL_AVAILABLE and psutil is not None
+            else None
+        )
         self._last_print_time: float = 0.0
         self._sample_count = 0
         self._thread_check_interval = 10
@@ -70,25 +109,35 @@ class ResourceUsageMonitor:
 
     def _monitor_loop(self) -> None:
         """监控循环"""
-        from app.ui.performance.monitor import PerformanceMonitor
-        from app.ui.performance.health import HealthMonitor
-
-        perf_monitor = PerformanceMonitor()
-        health_monitor = HealthMonitor()
+        self._resolve_monitors()
 
         try:
             if self._process:
                 self._process.cpu_percent()
 
             while self._running:
-                self._sample_metrics(perf_monitor, health_monitor)
+                self._sample_metrics()
                 time.sleep(self.sample_interval)
         except Exception:
             pass
 
-    def _sample_metrics(self, perf_monitor, health_monitor) -> None:
+    def _resolve_monitors(
+        self,
+    ) -> tuple[PerformanceMonitorPort, HealthMonitorPort]:
+        if self._performance_monitor is None:
+            from app.ui.performance.monitor import PerformanceMonitor
+            self._performance_monitor = PerformanceMonitor()
+        if self._health_monitor is None:
+            from app.ui.performance.health import HealthMonitor
+            self._health_monitor = HealthMonitor()
+        return self._performance_monitor, self._health_monitor
+
+    def _sample_metrics(self) -> None:
         """采样一次性能指标"""
         try:
+            if self._process is None:
+                return
+            perf_monitor, health_monitor = self._resolve_monitors()
             memory_mb = self._process.memory_info().rss / 1024 / 1024
             perf_monitor.record("memory_usage", memory_mb, "MB")
 
@@ -98,14 +147,19 @@ class ResourceUsageMonitor:
             health_monitor.check(cpu_percent, memory_mb)
 
             now = time.time()
-            if (self.print_interval > 0 and
-                (now - self._last_print_time) >= self.print_interval):
+            if (
+                self.print_interval > 0
+                and (now - self._last_print_time) >= self.print_interval
+            ):
                 self._last_print_time = now
                 self._print_log_summary(perf_monitor)
         except Exception:
             pass
 
-    def _print_log_summary(self, perf_monitor) -> None:
+    def _print_log_summary(
+        self,
+        perf_monitor: PerformanceMonitorPort,
+    ) -> None:
         """将性能摘要输出到日志"""
         try:
             from core.logger import logger as _logger

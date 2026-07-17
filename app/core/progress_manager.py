@@ -2,14 +2,18 @@
 
 负责进度条的显示、隐藏、更新和标签设置。
 """
-from typing import TYPE_CHECKING
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Callable, Optional
 import flet as ft
 
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui
 
+TranslateCallback = Callable[..., str]
+
 if TYPE_CHECKING:
-    from app.application import Application
+    from app.ui.components.progress import McProgressBar
 
 
 class ProgressManager:
@@ -22,17 +26,12 @@ class ProgressManager:
     - 进度条容器管理
     """
 
-    def __init__(self, app: "Application") -> None:
-        """初始化进度管理器
-
-        Args:
-            app: 应用实例
-        """
-        self.app = app
-        self.page = app.page
-        self._progress_bar = None
-        self._progress_label = None
-        self._progress_container = None
+    def __init__(self, page: ft.Page, translate: TranslateCallback) -> None:
+        self.page = page
+        self._translate = translate
+        self._progress_bar: Optional[McProgressBar] = None
+        self._progress_label: Optional[ft.Text] = None
+        self._progress_container: Optional[ft.Container] = None
 
     def create_progress_ui(self) -> ft.Container:
         """创建进度条UI组件
@@ -51,7 +50,7 @@ class ProgressManager:
         )
 
         self._progress_label = ft.Text(
-            self.app._t("top_bar.ready", "就绪"),
+            self._translate("top_bar.ready", "就绪"),
             size=12,
             color=THEME.mc_gold,
             weight=ft.FontWeight.BOLD,
@@ -70,7 +69,7 @@ class ProgressManager:
 
         return self._progress_container
 
-    def _update_ui_safe(self, update_func) -> None:
+    def _update_ui_safe(self, update_func: Callable[[], None]) -> None:
         """安全地更新 UI（线程安全）
 
         Args:
@@ -91,17 +90,20 @@ class ProgressManager:
         Args:
             value: 进度值（0.0 到 1.0）
         """
-        if not self._progress_container or not self._progress_bar:
+        container = self._progress_container
+        progress_bar = self._progress_bar
+        progress_label = self._progress_label
+        if container is None or progress_bar is None or progress_label is None:
             return
 
         def _update():
             # 确保进度条可见
-            if not self._progress_container.visible:
-                self._progress_container.visible = True
+            if not container.visible:
+                container.visible = True
 
             # 更新进度值和标签
-            self._progress_bar.set_value(value)
-            self._progress_label.value = self.app._t(
+            progress_bar.set_value(value)
+            progress_label.value = self._translate(
                 "top_bar.progress",
                 "进度 {percent}%",
                 percent=int(value * 100),
@@ -116,31 +118,37 @@ class ProgressManager:
         Args:
             task_name: 任务名称（如"转换中"、"扫描中"等）
         """
-        if not self._progress_container or not self._progress_bar:
+        container = self._progress_container
+        progress_bar = self._progress_bar
+        progress_label = self._progress_label
+        if container is None or progress_bar is None or progress_label is None:
             return
 
         def _update():
-            self._progress_container.visible = True
+            container.visible = True
 
             if task_name:
-                self._progress_label.value = task_name
+                progress_label.value = task_name
             else:
-                self._progress_label.value = "处理中..."
+                progress_label.value = "处理中..."
 
-            self._progress_bar.set_value(0.0)
+            progress_bar.set_value(0.0)
             self.page.update()
 
         self._update_ui_safe(_update)
 
     def hide_progress(self) -> None:
         """隐藏进度条"""
-        if not self._progress_container or not self._progress_bar:
+        container = self._progress_container
+        progress_bar = self._progress_bar
+        progress_label = self._progress_label
+        if container is None or progress_bar is None or progress_label is None:
             return
 
         def _update():
-            self._progress_container.visible = False
-            self._progress_label.value = self.app._t("top_bar.ready", "就绪")
-            self._progress_bar.set_value(0.0)
+            container.visible = False
+            progress_label.value = self._translate("top_bar.ready", "就绪")
+            progress_bar.set_value(0.0)
             self.page.update()
 
         self._update_ui_safe(_update)
@@ -152,21 +160,24 @@ class ProgressManager:
             task_name: 任务名称
             value: 进度值（0.0 到 1.0）
         """
-        if not self._progress_container or not self._progress_bar:
+        container = self._progress_container
+        progress_bar = self._progress_bar
+        progress_label = self._progress_label
+        if container is None or progress_bar is None or progress_label is None:
             return
 
         def _update():
             # 确保进度条可见
-            if not self._progress_container.visible:
-                self._progress_container.visible = True
+            if not container.visible:
+                container.visible = True
 
             # 设置任务名称和进度
             if value >= 0 and value <= 1.0:
-                self._progress_label.value = f"{task_name} {int(value * 100)}%"
+                progress_label.value = f"{task_name} {int(value * 100)}%"
             else:
-                self._progress_label.value = task_name
+                progress_label.value = task_name
 
-            self._progress_bar.set_value(value)
+            progress_bar.set_value(value)
             self.page.update()
 
         self._update_ui_safe(_update)
@@ -177,15 +188,17 @@ class ProgressManager:
         Args:
             text: 标签文本
         """
-        if not self._progress_container or not self._progress_label:
+        container = self._progress_container
+        progress_label = self._progress_label
+        if container is None or progress_label is None:
             return
 
         def _update():
             # 确保进度条可见
-            if not self._progress_container.visible:
-                self._progress_container.visible = True
+            if not container.visible:
+                container.visible = True
 
-            self._progress_label.value = text
+            progress_label.value = text
             self.page.update()
 
         self._update_ui_safe(_update)
@@ -196,11 +209,12 @@ class ProgressManager:
         Args:
             value: 进度值 (0.0 - 1.0)
         """
-        if not self._progress_bar:
+        progress_bar = self._progress_bar
+        if progress_bar is None:
             return
 
         def _update():
-            self._progress_bar.set_value(value)
+            progress_bar.set_value(value)
             self.page.update()
 
         self._update_ui_safe(_update)

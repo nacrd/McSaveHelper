@@ -11,6 +11,7 @@ from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, current_save_field, dropdown
 from app.ui.components.cards import placeholder
 from app.ui.components.layout import page_header
+from app.ui.utils import run_on_ui
 from app.services.entity_block_search_service import (
     EntityBlockSearchService,
     SearchResult,
@@ -174,7 +175,7 @@ class EntityBlockSearchView(ft.Column):
             content=left_content,
             width=280,
             bgcolor=THEME.bg_card,
-            border=ft.border.all(1, THEME.border_light),
+            border=ft.Border.all(1, THEME.border_light),
             border_radius=8,
             padding=12,
         )
@@ -216,7 +217,7 @@ class EntityBlockSearchView(ft.Column):
             content=center_content,
             expand=True,
             bgcolor=THEME.bg_card,
-            border=ft.border.all(1, THEME.border_light),
+            border=ft.Border.all(1, THEME.border_light),
             border_radius=8,
             padding=12,
         )
@@ -259,7 +260,7 @@ class EntityBlockSearchView(ft.Column):
             content=right_content,
             width=280,
             bgcolor=THEME.bg_card,
-            border=ft.border.all(1, THEME.border_light),
+            border=ft.Border.all(1, THEME.border_light),
             border_radius=8,
             padding=12,
         )
@@ -289,7 +290,7 @@ class EntityBlockSearchView(ft.Column):
                     no_wrap=True,
                 ),
                 bgcolor=THEME.bg_secondary,
-                border=ft.border.all(1, THEME.border_subtle),
+                border=ft.Border.all(1, THEME.border_subtle),
                 border_radius=12,
                 padding=ft.Padding(left=8, right=8, top=3, bottom=3),
                 on_click=lambda e, pid=preset_id: self._fill_target(pid),
@@ -318,15 +319,15 @@ class EntityBlockSearchView(ft.Column):
             self.app.warn_dialog("提示", "请输入目标 ID")
             return
 
-        dim_checks = {
-            self._dim_overworld: "overworld",
-            self._dim_nether: "nether",
-            self._dim_end: "end",
-        }
-        dimensions = [dim for checkbox, dim in dim_checks.items() if checkbox.value]
+        dim_checks = (
+            (self._dim_overworld, "overworld"),
+            (self._dim_nether, "nether"),
+            (self._dim_end, "end"),
+        )
+        dimensions = [dim for control, dim in dim_checks if control.value]
 
         condition = SearchCondition(
-            search_type=self._search_type_dropdown.value,
+            search_type=self._search_type_dropdown.value or "entity",
             target=target,
             dimensions=dimensions,
             world_path=Path(world_path),
@@ -375,15 +376,7 @@ class EntityBlockSearchView(ft.Column):
                     self._status_progress.update()
                     self._search_btn.update()
 
-                try:
-                    if hasattr(self.app.page, 'run_task'):
-                        self.app.page.run_task(_update_ui)
-                    else:
-                        _update_ui()
-                except Exception:
-                    self._searching = False
-                    self._search_btn.disabled = False
-                    self._status_progress.visible = False
+                run_on_ui(self.app.page, _update_ui)
 
             except Exception as ex:
                 error_msg = str(ex)
@@ -402,10 +395,7 @@ class EntityBlockSearchView(ft.Column):
                     self._search_btn.update()
                     self.app.handle_exception(exception, title="搜索失败")
 
-                if hasattr(self.app.page, 'run_task'):
-                    self.app.page.run_task(_show_error)
-                else:
-                    _show_error()
+                run_on_ui(self.app.page, _show_error)
 
         threading.Thread(target=_search, daemon=True).start()
 
@@ -452,7 +442,12 @@ class EntityBlockSearchView(ft.Column):
             content=ft.Row([
                 ft.Text(f"#{index + 1}", size=11, color=THEME.mc_gold, width=40),
                 ft.Column([
-                    ft.Text(result.target_id, size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                    ft.Text(
+                        result.target_id,
+                        size=12,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary,
+                    ),
                     ft.Text(f"{dim_label} {pos_text}", size=11, color=THEME.text_muted),
                 ], spacing=2, expand=True),
             ], spacing=8),

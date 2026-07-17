@@ -19,9 +19,6 @@ class TestConfigServiceConcurrency:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
 
-            # 重置单例以使用新目录
-            ConfigService._instance = None
-
             config = ConfigService(config_dir)
 
             errors = []
@@ -71,17 +68,12 @@ class TestConfigServiceConcurrency:
             assert "ui_settings" in config_dict
             assert isinstance(config_dict["custom_uuid_mappings"], dict)
 
-            # 清理单例
-            ConfigService._instance = None
-
     def test_config_copy_not_reference(self):
         """测试 get_config_dict 返回副本而非引用"""
         from app.services.config_service import ConfigService
 
         with tempfile.TemporaryDirectory() as tmpdir:
             config_dir = Path(tmpdir)
-            ConfigService._instance = None
-
             config = ConfigService(config_dir)
 
             # 获取配置副本
@@ -94,8 +86,6 @@ class TestConfigServiceConcurrency:
             original_config = config.get_config_dict()
             assert "test_key" not in original_config, "配置副本不是独立副本"
 
-            ConfigService._instance = None
-
     def test_invalid_config_is_backed_up(self):
         """测试损坏配置会备份并回退默认值"""
         from app.services.config_service import ConfigService
@@ -105,14 +95,10 @@ class TestConfigServiceConcurrency:
             (config_dir / "config.json").write_text(
                 "{invalid json", encoding="utf-8"
             )
-            ConfigService._instance = None
-
             config = ConfigService(config_dir)
 
             assert config.version_detection is True
             assert (config_dir / "config.json.bak").exists()
-
-            ConfigService._instance = None
 
 
 class TestBatchProcessorConcurrency:
@@ -193,7 +179,6 @@ class TestSaveNbtResourceManagement:
         from core.converter import ConversionResult
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            ConfigService._instance = None
             service = MigrationService(ConfigService(Path(tmpdir) / "config"))
             logs = []
 
@@ -212,8 +197,6 @@ class TestSaveNbtResourceManagement:
             assert any(
                 level == "ERROR" and "bad file" in msg for msg,
                 level in logs)
-
-            ConfigService._instance = None
 
 
 class TestReplaceDirectoryTreeAtomicity:

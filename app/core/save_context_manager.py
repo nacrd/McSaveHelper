@@ -9,11 +9,10 @@ from core.types import LogCallback
 
 
 class SaveConfig(Protocol):
-    @property
-    def config(self) -> Dict[str, object]:
+    def get_recent_saves(self) -> List[Dict[str, str]]:
         ...
 
-    def save(self) -> None:
+    def set_recent_saves(self, saves: List[Dict[str, str]]) -> None:
         ...
 
 
@@ -107,7 +106,7 @@ class SaveContextManager:
 
     def _load_recent_saves(self) -> List[Mapping[str, object]]:
         try:
-            saves = self._config.config.get("recent_saves", [])
+            saves = self._config.get_recent_saves()
             if isinstance(saves, list):
                 return [save for save in saves if isinstance(save, Mapping)]
         except Exception as exc:
@@ -116,7 +115,6 @@ class SaveContextManager:
 
     def _save_recent_saves(self) -> None:
         try:
-            self._config.config["recent_saves"] = self.get_recent_saves()
-            self._config.save()
+            self._config.set_recent_saves(self.get_recent_saves())
         except Exception as exc:
             self._log(f"保存最近存档失败: {exc}", "ERROR")

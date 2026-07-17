@@ -90,7 +90,7 @@ class MapExportView(ft.Column):
             return []
         return [
             ViewAction(
-                self.app._t("top_bar.start_export", "开始导出"),
+                self.app.translate("top_bar.start_export", "开始导出"),
                 self._start_export,
             )
         ]

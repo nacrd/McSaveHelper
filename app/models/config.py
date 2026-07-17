@@ -35,6 +35,28 @@ class UISettings:
     """是否启用性能监控，默认为关闭"""
 
 
+@dataclass(frozen=True)
+class ApplicationSettings:
+    """设置页使用的不可变配置快照。
+
+    将持久化结构从 Flet 控件中隔离出来，避免界面直接修改配置服务的
+    私有字典。所有字段都使用已经校验过、可直接落盘的值。
+    """
+
+    version_detection: bool = True
+    api_timeout: int = 10
+    theme: str = "dark"
+    language: str = "zh_CN"
+    sidebar_mode: str = "auto"
+    auto_clear_log: bool = True
+    show_log_panel: bool = True
+    enable_performance_monitor: bool = False
+    performance_print_interval: int = 60
+    max_concurrent: int = 2
+    preserve_structure: bool = True
+    cleanup_patterns: tuple[str, ...] = ("*.log", "cache/", "logs/")
+
+
 @dataclass
 class MigrationConfig:
     """迁移任务配置（运行时状态）

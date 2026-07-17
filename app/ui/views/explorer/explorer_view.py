@@ -67,7 +67,7 @@ class ExplorerView(
 
     @property
     def _t(self):
-        return self.app._t
+        return self.app.translate
 
     def get_top_actions(self) -> list[ViewAction]:
         """Declare Explorer commands consumed by the application shell."""
@@ -325,6 +325,7 @@ class ExplorerView(
 
     def dispose(self) -> None:
         """Release session-scoped background resources."""
+        self._dispose_region_tab()
         self._map_service.close()
 
     def _populate_world(self, session: WorldSession) -> None:

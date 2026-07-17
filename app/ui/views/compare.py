@@ -31,7 +31,7 @@ class CompareView(ft.Column):
     def get_top_actions(self) -> list[ViewAction]:
         return [
             ViewAction(
-                self.app._t("top_bar.start_compare", "开始对比"),
+                self.app.translate("top_bar.start_compare", "开始对比"),
                 self._compare,
             )
         ]

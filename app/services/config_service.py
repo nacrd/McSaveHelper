@@ -2,10 +2,11 @@
 import json
 import shutil
 import threading
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from app.models.config import MigrationConfig
+from app.models.config import ApplicationSettings, MigrationConfig
 from core.constants import MinecraftConstants
 from core.logger import logger
 
@@ -24,25 +25,13 @@ class ConfigService:
     CONFIG_FILENAME: str = "config.json"
     """配置文件名称"""
 
-    _instance: Optional['ConfigService'] = None
-    """单例实例"""
-
-    def __new__(cls, config_dir: Optional[Path] = None) -> 'ConfigService':
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self, config_dir: Optional[Path] = None) -> None:
-        if getattr(self, '_initialized', False):
-            return
         self._config_dir: Path = config_dir or (Path.home() / ".mcsavehelper")
         self._config_dir.mkdir(parents=True, exist_ok=True)
         self._config: Dict[str, Any] = {}
         self._migration: MigrationConfig = MigrationConfig()
         self._lock = threading.Lock()
         self._load()
-        self._initialized: bool = True
 
     # ─── 持久化配置 ────────────────────────────────
 
@@ -112,6 +101,7 @@ class ConfigService:
                 "theme": "dark",
                 "auto_clear_log": True,
                 "language": "zh_CN",
+                "sidebar_mode": "auto",
                 "show_log_panel": True,
                 "enable_performance_monitor": False,
                 "performance_print_interval": 60},
@@ -156,15 +146,6 @@ class ConfigService:
                         self._config[key][sub_key] = sub_default
 
     # ─── 快捷访问 ──────────────────────────────────
-
-    @property
-    def config(self) -> Dict[str, Any]:
-        """获取完整配置字典
-
-        Returns:
-            Dict[str, Any]: 完整配置字典
-        """
-        return self._config
 
     @property
     def version_detection(self) -> bool:
@@ -325,7 +306,91 @@ class ConfigService:
             Dict[str, Any]: 完整配置字典的副本
         """
         with self._lock:
-            return dict(self._config)
+            return deepcopy(self._config)
+
+    def get_recent_saves(self) -> list[Dict[str, str]]:
+        """返回最近存档列表的隔离副本。"""
+        with self._lock:
+            raw_saves = self._config.get("recent_saves", [])
+            if not isinstance(raw_saves, list):
+                return []
+            return [
+                {
+                    "path": str(item.get("path", "")),
+                    "name": str(item.get("name", "")),
+                }
+                for item in raw_saves
+                if isinstance(item, dict) and item.get("path")
+            ]
+
+    def set_recent_saves(self, saves: list[Dict[str, str]]) -> None:
+        """替换并持久化最近存档列表。"""
+        with self._lock:
+            self._config["recent_saves"] = deepcopy(saves)
+        self.save()
+
+    def get_settings(self) -> ApplicationSettings:
+        """返回设置页可安全消费的不可变快照。"""
+        with self._lock:
+            ui = self._config.get("ui_settings", {})
+            batch = self._config.get("batch_processing", {})
+            patterns = self._config.get("cleanup_patterns", [])
+            return ApplicationSettings(
+                version_detection=bool(
+                    self._config.get("version_detection", True)
+                ),
+                api_timeout=int(self._config.get("api_timeout", 10)),
+                theme=str(ui.get("theme", "dark")),
+                language=str(ui.get("language", "zh_CN")),
+                sidebar_mode=str(ui.get("sidebar_mode", "auto")),
+                auto_clear_log=bool(ui.get("auto_clear_log", True)),
+                show_log_panel=bool(ui.get("show_log_panel", True)),
+                enable_performance_monitor=bool(
+                    ui.get("enable_performance_monitor", False)
+                ),
+                performance_print_interval=int(
+                    ui.get("performance_print_interval", 60)
+                ),
+                max_concurrent=int(batch.get("max_concurrent", 2)),
+                preserve_structure=bool(
+                    batch.get("preserve_structure", True)
+                ),
+                cleanup_patterns=tuple(str(item) for item in patterns),
+            )
+
+    def update_settings(self, settings: ApplicationSettings) -> None:
+        """原子更新设置页负责的配置并持久化。"""
+        with self._lock:
+            self._config["version_detection"] = settings.version_detection
+            self._config["api_timeout"] = settings.api_timeout
+
+            ui = dict(self._config.get("ui_settings", {}))
+            ui.update({
+                "theme": settings.theme,
+                "language": settings.language,
+                "sidebar_mode": settings.sidebar_mode,
+                "auto_clear_log": settings.auto_clear_log,
+                "show_log_panel": settings.show_log_panel,
+                "enable_performance_monitor": (
+                    settings.enable_performance_monitor
+                ),
+                "performance_print_interval": (
+                    settings.performance_print_interval
+                ),
+            })
+            self._config["ui_settings"] = ui
+
+            batch = dict(self._config.get("batch_processing", {}))
+            batch.update({
+                "max_concurrent": settings.max_concurrent,
+                "preserve_structure": settings.preserve_structure,
+            })
+            self._config["batch_processing"] = batch
+            self._config["cleanup_patterns"] = list(
+                settings.cleanup_patterns
+            )
+            self._migration.version_detection = settings.version_detection
+        self.save()
 
     # ─── 运行时迁移配置 ────────────────────────────
 
@@ -342,6 +407,7 @@ class ConfigService:
         """重置所有配置为默认值"""
         with self._lock:
             self._config = self._defaults()
+            self._migration.version_detection = True
         self.save()
 
     def update_batch_config(
@@ -393,7 +459,7 @@ class ConfigService:
                 return None
 
             nbt_data = nbtlib.load(str(level_dat))
-            data = nbt_data.get("Data", {})
+            data = nbt_data.get("Data", {}) or {}
 
             # 从level.dat获取版本信息
             version_data = data.get("Version", {})

@@ -40,6 +40,7 @@ class MapFullscreenController:
         self._overlay: Optional[ft.Container] = None
         self._body: Optional[ft.Container] = None
         self._pre_fullscreen_size: Optional[Tuple[int, int]] = None
+        self._pre_side_visible = True
         self._enter_timer: Optional[threading.Timer] = None
         self._exit_timer: Optional[threading.Timer] = None
         self.active = False
@@ -55,6 +56,7 @@ class MapFullscreenController:
             return
         self.active = True
         self._set_toggle_label("⛶ 退出")
+        self._pre_side_visible = self._side_panel.visible is not False
         self._pre_fullscreen_size = (
             int(self._map_view.width or 900),
             int(self._map_view.height or 560),
@@ -86,6 +88,8 @@ class MapFullscreenController:
         self._schedule_enter_animation(width, height, bar_height)
 
     def exit(self) -> None:
+        self._cancel_timer(self._enter_timer)
+        self._enter_timer = None
         overlay = self._overlay
         body = self._body
         if overlay is None or body is None:
@@ -230,6 +234,7 @@ class MapFullscreenController:
         self._enter_timer.start()
 
     def _animate_in(self, width: int, height: int, bar_height: int) -> None:
+        self._enter_timer = None
         overlay = self._overlay
         body = self._body
         if overlay is None or body is None or self._page is None:
@@ -256,6 +261,10 @@ class MapFullscreenController:
             run_on_ui(self._page, self._restore)
 
     def _restore(self) -> None:
+        self._cancel_timer(self._enter_timer)
+        self._cancel_timer(self._exit_timer)
+        self._enter_timer = None
+        self._exit_timer = None
         overlay = self._overlay
         if self._page is not None and overlay is not None:
             try:
@@ -271,7 +280,7 @@ class MapFullscreenController:
         if self._pre_fullscreen_size is not None:
             width, height = self._pre_fullscreen_size
             self._resize_map(width, height, refit=False)
-        self._side_panel.visible = True
+        self._side_panel.visible = self._pre_side_visible
         safe_update(self._side_panel)
         self.active = False
         self._set_toggle_label("⛶ 全屏")

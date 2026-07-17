@@ -1,6 +1,6 @@
 """Edit, add and delete dialogs for NBT tree data."""
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 
 import flet as ft
 
@@ -118,7 +118,10 @@ class NbtTreeEditor:
         try:
             parent_parts = parse_path(parent_path)
             parent_node = self.get_node_at_path(parent_parts)
-            new_value = create_default_value(type_dropdown.value, value_field.value or "")
+            new_value = create_default_value(
+                type_dropdown.value or "String",
+                value_field.value or "",
+            )
             self._insert_value(parent_path, parent_parts, parent_node, key_field.value or "", new_value, is_list)
             self._close(dialog)
             self.owner._rebuild_tree()
@@ -154,9 +157,9 @@ class NbtTreeEditor:
             self._close(dialog)
             self.owner._rebuild_tree()
         except Exception as ex:
-            self.owner.page.snack_bar = ft.SnackBar(ft.Text(f"删除失败: {ex}"))
-            self.owner.page.snack_bar.open = True
-            self.owner.page.update()
+            self.owner.page.show_dialog(
+                ft.SnackBar(ft.Text(f"删除失败: {ex}"))
+            )
 
     def _notify(self, path_parts: List[Union[str, int]], old_value: Any, new_value: Any, path: str) -> None:
         if self.on_stage_change:

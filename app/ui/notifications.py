@@ -34,6 +34,7 @@ class NotificationManager:
 
     def __init__(self, page: ft.Page):
         self.page = page
+        self._current_dialog: Optional[ft.AlertDialog] = None
 
     def show_snackbar(
         self,
@@ -76,14 +77,13 @@ class NotificationManager:
 
         # 显示 SnackBar
         try:
-            self.page.snack_bar = ft.SnackBar(
+            snackbar = ft.SnackBar(
                 content=ft.Text(message, color="white"),
                 bgcolor=bgcolor,
                 duration=duration_ms,
                 action=action,
             )
-            self.page.snack_bar.open = True
-            self.page.update()
+            self.page.show_dialog(snackbar)
         except Exception:
             pass
 
@@ -127,11 +127,13 @@ class NotificationManager:
         def handle_confirm(e):
             dialog.open = False
             self.page.update()
+            self._current_dialog = None
             on_confirm(e)
 
         def handle_cancel(e):
             dialog.open = False
             self.page.update()
+            self._current_dialog = None
             if on_cancel:
                 on_cancel(e)
 
@@ -153,9 +155,8 @@ class NotificationManager:
             actions_alignment=ft.MainAxisAlignment.END,
         )
 
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
+        self._current_dialog = dialog
+        self.page.show_dialog(dialog)
 
     def show_loading(
         self,
@@ -171,7 +172,7 @@ class NotificationManager:
         Returns:
             对话框对象（用于后续关闭）
         """
-        content_items = [
+        content_items: List[ft.Control] = [
             ft.ProgressRing(width=50, height=50, color=THEME.accent),
         ]
 
@@ -195,9 +196,8 @@ class NotificationManager:
             modal=True,
         )
 
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
+        self._current_dialog = dialog
+        self.page.show_dialog(dialog)
 
         return dialog
 
@@ -209,6 +209,8 @@ class NotificationManager:
         """
         dialog.open = False
         self.page.update()
+        if self._current_dialog is dialog:
+            self._current_dialog = None
 
     def show_custom_dialog(
         self,
@@ -244,9 +246,8 @@ class NotificationManager:
             actions=actions or [],
         )
 
-        self.page.dialog = dialog
-        dialog.open = True
-        self.page.update()
+        self._current_dialog = dialog
+        self.page.show_dialog(dialog)
 
         return dialog
 
@@ -258,8 +259,11 @@ class NotificationManager:
         """
         if dialog:
             dialog.open = False
-        elif self.page.dialog:
-            self.page.dialog.open = False
+            if self._current_dialog is dialog:
+                self._current_dialog = None
+        elif self._current_dialog:
+            self._current_dialog.open = False
+            self._current_dialog = None
         self.page.update()
 
 
@@ -314,7 +318,7 @@ class Toast:
         # 添加到页面
         # 注意：Flet 使用 SnackBar 实现 Toast 通知
         try:
-            self.page.snack_bar = ft.SnackBar(
+            snackbar = ft.SnackBar(
                 content=ft.Row([
                     ft.Icon(icon, color=color, size=20),
                     ft.Text(message, color="white"),
@@ -322,8 +326,7 @@ class Toast:
                 bgcolor="rgba(0, 0, 0, 0.85)",
                 duration=duration_ms,
             )
-            self.page.snack_bar.open = True
-            self.page.update()
+            self.page.show_dialog(snackbar)
         except Exception:
             pass
 
@@ -374,9 +377,7 @@ class ProgressDialog:
 
     def show(self) -> None:
         """显示进度对话框"""
-        self.page.dialog = self.dialog
-        self.dialog.open = True
-        self.page.update()
+        self.page.show_dialog(self.dialog)
 
     def update_progress(self, value: float, status: str = "") -> None:
         """更新进度
@@ -426,12 +427,10 @@ def show_destructive_confirmation(
             page.update()
             on_confirm(e)
         else:
-            page.snack_bar = ft.SnackBar(
+            page.show_dialog(ft.SnackBar(
                 content=ft.Text("确认文本不匹配"),
                 bgcolor=THEME.error,
-            )
-            page.snack_bar.open = True
-            page.update()
+            ))
 
     def handle_cancel(e):
         dialog.open = False
@@ -467,6 +466,4 @@ def show_destructive_confirmation(
         ],
     )
 
-    page.dialog = dialog
-    dialog.open = True
-    page.update()
+    page.show_dialog(dialog)

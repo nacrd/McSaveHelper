@@ -2,15 +2,39 @@
 
 负责窗口的创建、最大化、最小化、关闭、大小调整和响应式布局。
 """
-from typing import TYPE_CHECKING, Optional, Callable, Any
+from dataclasses import dataclass
+from typing import Optional, Callable, Any, Protocol
 from pathlib import Path
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, get_theme_manager
 from core.logger import logger
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+class ResponsiveSidebar(Protocol):
+    def set_collapsed(self, collapsed: bool) -> None:
+        ...
+
+    def set_width(self, width: int) -> None:
+        ...
+
+
+@dataclass(frozen=True)
+class ResponsiveShellHost:
+    sidebar: ResponsiveSidebar
+    main_row: ft.Row
+    shell: ft.Container
+    scrollable_content: ft.Container
+    content: ft.Container
+
+
+@dataclass(frozen=True)
+class WindowManagerDependencies:
+    page: ft.Page
+    translate: Callable[[str, str], str]
+    apply_compact_layout: Callable[[bool], None]
+    stop_gui_optimizer: Callable[[], None]
+    dispose_views: Callable[[], None]
 
 
 class WindowManager:
@@ -24,22 +48,25 @@ class WindowManager:
     - 窗口事件处理
     """
 
-    def __init__(self, app: "Application") -> None:
-        """初始化窗口管理器
-
-        Args:
-            app: 应用实例
-        """
-        self.app = app
-        self.page = app.page
+    def __init__(self, dependencies: WindowManagerDependencies) -> None:
+        self._deps = dependencies
+        self.page = dependencies.page
         self._shutdown_started = False
         self._resize_timer: Optional[Any] = None
         self._maximize_button: Optional[ft.Container] = None
+        self._responsive_host: Optional[ResponsiveShellHost] = None
+
+    def attach_responsive_host(self, host: ResponsiveShellHost) -> None:
+        """Attach shell controls after Application has built its layout."""
+        self._responsive_host = host
 
     def setup_window(self) -> None:
         """设置窗口基本属性"""
         page = self.page
-        page.title = self.app._t("app.title", "MCSaveHelper · 存档管理工具")
+        page.title = self._deps.translate(
+            "app.title",
+            "MCSaveHelper · 存档管理工具",
+        )
         page.theme_mode = ft.ThemeMode.DARK
         page.bgcolor = THEME.bg_primary
         page.window.bgcolor = THEME.bg_primary
@@ -99,7 +126,6 @@ class WindowManager:
             padding=ft.Padding(left=12, right=12, top=8, bottom=8),
             bgcolor=THEME.mc_wood,
             border=ft.Border(
-                left=None, top=None, right=None,
                 bottom=ft.BorderSide(3, THEME.mc_grass),
             ),
         )
@@ -120,7 +146,10 @@ class WindowManager:
                     border=mc_border(2),
                 ),
                 ft.Text(
-                    self.app._t("app.title_bar", "MCSaveHelper ▣ Minecraft Save Toolkit"),
+                    self._deps.translate(
+                        "app.title_bar",
+                        "MCSaveHelper ▣ Minecraft Save Toolkit",
+                    ),
                     size=13, color=THEME.text_primary,
                     weight=ft.FontWeight.BOLD, font_family="monospace",
                 ),
@@ -167,7 +196,7 @@ class WindowManager:
         self,
         text: str,
         bgcolor: str,
-        on_click: Callable[[ft.ControlEvent], None],
+        on_click: Callable[..., Any],
     ) -> ft.Container:
         """创建窗口控制按钮
 
@@ -282,8 +311,8 @@ class WindowManager:
     def _apply_resize(self) -> None:
         """实际执行窗口大小调整"""
         try:
-            width = self.page.window.width
-            height = self.page.window.height
+            width = float(self.page.window.width or 1100)
+            height = float(self.page.window.height or 820)
 
             self.apply_responsive_layout(width, height)
 
@@ -309,7 +338,6 @@ class WindowManager:
         self._adjust_sidebar_width(compact, roomy)
         self._adjust_spacing_and_padding(compact)
         self._adjust_top_actions(compact)
-        self._notify_current_view_layout(compact)
 
     def _adjust_sidebar_width(self, compact: bool, roomy: bool) -> None:
         """调整侧边栏宽度 / 折叠状态
@@ -321,9 +349,10 @@ class WindowManager:
             compact: 是否紧凑模式（窗口 < 980px）
             roomy: 是否宽松模式（窗口 >= 1300px）
         """
-        if not hasattr(self.app, '_sidebar'):
+        host = self._responsive_host
+        if host is None:
             return
-        sidebar = self.app._sidebar
+        sidebar = host.sidebar
         # 极窄窗口：自动收窄
         if compact and (self.page.window.width or 0) < 800:
             sidebar.set_collapsed(True)
@@ -337,22 +366,21 @@ class WindowManager:
         Args:
             compact: 是否紧凑模式
         """
-        if hasattr(self.app, '_main_row'):
-            self.app._main_row.spacing = 6 if compact else 12
-
-        if hasattr(self.app, '_shell'):
-            shell_pad = 6 if compact else 12
-            shell_margin = 4 if compact else 12
-            self.app._shell.padding = shell_pad
-            self.app._shell.margin = ft.Margin(
-                left=shell_margin, right=shell_margin, top=0, bottom=shell_margin
-            )
-
-        if hasattr(self.app, '_scrollable_content'):
-            self.app._scrollable_content.padding = 6 if compact else 14
-
-        if hasattr(self.app, '_content'):
-            self.app._content.padding = 8 if compact else 18
+        host = self._responsive_host
+        if host is None:
+            return
+        host.main_row.spacing = 6 if compact else 12
+        shell_padding = 6 if compact else 12
+        shell_margin = 4 if compact else 12
+        host.shell.padding = shell_padding
+        host.shell.margin = ft.Margin(
+            left=shell_margin,
+            right=shell_margin,
+            top=0,
+            bottom=shell_margin,
+        )
+        host.scrollable_content.padding = 6 if compact else 14
+        host.content.padding = 8 if compact else 18
 
     def _adjust_top_actions(self, compact: bool) -> None:
         """调整顶部操作按钮
@@ -360,27 +388,7 @@ class WindowManager:
         Args:
             compact: 是否紧凑模式
         """
-        if hasattr(self.app, '_top_actions'):
-            self.app._top_actions.spacing = 6 if compact else 8
-            for btn in self.app._top_actions.controls:
-                if hasattr(btn, 'height'):
-                    btn.height = 34 if compact else 38
-                if hasattr(btn, 'width') and compact:
-                    btn.width = min(getattr(btn, 'width', 120) or 120, 104)
-
-    def _notify_current_view_layout(self, compact: bool) -> None:
-        """通知当前视图布局变化
-
-        Args:
-            compact: 是否紧凑模式
-        """
-        current_view = (
-            self.app.views.get(self.app._sidebar.selected_id)
-            if hasattr(self.app, '_sidebar')
-            else None
-        )
-        if current_view and hasattr(current_view, 'set_compact_mode'):
-            current_view.set_compact_mode(compact)
+        self._deps.apply_compact_layout(compact)
 
     def shutdown(self) -> None:
         """执行应用关闭流程"""
@@ -389,8 +397,7 @@ class WindowManager:
         self._shutdown_started = True
 
         self._set_closing_flag()
-        self._stop_monitoring()
-        self._stop_heartbeats()
+        self._stop_gui_optimizer()
         self._dispose_views()
         self._shutdown_logger()
         self._destroy_window_async()
@@ -401,27 +408,17 @@ class WindowManager:
         from app.ui.utils import set_app_closing
         set_app_closing(True)
 
-    def _stop_monitoring(self) -> None:
-        """停止性能监控"""
+    def _stop_gui_optimizer(self) -> None:
+        """Stop monitoring and heartbeat resources through their owner."""
         try:
-            from app.ui.performance import perf_monitor, resource_monitor
-            perf_monitor.disable()
-            resource_monitor.stop()
-        except Exception:
-            pass
-
-    def _stop_heartbeats(self) -> None:
-        """停止心跳线程"""
-        try:
-            self.app._heartbeat_active = False
-            self.app._hang_detector_active = False
+            self._deps.stop_gui_optimizer()
         except Exception:
             pass
 
     def _dispose_views(self) -> None:
         """Release resources held by cached views before closing the window."""
         try:
-            self.app.view_manager.dispose()
+            self._deps.dispose_views()
         except Exception:
             pass
 
@@ -476,8 +473,9 @@ class WindowManager:
         icon_name = "mcsavehelper_icon.ico"
         candidates = []
 
-        if hasattr(sys, '_MEIPASS'):
-            candidates.append(Path(sys._MEIPASS) / icon_name)
+        bundle_dir = getattr(sys, "_MEIPASS", None)
+        if bundle_dir:
+            candidates.append(Path(bundle_dir) / icon_name)
             candidates.append(Path(sys.executable).parent / icon_name)
 
         candidates.append(Path(__file__).parent.parent.parent / icon_name)

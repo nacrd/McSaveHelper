@@ -2,15 +2,27 @@
 
 负责各种对话框的显示和管理，包括信息、警告、错误对话框和文件选择对话框。
 """
-from typing import TYPE_CHECKING, Optional, List
+from dataclasses import dataclass
+from typing import Callable, Optional, List
 import traceback
 import flet as ft
 
+from app.adapters.file_dialogs import FileDialogPort, FileType
 from app.ui.theme import THEME
 from core.logger import logger
 
-if TYPE_CHECKING:
-    from app.application import Application
+TranslateCallback = Callable[[str, str], str]
+
+
+@dataclass(frozen=True)
+class DialogManagerDependencies:
+    page: ft.Page
+    translate: TranslateCallback
+    switch_view: Callable[[str], None]
+    remove_view: Callable[[str], Optional[ft.Control]]
+    copy_to_clipboard: Callable[[str], None]
+    show_snackbar: Callable[[str, str, int], None]
+    file_dialogs: FileDialogPort
 
 
 class DialogManager:
@@ -23,14 +35,10 @@ class DialogManager:
     - 对话框生命周期管理
     """
 
-    def __init__(self, app: "Application") -> None:
-        """初始化对话框管理器
-
-        Args:
-            app: 应用实例
-        """
-        self.app = app
-        self.page = app.page
+    def __init__(self, dependencies: DialogManagerDependencies) -> None:
+        self._deps = dependencies
+        self.page = dependencies.page
+        self._translate = dependencies.translate
         self._current_dialog: Optional[ft.AlertDialog] = None
 
     def close_dialog(self) -> None:
@@ -62,7 +70,14 @@ class DialogManager:
         content, full_error_text = self._build_dialog_content(
             title, message, include_details, exception
         )
-        d = self._create_alert_dialog(title, content, color, full_error_text, include_details, exception)
+        d = self._create_alert_dialog(
+            title,
+            content,
+            color,
+            full_error_text,
+            include_details,
+            exception,
+        )
 
         self._current_dialog = d
         self.page.overlay.append(d)
@@ -70,7 +85,11 @@ class DialogManager:
         self.page.update()
 
     def _build_dialog_content(
-        self, title: str, message: str, include_details: bool, exception: Optional[Exception]
+        self,
+        title: str,
+        message: str,
+        include_details: bool,
+        exception: Optional[Exception],
     ) -> tuple:
         """构建对话框内容
 
@@ -83,7 +102,9 @@ class DialogManager:
         Returns:
             tuple: (内容控件, 完整错误文本)
         """
-        content_list: List[ft.Control] = [ft.Text(message, color=THEME.text_secondary)]
+        content_list: List[ft.Control] = [
+            ft.Text(message, color=THEME.text_secondary)
+        ]
         full_error_text = f"{title}\n\n{message}"
 
         if include_details and exception:
@@ -105,9 +126,19 @@ class DialogManager:
         return ft.Container(
             content=ft.Column(
                 [
-                    ft.Text("详细信息：", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+                    ft.Text(
+                        "详细信息：",
+                        size=12,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary,
+                    ),
                     ft.Container(
-                        content=ft.Text(error_details, size=11, color=THEME.text_muted, selectable=True),
+                        content=ft.Text(
+                            error_details,
+                            size=11,
+                            color=THEME.text_muted,
+                            selectable=True,
+                        ),
                         bgcolor=THEME.bg_secondary, padding=8, border_radius=4,
                     ),
                 ],
@@ -173,7 +204,7 @@ class DialogManager:
 
         actions.append(
             ft.TextButton(
-                self.app._t("dialogs.ok", "确定"),
+                self._translate("dialogs.ok", "确定"),
                 style=ft.ButtonStyle(color=color),
                 on_click=lambda e: self._handle_ok(dialog),
             )
@@ -198,12 +229,7 @@ class DialogManager:
             text: 要复制的文本
         """
         try:
-            if hasattr(self.page, 'set_clipboard'):
-                self.page.set_clipboard(text)
-            else:
-                self.page.clipboard = text
-                self.page.update()
-
+            self._deps.copy_to_clipboard(text)
             self._show_snackbar("错误信息已复制到剪贴板", THEME.mc_grass, 2000)
         except Exception:
             self._show_snackbar("复制失败，错误信息可手动选择复制", THEME.warning, 3000)
@@ -216,13 +242,7 @@ class DialogManager:
             bgcolor: 背景颜色
             duration: 持续时间
         """
-        self.page.snack_bar = ft.SnackBar(
-            content=ft.Text(message, color=THEME.text_primary),
-            bgcolor=bgcolor,
-            duration=duration,
-        )
-        self.page.snack_bar.open = True
-        self.page.update()
+        self._deps.show_snackbar(message, bgcolor, duration)
 
     def info_dialog(self, title: str, message: str) -> None:
         """显示信息对话框
@@ -279,7 +299,7 @@ class DialogManager:
             show_dialog: 是否显示对话框
         """
         if title is None:
-            title = self.app._t("dialogs.error", "错误")
+            title = self._translate("dialogs.error", "错误")
 
         # 记录日志
         if log:
@@ -324,8 +344,19 @@ class DialogManager:
         Returns:
             tuple: (错误文本, 堆栈跟踪文本)
         """
-        error_text = ft.SelectableText(str(error), size=13, color=THEME.text_secondary)
-        traceback_text = ft.SelectableText(tb, size=11, color=THEME.text_muted, font_family="monospace")
+        error_text = ft.Text(
+            str(error),
+            size=13,
+            color=THEME.text_secondary,
+            selectable=True,
+        )
+        traceback_text = ft.Text(
+            tb,
+            size=11,
+            color=THEME.text_muted,
+            font_family="monospace",
+            selectable=True,
+        )
         return error_text, traceback_text
 
     def _create_error_placeholder_buttons(self, view_id: str, tb: str) -> List[ft.Control]:
@@ -335,13 +366,26 @@ class DialogManager:
             List[ft.Control]: 按钮列表 [关闭, 重试, 返回, 复制]
         """
         return [
-            ft.IconButton(icon=ft.Icons.CLOSE, icon_color=THEME.text_secondary,
-                         on_click=lambda e: self._close_error_view(), tooltip="关闭"),
-            ft.ElevatedButton("🔄 重试", on_click=lambda e: self._retry_view(view_id),
-                            bgcolor=THEME.accent, color=THEME.text_primary),
-            ft.OutlinedButton("← 返回首页",
-                            on_click=lambda e: self.app.view_manager.switch_view("explorer")),
-            ft.OutlinedButton("📋 复制错误", on_click=lambda e: self._copy_error_to_clipboard(tb)),
+            ft.IconButton(
+                icon=ft.Icons.CLOSE,
+                icon_color=THEME.text_secondary,
+                on_click=lambda e: self._close_error_view(),
+                tooltip="关闭",
+            ),
+            ft.Button(
+                "🔄 重试",
+                on_click=lambda e: self._retry_view(view_id),
+                bgcolor=THEME.accent,
+                color=THEME.text_primary,
+            ),
+            ft.OutlinedButton(
+                "← 返回首页",
+                on_click=lambda e: self._deps.switch_view("explorer"),
+            ),
+            ft.OutlinedButton(
+                "📋 复制错误",
+                on_click=lambda e: self._copy_error_to_clipboard(tb),
+            ),
         ]
 
     def _create_error_header(self, view_id: str, close_btn: ft.Control) -> ft.Row:
@@ -353,8 +397,12 @@ class DialogManager:
         return ft.Row([
             ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
             ft.Column([
-                ft.Text(f"加载页面 '{view_id}' 时出错", size=18,
-                       color=THEME.text_primary, weight=ft.FontWeight.BOLD),
+                ft.Text(
+                    f"加载页面 '{view_id}' 时出错",
+                    size=18,
+                    color=THEME.text_primary,
+                    weight=ft.FontWeight.BOLD,
+                ),
                 ft.Text("请检查错误信息，或尝试返回首页", size=12, color=THEME.text_muted),
             ], spacing=4),
             close_btn,
@@ -389,7 +437,7 @@ class DialogManager:
             error_text: 要复制的错误文本
         """
         try:
-            self.page.set_clipboard(error_text)
+            self._deps.copy_to_clipboard(error_text)
             self.info_dialog("✅ 成功", "错误信息已复制到剪贴板\n你可以直接粘贴到任何地方")
         except Exception as e:
             self.warn_dialog(
@@ -399,8 +447,8 @@ class DialogManager:
 
     def _close_error_view(self) -> None:
         """关闭错误页面，返回首页"""
-        self.app.views.pop("error", None)
-        self.app.view_manager.switch_view("explorer")
+        self._deps.remove_view("error")
+        self._deps.switch_view("explorer")
 
     def _retry_view(self, view_id: str) -> None:
         """重试加载视图
@@ -408,9 +456,9 @@ class DialogManager:
         Args:
             view_id: 视图ID
         """
-        self.app.views.pop(view_id, None)
+        self._deps.remove_view(view_id)
         try:
-            self.app.view_manager.switch_view(view_id)
+            self._deps.switch_view(view_id)
         except Exception:
             pass
 
@@ -424,23 +472,14 @@ class DialogManager:
         Returns:
             Optional[str]: 选择的目录路径，取消则返回None
         """
-        try:
-            from tkinter import Tk, filedialog
-            root = Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            path = filedialog.askdirectory(
-                title=self.app._t("common.select", "选择目录")
-            )
-            root.destroy()
-            return path if path else None
-        except Exception:
-            return None
+        return self._deps.file_dialogs.pick_directory(
+            self._translate("common.select", "选择目录")
+        )
 
     def pick_file(
         self,
         title: str = "",
-        file_types: Optional[List[tuple]] = None
+        file_types: Optional[List[FileType]] = None
     ) -> Optional[str]:
         """选择文件对话框
 
@@ -451,26 +490,20 @@ class DialogManager:
         Returns:
             Optional[str]: 选择的文件路径，取消则返回None
         """
-        try:
-            from tkinter import Tk, filedialog
-            root = Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            ft_list = file_types or [
-                (self.app._t("common.all_files", "所有文件"), "*.*")
-            ]
-            d_title = title or self.app._t("common.select", "选择文件")
-            path = filedialog.askopenfilename(title=d_title, filetypes=ft_list)
-            root.destroy()
-            return path if path else None
-        except Exception:
-            return None
+        selected_types = file_types or [
+            (self._translate("common.all_files", "所有文件"), "*.*")
+        ]
+        dialog_title = title or self._translate("common.select", "选择文件")
+        return self._deps.file_dialogs.pick_file(
+            dialog_title,
+            selected_types,
+        )
 
     def save_file(
         self,
         title: str = "",
         default_ext: str = ".txt",
-        file_types: Optional[List[tuple]] = None
+        file_types: Optional[List[FileType]] = None
     ) -> Optional[str]:
         """保存文件对话框
 
@@ -482,21 +515,12 @@ class DialogManager:
         Returns:
             Optional[str]: 选择的文件路径，取消则返回None
         """
-        try:
-            from tkinter import Tk, filedialog
-            root = Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            ft_list = file_types or [
-                (self.app._t("common.all_files", "所有文件"), "*.*")
-            ]
-            d_title = title or self.app._t("common.save", "保存文件")
-            path = filedialog.asksaveasfilename(
-                title=d_title,
-                defaultextension=default_ext,
-                filetypes=ft_list,
-            )
-            root.destroy()
-            return path if path else None
-        except Exception:
-            return None
+        selected_types = file_types or [
+            (self._translate("common.all_files", "所有文件"), "*.*")
+        ]
+        dialog_title = title or self._translate("common.save", "保存文件")
+        return self._deps.file_dialogs.save_file(
+            dialog_title,
+            default_ext,
+            selected_types,
+        )

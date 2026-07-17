@@ -20,6 +20,7 @@ import flet as ft
 from core.logger import LogLevel, logger, setup_default_logging
 
 from app.bootstrap.services import AppServices, create_app_services
+from app.adapters.file_dialogs import FileType, TkFileDialogs
 from app.models.save_context import CurrentSaveContext
 from app.models.save_store import CurrentSaveStore, RecentSave
 from app.controllers.migration_controller import (
@@ -34,15 +35,19 @@ from app.ui.view_catalog import create_default_view_catalog
 from app.ui.components.floating_log_panel import FloatingLogPanel, FloatingLogButton
 
 # 导入管理器
-from app.core.window_manager import WindowManager
-from app.core.dialog_manager import DialogManager
+from app.core.window_manager import (
+    ResponsiveShellHost,
+    WindowManager,
+    WindowManagerDependencies,
+)
+from app.core.dialog_manager import DialogManager, DialogManagerDependencies
 from app.core.view_manager import (
     ViewHost,
     ViewManager,
     ViewManagerDependencies,
 )
 from app.core.progress_manager import ProgressManager
-from app.core.gui_optimizer import GUIOptimizer
+from app.core.gui_optimizer import GUIOptimizer, GUIOptimizerDependencies
 from app.core.save_context_manager import SaveContextManager
 
 if TYPE_CHECKING:
@@ -135,14 +140,32 @@ class Application:
     def _init_managers(self) -> None:
         """初始化所有管理器"""
         # 窗口管理器
-        self.window_manager = WindowManager(self)
+        self.window_manager = WindowManager(WindowManagerDependencies(
+            page=self.page,
+            translate=self._t,
+            apply_compact_layout=(
+                lambda compact: self.view_manager.apply_compact_layout(compact)
+            ),
+            stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
+            dispose_views=lambda: self.view_manager.dispose(),
+        ))
         self.window_manager.setup_window()
 
         # 对话框管理器
-        self.dialog_manager = DialogManager(self)
+        self.dialog_manager = DialogManager(DialogManagerDependencies(
+            page=self.page,
+            translate=self._t,
+            switch_view=lambda view_id: self.view_manager.switch_view(view_id),
+            remove_view=lambda view_id: self.view_manager.remove_view(view_id),
+            copy_to_clipboard=self._copy_to_clipboard,
+            show_snackbar=self._show_snackbar,
+            file_dialogs=TkFileDialogs(),
+        ))
 
         # 视图管理器
-        view_catalog = create_default_view_catalog()
+        view_catalog = create_default_view_catalog(
+            settings_factory=lambda app: app.create_settings_view(),
+        )
         self.view_manager = ViewManager(ViewManagerDependencies(
             create_view=lambda view_id: view_catalog.create(view_id, self),
             get_current_save_path=lambda: self.current_save_path,
@@ -155,10 +178,17 @@ class Application:
         ))
 
         # 进度管理器
-        self.progress_manager = ProgressManager(self)
+        self.progress_manager = ProgressManager(self.page, self._t)
 
         # GUI优化管理器
-        self.gui_optimizer = GUIOptimizer(self)
+        self.gui_optimizer = GUIOptimizer(GUIOptimizerDependencies(
+            page=self.page,
+            get_ui_setting=lambda key, default: self.config.ui_settings.get(
+                key,
+                default,
+            ),
+            save_config=self.config.save,
+        ))
 
         # 当前存档状态和用例协调器
         self.current_save_store = CurrentSaveStore()
@@ -176,6 +206,75 @@ class Application:
             error_dialog=self.dialog_manager.error_dialog,
             activate_save=self._activate_current_save,
             log=self.log,
+        )
+
+    def create_settings_view(self) -> ft.Control:
+        """在组合根中装配设置页依赖。"""
+        from app.ui.views.settings import (
+            SettingsView,
+            SettingsViewDependencies,
+        )
+
+        return SettingsView(SettingsViewDependencies(
+            load_settings=self.config.get_settings,
+            save_settings=self.config.update_settings,
+            reset_settings=self._reset_settings,
+            translate=self._t,
+            apply_theme=self._apply_theme,
+            apply_language=self._apply_language,
+            set_sidebar_mode=self._set_sidebar_mode,
+            set_log_panel_visible=self._set_log_panel_visible,
+            configure_performance_monitor=(
+                self.gui_optimizer.configure_performance_monitor
+            ),
+            set_performance_interval=(
+                self.gui_optimizer.set_performance_print_interval
+            ),
+            info_dialog=self.info_dialog,
+            error_dialog=self.error_dialog,
+        ))
+
+    def _apply_theme(self, theme: str) -> None:
+        """将已持久化的主题选择应用到 Flet 壳层。"""
+        get_theme_manager().set_mode(theme)
+        self.page.bgcolor = THEME.bg_primary
+        self.page.window.bgcolor = THEME.bg_primary
+        self.page.theme_mode = (
+            ft.ThemeMode.LIGHT if theme == "light" else ft.ThemeMode.DARK
+        )
+        self.page.update()
+
+    def _apply_language(self, language: str) -> None:
+        """切换当前翻译服务语言。"""
+        self.i18n.set_language(language)
+
+    def _set_sidebar_mode(self, mode: str) -> None:
+        """通过侧边栏公开命令应用固定展开模式。"""
+        if not hasattr(self, "_sidebar"):
+            return
+        if mode == "collapsed":
+            self._sidebar.set_collapsed(True)
+        elif mode == "expanded":
+            self._sidebar.set_collapsed(False)
+
+    def _set_log_panel_visible(self, visible: bool) -> None:
+        """同步日志入口和悬浮面板可见性。"""
+        if not hasattr(self, "_log_fab"):
+            return
+        self._log_fab.set_visible(visible)
+        self.floating_log_panel.set_visible(False)
+
+    def _reset_settings(self) -> None:
+        """重置配置并同步所有即时生效的设置。"""
+        self.config.reset_config()
+        settings = self.config.get_settings()
+        self._apply_theme(settings.theme)
+        self._apply_language(settings.language)
+        self._set_sidebar_mode(settings.sidebar_mode)
+        self._set_log_panel_visible(settings.show_log_panel)
+        self.gui_optimizer.configure_performance_monitor(
+            settings.enable_performance_monitor,
+            float(settings.performance_print_interval),
         )
 
     def _on_current_save_changed(
@@ -365,7 +464,7 @@ class Application:
             bgcolor=THEME.bg_primary,
             border=ft.Border(
                 left=ft.BorderSide(4, THEME.border_light),
-                top=None,
+                top=ft.BorderSide(0, ft.Colors.TRANSPARENT),
                 right=ft.BorderSide(4, THEME.border_dark),
                 bottom=ft.BorderSide(4, THEME.border_dark),
             ),
@@ -373,6 +472,14 @@ class Application:
             shadow=mc_shadow(6),
             expand=True,
         )
+
+        self.window_manager.attach_responsive_host(ResponsiveShellHost(
+            sidebar=self._sidebar,
+            main_row=self._main_row,
+            shell=self._shell,
+            scrollable_content=self._scrollable_content,
+            content=self._content,
+        ))
 
         # 底部进度条 - Enhanced styling
         progress_container = self.progress_manager.create_progress_ui()
@@ -386,7 +493,7 @@ class Application:
             bgcolor=THEME.mc_wood,
             border=ft.Border(
                 left=ft.BorderSide(3, THEME.border_light),
-                top=None,
+                top=ft.BorderSide(0, ft.Colors.TRANSPARENT),
                 right=ft.BorderSide(3, THEME.border_dark),
                 bottom=ft.BorderSide(3, THEME.border_dark),
             ),
@@ -514,7 +621,7 @@ class Application:
     #  异常处理
     # ════════════════════════════════════════════
 
-    def _on_page_error(self, e: ft.ControlEvent) -> None:
+    def _on_page_error(self, e: ft.Event[ft.Page]) -> None:
         """页面级全局异常兜底
 
         Args:
@@ -555,6 +662,10 @@ class Application:
     # ════════════════════════════════════════════
     #  便捷方法（向后兼容）
     # ════════════════════════════════════════════
+
+    def translate(self, key: str, default: str = "", **kwargs) -> str:
+        """翻译公开端口，供视图使用。"""
+        return self._t(key, default, **kwargs)
 
     def _t(self, key: str, default: str = "", **kwargs) -> str:
         """翻译快捷方法
@@ -643,6 +754,23 @@ class Application:
         """
         self.progress_manager.set_progress_value(value)
 
+    def _copy_to_clipboard(self, text: str) -> None:
+        """Adapt Flet 0.85's async clipboard service to a sync command."""
+        self.page.run_task(self.page.clipboard.set, text)
+
+    def _show_snackbar(
+        self,
+        message: str,
+        bgcolor: str,
+        duration: int,
+    ) -> None:
+        """Show transient feedback through Flet's dialog-control API."""
+        self.page.show_dialog(ft.SnackBar(
+            content=ft.Text(message, color=THEME.text_primary),
+            bgcolor=bgcolor,
+            duration=duration,
+        ))
+
     # ─── 对话框方法（委托给 DialogManager）────────
     def info_dialog(self, title: str, message: str) -> None:
         """显示信息对话框
@@ -716,7 +844,7 @@ class Application:
     def pick_file(
         self,
         title: str = "",
-        file_types: Optional[List[tuple]] = None
+        file_types: Optional[List[FileType]] = None
     ) -> Optional[str]:
         """选择文件对话框
 
@@ -733,7 +861,7 @@ class Application:
         self,
         title: str = "",
         default_ext: str = ".txt",
-        file_types: Optional[List[tuple]] = None
+        file_types: Optional[List[FileType]] = None
     ) -> Optional[str]:
         """保存文件对话框
 
@@ -801,7 +929,7 @@ class Application:
             path = self.pick_directory()
             if path:
                 self.config.migration.src_path = path
-                self._update_migrator_field("_src_field", path)
+                self._update_migrator_path("source", path)
                 self.page.update()
         except Exception as e:
             self.handle_exception(e, title="选择目录失败")
@@ -812,7 +940,7 @@ class Application:
             path = self.pick_directory()
             if path:
                 self.config.migration.dest_path = path
-                self._update_migrator_field("_dest_field", path)
+                self._update_migrator_path("destination", path)
                 self.page.update()
         except Exception as e:
             self.handle_exception(e, title="选择目录失败")
@@ -823,28 +951,24 @@ class Application:
             path = self.pick_directory()
             if path:
                 self.config.migration.batch_dir_path = path
-                self._update_migrator_field("_batch_dir_field", path)
+                self._update_migrator_path("batch", path)
                 self.page.update()
         except Exception as e:
             self.handle_exception(e, title="选择目录失败")
 
-    def _update_migrator_field(self, field_name: str, value: str) -> None:
-        """更新 MigratorView 中的输入框值
+    def _update_migrator_path(self, target: str, value: str) -> None:
+        """通过公开页面命令更新 MigratorView 路径。
 
         Args:
-            field_name: 字段名称
+            target: source、destination 或 batch
             value: 字段值
         """
         view = self.view_manager.get_view("migrator")
-        field = getattr(view, field_name, None)
-        if field is not None:
-            field.value = value
-            try:
-                field.update()
-            except RuntimeError:
-                pass
+        setter = getattr(view, "set_path_value", None)
+        if callable(setter):
+            setter(target, value)
 
-    def _on_uuid_mappings_change(self, mappings: Dict[str, str]) -> None:
+    def update_uuid_mappings(self, mappings: Dict[str, str]) -> None:
         """UUID 映射变更回调
 
         Args:
@@ -854,7 +978,7 @@ class Application:
         self._save_config()
 
     # ════════════════════════════════════════════
-    #  属性访问（向后兼容）
+    #  公共状态访问
     # ════════════════════════════════════════════
 
     @property
@@ -874,73 +998,11 @@ class Application:
         return self.services.uuid
 
     @property
-    def views(self) -> Dict[str, ft.Control]:
-        """获取视图字典
-
-        Returns:
-            Dict[str, ft.Control]: 视图字典
-        """
-        return self.view_manager.views
-
-    @property
     def selected_view_id(self) -> Optional[str]:
         """Public read-only access to the selected sidebar view."""
         return self._sidebar.selected_id if hasattr(self, "_sidebar") else None
 
     @property
-    def _current_save_context(self):
-        """获取当前存档上下文"""
-        return self.save_context_manager.get_current_save_context()
-
-    @_current_save_context.setter
-    def _current_save_context(self, value):
-        """设置当前存档上下文"""
-        if value is not None:
-            self.save_context_manager.set_current_save_context(value)
-
-    @property
-    def _current_save_path(self) -> Optional[str]:
-        """获取当前存档路径"""
-        return self.current_save_path
-
-    @_current_save_path.setter
-    def _current_save_path(self, value: Optional[str]) -> None:
-        """设置当前存档路径（内部使用）"""
-        self.save_context_manager.set_current_save_path(value)
-
-    @property
     def current_save_path(self) -> Optional[str]:
         """Public read-only access to the selected save path."""
         return self.save_context_manager.get_current_save_path()
-
-    @property
-    def _recent_saves(self) -> List[Dict[str, str]]:
-        """获取最近存档列表"""
-        return self.save_context_manager.get_recent_saves()
-
-    @property
-    def notification_manager(self):
-        """获取通知管理器（向后兼容）"""
-        return self.gui_optimizer.notification_manager if hasattr(self, 'gui_optimizer') else None
-
-    @property
-    def _heartbeat_active(self) -> bool:
-        """获取心跳活动状态"""
-        return self.gui_optimizer._heartbeat_active if hasattr(self, 'gui_optimizer') else False
-
-    @_heartbeat_active.setter
-    def _heartbeat_active(self, value: bool) -> None:
-        """设置心跳活动状态"""
-        if hasattr(self, 'gui_optimizer'):
-            self.gui_optimizer._heartbeat_active = value
-
-    @property
-    def _hang_detector_active(self) -> bool:
-        """获取卡死检测器活动状态"""
-        return self.gui_optimizer._hang_detector_active if hasattr(self, 'gui_optimizer') else False
-
-    @_hang_detector_active.setter
-    def _hang_detector_active(self, value: bool) -> None:
-        """设置卡死检测器活动状态"""
-        if hasattr(self, 'gui_optimizer'):
-            self.gui_optimizer._hang_detector_active = value

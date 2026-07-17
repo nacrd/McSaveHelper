@@ -14,6 +14,7 @@ class ActionView(ft.Column):
         super().__init__()
         self.selected_paths = []
         self.command_calls = 0
+        self.compact_modes = []
 
     def get_top_actions(self) -> list[ViewAction]:
         return [ViewAction("执行", self._execute)]
@@ -23,6 +24,9 @@ class ActionView(ft.Column):
 
     def on_save_selected(self, path: str) -> None:
         self.selected_paths.append(path)
+
+    def set_compact_mode(self, compact: bool) -> None:
+        self.compact_modes.append(compact)
 
 
 def _manager(create_view, selected=lambda: "test"):
@@ -61,6 +65,11 @@ def test_view_manager_projects_view_actions_and_save_context() -> None:
 
     manager.set_top_actions_enabled(False)
     assert actions.controls[0].disabled is True
+
+    manager.apply_compact_layout(True)
+    assert actions.spacing == 6
+    assert getattr(actions.controls[0], "height") == 34
+    assert view.compact_modes == [True]
 
     manager.notify_current_view_save_selected("D:/other")
     assert view.selected_paths[-1] == "D:/other"

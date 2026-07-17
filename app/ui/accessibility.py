@@ -171,7 +171,7 @@ def accessible_button(
     on_click: Optional[Callable] = None,
     tooltip: Optional[str] = None,
     semantic_label: Optional[str] = None,
-    icon: Optional[str] = None,
+    icon: Optional[ft.IconData] = None,
     disabled: bool = False,
     **kwargs
 ) -> ft.ElevatedButton:
@@ -190,7 +190,7 @@ def accessible_button(
         配置好的按钮控件
     """
     return ft.ElevatedButton(
-        text=text,
+        content=text,
         icon=icon,
         on_click=on_click,
         tooltip=tooltip or text,
@@ -233,7 +233,7 @@ def accessible_text_field(
         label=display_label,
         value=value,
         hint_text=hint_text,
-        error_text=error_text,
+        error=error_text,
         on_change=on_change,
         password=password,
         can_reveal_password=password,  # 密码字段允许显示/隐藏
@@ -296,12 +296,10 @@ def announce_to_screen_reader(
         priority: 优先级 "polite" 或 "assertive"
     """
     # Flet 通过 SnackBar 实现可访问的通知
-    page.snack_bar = ft.SnackBar(
+    page.show_dialog(ft.SnackBar(
         content=ft.Text(message),
         duration=3000 if priority == "polite" else 5000,
-    )
-    page.snack_bar.open = True
-    page.update()
+    ))
 
 
 class SkipLink(ft.TextButton):
@@ -314,16 +312,16 @@ class SkipLink(ft.TextButton):
 
     def __init__(self, target_id: str, text: str = "跳转到主内容"):
         super().__init__(
-            text=text,
+            content=text,
             # 默认隐藏，获得焦点时显示
             style=ft.ButtonStyle(
                 color={
-                    ft.MaterialState.DEFAULT: "transparent",
-                    ft.MaterialState.FOCUSED: THEME.text_primary,
+                    ft.ControlState.DEFAULT: "transparent",
+                    ft.ControlState.FOCUSED: THEME.text_primary,
                 },
                 bgcolor={
-                    ft.MaterialState.DEFAULT: "transparent",
-                    ft.MaterialState.FOCUSED: THEME.accent,
+                    ft.ControlState.DEFAULT: "transparent",
+                    ft.ControlState.FOCUSED: THEME.accent,
                 },
             ),
         )

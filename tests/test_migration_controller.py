@@ -67,7 +67,6 @@ def _create_controller(config, migration, state, start_worker=None):
 def test_controller_rejects_missing_source_without_starting_worker(
     tmp_path: Path,
 ) -> None:
-    ConfigService._instance = None
     config = ConfigService(tmp_path / "config")
     state = {}
     workers = []
@@ -83,13 +82,11 @@ def test_controller_rejects_missing_source_without_starting_worker(
     assert workers == []
     assert state["warnings"]
     assert "请先" in state["warnings"][0][0][1]
-    ConfigService._instance = None
 
 
 def test_controller_selects_single_worker_and_injects_destination(
     tmp_path: Path,
 ) -> None:
-    ConfigService._instance = None
     config = ConfigService(tmp_path / "config")
     config.migration.src_path = str(tmp_path / "source")
     config.migration.dest_path = str(tmp_path / "output")
@@ -111,13 +108,11 @@ def test_controller_selects_single_worker_and_injects_destination(
     ]
     assert state["enabled"] == [False]
     assert state["updates"] == [True]
-    ConfigService._instance = None
 
 
 def test_controller_single_run_reports_success_and_resets_ui(
     tmp_path: Path,
 ) -> None:
-    ConfigService._instance = None
     config = ConfigService(tmp_path / "config")
     config.migration.src_path = str(tmp_path / "source")
     config.migration.world_name = "converted"
@@ -132,4 +127,3 @@ def test_controller_single_run_reports_success_and_resets_ui(
     assert "converted" in state["successes"][0][0][1]
     assert state["enabled"][-1] is True
     assert state["progress_values"][-1] == 0
-    ConfigService._instance = None

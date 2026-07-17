@@ -39,8 +39,11 @@ from app.ui.performance.frame_rate import (
 
 # 创建全局单例实例（向后兼容）
 perf_monitor = PerformanceMonitor()
-resource_monitor = ResourceUsageMonitor()
 health_monitor = HealthMonitor()
+resource_monitor = ResourceUsageMonitor(
+    performance_monitor=perf_monitor,
+    health_monitor=health_monitor,
+)
 async_tracker = AsyncOperationTracker()
 
 # 导出所有公共接口

@@ -98,6 +98,23 @@ class ViewManager:
             except RuntimeError:
                 pass
 
+    def apply_compact_layout(self, compact: bool) -> None:
+        """Resize shell actions and notify the active view."""
+        if self._host is not None:
+            self._host.top_actions.spacing = 6 if compact else 8
+            for button in self._host.top_actions.controls:
+                if hasattr(button, "height"):
+                    setattr(button, "height", 34 if compact else 38)
+                if hasattr(button, "width") and compact:
+                    width = getattr(button, "width", 120) or 120
+                    setattr(button, "width", min(width, 104))
+
+        view_id = self._deps.get_selected_view_id()
+        current_view = self.views.get(view_id) if view_id else None
+        callback = getattr(current_view, "set_compact_mode", None)
+        if callable(callback):
+            callback(compact)
+
     def _notify_save_selected(self, view: ft.Control) -> None:
         current_save_path = self._deps.get_current_save_path()
         callback = getattr(view, "on_save_selected", None)

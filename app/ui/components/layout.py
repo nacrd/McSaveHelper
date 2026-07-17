@@ -13,13 +13,13 @@ class TabSpec(NamedTuple):
     """Small descriptor for a segmented tab in a view."""
 
     label: str
-    icon: str
+    icon: ft.IconData
 
 
 def page_header(
     title: str,
     subtitle: ft.Control,
-    icon: str = IconSet.SETTINGS,
+    icon: ft.IconData = IconSet.SETTINGS,
     actions: ft.Control | None = None,
 ) -> ft.Container:
     """Create the shared page title bar used by full-page views."""

@@ -95,18 +95,15 @@ When implementing similar features, refer to:
 
 ### Flet API Compatibility
 
-**IMPORTANT**: This project includes extensive Flet 0.85+ API compatibility patches in `main.py` (`_patch_flet_api()`). These monkey-patches handle breaking API changes:
+The project uses the native Flet 0.85+ API directly. Do not add global monkey-patches
+to `main.py`; compatibility belongs at the component or adapter boundary.
 
-1. `ft.alignment.center` and similar convenience properties
-2. `ft.ImageFit` → `ft.BoxFit` rename
-3. `ft.Image` constructor `src` parameter requirements
-4. `ft.Dropdown` constructor `on_change` parameter handling
-5. `ft.Spacer` removal (replaced with `ft.Container(expand=True)`)
-6. `ft.border.all()` deprecation
-7. `page.set_clipboard()` → `page.set_clipboard_async()` change
-8. `page.run_task()` async function requirements
-
-When working with Flet components, be aware these patches exist and avoid breaking them.
+- Use `ft.Alignment`, `ft.BoxFit`, `ft.Border.all`, and `ft.Container(expand=True)`.
+- Bind dropdown changes through `on_select`.
+- Show dialogs and snack bars with `page.show_dialog()`.
+- Use `page.clipboard.set()` through `page.run_task()`.
+- Pass only async callables to `page.run_task()`; use `app.ui.utils.run_on_ui()`
+  when scheduling a synchronous UI callback from a worker thread.
 
 ### Type Checking Configuration
 

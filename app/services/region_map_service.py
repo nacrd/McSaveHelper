@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from core.region_utils import parse_region_coords, scan_region_dir
 from core.perf_timing import PerfTimer
+from core.mca.topview_renderer import render_region_topview
 
 
 @dataclass
@@ -269,8 +270,6 @@ class RegionMapService:
             with self._data_lock:
                 if generation != self._topview_generation:
                     return
-            from app.ui.views.explorer.map.topview_renderer import render_region_topview
-
             png = render_region_topview(path, tile_size=tile_size)
         except Exception:
             png = None

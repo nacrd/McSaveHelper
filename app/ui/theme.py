@@ -452,7 +452,10 @@ def mc_shadow(offset: int = 4) -> ft.BoxShadow:
     )
 
 
-def mc_shadow_glow(color: str = None, blur: int = 8) -> ft.BoxShadow:
+def mc_shadow_glow(
+    color: Optional[str] = None,
+    blur: int = 8,
+) -> ft.BoxShadow:
     """Create a glowing shadow effect (for hover/active states)
 
     Args:
@@ -462,12 +465,11 @@ def mc_shadow_glow(color: str = None, blur: int = 8) -> ft.BoxShadow:
     Returns:
         ft.BoxShadow: Glowing shadow effect
     """
-    if color is None:
-        color = THEME.shadow_glow
+    selected_color = color or THEME.shadow_glow
     return ft.BoxShadow(
         spread_radius=2,
         blur_radius=blur,
-        color=color,
+        color=selected_color,
         offset=ft.Offset(0, 0),
     )
 
@@ -497,7 +499,10 @@ def mc_focus_border(width: int = 3) -> ft.Border:
 #  Gradient utilities
 # ════════════════════════════════════════════
 
-def mc_gradient_bg(color1: str = None, color2: str = None) -> ft.LinearGradient:
+def mc_gradient_bg(
+    color1: Optional[str] = None,
+    color2: Optional[str] = None,
+) -> ft.LinearGradient:
     """Create a subtle gradient background
 
     Args:
@@ -507,12 +512,10 @@ def mc_gradient_bg(color1: str = None, color2: str = None) -> ft.LinearGradient:
     Returns:
         ft.LinearGradient: Gradient for backgrounds
     """
-    if color1 is None:
-        color1 = THEME.bg_primary
-    if color2 is None:
-        color2 = THEME.bg_secondary
+    start_color = color1 or THEME.bg_primary
+    end_color = color2 or THEME.bg_secondary
     return ft.LinearGradient(
-        begin=ft.alignment.top_center,
-        end=ft.alignment.bottom_center,
-        colors=[color1, color2],
+        begin=ft.Alignment(0, -1),
+        end=ft.Alignment(0, 1),
+        colors=[start_color, end_color],
     )

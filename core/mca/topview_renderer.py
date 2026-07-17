@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import io
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from PIL import Image
@@ -142,6 +142,70 @@ def _color_for_block(block: Any) -> Tuple[int, int, int]:
         return (128, 128, 128)
 
 
+Color = Tuple[int, int, int]
+ColorGrid = List[List[Color]]
+
+
+def _load_cached_tile(region_path: Path, tile_size: int) -> Optional[bytes]:
+    try:
+        from core.mca.tile_cache import load_tile
+
+        return load_tile(region_path, tile_size)
+    except Exception:
+        return None
+
+
+def _sample_surface_grid(
+    region_path: Path,
+    tile_size: int,
+) -> Optional[ColorGrid]:
+    try:
+        from core.mca.surface import sample_region_surface_colors
+
+        return sample_region_surface_colors(
+            region_path,
+            tile_size=tile_size,
+            color_for_block=_color_for_block_name,
+        )
+    except Exception:
+        return None
+
+
+def _encode_png(grid: ColorGrid, tile_size: int) -> Optional[bytes]:
+    image = Image.new("RGB", (tile_size, tile_size), color=(40, 55, 45))
+    try:
+        try:
+            image.putdata([color for row in grid for color in row])
+        except Exception:
+            pixels = image.load()
+            if pixels is None:
+                return None
+            for pz, row in enumerate(grid):
+                for px, color in enumerate(row):
+                    pixels[px, pz] = color
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=False, compress_level=1)
+        return buffer.getvalue()
+    except Exception:
+        return None
+    finally:
+        image.close()
+
+
+def _store_cached_tile(
+    region_path: Path,
+    tile_size: int,
+    png: bytes,
+) -> None:
+    try:
+        from core.mca.tile_cache import store_tile
+
+        store_tile(region_path, tile_size, png)
+    except Exception:
+        pass
+
+
 def render_region_topview(
     region_file: Path | str,
     tile_size: int = DEFAULT_TILE_SIZE,
@@ -159,54 +223,19 @@ def render_region_topview(
     tile_size = max(8, min(256, int(tile_size)))
 
     if use_disk_cache:
-        try:
-            from core.mca.tile_cache import load_tile
+        cached = _load_cached_tile(region_path, tile_size)
+        if cached:
+            return cached
 
-            cached = load_tile(region_path, tile_size)
-            if cached:
-                return cached
-        except Exception:
-            pass
-
-    try:
-        from core.mca.surface import sample_region_surface_colors
-
-        grid = sample_region_surface_colors(
-            region_path,
-            tile_size=tile_size,
-            color_for_block=_color_for_block_name,
-        )
-    except Exception:
-        return None
-
+    grid = _sample_surface_grid(region_path, tile_size)
     if grid is None:
         return None
 
-    image = Image.new("RGB", (tile_size, tile_size), color=(40, 55, 45))
-    try:
-        image.putdata([c for row in grid for c in row])
-    except Exception:
-        pixels = image.load()
-        for pz, row in enumerate(grid):
-            for px, color in enumerate(row):
-                pixels[px, pz] = color
-
-    buf = io.BytesIO()
-    try:
-        image.save(buf, format="PNG", optimize=False, compress_level=1)
-        png = buf.getvalue()
-    except Exception:
+    png = _encode_png(grid, tile_size)
+    if png is None:
         return None
-    finally:
-        image.close()
-
     if use_disk_cache and png:
-        try:
-            from core.mca.tile_cache import store_tile
-
-            store_tile(region_path, tile_size, png)
-        except Exception:
-            pass
+        _store_cached_tile(region_path, tile_size, png)
     return png
 
 

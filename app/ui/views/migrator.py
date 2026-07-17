@@ -45,7 +45,7 @@ class MigratorView(ft.Column):
 
     @property
     def _t(self):
-        return self.app._t
+        return self.app.translate
 
     def get_top_actions(self) -> list[ViewAction]:
         return [
@@ -54,6 +54,23 @@ class MigratorView(ft.Column):
                 lambda event: self.app.start(),
             )
         ]
+
+    def set_path_value(self, target: str, value: str) -> None:
+        """Update a path control through the public view command boundary."""
+        fields = {
+            "source": self._src_field,
+            "destination": self._dest_field,
+            "batch": self._batch_dir_field,
+        }
+        try:
+            field = fields[target]
+        except KeyError as error:
+            raise ValueError(f"未知路径目标: {target}") from error
+        field.value = value
+        try:
+            field.update()
+        except RuntimeError:
+            pass
 
     def _build(self) -> None:
         self.controls.clear()
@@ -86,7 +103,7 @@ class MigratorView(ft.Column):
             bgcolor=THEME.bg_secondary,
             padding=16,
             border_radius=8,
-            border=ft.border.all(1, THEME.border_subtle),
+            border=ft.Border.all(1, THEME.border_subtle),
         )
         self.controls.append(guide_card)
 
@@ -208,7 +225,7 @@ class MigratorView(ft.Column):
             width=280,
             border_color=THEME.border_standard,
             text_size=13,
-            on_select=self._on_version_change,
+            on_select=lambda _: self._on_version_change(),
         )
         s.controls.append(ft.Container(
             content=ft.Row([
@@ -385,7 +402,10 @@ class MigratorView(ft.Column):
                 "right_panel.full_mode", "🧠 完整模式"))
         mode_group = ft.RadioGroup(
             content=ft.Row([self._mode_fast, self._mode_full], spacing=30),
-            value=mc.mode, on_change=self._on_mode_change,
+            value=mc.mode,
+            on_change=lambda _: self._on_mode_change(
+                mode_group.value or "fast"
+            ),
         )
         s.controls.append(ft.Container(
             content=mode_group,
@@ -499,10 +519,10 @@ class MigratorView(ft.Column):
 
     # ─── 联动回调 ──────────────────────────────
 
-    def _on_mode_change(self, e: ft.ControlEvent) -> None:
+    def _on_mode_change(self, mode: str) -> None:
         mc = self.app.config.migration
-        mc.mode = e.control.value
-        is_fast = e.control.value == "fast"
+        mc.mode = mode
+        is_fast = mode == "fast"
 
         self._mode_desc.value = (
             "⚡ 快速模式：仅复制UUID文件，速度最快"
@@ -518,7 +538,7 @@ class MigratorView(ft.Column):
 
         self.update()
 
-    def _on_version_change(self, e: ft.ControlEvent) -> None:
+    def _on_version_change(self) -> None:
         self.app.config.migration.target_version = self._vc_version_dd.value or ""
         self._on_version_update()
         self.update()
