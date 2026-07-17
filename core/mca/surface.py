@@ -13,7 +13,7 @@ import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from core.mca.block_palette import get_chunk_blocks, is_air_name
 from core.mca.errors import ChunkMissing, McaError
@@ -22,6 +22,7 @@ from core.mca.region_file import RegionFile
 PathLike = Union[str, Path]
 Color = Tuple[int, int, int]
 ColorFunc = Callable[[str], Color]
+SampleJob = Tuple[int, int, int, int, int, int]
 
 DEFAULT_EMPTY = (45, 60, 50)
 DEFAULT_WATERISH = (64, 164, 223)
@@ -84,6 +85,129 @@ def _decode_one(
         return (cx, cz), None
 
 
+def _build_sample_jobs(edge: int) -> List[SampleJob]:
+    jobs: List[SampleJob] = []
+    for row in range(edge):
+        for column in range(edge):
+            block_x = min(511, int((column + 0.5) * 512 / edge))
+            block_z = min(511, int((row + 0.5) * 512 / edge))
+            chunk_x, local_x = divmod(block_x, 16)
+            chunk_z, local_z = divmod(block_z, 16)
+            jobs.append((column, row, chunk_x, chunk_z, local_x, local_z))
+    return jobs
+
+
+def _needed_chunks(region: RegionFile, jobs: List[SampleJob]) -> Set[Tuple[int, int]]:
+    return {
+        (chunk_x, chunk_z)
+        for _, _, chunk_x, chunk_z, _, _ in jobs
+        if region.has_chunk(chunk_x, chunk_z)
+    }
+
+
+def _load_chunk_views(
+    region: RegionFile,
+    needed: Set[Tuple[int, int]],
+    path_key: str,
+    mtime_ns: int,
+) -> Dict[Tuple[int, int], Optional[Any]]:
+    views: Dict[Tuple[int, int], Optional[Any]] = {}
+    misses: List[Tuple[int, int]] = []
+    for chunk_x, chunk_z in needed:
+        hit, view = _lru_get((path_key, mtime_ns, chunk_x, chunk_z))
+        if hit:
+            views[(chunk_x, chunk_z)] = view
+        else:
+            misses.append((chunk_x, chunk_z))
+
+    if len(misses) < 12 or min(_DECODE_WORKERS, len(misses)) <= 1:
+        _decode_misses_sequential(region, misses, path_key, mtime_ns, views)
+    else:
+        _decode_misses_parallel(region, misses, path_key, mtime_ns, views)
+    return views
+
+
+def _decode_misses_sequential(
+    region: RegionFile,
+    misses: List[Tuple[int, int]],
+    path_key: str,
+    mtime_ns: int,
+    views: Dict[Tuple[int, int], Optional[Any]],
+) -> None:
+    for chunk_x, chunk_z in misses:
+        try:
+            nbt = region.read_chunk(chunk_x, chunk_z)
+            view = get_chunk_blocks(nbt)
+        except Exception:
+            view = None
+        views[(chunk_x, chunk_z)] = view
+        _lru_put((path_key, mtime_ns, chunk_x, chunk_z), view)
+
+
+def _decode_misses_parallel(
+    region: RegionFile,
+    misses: List[Tuple[int, int]],
+    path_key: str,
+    mtime_ns: int,
+    views: Dict[Tuple[int, int], Optional[Any]],
+) -> None:
+    workers = min(_DECODE_WORKERS, len(misses))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [
+            pool.submit(_decode_one, region._data, chunk_x, chunk_z)
+            for chunk_x, chunk_z in misses
+        ]
+        for future in as_completed(futures):
+            try:
+                key, view = future.result()
+            except Exception:
+                continue
+            views[key] = view
+            _lru_put((path_key, mtime_ns, key[0], key[1]), view)
+
+
+def _sample_coarse_grid(
+    edge: int,
+    jobs: List[SampleJob],
+    views: Dict[Tuple[int, int], Optional[Any]],
+) -> List[List[Optional[str]]]:
+    grid: List[List[Optional[str]]] = [
+        [None for _ in range(edge)] for _ in range(edge)
+    ]
+    for column, row, chunk_x, chunk_z, local_x, local_z in jobs:
+        view = views.get((chunk_x, chunk_z))
+        if view is None:
+            continue
+        try:
+            grid[row][column] = view.surface_block_id(local_x, local_z)
+        except Exception:
+            grid[row][column] = None
+    return grid
+
+
+def _resize_nearest(
+    source: Sequence[Sequence[Optional[str]]],
+    target_size: int,
+) -> List[List[Optional[str]]]:
+    source_size = len(source)
+    if source_size == target_size:
+        return [list(row) for row in source]
+    target: List[List[Optional[str]]] = [
+        [None for _ in range(target_size)] for _ in range(target_size)
+    ]
+    for target_z in range(target_size):
+        source_z = min(source_size - 1, target_z * source_size // target_size)
+        source_row = source[source_z]
+        target_row = target[target_z]
+        for target_x in range(target_size):
+            source_x = min(
+                source_size - 1,
+                target_x * source_size // target_size,
+            )
+            target_row[target_x] = source_row[source_x]
+    return target
+
+
 def sample_region_surface_ids(
     region_file: PathLike,
     tile_size: int = 64,
@@ -98,83 +222,17 @@ def sample_region_surface_ids(
 
     try:
         path_key, mtime_ns = _path_mtime(region_path)
-        n = _coarse_edge(tile_size)
-        coarse: List[List[Optional[str]]] = [
-            [None for _ in range(n)] for _ in range(n)
-        ]
-        jobs: List[Tuple[int, int, int, int, int, int]] = []
-        for j in range(n):
-            for i in range(n):
-                bx = min(511, int((i + 0.5) * 512 / n))
-                bz = min(511, int((j + 0.5) * 512 / n))
-                cx, lx = divmod(bx, 16)
-                cz, lz = divmod(bz, 16)
-                jobs.append((i, j, cx, cz, lx, lz))
-
-        needed: Set[Tuple[int, int]] = set()
-        for _, _, cx, cz, _, _ in jobs:
-            if rf.has_chunk(cx, cz):
-                needed.add((cx, cz))
-
-        chunk_views: Dict[Tuple[int, int], Optional[Any]] = {}
-        miss: List[Tuple[int, int]] = []
-        for cx, cz in needed:
-            hit, view = _lru_get((path_key, mtime_ns, cx, cz))
-            if hit:
-                chunk_views[(cx, cz)] = view
-            else:
-                miss.append((cx, cz))
-
-        if miss:
-            data = rf._data  # noqa: SLF001
-            workers = min(_DECODE_WORKERS, max(1, len(miss)))
-            if len(miss) < 12 or workers == 1:
-                for cx, cz in miss:
-                    try:
-                        nbt = rf.read_chunk(cx, cz)
-                        view = get_chunk_blocks(nbt)
-                    except Exception:
-                        view = None
-                    chunk_views[(cx, cz)] = view
-                    _lru_put((path_key, mtime_ns, cx, cz), view)
-            else:
-                with ThreadPoolExecutor(max_workers=workers) as pool:
-                    futs = [
-                        pool.submit(_decode_one, data, cx, cz) for cx, cz in miss
-                    ]
-                    for fut in as_completed(futs):
-                        try:
-                            key, view = fut.result()
-                            chunk_views[key] = view
-                            _lru_put(
-                                (path_key, mtime_ns, key[0], key[1]), view
-                            )
-                        except Exception:
-                            continue
-
-        for i, j, cx, cz, lx, lz in jobs:
-            view = chunk_views.get((cx, cz))
-            if view is None:
-                continue
-            try:
-                coarse[j][i] = view.surface_block_id(lx, lz)
-            except Exception:
-                coarse[j][i] = None
-
-        if n == tile_size:
-            return coarse
-
-        grid: List[List[Optional[str]]] = [
-            [None for _ in range(tile_size)] for _ in range(tile_size)
-        ]
-        for pz in range(tile_size):
-            j = min(n - 1, pz * n // tile_size)
-            row_c = coarse[j]
-            row_g = grid[pz]
-            for px in range(tile_size):
-                i = min(n - 1, px * n // tile_size)
-                row_g[px] = row_c[i]
-        return grid
+        edge = _coarse_edge(tile_size)
+        jobs = _build_sample_jobs(edge)
+        needed = _needed_chunks(rf, jobs)
+        chunk_views = _load_chunk_views(
+            rf,
+            needed,
+            path_key,
+            mtime_ns,
+        )
+        coarse = _sample_coarse_grid(edge, jobs, chunk_views)
+        return _resize_nearest(coarse, tile_size)
     finally:
         rf.close()
 
