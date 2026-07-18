@@ -7,32 +7,25 @@ from typing import Any, Dict, Optional, Tuple
 
 import flet as ft
 
-from app.ui.theme import THEME, mc_border
-from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
-from app.ui.components.cards import card
+from app.ui.theme import THEME
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
 from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
+from app.ui.views.explorer.region_tab_chrome import (
+    REGION_DISPLAY_HELP,
+    REGION_LEGEND,
+    build_map_fallback,
+    build_region_legend_content,
+    build_region_tab_chrome,
+)
+from core.mca.region_selection import format_region_selection
 
 
 class RegionTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer region / map tab."""
 
     def _build_region_tab(self) -> None:
-        self._dimension_dropdown = ft.Dropdown(
-            options=[],
-            on_select=self._on_dimension_changed,
-            border_color=THEME.border_standard,
-            text_size=13,
-            width=180,
-        )
-
-        dimension_row = ft.Row([
-            ft.Text("维度：", size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            self._dimension_dropdown,
-        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER)
-
         try:
             self._map_view = McaMapView(
                 map_service=self._map_service,
@@ -43,137 +36,38 @@ class RegionTabMixin(ExplorerMixinHost):
             map_view = self._map_view
         except Exception:
             self._map_view = None
-            map_view = ft.Container(
-                content=ft.Column([
-                    ft.Icon(ft.Icons.WARNING, size=48, color="#FF9800"),
-                    ft.Text(
-                        "区域地图组件不可用",
-                        size=16,
-                        weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary,
-                    ),
-                    ft.Text("请升级 Flet 版本以启用区域地图功能", size=13, color=THEME.text_muted),
-                ], spacing=10, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
-                padding=50,
-                bgcolor=THEME.bg_card,
-                border_radius=8,
-            )
+            map_view = build_map_fallback()
 
-        self._region_help_text = ft.Text(
-            "滚轮缩放自动切层级 · 双击深入区块/区块内 · 右键逐级返回 · 坐标随缩放变为游戏坐标",
-            size=11,
-            color=THEME.text_muted,
-            no_wrap=True,
-            overflow=ft.TextOverflow.ELLIPSIS,
+        chrome = build_region_tab_chrome(
+            map_content=map_view,
+            on_dimension_changed=self._on_dimension_changed,
+            on_display_mode_changed=self._change_region_display_mode,
+            on_refresh=self._refresh_map,
+            on_zoom_in=self._map_zoom_in,
+            on_zoom_out=self._map_zoom_out,
+            on_reset=self._map_reset_view,
+            on_toggle_coordinates=self._toggle_map_coordinates,
+            on_toggle_empty=self._toggle_map_empty_regions,
+            on_toggle_fullscreen=self._toggle_map_fullscreen,
+            on_fill_nbt=self._fill_selected_region_for_nbt,
+            on_delete_region=self._delete_selected_region,
         )
-
-        # Keep display-mode state for side-panel detail text.
         self._region_display_mode = "topview"
-        self._region_display_mode_dropdown = ft.Dropdown(
-            label="显示方式",
-            value="topview",
-            width=150,
-            options=[
-                ft.dropdown.Option("topview", "方块俯视"),
-            ],
-            on_select=lambda: self._change_region_display_mode(),
-            border_color=THEME.border_light,
-            focused_border_color=THEME.accent,
-            color=THEME.text_primary,
-            bgcolor=THEME.bg_card,
-        )
-
-        self._map_coord_btn = btn_ghost(
-            "隐藏坐标", width=88, on_click=lambda e: self._toggle_map_coordinates())
-        self._map_empty_btn = btn_ghost(
-            "显示空格", width=88, on_click=lambda e: self._toggle_map_empty_regions())
-        self._map_fullscreen_btn = btn_ghost(
-            "⛶ 全屏", width=88, on_click=lambda e: self._toggle_map_fullscreen())
-
-        self._region_stats_text = ft.Text(
-            "等待设置当前存档...", size=11, color=THEME.text_muted)
-        self._region_status_text = ft.Text(
-            "👆 点击方块查看详情", size=12, color=THEME.text_secondary)
-
-        action_row = ft.Row([
-            btn_ghost("填入 NBT", width=100, on_click=self._fill_selected_region_for_nbt),
-            btn_danger("删除区域", width=100, on_click=self._delete_selected_region),
-        ], spacing=6)
-
-        view_option_row = ft.Row(
-            [self._map_coord_btn, self._map_empty_btn, self._map_fullscreen_btn],
-            spacing=6,
-        )
-        toolbar = card(ft.Row([
-            dimension_row,
-            self._region_display_mode_dropdown,
-            btn_primary("🔄 刷新", width=84, on_click=lambda e: self._refresh_map()),
-            btn_ghost("🔍+", width=52, on_click=lambda e: self._map_zoom_in()),
-            btn_ghost("🔍−", width=52, on_click=lambda e: self._map_zoom_out()),
-            btn_ghost("🏠", width=52, on_click=lambda e: self._map_reset_view()),
-            view_option_row,
-            self._region_help_text,
-        ], spacing=8, vertical_alignment=ft.CrossAxisAlignment.CENTER, wrap=True), padding=8)
-        self._region_toolbar = toolbar
-
-        self._map_host = ft.Container(
-            content=map_view,
-            bgcolor=THEME.bg_secondary,
-            border=mc_border(2),
-            border_radius=0,
-            padding=2,
-            expand=True,
-            alignment=ft.alignment.Alignment(0, 0),
-        )
-        map_card = card(self._map_host, padding=4)
-        map_card.expand = True
-        self._region_map_card = map_card
-
-        stats_card = card(ft.Column([
-            ft.Text("📊 概况", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            self._region_stats_text,
-        ], spacing=4), padding=8)
-
-        selection_card = card(ft.Column([
-            ft.Text("👆 选中", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            self._region_status_text,
-        ], spacing=4), padding=8)
-
-        self._region_legend_container = ft.Container(
-            content=self._create_region_legend_content())
-        legend = card(self._region_legend_container, padding=8)
-
-        left_panel = ft.Container(
-            content=ft.Column([
-                toolbar,
-                map_card,
-            ], spacing=6, expand=True),
-            expand=True,
-        )
-        self._region_left_panel = left_panel
-
-        # Compact side rail — no fixed height / no forced scroll
-        side_panel = ft.Container(
-            content=ft.Column([
-                selection_card,
-                stats_card,
-                legend,
-                card(ft.Column([
-                    ft.Text("🛠️ 操作", size=12, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-                    action_row,
-                ], spacing=6), padding=8),
-            ], spacing=6),
-            width=280,
-            expand=False,
-        )
-        self._region_side_panel = side_panel
-
-        self._region_layout = ft.Row(
-            [left_panel, side_panel],
-            spacing=10,
-            expand=True,
-            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-        )
+        self._dimension_dropdown = chrome.dimension_dropdown
+        self._region_display_mode_dropdown = chrome.display_mode_dropdown
+        self._map_coord_btn = chrome.coord_button
+        self._map_empty_btn = chrome.empty_button
+        self._map_fullscreen_btn = chrome.fullscreen_button
+        self._region_help_text = chrome.help_text
+        self._region_stats_text = chrome.stats_text
+        self._region_status_text = chrome.status_text
+        self._region_legend_container = chrome.legend_container
+        self._region_toolbar = chrome.toolbar
+        self._map_host = chrome.map_host
+        self._region_map_card = chrome.map_card
+        self._region_left_panel = chrome.left_panel
+        self._region_side_panel = chrome.side_panel
+        self._region_layout = chrome.layout
         self._tab_region.content = self._region_layout
         self._tab_region.expand = True
         self._map_fullscreen_controller = (
@@ -214,29 +108,11 @@ class RegionTabMixin(ExplorerMixinHost):
             self._map_fullscreen_controller.exit()
 
     def _create_region_legend_content(self) -> ft.Column:
-        title, items = self._get_region_display_legend()
-        legend_rows = []
-        for color, item_title, desc in items:
-            legend_rows.append(ft.Row([
-                ft.Container(width=18, height=18, bgcolor=color, border_radius=2),
-                ft.Text(item_title, size=11, color=THEME.text_primary, width=58),
-                ft.Text(desc, size=10, color=THEME.text_muted),
-            ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER))
-        return ft.Column([
-            ft.Text(title, size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            *legend_rows,
-        ], spacing=5)
+        return build_region_legend_content()
 
     def _get_region_display_legend(
             self) -> tuple[str, list[tuple[str, str, str]]]:
-        return "🗺️ 俯视图例", [
-            ("#228B22", "草地", "植被"),
-            ("#64A4DF", "水体", "海/河"),
-            ("#EED6AF", "沙地", "沙漠"),
-            ("#808080", "岩石", "石/深板岩"),
-            ("#4CAF50", "占位", "未加载"),
-            ("#FFD54F", "选中", "边框"),
-        ]
+        return "🗺️ 俯视图例", list(REGION_LEGEND)
 
     def _change_region_display_mode(self) -> None:
         mode = self._region_display_mode_dropdown.value or "topview"
@@ -260,7 +136,8 @@ class RegionTabMixin(ExplorerMixinHost):
             self._map_view.set_detail_level(level)
 
     def _get_region_display_help(self, mode: str) -> str:
-        return "按区域最高方块着色的俯视图；扫描时渐进加载，未加载前显示绿色占位。"
+        del mode
+        return REGION_DISPLAY_HELP
 
     def _map_zoom_in(self) -> None:
         map_view = self._map_view
@@ -308,39 +185,7 @@ class RegionTabMixin(ExplorerMixinHost):
             return
 
         self._selected_region_coord = coord
-        region_x, region_z = coord
-        chunk_x0 = region_x * 32
-        chunk_x1 = region_x * 32 + 31
-        chunk_z0 = region_z * 32
-        chunk_z1 = region_z * 32 + 31
-        block_x0 = region_x * 512
-        block_x1 = region_x * 512 + 511
-        block_z0 = region_z * 512
-        block_z1 = region_z * 512 + 511
-        if detail and detail.get("level") in {"chunk", "block"}:
-            chunk = detail.get("chunk_coord")
-            br = detail.get("block_range", "")
-            level = detail.get("level")
-            if chunk:
-                title = "区块内" if level == "block" else "区块"
-                self._region_status_text.value = (
-                    f"{title} ({chunk[0]}, {chunk[1]})\n"
-                    f"所属 r.{region_x}.{region_z}.mca\n"
-                    f"方块 {br}"
-                )
-            else:
-                self._region_status_text.value = (
-                    f"区域 ({region_x}, {region_z}) · 区块级\n"
-                    f"r.{region_x}.{region_z}.mca\n"
-                    f"方块 {detail.get('block_range', self._region_status_text.value)}"
-                )
-        else:
-            self._region_status_text.value = (
-                f"区域 ({region_x}, {region_z})\n"
-                f"r.{region_x}.{region_z}.mca\n"
-                f"区块 X{chunk_x0}~{chunk_x1} Z{chunk_z0}~{chunk_z1}\n"
-                f"方块 X{block_x0}~{block_x1} Z{block_z0}~{block_z1}"
-            )
+        self._region_status_text.value = format_region_selection(coord, detail)
         self._region_status_text.color = THEME.accent_light
         safe_update(self._region_status_text)
 

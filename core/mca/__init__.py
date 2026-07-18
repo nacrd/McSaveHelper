@@ -29,6 +29,7 @@ from core.mca.map_navigation import (
     SelectionNotification,
 )
 from core.mca.region_file import RegionFile
+from core.mca.region_selection import format_region_selection
 from core.mca.surface import sample_region_surface_colors, sample_region_surface_ids
 from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
@@ -82,6 +83,7 @@ __all__ = [
     "format_chunk_block_range",
     "format_region_block_range",
     "format_region_coordinate_label",
+    "format_region_selection",
     "sample_region_surface_colors",
     "sample_region_surface_ids",
     "render_region_topview",
