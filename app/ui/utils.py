@@ -1,10 +1,14 @@
 """UI 公共工具函数"""
-from typing import Any, Callable
+import asyncio
+import threading
+from concurrent.futures import Future as ConcurrentFuture
+from typing import Any, Callable, Coroutine, Optional
 
 import flet as ft
 
 # 全局关闭标记，防止关闭过程中触发 UI 更新
 _app_closing = False
+ScheduledTask = asyncio.Future[Any] | ConcurrentFuture[Any]
 
 
 def is_app_closing() -> bool:
@@ -50,6 +54,38 @@ def run_on_ui(page: ft.Page | None,
         page.run_task(_runner)
     except Exception:
         pass
+
+
+def schedule_coroutine(
+    coroutine: Coroutine[Any, Any, Any],
+    *,
+    page: Optional[ft.Page] = None,
+) -> Optional[ScheduledTask]:
+    """Schedule a coroutine on the active loop, Flet page, or worker loop."""
+    try:
+        return asyncio.get_running_loop().create_task(coroutine)
+    except RuntimeError:
+        pass
+
+    if page is not None:
+        try:
+            async def _runner() -> Any:
+                return await coroutine
+
+            return page.run_task(_runner)
+        except Exception:
+            pass
+
+    def _run_in_thread() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(coroutine)
+        finally:
+            loop.close()
+
+    threading.Thread(target=_run_in_thread, daemon=True).start()
+    return None
 
 
 def format_size(size: int) -> str:

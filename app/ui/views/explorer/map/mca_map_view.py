@@ -12,10 +12,17 @@ Zoom levels (auto-switched by scale thresholds on wheel):
 from __future__ import annotations
 
 import asyncio
-import threading
-import time
-from concurrent.futures import Future as ConcurrentFuture
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Coroutine,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    cast,
+)
 
 import flet as ft
 
@@ -24,7 +31,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.ui.utils import run_on_ui
+from app.ui.utils import ScheduledTask, run_on_ui, schedule_coroutine
 from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,
@@ -34,6 +41,8 @@ from app.ui.views.explorer.map.color_schemes import (
 from app.ui.views.explorer.map import map_shapes
 from app.ui.views.explorer.map.map_hit_testing import hit_bounds
 from app.ui.views.explorer.map.camera_animator import MapCameraAnimator
+from app.ui.views.explorer.map.rebuild_scheduler import RebuildScheduler
+from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 from core.mca.topview_renderer import (
     DEFAULT_TILE_SIZE,
     DETAIL_TILE_SIZE,
@@ -70,7 +79,6 @@ if TYPE_CHECKING:
 MapSelectionCallback = Callable[
     [Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Any]]], None
 ]
-ScheduledTask = asyncio.Future[Any] | ConcurrentFuture[Any]
 
 
 class McaMapView(ft.Container):
@@ -120,9 +128,7 @@ class McaMapView(ft.Container):
         self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._block_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
-        # base64 cache for canvas Image.src (derived from service PNG bytes)
-        self._tile_src_cache: Dict[Tuple[int, int], str] = {}
-        self._tile_src_generation = -1
+        self._tile_sources = TileSourceCache()
 
         self._last_x = 0.0
         self._last_y = 0.0
@@ -131,10 +137,6 @@ class McaMapView(ft.Container):
         self._last_drawn_count = -1
         self._mounted = False
 
-        self._rebuild_pending = False
-        self._rebuild_timer: Optional[threading.Timer] = None
-        self._last_rebuild_ts = 0.0
-        self._min_rebuild_interval = 1.0 / 60.0
         # Pointer used for level auto-switch while zooming.
         self._zoom_pivot_x = 0.0
         self._zoom_pivot_y = 0.0
@@ -146,6 +148,10 @@ class McaMapView(ft.Container):
             on_frame=self._on_camera_frame,
             on_complete=self._on_camera_complete,
             is_alive=lambda: self._mounted,
+        )
+        self._rebuild_scheduler = RebuildScheduler(
+            self._request_rebuild,
+            is_active=lambda: self._mounted,
         )
 
         self.width = width
@@ -244,21 +250,11 @@ class McaMapView(ft.Container):
 
     def _tile_src(self, coord: Tuple[int, int]) -> Optional[str]:
         """Return base64 PNG for coord, caching decoded form for canvas."""
-        import base64
-
-        generation = self._service.get_topview_generation()
-        if generation != self._tile_src_generation:
-            self._tile_src_cache.clear()
-            self._tile_src_generation = generation
-        cached = self._tile_src_cache.get(coord)
-        if cached is not None:
-            return cached
-        raw = self._service.get_topview_tile(coord)
-        if not raw:
-            return None
-        src = base64.b64encode(raw).decode("ascii")
-        self._tile_src_cache[coord] = src
-        return src
+        return self._tile_sources.get(
+            coord,
+            generation=self._service.get_topview_generation(),
+            load_tile=self._service.get_topview_tile,
+        )
 
     # ------------------------------------------------------------------ UI helpers
     def _empty_shapes(self) -> List[cv.Shape]:
@@ -293,43 +289,10 @@ class McaMapView(ft.Container):
             pass
 
     def _schedule_rebuild(self) -> None:
-        """Rate-limit rebuild requests, then hop to the UI thread."""
-        now = time.monotonic()
-        elapsed = now - self._last_rebuild_ts
-        if elapsed >= self._min_rebuild_interval and not self._rebuild_pending:
-            self._last_rebuild_ts = now
-            self._request_rebuild()
-            return
-        if self._rebuild_pending:
-            return
-        self._rebuild_pending = True
-        delay = max(0.0, self._min_rebuild_interval - elapsed)
-
-        def _fire() -> None:
-            self._rebuild_pending = False
-            self._last_rebuild_ts = time.monotonic()
-            try:
-                self._request_rebuild()
-            except Exception:
-                pass
-
-        try:
-            if self._rebuild_timer is not None:
-                self._rebuild_timer.cancel()
-        except Exception:
-            pass
-        self._rebuild_timer = threading.Timer(delay, _fire)
-        self._rebuild_timer.daemon = True
-        self._rebuild_timer.start()
+        self._rebuild_scheduler.schedule()
 
     def _cancel_rebuild_timer(self) -> None:
-        try:
-            if self._rebuild_timer is not None:
-                self._rebuild_timer.cancel()
-        except Exception:
-            pass
-        self._rebuild_timer = None
-        self._rebuild_pending = False
+        self._rebuild_scheduler.cancel()
 
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
@@ -967,34 +930,16 @@ class McaMapView(ft.Container):
         if super_did_unmount:
             super_did_unmount()
 
-    def _schedule_task(self, coro: Any) -> Optional[ScheduledTask]:
+    def _schedule_task(
+        self,
+        coro: Coroutine[Any, Any, Any],
+    ) -> Optional[ScheduledTask]:
         """Schedule a coroutine on the UI event loop when possible."""
         try:
-            return asyncio.get_running_loop().create_task(coro)
+            page = cast(Optional[ft.Page], self.page)
         except RuntimeError:
-            pass
-
-        page = cast(Optional[ft.Page], self.page)
-        if page is not None:
-            try:
-                async def _runner() -> Any:
-                    return await coro
-
-                return page.run_task(_runner)
-            except Exception:
-                pass
-
-        # Last resort: background loop (scan-only; UI updates still go via run_on_ui).
-        def _run_in_thread() -> None:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(coro)
-            finally:
-                loop.close()
-
-        threading.Thread(target=_run_in_thread, daemon=True).start()
-        return None
+            page = None
+        return schedule_coroutine(coro, page=page)
 
     def _start_update_loop(self) -> None:
         if self._update_task is None or self._update_task.done():
