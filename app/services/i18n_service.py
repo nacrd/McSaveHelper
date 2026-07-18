@@ -78,33 +78,3 @@ class I18nService:
             str: 语言的显示名称
         """
         return self._manager.get_display_name(lang_code)
-
-
-# 模块级快捷函数（向后兼容）
-_i18n_service: Optional[I18nService] = None
-
-
-def get_i18n() -> I18nService:
-    """获取I18nService单例实例
-
-    Returns:
-        I18nService: I18nService实例
-    """
-    global _i18n_service
-    if _i18n_service is None:
-        _i18n_service = I18nService()
-    return _i18n_service
-
-
-def t(key: str, default: str = "", **kwargs) -> str:
-    """翻译快捷函数
-
-    Args:
-        key: 翻译键
-        default: 默认文本
-        **kwargs: 格式化参数
-
-    Returns:
-        str: 翻译后的文本
-    """
-    return get_i18n().translate(key, default, **kwargs)

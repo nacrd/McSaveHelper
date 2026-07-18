@@ -152,6 +152,15 @@ def test_config_service_has_no_hidden_singleton_lifetime() -> None:
     assert "_instance" not in source
 
 
+def test_i18n_service_has_no_hidden_singleton_lifetime() -> None:
+    source = (
+        PROJECT_ROOT / "app/services/i18n_service.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_i18n_service" not in source
+    assert "def get_i18n(" not in source
+
+
 def test_item_and_texture_services_are_application_scoped() -> None:
     for relative_path in (
         "app/services/item_service.py",
