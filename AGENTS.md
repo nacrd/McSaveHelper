@@ -205,3 +205,20 @@ The `WorldSession` class (`core/omni/world_session.py`) provides the main interf
 - Error logs for packaged builds are written to `startup_error.log` in the executable directory
 - Use `app/ui/components/` for reusable UI components (`buttons.py`, `cards.py`, `fields.py`, `layout.py`)
 - The `Application` class (`app/application.py`) is the central coordinator - avoid creating global state elsewhere
+
+## Refactor Boundary Rules
+
+Keep dependency direction one-way: UI -> controllers -> services -> core.
+
+- Extract large Flet trees into nearby chrome builder modules that return typed control bundles.
+- Keep pure decisions (selection formatting, resource path guesses, report text) outside views.
+- Put Minecraft-format algorithms in core; services orchestrate callbacks, I/O, and application ports.
+- Controllers must not import the UI package.
+- Business services are application-scoped or factory-created instances. Do not add module-level business singletons.
+
+Intentional process-wide infrastructure (not page/business state):
+
+- Theme proxy and theme manager
+- Logging manager, translation manager, and performance tracker
+- MCA surface/tile performance caches
+- Replaceable UI defaults: shortcut manager, performance monitor, and feedback collector
