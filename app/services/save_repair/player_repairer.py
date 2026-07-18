@@ -32,12 +32,8 @@ PLAYER_REQUIRED_FIELDS = [
 def get_player_defaults() -> Dict[str, Any]:
     """获取玩家数据默认值（工厂函数，避免跨文件共享可变对象）"""
     return {
-        "Pos": NbtList[NbtList[Double]]([
-            NbtList[Double]([0.0, 64.0, 0.0])
-        ]),
-        "Rotation": NbtList[NbtList[Float]]([
-            NbtList[Float]([0.0, 0.0])
-        ]),
+        "Pos": NbtList[Double]([0.0, 64.0, 0.0]),
+        "Rotation": NbtList[Float]([0.0, 0.0]),
         "Health": Float(20.0),
         "foodLevel": Int(20),
         "foodSaturationLevel": Float(5.0),

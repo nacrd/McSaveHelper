@@ -2,9 +2,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import platform
+import tempfile
+import zipfile
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
@@ -42,13 +46,24 @@ def find_local_minecraft_jar() -> Optional[Path]:
     if not versions_dir.exists():
         return None
 
-    jars: list[tuple[str, Path]] = []
+    jars: list[tuple[float, Path]] = []
     for version_dir in versions_dir.iterdir():
         if not version_dir.is_dir():
             continue
         jar_path = version_dir / f"{version_dir.name}.jar"
         if jar_path.exists():
-            jars.append((version_dir.name, jar_path))
+            sort_time = jar_path.stat().st_mtime
+            metadata_path = version_dir / f"{version_dir.name}.json"
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+                release_time = metadata.get("releaseTime") or metadata.get("time")
+                if release_time:
+                    sort_time = datetime.fromisoformat(
+                        str(release_time).replace("Z", "+00:00")
+                    ).timestamp()
+            except (OSError, ValueError, TypeError):
+                pass
+            jars.append((sort_time, jar_path))
 
     if not jars:
         return None
@@ -137,30 +152,52 @@ def resolve_latest_client_jar(
 
 
 def stream_client_jar(info: ClientJarInfo, jar_path: Path) -> bool:
-    """Download a client jar to jar_path atomically via a .part temp file."""
+    """Download, verify, and atomically publish a client JAR."""
     logger.info(f"开始下载 JAR ({info.size / 1024 / 1024:.1f} MB)...")
     response = requests.get(info.url, timeout=300, stream=True)
     if response.status_code != 200:
         logger.warning(f"下载失败: HTTP {response.status_code}")
         return False
-    temp_path = jar_path.with_suffix(jar_path.suffix + ".part")
+    jar_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{jar_path.name}.", suffix=".part", dir=jar_path.parent
+    )
+    os.close(fd)
+    temp_path = Path(temp_name)
     try:
+        digest = hashlib.sha1()
         with open(temp_path, "wb") as file:
             downloaded = 0
             for chunk in response.iter_content(chunk_size=8192):
                 if not chunk:
                     continue
                 file.write(chunk)
+                digest.update(chunk)
                 downloaded += len(chunk)
                 if downloaded % (1024 * 1024) == 0:
                     logger.debug(
                         f"已下载: {downloaded / 1024 / 1024:.1f} MB"
                     )
-        temp_path.replace(jar_path)
+        if info.size and downloaded != info.size:
+            logger.warning(f"JAR 长度校验失败: 预期 {info.size}，实际 {downloaded}")
+            return False
+        if info.sha1 and digest.hexdigest().lower() != info.sha1.lower():
+            logger.warning("JAR SHA1 校验失败")
+            return False
+        try:
+            with zipfile.ZipFile(temp_path) as archive:
+                if archive.testzip() is not None:
+                    logger.warning("JAR ZIP 完整性校验失败")
+                    return False
+        except zipfile.BadZipFile:
+            logger.warning("下载内容不是有效的 JAR")
+            return False
+        os.replace(temp_path, jar_path)
         return True
     except Exception:
-        temp_path.unlink(missing_ok=True)
         raise
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def cleanup_old_jars(jar_cache_dir: Path, keep_count: int = 1) -> None:

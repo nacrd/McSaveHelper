@@ -8,7 +8,6 @@ from .detector import WorldDetector
 from .chunk_repairer import ChunkRepairer
 from .player_repairer import PlayerRepairer
 from .level_repairer import LevelRepairer
-from .backup_helper import BackupHelper
 
 __all__ = [
     "IssueLevel",
@@ -20,5 +19,4 @@ __all__ = [
     "ChunkRepairer",
     "PlayerRepairer",
     "LevelRepairer",
-    "BackupHelper",
 ]

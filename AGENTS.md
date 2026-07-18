@@ -39,14 +39,17 @@ pyright
 
 ### Building Executables
 ```bash
+# Install build dependencies
+python -m pip install nuitka ordered-set ziglang zstandard
+
 # Single-file executable
-pyinstaller build-onefile.spec
+python build_nuitka.py onefile
 
 # Portable multi-file version
-pyinstaller build-portable.spec
+python build_nuitka.py portable
 ```
 
-Output: `dist/` directory
+Output: `dist/MCSaveHelper.exe` and `dist/MCSaveHelper/`
 
 ### Debug Packaged Executable
 ```bash

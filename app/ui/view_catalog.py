@@ -21,6 +21,11 @@ def create_default_view_catalog(
         "SaveRepairView",
     )
     catalog.register_lazy(
+        "backup_center",
+        "app.ui.views.backup_center",
+        "BackupCenterView",
+    )
+    catalog.register_lazy(
         "map_export",
         "app.ui.views.map_export",
         "MapExportView",

@@ -1,5 +1,6 @@
 """Tests for migrator pure option helpers."""
 from app.ui.views.migrator_options import (
+    PLATFORM_OPTIONS,
     VERSION_OPTIONS,
     format_uuid_query_result,
     format_version_label,
@@ -40,6 +41,6 @@ def test_format_uuid_query_result_online_and_offline() -> None:
     assert "官方名称: Notch" in online
 
 
-def test_version_options_are_non_empty() -> None:
-    assert len(VERSION_OPTIONS) >= 5
-    assert VERSION_OPTIONS[0][0] == "1.21.4"
+def test_unsupported_conversion_options_are_not_exposed() -> None:
+    assert VERSION_OPTIONS == []
+    assert PLATFORM_OPTIONS == [("java", "Java 版")]

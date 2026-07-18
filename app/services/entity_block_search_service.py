@@ -179,10 +179,7 @@ class EntityBlockSearchService:
         search_type: str,
         log: Callable[[str, str], None],
     ) -> None:
-        if search_type == "entity" and not self.results:
-            warning = "提示: 1.18+ 存档的实体数据可能存储在独立 entities/ 区域文件中"
-            self.summary.warnings.append(warning)
-            log(warning, "WARNING")
+        del search_type, log
 
     def _make_logger(
         self,

@@ -401,7 +401,6 @@ class WindowManager:
         self._dispose_views()
         self._shutdown_logger()
         self._destroy_window_async()
-        self._schedule_force_exit()
 
     def _set_closing_flag(self) -> None:
         """设置关闭标记"""
@@ -444,21 +443,6 @@ class WindowManager:
                         pass
 
             self.page.run_task(_destroy_window)
-        except Exception:
-            pass
-
-    def _schedule_force_exit(self) -> None:
-        """调度强制退出（兜底）"""
-        try:
-            import os
-            import threading
-
-            def _force_exit() -> None:
-                os._exit(0)
-
-            timer = threading.Timer(2.0, _force_exit)
-            timer.daemon = True
-            timer.start()
         except Exception:
             pass
 

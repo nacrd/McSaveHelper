@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import nbtlib
-from .scanner import scan_all_regions
+from .scanner import scan_all_entity_regions, scan_all_regions
 from .types import LogCallback
 
 
@@ -45,7 +45,7 @@ def _process_one_region(
         return region_file.name, 0, 0, 0, str(e)
 
 
-def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
+def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> bool:
     """从世界存档中移除所有模组相关的方块和实体
 
     Args:
@@ -53,15 +53,16 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
         log: 日志回调函数
     """
     log("开始纯净扫描：移除模组方块和实体", "PURE")
-    region_files = scan_all_regions(world_path)
+    region_files = scan_all_regions(world_path) + scan_all_entity_regions(world_path)
     total_regions = len(region_files)
     if total_regions == 0:
         log("未找到任何区域文件，跳过纯净扫描", "INFO")
-        return
+        return True
 
     total_chunks = 0
     total_blocks_replaced = 0
     total_entities_removed = 0
+    errors = 0
 
     # region 级并发（各处理独立文件，写回安全）
     # 参照 core/worker.py process_regions_parallel 的 ThreadPoolExecutor 模式
@@ -78,24 +79,39 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> None:
             total_blocks_replaced += br
             total_entities_removed += er
             if err:
+                errors += 1
                 log(f"处理区域文件失败 {name}: {err}", "ERROR")
             else:
                 log(f"处理区域文件 ({done}/{total_regions}): {name}", "INFO")
                 if br > 0 or er > 0:
                     log(f"  修改: 方块 {br}, 实体 {er}", "INFO")
 
-    log("纯净扫描完成", "PURE")
+    if errors:
+        log(f"纯净扫描未完整完成: {errors} 个区域文件失败", "ERROR")
+    else:
+        log("纯净扫描完成", "PURE")
     log(f"总计扫描 {total_chunks} 个区块", "INFO")
     log(f"替换了 {total_blocks_replaced} 个模组方块", "INFO")
     log(f"移除了 {total_entities_removed} 个模组实体", "INFO")
+    return errors == 0
+
+
+def _get_chunk_root(data: nbtlib.tag.Compound) -> nbtlib.tag.Compound:
+    level = data.get("Level")
+    return level if isinstance(level, nbtlib.tag.Compound) else data
 
 
 def _replace_modded_palette_entries(data: nbtlib.tag.Compound) -> int:
     replaced = 0
-    sections = data.get('sections')
+    root = _get_chunk_root(data)
+    sections = root.get('sections') or root.get('Sections')
     if sections:
         for section in sections:
-            palette = section.get('palette')
+            block_states = section.get("block_states") or section.get("BlockStates")
+            palette = None
+            if isinstance(block_states, nbtlib.Compound):
+                palette = block_states.get("palette") or block_states.get("Palette")
+            palette = palette or section.get('Palette') or section.get('palette')
             if not palette:
                 continue
             for block_state in palette:
@@ -134,8 +150,10 @@ def _purge_mod_data_in_chunk(chunk) -> Tuple[int, int]:
     if not isinstance(data, nbtlib.tag.Compound):
         return 0, 0
 
-    entities_key = 'Entities' if 'Entities' in data else 'entities'
-    entities_removed = _filter_modded_entities(data, entities_key)
+    root = _get_chunk_root(data)
+    entities_removed = 0
+    for entities_key in ('entities', 'Entities'):
+        entities_removed += _filter_modded_entities(root, entities_key)
     for key in ('block_entities', 'BlockEntities', 'TileEntities'):
-        entities_removed += _filter_modded_entities(data, key)
+        entities_removed += _filter_modded_entities(root, key)
     return _replace_modded_palette_entries(data), entities_removed

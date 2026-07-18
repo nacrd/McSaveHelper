@@ -5,11 +5,14 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from app.services.config_service import ConfigService
+from app.services.backup_service import BackupService
+from app.services.save_repair_service import SaveRepairService
 from app.services.i18n_service import I18nService
 from app.services.item_service import ItemService
 from app.services.migration_service import MigrationService
 from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
+from app.services.world_write_coordinator import WorldWriteCoordinator
 
 
 class ServiceInitializationError(RuntimeError):
@@ -29,16 +32,28 @@ class AppServices:
     uuid: UUIDService
     item: ItemService
     texture: TextureService
+    backup: BackupService
+    save_repair: SaveRepairService
+    world_writes: WorldWriteCoordinator
 
 
 @dataclass(frozen=True)
 class ServiceFactories:
     config: Callable[[], ConfigService] = ConfigService
     i18n: Callable[[ConfigService], I18nService] = I18nService
-    migration: Callable[[ConfigService], MigrationService] = MigrationService
+    migration: Callable[
+        [ConfigService, BackupService],
+        MigrationService,
+    ] = MigrationService
     uuid: Callable[[], UUIDService] = UUIDService
     item: Callable[[], ItemService] = ItemService
     texture: Callable[[], TextureService] = TextureService
+    world_writes: Callable[[], WorldWriteCoordinator] = WorldWriteCoordinator
+    backup: Callable[[WorldWriteCoordinator], BackupService] = BackupService
+    save_repair: Callable[
+        [BackupService],
+        SaveRepairService,
+    ] = SaveRepairService
 
 
 def _create(service_name: str, factory: Callable[..., Any], *args: Any) -> Any:
@@ -55,10 +70,13 @@ def create_app_services(
     selected = factories or ServiceFactories()
     config = _create("config", selected.config)
     i18n = _create("i18n", selected.i18n, config)
-    migration = _create("migration", selected.migration, config)
+    world_writes = _create("world_writes", selected.world_writes)
+    backup = _create("backup", selected.backup, world_writes)
+    migration = _create("migration", selected.migration, config, backup)
     uuid = _create("uuid", selected.uuid)
     item = _create("item", selected.item)
     texture = _create("texture", selected.texture)
+    save_repair = _create("save_repair", selected.save_repair, backup)
     return AppServices(
         config=config,
         i18n=i18n,
@@ -66,4 +84,7 @@ def create_app_services(
         uuid=uuid,
         item=item,
         texture=texture,
+        backup=backup,
+        save_repair=save_repair,
+        world_writes=world_writes,
     )

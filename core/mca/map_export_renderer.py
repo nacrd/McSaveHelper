@@ -45,6 +45,9 @@ def analyze_region_bounds(region_files: List[Path]) -> Dict[str, int]:
 
 
 class MapExportRenderer:
+    def __init__(self) -> None:
+        self.last_rendered_chunks = 0
+
     BLOCK_COLORS = {
         "minecraft:air": (135, 206, 235),  # 天蓝色
         "minecraft:stone": (128, 128, 128),
@@ -109,7 +112,7 @@ class MapExportRenderer:
             color=(135, 206, 235),
         )
         try:
-            self._render_regions(
+            self.last_rendered_chunks = self._render_regions(
                 image,
                 region_files,
                 bounds,
@@ -121,6 +124,9 @@ class MapExportRenderer:
         except ImportError:
             log("地图渲染后端不可用，使用简化渲染", "WARNING")
             self.draw_fallback_grid(image, scale)
+        if self.last_rendered_chunks == 0:
+            image.close()
+            raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
         return image
 
     @staticmethod
@@ -161,11 +167,12 @@ class MapExportRenderer:
         scale: int,
         log: Callable[[str, str], None],
         progress: Callable[[float, str], None],
-    ) -> None:
+    ) -> int:
         from core.mca import NativeRegion
 
         pixels = image.load()
         total = len(region_files)
+        rendered_chunks = 0
         for index, region_file in enumerate(region_files):
             progress(
                 0.25 + (index / total) * 0.70,
@@ -177,7 +184,7 @@ class MapExportRenderer:
                     continue
                 region_x, region_z = coords
                 with NativeRegion.from_file(region_file) as region:
-                    self._render_region_chunks(
+                    rendered_chunks += self._render_region_chunks(
                         image,
                         pixels,
                         region,
@@ -189,6 +196,7 @@ class MapExportRenderer:
                     )
             except Exception as exc:
                 log(f"处理区块文件 {region_file.name} 失败: {exc}", "WARNING")
+        return rendered_chunks
 
     def _render_region_chunks(
         self,
@@ -200,7 +208,8 @@ class MapExportRenderer:
         bounds: Dict[str, int],
         map_type: str,
         scale: int,
-    ) -> None:
+    ) -> int:
+        rendered_chunks = 0
         for chunk_x in range(32):
             for chunk_z in range(32):
                 try:
@@ -218,8 +227,10 @@ class MapExportRenderer:
                             scale,
                             pixels,
                         )
+                        rendered_chunks += 1
                 except Exception:
                     continue
+        return rendered_chunks
 
     @staticmethod
     def draw_fallback_grid(image: Any, scale: int) -> None:

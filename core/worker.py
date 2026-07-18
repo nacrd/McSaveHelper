@@ -47,7 +47,7 @@ def process_regions_parallel(
     mappings: List[UUIDMapping],
     progress_callback: Callable[[float], None],
     log_callback: LogCallback
-) -> None:
+) -> int:
     """使用线程池并发处理区域文件
 
     Args:
@@ -63,7 +63,9 @@ def process_regions_parallel(
     if total == 0:
         progress_callback(1.0)
         log_callback("区块总计修改: 0 处", "INFO")
-        return
+        return 0
+
+    errors: List[str] = []
 
     with ThreadPoolExecutor(max_workers=min(8, total)) as executor:
         futures = [
@@ -81,4 +83,8 @@ def process_regions_parallel(
             elif changes == -1:
                 err_msg = f"处理失败: {error}" if error else "未知错误"
                 log_callback(f"MCA {Path(path).name}: {err_msg}", "ERROR")
+                errors.append(f"{path}: {err_msg}")
+    if errors:
+        raise RuntimeError(f"{len(errors)} 个区域文件处理失败: {errors[0]}")
     log_callback(f"区块总计修改: {total_changes} 处", "INFO")
+    return total_changes

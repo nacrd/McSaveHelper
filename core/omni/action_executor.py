@@ -4,20 +4,27 @@ ActionExecutor - 操作执行器
 """
 import json
 import shutil
+import tempfile
 from pathlib import Path
 from typing import List, Union, Any, Optional, Callable
 import nbtlib
 from .models import Action, ChunkTarget
-from ..utils import replace_directory_tree
+from ..utils import publish_directory_tree
 from ..perf_timing import PerfTimer
 
 
 class ActionExecutor:
     """操作执行器"""
 
-    def __init__(self, world_path: Path, log_callback: Optional[Callable] = None):
+    def __init__(
+        self,
+        world_path: Path,
+        log_callback: Optional[Callable] = None,
+        backup_callback: Optional[Callable[[Path], Path]] = None,
+    ) -> None:
         self.world_path = world_path
         self._log = log_callback or (lambda msg, lvl="INFO": None)
+        self._backup_callback = backup_callback
 
     def execute_all(
         self,
@@ -35,55 +42,56 @@ class ActionExecutor:
         Returns:
             成功返回 True，失败返回 False
         """
-        if dest_path is None:
-            self._log("警告：未提供目标路径，将原地修改（风险极高）", "WARNING")
-            dest_path = self.world_path
-        else:
-            dest_path = dest_path.resolve()
+        target_world = (dest_path or self.world_path).resolve()
+        if not actions:
+            self._log("没有需要提交的操作", "INFO")
+            return True
+        try:
+            if backup and target_world.exists():
+                self._create_backup(target_world)
+            return self._execute_transaction(actions, target_world)
+        except Exception as exc:
+            self._log(f"提交失败，原存档保持不变: {exc}", "ERROR")
+            return False
 
-        # 1. 备份
-        if backup and dest_path == self.world_path:
-            backup_dir = self.world_path.parent / f"{self.world_path.name}.backup"
-            try:
-                if backup_dir.exists():
-                    shutil.rmtree(backup_dir)
-                with PerfTimer("action_executor.backup"):
-                    shutil.copytree(self.world_path, backup_dir)
-                self._log(f"已备份原存档到 {backup_dir}", "BACKUP")
-            except Exception as e:
-                self._log(f"备份失败: {e}", "ERROR")
-                return False
+    def _create_backup(self, target_world: Path) -> None:
+        if self._backup_callback:
+            backup_path = self._backup_callback(target_world)
+            self._log(f"已备份原存档到 {backup_path}", "BACKUP")
+            return
+        backup_dir = target_world.parent / f"{target_world.name}.backup"
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir)
+        with PerfTimer("action_executor.backup"):
+            shutil.copytree(target_world, backup_dir)
+        self._log(f"已备份原存档到 {backup_dir}", "BACKUP")
 
-        # 2. 克隆（如果目标路径与源路径不同）
-        if dest_path != self.world_path:
-            try:
-                with PerfTimer("action_executor.clone"):
-                    replace_directory_tree(self.world_path, dest_path)
-                self._log(f"已克隆存档到 {dest_path}", "CLONE")
-            except Exception as e:
-                self._log(f"克隆失败: {e}", "ERROR")
-                return False
-            target_world = dest_path
-        else:
-            target_world = self.world_path
-
-        # 3. 执行队列中的操作
-        success = True
-        with PerfTimer("action_executor.execute_queue"):
-            for idx, action in enumerate(actions):
-                try:
-                    self._execute_action(action, target_world)
-                    self._log(f"操作 {idx + 1}/{len(actions)} 执行成功", "ACTION")
-                except Exception as e:
-                    self._log(f"操作 {idx + 1} 执行失败: {e}", "ERROR")
-                    success = False
-
-        if success:
-            self._log("所有操作已提交", "COMMIT")
-        else:
-            self._log("部分操作失败", "ERROR")
-
-        return success
+    def _execute_transaction(
+        self,
+        actions: List[Action],
+        target_world: Path,
+    ) -> bool:
+        target_world.parent.mkdir(parents=True, exist_ok=True)
+        staging_root = Path(tempfile.mkdtemp(
+            prefix=f".mcsavehelper_commit_{target_world.name}_",
+            dir=target_world.parent,
+        ))
+        prepared = staging_root / target_world.name
+        try:
+            with PerfTimer("action_executor.clone"):
+                shutil.copytree(self.world_path, prepared)
+            with PerfTimer("action_executor.execute_queue"):
+                for index, action in enumerate(actions):
+                    self._execute_action(action, prepared)
+                    self._log(
+                        f"操作 {index + 1}/{len(actions)} 执行成功",
+                        "ACTION",
+                    )
+            publish_directory_tree(prepared, target_world)
+            self._log("所有操作已原子提交", "COMMIT")
+            return True
+        finally:
+            shutil.rmtree(staging_root, ignore_errors=True)
 
     def _execute_action(self, action: Action, target_world: Path) -> None:
         """执行单个操作"""
@@ -155,7 +163,14 @@ class ActionExecutor:
         if not isinstance(target, ChunkTarget):
             raise ValueError("无效的区块目标")
 
-        abs_region_path = target_world / target.region_path
+        abs_region_path = self._resolve_world_file(
+            target.region_path,
+            target_world,
+        )
+        if abs_region_path.suffix.lower() != ".mca":
+            raise ValueError(f"区块目标不是 MCA 文件: {target.region_path}")
+        if not 0 <= target.chunk_x < 32 or not 0 <= target.chunk_z < 32:
+            raise ValueError("区块局部坐标必须位于 0-31")
         if not abs_region_path.exists():
             raise ValueError(f"区域文件不存在: {target.region_path}")
 
@@ -169,18 +184,12 @@ class ActionExecutor:
 
     def _execute_delete_region(self, action: Action, target_world: Path) -> None:
         """删除区域文件"""
-        x, z = action.target
-
-        # 只删除标准 region 目录下的文件
-        region_file = target_world / "region" / f"r.{x}.{z}.mca"
-        if region_file.exists():
-            region_file.unlink(missing_ok=True)
-
-        # 同时删除 DIM* 下的区域文件
-        for dim in target_world.glob("DIM*"):
-            region_file = dim / "region" / f"r.{x}.{z}.mca"
-            if region_file.exists():
-                region_file.unlink(missing_ok=True)
+        region_file = self._resolve_world_file(action.target, target_world)
+        if region_file.suffix.lower() != ".mca":
+            raise ValueError(f"区域删除目标不是 MCA 文件: {action.target}")
+        if not region_file.exists():
+            raise FileNotFoundError(f"区域文件不存在: {action.target}")
+        region_file.unlink()
 
     def _execute_rename_player(self, action: Action, target_world: Path) -> None:
         """重命名玩家文件"""
@@ -211,7 +220,15 @@ class ActionExecutor:
         elif not isinstance(target_path, Path):
             target_path = Path(target_path)
 
-        if not target_path.is_absolute():
+        if target_path.is_absolute():
+            try:
+                relative = target_path.resolve().relative_to(
+                    self.world_path.resolve()
+                )
+                target_path = target_world / relative
+            except ValueError:
+                pass
+        else:
             target_path = target_world / target_path
 
         target_path = target_path.resolve()

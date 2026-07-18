@@ -46,8 +46,26 @@ class MigratorView(ft.Column):
             ViewAction(
                 self._t("top_bar.start_conversion", "开始转换"),
                 lambda event: self.app.start(),
-            )
+            ),
+            ViewAction(
+                self._t("top_bar.cancel_batch", "取消批量处理"),
+                self._cancel_batch,
+                "danger",
+            ),
         ]
+
+    def _cancel_batch(self, event: ft.ControlEvent) -> None:
+        del event
+        if self.app.migration.cancel_batch():
+            self.app.log(
+                self._t("messages.batch_cancel_requested", "已请求取消批量处理"),
+                "WARNING",
+            )
+        else:
+            self.app.warn_dialog(
+                self._t("dialogs.warning", "提示"),
+                self._t("messages.no_batch_running", "当前没有运行中的批量任务"),
+            )
 
     def set_path_value(self, target: str, value: str) -> None:
         """Update a path control through the public view command boundary."""

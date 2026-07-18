@@ -31,6 +31,7 @@ def test_default_catalog_contains_all_sidebar_views() -> None:
         "explorer",
         "migrator",
         "save_repair",
+        "backup_center",
         "map_export",
         "compare",
         "server_properties",

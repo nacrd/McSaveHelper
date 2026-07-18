@@ -36,7 +36,7 @@ class SaveRepairView(ft.Column):
     ) -> None:
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
-        self.service = service or SaveRepairService()
+        self.service = service or app.services.save_repair
         self.expand = True
         self._busy = False
         self._build_ui()
@@ -246,8 +246,10 @@ class SaveRepairView(ft.Column):
     def _show_repair_report(self, report: RepairReport) -> None:
         self._result_text.value = format_repair_report(report)
         self._result_text.update()
-        if not report.cancelled:
+        if report.success:
             self.app.info_dialog("完成", "存档修复完成！")
+        elif not report.cancelled:
+            self.app.error_dialog("修复失败", "修复未完成，存档未进入后续修复步骤。")
 
     def _append_log(self, msg: str, level: str) -> None:
         color_map = {

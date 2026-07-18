@@ -13,15 +13,36 @@ from core.mca.format import (
     COMPRESSION_ZLIB,
 )
 
+MAX_COMPRESSED_CHUNK_BYTES = 64 * 1024 * 1024
+MAX_DECOMPRESSED_CHUNK_BYTES = 256 * 1024 * 1024
+
 
 def decompress_chunk(compression: int, payload: bytes) -> bytes:
     """Return raw NBT bytes for a chunk payload."""
     try:
+        if len(payload) > MAX_COMPRESSED_CHUNK_BYTES:
+            raise CorruptChunk("区块压缩载荷超过 64 MiB 限制")
         if compression == COMPRESSION_ZLIB:
-            return zlib.decompress(payload)
+            stream = zlib.decompressobj()
+            result = stream.decompress(payload, MAX_DECOMPRESSED_CHUNK_BYTES + 1)
+            if len(result) > MAX_DECOMPRESSED_CHUNK_BYTES:
+                raise CorruptChunk("区块解压结果超过 256 MiB 限制")
+            result += stream.flush(MAX_DECOMPRESSED_CHUNK_BYTES + 1 - len(result))
+            if len(result) > MAX_DECOMPRESSED_CHUNK_BYTES or not stream.eof:
+                raise CorruptChunk("区块解压结果超过 256 MiB 限制")
+            return result
         if compression == COMPRESSION_GZIP:
-            return gzip.decompress(payload)
+            stream = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            result = stream.decompress(payload, MAX_DECOMPRESSED_CHUNK_BYTES + 1)
+            if len(result) > MAX_DECOMPRESSED_CHUNK_BYTES:
+                raise CorruptChunk("区块解压结果超过 256 MiB 限制")
+            result += stream.flush(MAX_DECOMPRESSED_CHUNK_BYTES + 1 - len(result))
+            if len(result) > MAX_DECOMPRESSED_CHUNK_BYTES or not stream.eof:
+                raise CorruptChunk("区块解压结果超过 256 MiB 限制")
+            return result
         if compression == COMPRESSION_NONE:
+            if len(payload) > MAX_DECOMPRESSED_CHUNK_BYTES:
+                raise CorruptChunk("区块载荷超过 256 MiB 限制")
             return payload
         if compression == COMPRESSION_LZ4:
             raise UnsupportedCompression(

@@ -61,6 +61,7 @@ class ExplorerView(
         self._selected_region_coord: Optional[Tuple[int, int]] = None
         self._map_view: Optional[Any] = None
         self._compact_mode = False
+        self._world_load_generation = 0
         self._build()
 
     @property
@@ -272,30 +273,62 @@ class ExplorerView(
             self._world_label.value = "⏳ 正在加载存档..."
             self._world_label.color = THEME.mc_gold
             safe_update(self._world_label)
+            self._world_load_generation += 1
+            generation = self._world_load_generation
 
             threading.Thread(
                 target=self._load_world_worker,
-                args=(str(path),),
+                args=(str(path), generation),
                 daemon=True,
             ).start()
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
 
-    def _load_world_worker(self, path: str) -> None:
+    def _load_world_worker(self, path: str, generation: int) -> None:
         """Load a world off the UI thread and schedule one result callback."""
         try:
-            session = WorldSession(Path(path), log=self.app.log)
-            self.app.page.run_task(self._apply_loaded_world, session)
+            session = self._create_world_session(Path(path), self.app.log)
+            self.app.page.run_task(self._apply_loaded_world, session, generation)
         except Exception as exc:
-            self.app.page.run_task(self._show_world_load_error, exc)
+            self.app.page.run_task(self._show_world_load_error, exc, generation)
 
-    async def _apply_loaded_world(self, session: WorldSession) -> None:
+    def _create_world_session(
+        self,
+        path: Path,
+        log: Any = None,
+    ) -> WorldSession:
+        """Compose a session with application-scoped write safety ports."""
+        return WorldSession(
+            path,
+            log=log or self.app.log,
+            write_lease_factory=self.app.services.world_writes.reserve,
+            backup_callback=lambda world: (
+                self.app.services.backup.create_backup(
+                    world,
+                    label="NBT 提交前自动备份",
+                ).backup_path
+            ),
+        )
+
+    async def _apply_loaded_world(
+        self,
+        session: WorldSession,
+        generation: int,
+    ) -> None:
+        if generation != self._world_load_generation:
+            return
         try:
             self._populate_world(session)
         except Exception as exc:
             self.app.handle_exception(exc, title="更新存档界面失败")
 
-    async def _show_world_load_error(self, error: Exception) -> None:
+    async def _show_world_load_error(
+        self,
+        error: Exception,
+        generation: int,
+    ) -> None:
+        if generation != self._world_load_generation:
+            return
         if isinstance(error, FileNotFoundError):
             self._world_label.value = "❌ 无效的存档目录"
             self._world_label.color = THEME.error

@@ -1,5 +1,6 @@
 """Tests for the typed NBT staging and commit boundary."""
 from pathlib import Path
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -25,12 +26,13 @@ def _change(
     format: NbtEditFormat = "nbt",
     old_value: Any = 1,
     new_value: Any = 2,
+    path: list[Any] | None = None,
 ) -> NbtChange:
     return NbtChange.create(
         target=target,
         target_label="测试目标",
         format=format,
-        path=["Data", "value"],
+        path=path or ["Data", "value"],
         display_path="Data.value",
         old_value=old_value,
         new_value=new_value,
@@ -74,10 +76,11 @@ def test_stage_store_owns_mutation_and_groups_targets() -> None:
 
 
 class FakeSession(WorldSession):
-    def __init__(self, world_path: Path) -> None:
+    def __init__(self, world_path: Path, chunk_data: Any = None) -> None:
         self.world_path = world_path
         self.queued = []
         self.committed_with_backup = False
+        self.chunk_data = chunk_data or {"Data": {"value": 1}, "sections": []}
 
     def queue_modify_nbt(self, target, path, value, operation="set") -> None:
         self.queued.append(("nbt", target, path, value, operation))
@@ -87,6 +90,9 @@ class FakeSession(WorldSession):
 
     def queue_modify_chunk(self, region_path, chunk_x, chunk_z, data) -> None:
         self.queued.append(("chunk", region_path, chunk_x, chunk_z, data))
+
+    def load_chunk_nbt(self, region_path, chunk_x, chunk_z):
+        return deepcopy(self.chunk_data), region_path
 
     def get_queue_size(self) -> int:
         return len(self.queued)
@@ -98,7 +104,7 @@ class FakeSession(WorldSession):
 
 def test_commit_handler_queues_typed_changes_and_refreshes_session() -> None:
     store = NbtStageStore()
-    chunk_data = {"sections": []}
+    chunk_data = {"Data": {"value": 4}, "sections": []}
     chunk_target = ChunkNbtTarget(Path("region/r.0.0.mca"), 1, 2, chunk_data)
     store.add(_change())
     store.add(_change(target=Path("stats/test.json"), format="json"))
@@ -134,6 +140,52 @@ def test_commit_handler_queues_typed_changes_and_refreshes_session() -> None:
     assert refreshed == ["stage", "target"]
     assert len(replacements) == 1
     assert messages[-1][0] == "提交完成"
+
+
+def test_chunk_commit_replays_only_remaining_changes_from_disk() -> None:
+    store = NbtStageStore()
+    mutable_data = {"Data": {"kept": 2, "removed": 1}}
+    target = ChunkNbtTarget(Path("region/r.0.0.mca"), 0, 0, mutable_data)
+    removed = _change(
+        target=target,
+        format="chunk",
+        old_value=0,
+        new_value=1,
+        path=["Data", "removed"],
+    )
+    kept = _change(
+        target=target,
+        format="chunk",
+        old_value=0,
+        new_value=2,
+        path=["Data", "kept"],
+    )
+    store.add(removed)
+    store.add(kept)
+    assert store.remove(0) is removed
+    session = FakeSession(
+        Path("world"),
+        chunk_data={"Data": {"kept": 0, "removed": 0}},
+    )
+    handler = NbtCommitHandler(
+        store=store,
+        get_world_session=lambda: session,
+        replace_world_session=lambda _session: None,
+        get_page=lambda: None,
+        refresh_stage=lambda: None,
+        reload_current_target=lambda: None,
+        warn=lambda _title, _message: None,
+        info=lambda _title, _message: None,
+        error=lambda _title, _message: None,
+        handle_error=lambda error, _title: (_ for _ in ()).throw(error),
+        log=lambda _message, _level: None,
+        session_factory=lambda path, _log: FakeSession(path),
+    )
+
+    handler.execute_commit()
+
+    committed = session.queued[0][4]
+    assert committed["Data"] == {"kept": 2, "removed": 0}
 
 
 class FakeBlockService(BlockDataService):

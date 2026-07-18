@@ -14,6 +14,7 @@ def test_build_tab_definitions_keeps_stable_view_order() -> None:
         "explorer",
         "migrator",
         "save_repair",
+        "backup_center",
         "map_export",
         "compare",
         "mappings",

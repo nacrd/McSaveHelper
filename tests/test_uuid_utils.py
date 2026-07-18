@@ -2,6 +2,7 @@ import uuid
 from pathlib import Path
 
 import nbtlib
+import pytest
 
 from core.nbt_utils import patch_nbt
 from core.uuid_utils import build_mappings, get_offline_uuid_str, uuid_to_ints, uuid_to_most_least
@@ -119,7 +120,7 @@ def test_build_mappings_uses_injected_custom_mapping(tmp_path: Path):
     assert mappings[0][3] == custom_uuid
 
 
-def test_build_mappings_uses_first_manual_name_and_appends_unmatched_names(
+def test_build_mappings_rejects_non_one_to_one_manual_names(
     tmp_path: Path,
 ):
     world = tmp_path / "world"
@@ -129,24 +130,17 @@ def test_build_mappings_uses_first_manual_name_and_appends_unmatched_names(
     (playerdata / f"{old_uuid}.dat").touch()
     logs = []
 
-    mappings = build_mappings(
-        world,
-        {},
-        offline_mode=True,
-        manual_names=["Alice", "Bob"],
-        log=lambda message, level: logs.append((message, level)),
-    )
-
-    alice_uuid = get_offline_uuid_str("Alice")
-    bob_uuid = get_offline_uuid_str("Bob")
-    assert [(mapping[2], mapping[3]) for mapping in mappings] == [
-        (old_uuid, alice_uuid),
-        (bob_uuid, bob_uuid),
-    ]
-    assert any(level == "MANUAL" for _message, level in logs)
+    with pytest.raises(ValueError, match="必须一对一"):
+        build_mappings(
+            world,
+            {},
+            offline_mode=True,
+            manual_names=["Alice", "Bob"],
+            log=lambda message, level: logs.append((message, level)),
+        )
 
 
-def test_build_mappings_prefers_cached_name_over_manual_name(tmp_path: Path):
+def test_build_mappings_uses_cached_name_and_custom_uuid(tmp_path: Path):
     world = tmp_path / "world"
     playerdata = world / "playerdata"
     playerdata.mkdir(parents=True)
@@ -158,7 +152,7 @@ def test_build_mappings_prefers_cached_name_over_manual_name(tmp_path: Path):
         world,
         {old_uuid: "CachedPlayer"},
         offline_mode=True,
-        manual_names=["ManualPlayer"],
+        manual_names=None,
         log=lambda _message, _level: None,
         custom_mappings={"CachedPlayer": custom_uuid},
     )
@@ -169,3 +163,24 @@ def test_build_mappings_prefers_cached_name_over_manual_name(tmp_path: Path):
         uuid_to_most_least(old_uuid),
         uuid_to_most_least(custom_uuid),
     )
+
+
+def test_build_mappings_rejects_duplicate_target_uuid(tmp_path: Path) -> None:
+    world = tmp_path / "world"
+    playerdata = world / "playerdata"
+    playerdata.mkdir(parents=True)
+    first = "11111111-1111-1111-1111-111111111111"
+    second = "22222222-2222-2222-2222-222222222222"
+    for old_uuid in (first, second):
+        (playerdata / f"{old_uuid}.dat").touch()
+    duplicate = "33333333-3333-3333-3333-333333333333"
+
+    with pytest.raises(ValueError, match="同一个目标 UUID"):
+        build_mappings(
+            world,
+            {first: "Alice", second: "Bob"},
+            offline_mode=True,
+            manual_names=None,
+            log=lambda _message, _level: None,
+            custom_mappings={"Alice": duplicate, "Bob": duplicate},
+        )

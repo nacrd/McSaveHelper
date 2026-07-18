@@ -114,10 +114,11 @@ class ServerPropertiesView(ft.Column):
 
     def _save(self, e: ft.ControlEvent) -> None:
         try:
-            target = Path(self._path_field.value or "")
-            if not target:
+            raw_target = (self._path_field.value or "").strip()
+            if not raw_target:
                 self.app.warn_dialog("提示", "请先选择保存位置。")
                 return
+            target = Path(raw_target)
             props: Dict[str, str] = {}
             for key, control in self._fields.items():
                 if isinstance(control, ft.Checkbox):

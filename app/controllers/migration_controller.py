@@ -1,7 +1,6 @@
 """Migration task orchestration with explicit application ports."""
 from __future__ import annotations
 
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -87,11 +86,20 @@ class MigrationController:
                     ),
                 )
                 return
+            if not migration_config.dest_path.strip():
+                deps.warn_dialog(
+                    self._t("dialogs.warning", "提示"),
+                    self._t(
+                        "messages.please_select_destination",
+                        "请先选择目标输出目录",
+                    ),
+                )
+                return
 
             deps.set_start_enabled(False)
             self.try_update_page()
             self.save_config()
-            destination = migration_config.dest_path or os.getcwd()
+            destination = migration_config.dest_path
             run_batch = (
                 migration_config.batch_mode
                 and bool(self.migration.batch_worlds)
@@ -209,6 +217,10 @@ class MigrationController:
             if elapsed is not None:
                 deps.log(f"批量迁移耗时: {elapsed:.2f}秒", "INFO")
             success = sum(1 for result in results.values() if result["success"])
+            cancelled = sum(
+                1 for result in results.values() if result.get("cancelled")
+            )
+            failed = len(results) - success - cancelled
             deps.log_header(
                 self._t(
                     "messages.batch_migration_complete_header",
@@ -222,11 +234,25 @@ class MigrationController:
                     success=success,
                     total=len(results),
                 ),
-                "SUCCESS",
+                "SUCCESS" if success == len(results) else "WARN",
             )
-            deps.set_progress_label(
-                self._t("top_bar.batch_completed", "批量处理完成")
-            )
+            if success == len(results):
+                label = self._t("top_bar.batch_completed", "批量处理完成")
+            else:
+                label = self._t(
+                    "top_bar.batch_partial",
+                    "批量处理部分完成",
+                )
+                deps.log(
+                    self._t(
+                        "messages.batch_result_details",
+                        "失败: {failed}，取消: {cancelled}",
+                        failed=failed,
+                        cancelled=cancelled,
+                    ),
+                    "WARN",
+                )
+            deps.set_progress_label(label)
         except Exception as exc:
             self._finish_timing("migration_batch")
             deps.handle_exception(

@@ -111,10 +111,8 @@ class PerfTracker:
         metrics_sink: Optional[Callable[[PerformanceMetrics], None]] = None,
     ) -> None:
         self._metrics: Dict[str, PerformanceMetrics] = {}
-        self._current_operation: Optional[str] = None
-        self._start_time: float = 0.0
-        self._start_memory: float = 0.0
         self._lock = threading.Lock()
+        self._local = threading.local()
         self._metrics_sink = metrics_sink
         # 尝试导入 psutil 用于内存采样
         try:
@@ -175,68 +173,91 @@ class PerfTracker:
             >>> with tracker.track("UUID 迁移", {"mode": "fast"}):
             ...     migrate_fast(world_path, mapping)
         """
-        self._current_operation = operation
-        self._start_time = time.perf_counter()
-        self._start_memory = self._get_memory_mb()
+        start_time = time.perf_counter()
+        start_memory = self._get_memory_mb()
 
         with self._lock:
-            self._metrics[operation] = PerformanceMetrics(
-                operation=operation,
-                duration_seconds=0.0,
-                memory_peak_mb=0.0,
-                memory_delta_mb=0.0,
-                metadata=metadata or {},
-            )
+            metric = self._metrics.get(operation)
+            if metric is None:
+                metric = PerformanceMetrics(
+                    operation=operation,
+                    duration_seconds=0.0,
+                    memory_peak_mb=0.0,
+                    memory_delta_mb=0.0,
+                    metadata=dict(metadata or {}),
+                )
+                self._metrics[operation] = metric
+            elif metadata:
+                metric.metadata.update(metadata)
+        stack = getattr(self._local, "stack", None)
+        if stack is None:
+            stack = []
+            self._local.stack = stack
+        stack.append(metric)
 
         try:
             yield self
         finally:
-            duration = time.perf_counter() - self._start_time
+            duration = time.perf_counter() - start_time
             current_mem = self._get_memory_mb()
-            memory_delta = current_mem - self._start_memory if current_mem > 0 else 0.0
+            memory_delta = current_mem - start_memory if current_mem > 0 else 0.0
             memory_peak = current_mem if current_mem > 0 else 0.0
 
             with self._lock:
-                m = self._metrics[operation]
-                m.duration_seconds = duration
-                m.memory_peak_mb = memory_peak
-                m.memory_delta_mb = memory_delta
+                metric.duration_seconds += duration
+                metric.memory_peak_mb = max(metric.memory_peak_mb, memory_peak)
+                metric.memory_delta_mb += memory_delta
 
-            self._log_metrics(m)
-            self._publish_metrics(m)
-            self._current_operation = None
+            self._log_metrics(metric)
+            self._publish_metrics(metric)
+            stack.pop()
+
+    def _current_metric(self) -> Optional[PerformanceMetrics]:
+        stack = getattr(self._local, "stack", None)
+        return stack[-1] if stack else None
 
     def increment_files(self, count: int = 1) -> None:
         """增加处理的文件计数"""
-        if self._current_operation and self._current_operation in self._metrics:
-            self._metrics[self._current_operation].files_processed += count
+        metric = self._current_metric()
+        if metric is not None:
+            with self._lock:
+                metric.files_processed += count
 
     def increment_bytes(self, bytes_count: int) -> None:
         """增加处理的字节数"""
-        if self._current_operation and self._current_operation in self._metrics:
-            self._metrics[self._current_operation].bytes_processed += bytes_count
+        metric = self._current_metric()
+        if metric is not None:
+            with self._lock:
+                metric.bytes_processed += bytes_count
 
     def increment_errors(self, count: int = 1) -> None:
         """增加错误计数"""
-        if self._current_operation and self._current_operation in self._metrics:
-            self._metrics[self._current_operation].errors += count
+        metric = self._current_metric()
+        if metric is not None:
+            with self._lock:
+                metric.errors += count
 
     def add_metadata(self, key: str, value: Any) -> None:
         """添加元数据到当前操作"""
-        if self._current_operation and self._current_operation in self._metrics:
-            self._metrics[self._current_operation].metadata[key] = value
+        metric = self._current_metric()
+        if metric is not None:
+            with self._lock:
+                metric.metadata[key] = value
 
     def get_metrics(self, operation: str) -> Optional[PerformanceMetrics]:
         """获取指定操作的性能指标"""
-        return self._metrics.get(operation)
+        with self._lock:
+            return self._metrics.get(operation)
 
     def get_all_metrics(self) -> Dict[str, PerformanceMetrics]:
         """获取所有操作的性能指标"""
-        return self._metrics.copy()
+        with self._lock:
+            return self._metrics.copy()
 
     def clear(self) -> None:
         """清除所有性能指标"""
-        self._metrics.clear()
+        with self._lock:
+            self._metrics.clear()
 
 
 # 全局追踪器

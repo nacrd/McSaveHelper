@@ -1,34 +1,61 @@
-"""批量处理模块，支持同时处理多个存档"""
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Callable
+"""Concurrent batch scheduling with explicit cancellation and task identity."""
+from __future__ import annotations
+
 import queue
 import threading
+from concurrent.futures import (
+    CancelledError,
+    Future,
+    ThreadPoolExecutor,
+    as_completed,
+)
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-from core.types import LogCallback, ProgressCallback, BatchResult
+from core.types import BatchResult, LogCallback, ProgressCallback
+from core.utils import validate_world_name
 
 
 VersionDetector = Callable[[Path], Optional[str]]
+BatchTaskHandler = Callable[
+    [Path, Path, str, LogCallback, threading.Event],
+    Dict[str, Any],
+]
+
+
+class BatchCancelledError(RuntimeError):
+    """Raised at a safe checkpoint when cancellation was requested."""
+
+
+@dataclass(frozen=True)
+class _BatchTask:
+    task_id: str
+    index: int
+    source: Path
+    world_name: str
 
 
 class BatchProcessor:
-    """批量处理器"""
+    """Schedule independent world tasks and aggregate structured results."""
 
     def __init__(
         self,
         max_workers: Optional[int] = None,
         version_detector: Optional[VersionDetector] = None,
         custom_mappings: Optional[Dict[str, str]] = None,
+        task_handler: Optional[BatchTaskHandler] = None,
     ) -> None:
-        if max_workers is None:
-            max_workers = 2
-        self.max_workers = max(1, max_workers)
+        self.max_workers = max(1, max_workers or 2)
         self.version_detector = version_detector
         self.custom_mappings = custom_mappings
+        self.task_handler = task_handler
         self.progress_queue: queue.Queue[Any] = queue.Queue()
-        self.results: Dict[str, Dict[str, Any]] = {}
+        self.results: BatchResult = {}
         self.is_running = False
         self._lock = threading.Lock()
+        self._cancel_event = threading.Event()
+        self._futures: set[Future[Dict[str, Any]]] = set()
         self._total_tasks = 0
 
     def process_batch(
@@ -42,128 +69,185 @@ class BatchProcessor:
         pure_clean_mode: bool = False,
         manual_names: Optional[List[str]] = None,
         log_callback: Optional[LogCallback] = None,
-        progress_callback: Optional[ProgressCallback] = None
+        progress_callback: Optional[ProgressCallback] = None,
     ) -> BatchResult:
-        """
-        批量处理多个世界存档
+        """Process each input exactly once and return task-keyed results."""
+        tasks = self._build_tasks(world_paths, world_names, mode)
+        with self._lock:
+            if self.is_running:
+                raise RuntimeError("批量处理已在运行")
+            self.is_running = True
+            self.results = {}
+            self._total_tasks = len(tasks)
+            self._futures = set()
+            self._cancel_event.clear()
 
-        Args:
-            world_paths: 源世界路径列表
-            dest_dir: 目标目录
-            world_names: 目标世界名称列表（可选）
-            mode: 处理模式（fast/full）
-            offline_mode: 是否离线模式
-            clean_mode: 是否清理模式
-            pure_clean_mode: 是否进行纯净扫描（移除模组方块/实体）
-            manual_names: 手动玩家名列表
-            log_callback: 日志回调函数
-            progress_callback: 进度回调函数
-
-        Returns:
-            处理结果字典
-        """
-        self.is_running = True
-        self.results = {}
-
-        total_tasks = len(world_paths)
-        self._total_tasks = total_tasks
-
-        if total_tasks == 0:
-            self.is_running = False
+        try:
+            if not tasks:
+                self._report_empty(log_callback, progress_callback)
+                return self.results
             if log_callback:
-                log_callback("没有需要处理的存档", "INFO")
-            if progress_callback:
-                progress_callback(1.0)
+                log_callback(f"开始批量处理 {len(tasks)} 个存档...", "INFO")
+            self._execute_tasks(
+                tasks,
+                dest_dir,
+                mode,
+                offline_mode,
+                clean_mode,
+                pure_clean_mode,
+                manual_names,
+                log_callback,
+                progress_callback,
+            )
+            self._report_summary(tasks, log_callback)
             return self.results
+        finally:
+            with self._lock:
+                self.is_running = False
+                self._futures.clear()
 
-        if not world_names:
-            world_names = [f"world_{i + 1}" for i in range(total_tasks)]
+    def _build_tasks(
+        self,
+        world_paths: List[Path],
+        world_names: Optional[List[str]],
+        mode: str,
+    ) -> list[_BatchTask]:
+        if mode not in {"fast", "full"}:
+            raise ValueError(f"不支持的批量处理模式: {mode}")
+        names = (
+            [f"world_{index + 1}" for index in range(len(world_paths))]
+            if world_names is None
+            else list(world_names)
+        )
+        if len(names) != len(world_paths):
+            raise ValueError("源存档与目标世界名称数量必须完全一致")
+        safe_names = [validate_world_name(name) for name in names]
+        if len(set(safe_names)) != len(safe_names):
+            raise ValueError("批量任务的目标世界名称不能重复")
+        return [
+            _BatchTask(
+                task_id=f"task-{index + 1}",
+                index=index,
+                source=Path(source).expanduser().resolve(),
+                world_name=safe_names[index],
+            )
+            for index, source in enumerate(world_paths)
+        ]
 
-        if log_callback:
-            log_callback(f"开始批量处理 {total_tasks} 个存档...", "INFO")
-
+    def _execute_tasks(
+        self,
+        tasks: list[_BatchTask],
+        dest_dir: Path,
+        mode: str,
+        offline_mode: bool,
+        clean_mode: bool,
+        pure_clean_mode: bool,
+        manual_names: Optional[List[str]],
+        log_callback: Optional[LogCallback],
+        progress_callback: Optional[ProgressCallback],
+    ) -> None:
         from core.performance import get_tracker
+
         tracker = get_tracker()
-        with tracker.track("批量处理", {"count": str(total_tasks), "mode": mode}):
+        with tracker.track("批量处理", {"count": str(len(tasks)), "mode": mode}):
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                # 提交所有任务
-                future_to_world = {}
-                for i, (world_path, world_name) in enumerate(
-                        zip(world_paths, world_names)):
+                future_tasks: dict[Future[Dict[str, Any]], _BatchTask] = {}
+                for task in tasks:
                     future = executor.submit(
                         self._process_single_world,
-                        world_path,
+                        task,
                         dest_dir,
-                        world_name,
                         mode,
                         offline_mode,
                         clean_mode,
                         pure_clean_mode,
                         manual_names,
                         log_callback,
-                        i,
-                        total_tasks)
-                    future_to_world[future] = (world_path.name, world_name, i)
+                        len(tasks),
+                    )
+                    future_tasks[future] = task
+                with self._lock:
+                    self._futures = set(future_tasks)
 
-                # 处理完成的任务
-                completed_count = 0
-                for future in as_completed(future_to_world):
-                    world_path_name, world_name, task_index = future_to_world[future]
+                completed = 0
+                for future in as_completed(future_tasks):
+                    if self._cancel_event.is_set():
+                        self._cancel_pending()
+                    task = future_tasks[future]
+                    result = self._future_result(future, task)
+                    with self._lock:
+                        self.results[task.task_id] = result
+                        completed += 1
+                    self._log_task_result(task, result, len(tasks), log_callback)
+                    if progress_callback:
+                        progress_callback(completed / len(tasks))
 
-                    try:
-                        result = future.result()
-                        with self._lock:
-                            self.results[world_path_name] = result
-                            completed_count += 1
-
-                        if log_callback:
-                            status = "成功" if result["success"] else "失败"
-                            log_callback(
-                                f"任务 {
-                                    task_index + 1}/{total_tasks}: {world_name} - {status}",
-                                "SUCCESS" if result["success"] else "ERROR")
-
-                        if progress_callback:
-                            with self._lock:
-                                progress = completed_count / total_tasks
-                            progress_callback(progress)
-
-                    except Exception as e:
-                        error_result = {
-                            "success": False,
-                            "error": str(e),
-                            "world_name": world_name
-                        }
-                        with self._lock:
-                            self.results[world_path_name] = error_result
-
-                        if log_callback:
-                            log_callback(
-                                f"任务 {
-                                    task_index + 1}/{total_tasks}: {world_name} - 失败: {e}",
-                                "ERROR")
-
-            tracker.increment_files(total_tasks)
-            success = sum(1 for r in self.results.values() if r["success"])
-            tracker.add_metadata("success", success)
-            tracker.add_metadata("failed", total_tasks - success)
-            if success < total_tasks:
-                tracker.increment_errors(total_tasks - success)
-
-        with self._lock:
-            self.is_running = False
-
-        # 统计结果
-        success_count = sum(1 for r in self.results.values() if r["success"])
-        if log_callback:
-            log_callback(f"批量处理完成: {success_count}/{total_tasks} 个存档处理成功",
-                         "SUCCESS" if success_count == total_tasks else "WARN")
-
-        return self.results
+            tracker.increment_files(len(tasks))
+            failed = sum(1 for result in self.results.values() if not result["success"])
+            tracker.add_metadata("success", len(tasks) - failed)
+            tracker.add_metadata("failed", failed)
+            if failed:
+                tracker.increment_errors(failed)
 
     def _process_single_world(
         self,
-        world_path: Path,
+        task: _BatchTask,
+        dest_dir: Path,
+        mode: str,
+        offline_mode: bool,
+        clean_mode: bool,
+        pure_clean_mode: bool,
+        manual_names: Optional[List[str]],
+        log_callback: Optional[LogCallback],
+        total_tasks: int,
+    ) -> Dict[str, Any]:
+        def local_log(message: str, level: str = "INFO") -> None:
+            if log_callback:
+                log_callback(
+                    f"[{task.index + 1}/{total_tasks}] {message}",
+                    level,
+                )
+
+        base = {
+            "world_name": task.world_name,
+            "source_path": str(task.source),
+            "task_index": task.index,
+        }
+        try:
+            self._raise_if_cancelled()
+            version = self.version_detector(task.source) if self.version_detector else None
+            if version:
+                local_log(f"检测到版本: {version}", "INFO")
+            if self.task_handler:
+                result = self.task_handler(
+                    task.source,
+                    dest_dir,
+                    task.world_name,
+                    local_log,
+                    self._cancel_event,
+                )
+            else:
+                self._run_default_handler(
+                    task.source,
+                    dest_dir,
+                    task.world_name,
+                    mode,
+                    offline_mode,
+                    clean_mode,
+                    pure_clean_mode,
+                    manual_names,
+                    local_log,
+                )
+                result = {"success": True}
+            return {**base, "version": version, **result}
+        except BatchCancelledError as exc:
+            return {**base, "success": False, "cancelled": True, "error": str(exc)}
+        except Exception as exc:
+            return {**base, "success": False, "error": str(exc)}
+
+    def _run_default_handler(
+        self,
+        source: Path,
         dest_dir: Path,
         world_name: str,
         mode: str,
@@ -171,91 +255,143 @@ class BatchProcessor:
         clean_mode: bool,
         pure_clean_mode: bool,
         manual_names: Optional[List[str]],
-        log_callback: Optional[LogCallback],
-        task_index: int,
-        total_tasks: int
+        log: LogCallback,
+    ) -> None:
+        if mode == "fast":
+            from core.fast_mode import run_fast
+
+            run_fast(
+                source,
+                dest_dir,
+                world_name,
+                offline_mode,
+                clean_mode,
+                pure_clean_mode,
+                manual_names,
+                log,
+            )
+            return
+        from core.full_mode import run_full
+        from core.worker import dummy_progress
+
+        run_full(
+            source,
+            dest_dir,
+            world_name,
+            offline_mode,
+            clean_mode,
+            pure_clean_mode,
+            manual_names,
+            log,
+            dummy_progress,
+            self.custom_mappings,
+        )
+
+    def _future_result(
+        self,
+        future: Future[Dict[str, Any]],
+        task: _BatchTask,
     ) -> Dict[str, Any]:
-        """处理单个世界存档"""
-
-        def local_log(msg: str, level: str = "INFO") -> None:
-            """本地日志函数"""
-            if log_callback:
-                log_callback(f"[{task_index + 1}/{total_tasks}] {msg}", level)
-
         try:
-            # 检测版本
-            version = self.version_detector(
-                world_path) if self.version_detector else None
-            if version:
-                local_log(f"检测到版本: {version}", "INFO")
-
-            # 导入对应的处理模块
-            if mode == "fast":
-                from core.fast_mode import run_fast
-                run_fast(
-                    world_path,
-                    dest_dir,
-                    world_name,
-                    offline_mode,
-                    clean_mode,
-                    pure_clean_mode,
-                    manual_names,
-                    local_log)
-            else:
-                from core.full_mode import run_full
-                from core.worker import dummy_progress
-                run_full(
-                    world_path,
-                    dest_dir,
-                    world_name,
-                    offline_mode,
-                    clean_mode,
-                    pure_clean_mode,
-                    manual_names,
-                    local_log,
-                    dummy_progress,
-                    self.custom_mappings,
-                )
-
-            return {
-                "success": True,
-                "world_name": world_name,
-                "version": version
-            }
-
-        except Exception as e:
+            return future.result()
+        except CancelledError:
             return {
                 "success": False,
-                "error": str(e),
-                "world_name": world_name
+                "cancelled": True,
+                "error": "批量任务已取消",
+                "world_name": task.world_name,
+                "source_path": str(task.source),
+                "task_index": task.index,
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "error": str(exc),
+                "world_name": task.world_name,
+                "source_path": str(task.source),
+                "task_index": task.index,
             }
 
+    def _log_task_result(
+        self,
+        task: _BatchTask,
+        result: Dict[str, Any],
+        total: int,
+        callback: Optional[LogCallback],
+    ) -> None:
+        if not callback:
+            return
+        if result.get("cancelled"):
+            status = "已取消"
+            level = "WARNING"
+        elif result["success"]:
+            status = "成功"
+            level = "SUCCESS"
+        else:
+            status = f"失败: {result.get('error', '未知错误')}"
+            level = "ERROR"
+        callback(
+            f"任务 {task.index + 1}/{total}: {task.world_name} - {status}",
+            level,
+        )
+
+    def _report_empty(
+        self,
+        log_callback: Optional[LogCallback],
+        progress_callback: Optional[ProgressCallback],
+    ) -> None:
+        if log_callback:
+            log_callback("没有需要处理的存档", "INFO")
+        if progress_callback:
+            progress_callback(1.0)
+
+    def _report_summary(
+        self,
+        tasks: list[_BatchTask],
+        log_callback: Optional[LogCallback],
+    ) -> None:
+        if not log_callback:
+            return
+        success = sum(1 for result in self.results.values() if result["success"])
+        cancelled = sum(
+            1 for result in self.results.values() if result.get("cancelled")
+        )
+        level = "SUCCESS" if success == len(tasks) else "WARN"
+        log_callback(
+            f"批量处理完成: {success}/{len(tasks)} 个存档处理成功"
+            f"，取消 {cancelled} 个",
+            level,
+        )
+
+    def _raise_if_cancelled(self) -> None:
+        if self._cancel_event.is_set():
+            raise BatchCancelledError("批量任务已取消")
+
+    def _cancel_pending(self) -> None:
+        with self._lock:
+            futures = tuple(self._futures)
+        for future in futures:
+            future.cancel()
+
     def stop(self) -> None:
-        """停止批量处理"""
-        self.is_running = False
+        """Request cancellation without falsifying the running lifecycle."""
+        self._cancel_event.set()
+        self._cancel_pending()
 
     def get_progress(self) -> float:
-        """获取当前进度"""
         with self._lock:
-            total = self._total_tasks
-            if total <= 0:
+            if self._total_tasks <= 0:
                 return 0.0
-            completed = len(self.results)
-            return completed / total
+            return len(self.results) / self._total_tasks
 
 
 def scan_worlds_directory(directory: Path) -> List[Path]:
-    """扫描目录中的世界存档"""
-    worlds: List[Path] = []
-
+    """Return direct child directories containing a level.dat file."""
     if not directory.exists():
-        return worlds
-
-    # 查找包含level.dat的目录
-    for item in directory.iterdir():
-        if item.is_dir():
-            level_dat = item / "level.dat"
-            if level_dat.exists():
-                worlds.append(item)
-
+        return []
+    worlds = [
+        item
+        for item in directory.iterdir()
+        if item.is_dir() and (item / "level.dat").is_file()
+    ]
     return sorted(worlds)

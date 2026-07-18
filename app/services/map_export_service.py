@@ -123,8 +123,8 @@ class MapExportService:
             results["success"] = True
             results["output_path"] = str(output_path)
             results["dimensions"] = image_size
-            results["chunks_processed"] = len(region_files)
-            tracker.increment_files(len(region_files))
+            results["chunks_processed"] = self._renderer.last_rendered_chunks
+            tracker.increment_files(self._renderer.last_rendered_chunks)
 
             progress(1.0, "导出完成")
 

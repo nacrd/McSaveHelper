@@ -11,7 +11,7 @@ class ActionQueue:
     """操作队列管理器"""
 
     def __init__(self, world_path: Path, player_files: Dict[str, Path],
-                 region_files: Dict[tuple, Path], log_callback: Optional[Callable] = None):
+                 region_files: Dict[object, Path], log_callback: Optional[Callable] = None):
         self.world_path = world_path
         self._player_files = player_files
         self._region_files = region_files
@@ -92,22 +92,53 @@ class ActionQueue:
         self._action_queue.append(action)
         self._log(f"已队列化 JSON {operation}: {key_path} -> {value}", "QUEUE")
 
-    def queue_delete_region(self, x: int, z: int) -> None:
+    def queue_delete_region(
+        self,
+        x: int,
+        z: int,
+        region_path: Optional[Path] = None,
+    ) -> None:
         """队列化删除指定区域文件的操作
 
         Args:
             x, z: 区域坐标
         """
-        if (x, z) not in self._region_files:
+        if region_path is not None:
+            requested = Path(region_path)
+            absolute = (
+                requested.resolve()
+                if requested.is_absolute()
+                else (self.world_path / requested).resolve()
+            )
+            try:
+                absolute.relative_to(self.world_path.resolve())
+            except ValueError as exc:
+                raise ValueError("区域删除目标越过存档边界") from exc
+            if absolute.name != f"r.{x}.{z}.mca":
+                raise ValueError("区域删除目标与请求坐标不匹配")
+            region_path = absolute
+        else:
+            legacy_key = (x, z)
+            relative_key = f"region/r.{x}.{z}.mca"
+            region_path = self._region_files.get(legacy_key)
+            if region_path is None:
+                region_path = self._region_files.get(relative_key)
+        if region_path is None:
             self._log(f"区域文件不存在: r.{x}.{z}.mca", "WARNING")
             return
-
+        try:
+            region_path = region_path.resolve().relative_to(
+                self.world_path.resolve()
+            )
+        except ValueError:
+            self._log(f"区域文件越过存档边界: {region_path}", "ERROR")
+            return
         action = Action(
             type='delete_region',
-            target=(x, z),
+            target=region_path,
         )
         self._action_queue.append(action)
-        self._log(f"已队列化删除区域: r.{x}.{z}.mca", "QUEUE")
+        self._log(f"已队列化删除区域: {region_path}", "QUEUE")
 
     def queue_rename_player(self, old_uuid: str, new_uuid: str) -> None:
         """队列化重命名玩家文件的操作
@@ -155,18 +186,21 @@ class ActionQueue:
         def conversion_callback(target_world: Path) -> None:
             try:
                 from ..converter import convert_world
-                success = convert_world(
+                result = convert_world(
                     src_path=target_world,
                     dst_path=target_world,  # 原地转换
                     target_platform=target_platform,
                     target_version=target_version
                 )
-                if success:
+                if result.success:
                     self._log(f"存档转换成功 (平台: {target_platform}, 版本: {target_version})", "SUCCESS")
                 else:
-                    self._log("存档转换失败", "ERROR")
+                    raise RuntimeError(
+                        f"存档转换失败: {'; '.join(result.errors[:3])}"
+                    )
             except Exception as e:
                 self._log(f"转换过程发生错误: {e}", "ERROR")
+                raise
 
         self.queue_custom(conversion_callback)
         self._log(f"已队列化转换操作到平台 {target_platform}", "QUEUE")
@@ -186,6 +220,25 @@ class ActionQueue:
             chunk_z: 区块在区域内的 Z 坐标 (0-31)
             full_chunk_data: 修改后的完整区块 NBT 数据
         """
+        region_path = Path(region_path)
+        if region_path.is_absolute():
+            try:
+                region_path = region_path.resolve().relative_to(
+                    self.world_path.resolve()
+                )
+            except ValueError as exc:
+                raise ValueError("区块目标越过存档边界") from exc
+        else:
+            try:
+                (self.world_path / region_path).resolve().relative_to(
+                    self.world_path.resolve()
+                )
+            except ValueError as exc:
+                raise ValueError("区块目标越过存档边界") from exc
+        if region_path.suffix.lower() != ".mca":
+            raise ValueError("区块目标必须是 MCA 文件")
+        if not 0 <= chunk_x < 32 or not 0 <= chunk_z < 32:
+            raise ValueError("区块局部坐标必须位于 0-31")
         target = ChunkTarget(
             region_path=region_path,
             chunk_x=chunk_x,

@@ -19,10 +19,9 @@ def _collect_player_names(
     manual_names: Optional[List[str]],
     log: LogCallback,
 ) -> tuple[set[str], Dict[str, Path]]:
-    names = set(manual_names or [])
+    names: set[str] = set()
     templates: Dict[str, Path] = {}
-    if manual_names:
-        log(f"使用手动输入的玩家名: {', '.join(manual_names)}", "MANUAL")
+    unresolved: List[Path] = []
     for player_dir in find_player_data_dirs(world_path):
         for player_file in player_dir.glob("*.dat"):
             old_uuid = player_file.stem
@@ -33,10 +32,22 @@ def _collect_player_names(
                 names.add(name)
                 templates.setdefault(name, player_file)
             else:
+                unresolved.append(player_file)
                 log(
                     f"无法识别 UUID: {old_uuid}，如果这是您的账号，请在手动输入框中填写玩家名",
                     "WARN",
                 )
+    if manual_names:
+        names_list = [name.strip() for name in manual_names if name.strip()]
+        if len(names_list) != len(unresolved) or len(set(names_list)) != len(names_list):
+            raise ValueError(
+                f"未知玩家数量为 {len(unresolved)}，手动名称数量为 {len(names_list)}，"
+                "必须一对一且名称不能重复"
+            )
+        for player_file, name in zip(sorted(unresolved), names_list):
+            names.add(name)
+            templates[name] = player_file
+            log(f"手动关联玩家: {player_file.stem} -> {name}", "MANUAL")
     return names, templates
 
 
@@ -147,7 +158,8 @@ def run_fast(
 
     if pure_clean:
         log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
-        purge_mod_blocks_and_entities(dest_world, log)
+        if not purge_mod_blocks_and_entities(dest_world, log):
+            raise RuntimeError("纯净扫描未完整处理所有区域文件")
     else:
         log("跳过纯净扫描", "INFO")
 

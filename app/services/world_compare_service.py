@@ -1,5 +1,6 @@
 """存档对比服务"""
 from pathlib import Path
+import hashlib
 from typing import Any, Dict, List, Optional
 from dataclasses import asdict, dataclass
 
@@ -89,10 +90,14 @@ class WorldCompareService:
             self,
             left_path: Path,
             right_path: Path) -> List[CompareItem]:
-        left_regions = {p.name: self._file_signature(
-            p) for p in scan_all_regions(left_path)}
-        right_regions = {p.name: self._file_signature(
-            p) for p in scan_all_regions(right_path)}
+        left_regions = {
+            p.relative_to(left_path).as_posix(): self._file_signature(p)
+            for p in scan_all_regions(left_path)
+        }
+        right_regions = {
+            p.relative_to(right_path).as_posix(): self._file_signature(p)
+            for p in scan_all_regions(right_path)
+        }
         keys = sorted(set(left_regions) | set(right_regions))
         return [
             CompareItem(
@@ -120,7 +125,11 @@ class WorldCompareService:
 
     def _file_signature(self, path: Path) -> Dict[str, Any]:
         st = path.stat()
-        return {"size": st.st_size, "mtime": int(st.st_mtime)}
+        digest = hashlib.sha256()
+        with path.open("rb") as region_file:
+            for chunk in iter(lambda: region_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return {"size": st.st_size, "sha256": digest.hexdigest()}
 
 
 def get_world_compare_service(

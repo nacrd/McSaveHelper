@@ -1,4 +1,9 @@
 import hashlib
+import io
+import json
+import threading
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -8,6 +13,7 @@ from core.texture.block_guess import (
     resolve_texture_resource_key,
 )
 from core.texture.client_jar import ClientJarInfo
+from app.services.texture_service import TextureService
 
 
 class _Response:
@@ -27,6 +33,13 @@ class _Response:
     def iter_content(self, chunk_size: int) -> Iterator[bytes]:
         del chunk_size
         return iter(self._chunks)
+
+
+def _zip_bytes() -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("assets/minecraft/example.txt", "ok")
+    return buffer.getvalue()
 
 
 def test_resolve_latest_client_jar_reads_manifest_and_metadata() -> None:
@@ -71,17 +84,23 @@ def test_stream_client_jar_commits_temp_file_atomically(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
+    payload = _zip_bytes()
     monkeypatch.setattr(
         client_jar.requests,
         "get",
-        lambda *_args, **_kwargs: _Response(chunks=(b"abc", b"", b"def")),
+        lambda *_args, **_kwargs: _Response(chunks=(payload[:10], b"", payload[10:])),
     )
     target = tmp_path / "client.jar"
-    info = ClientJarInfo("1.21", "client", None, 6)
+    info = ClientJarInfo(
+        "1.21",
+        "client",
+        hashlib.sha1(payload).hexdigest(),
+        len(payload),
+    )
 
     assert client_jar.stream_client_jar(info, target) is True
-    assert target.read_bytes() == b"abcdef"
-    assert not target.with_suffix(".jar.part").exists()
+    assert target.read_bytes() == payload
+    assert not list(tmp_path.glob(".*.part"))
 
 
 def test_stream_client_jar_rejects_http_failure(
@@ -100,6 +119,89 @@ def test_stream_client_jar_rejects_http_failure(
         target,
     ) is False
     assert not target.exists()
+
+
+def test_stream_client_jar_rejects_invalid_integrity(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        client_jar.requests,
+        "get",
+        lambda *_args, **_kwargs: _Response(chunks=(b"not-a-jar",)),
+    )
+    target = tmp_path / "client.jar"
+
+    assert client_jar.stream_client_jar(
+        ClientJarInfo("1.21", "client", "wrong", 9),
+        target,
+    ) is False
+    assert not target.exists()
+    assert not list(tmp_path.glob(".*.part"))
+
+
+def test_find_local_jar_uses_release_time_not_version_string(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(client_jar.platform, "system", lambda: "Windows")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    versions = tmp_path / ".minecraft" / "versions"
+    for version, release_time in (
+        ("1.9", "2016-02-29T00:00:00Z"),
+        ("1.21", "2024-06-13T00:00:00Z"),
+    ):
+        version_dir = versions / version
+        version_dir.mkdir(parents=True)
+        (version_dir / f"{version}.jar").write_bytes(_zip_bytes())
+        (version_dir / f"{version}.json").write_text(
+            json.dumps({"releaseTime": release_time}),
+            encoding="utf-8",
+        )
+
+    assert client_jar.find_local_minecraft_jar() == versions / "1.21" / "1.21.jar"
+
+
+def test_texture_cache_rejects_item_id_path_traversal(tmp_path: Path) -> None:
+    service = TextureService()
+    service._cache_dir = tmp_path / "cache"
+    service._cache_dir.mkdir()
+    outside = tmp_path / "review_probe.png"
+    outside.write_bytes(b"\x89PNG\r\n\x1a\nprobe")
+
+    assert service.get_texture_base64("minecraft:../../../review_probe") is None
+
+
+def test_client_jar_download_is_single_flight(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    service = TextureService()
+    service._jar_cache_dir = tmp_path
+    target = tmp_path / "client.jar"
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+    monkeypatch.setattr(service, "find_minecraft_jar", lambda: None)
+
+    def download() -> Path:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        release.wait(timeout=2)
+        target.write_bytes(_zip_bytes())
+        return target
+
+    monkeypatch.setattr(service, "_download_client_jar", download)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service._find_or_get_jar)
+        assert entered.wait(timeout=2)
+        second = executor.submit(service._find_or_get_jar)
+        release.set()
+        assert first.result() == target
+        assert second.result() == target
+
+    assert calls == 1
 
 
 def test_block_guess_and_resource_resolution_are_pure() -> None:

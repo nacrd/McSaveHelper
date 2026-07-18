@@ -205,7 +205,11 @@ class RegionTabMixin(ExplorerMixinHost):
                 return
             from app.services.region_editor_service import get_region_editor_service
             service = get_region_editor_service(log=self.app.log)
-            if service.reset_region(region_path, backup=True):
+            with self.app.services.world_writes.reserve(
+                self.world_session.world_path
+            ):
+                deleted = service.reset_region(region_path, backup=True)
+            if deleted:
                 self.app.info_dialog(
                     "成功", f"已删除区域 {coord}，游戏下次进入会重新生成。备份文件保留为 .bak。")
                 self._selected_region_coord = None

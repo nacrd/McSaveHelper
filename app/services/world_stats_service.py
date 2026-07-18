@@ -183,15 +183,18 @@ class WorldStatsService:
         return block_counter, entity_counter
 
     def _count_palette_blocks(self, data: Any) -> Counter[str]:
+        from core.mca.block_palette import ChunkBlocks
+
         counter: Counter[str] = Counter()
-        for section in data.get('sections', []):
-            if section is None:
-                continue
-            block_states = section.get('block_states', {})
-            for block in block_states.get('palette', []):
-                block_id = str(block.get('Name', ''))
-                if block_id and block_id not in self.AIR_BLOCKS:
-                    counter[block_id] += 1
+        blocks = ChunkBlocks(data)
+        for section_y in blocks.section_ys_desc:
+            y_base = section_y * 16
+            for local_y in range(16):
+                for z in range(16):
+                    for x in range(16):
+                        block_id = blocks.block_id_at(x, y_base + local_y, z)
+                        if block_id and block_id not in self.AIR_BLOCKS:
+                            counter[block_id] += 1
         return counter
 
     @staticmethod

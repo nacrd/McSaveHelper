@@ -24,8 +24,6 @@ _AIR_NAMES = frozenset({
     "air", "cave_air", "void_air",
 })
 
-_CHUNK_CACHE: Dict[int, "ChunkBlocks"] = {}
-
 
 def is_air_name(name: Optional[str]) -> bool:
     if not name:
@@ -258,15 +256,9 @@ class ChunkBlocks:
 
 
 def get_chunk_blocks(chunk_nbt: Any) -> ChunkBlocks:
-    key = id(chunk_nbt)
-    cached = _CHUNK_CACHE.get(key)
-    if cached is not None:
-        return cached
-    view = ChunkBlocks(chunk_nbt)
-    if len(_CHUNK_CACHE) > 512:
-        _CHUNK_CACHE.clear()
-    _CHUNK_CACHE[key] = view
-    return view
+    # NBT objects are mutable; an id-based cache can return stale block states
+    # after an editor changes palette/data in place.
+    return ChunkBlocks(chunk_nbt)
 
 
 def block_id_at(chunk_nbt: Any, x: int, y: int, z: int) -> Optional[str]:

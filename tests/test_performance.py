@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from typing import cast
+import threading
 
 from app.ui.performance import health_monitor, perf_monitor, resource_monitor
 from app.ui.performance.resource import (
@@ -22,6 +23,48 @@ def test_perf_tracker_publishes_metrics_without_ui_dependency() -> None:
     assert published[0].operation == "scan"
     assert published[0].files_processed == 2
     assert published[0].bytes_processed == 1024
+
+
+def test_perf_tracker_supports_nested_operations() -> None:
+    tracker = PerfTracker()
+    with tracker.track("outer"):
+        tracker.increment_files()
+        with tracker.track("inner"):
+            tracker.increment_files(2)
+        tracker.increment_files()
+
+    outer = tracker.get_metrics("outer")
+    inner = tracker.get_metrics("inner")
+    assert outer is not None
+    assert inner is not None
+    assert outer.files_processed == 2
+    assert inner.files_processed == 2
+
+
+def test_perf_tracker_separates_concurrent_operations() -> None:
+    tracker = PerfTracker()
+    barrier = threading.Barrier(2)
+
+    def run(name: str, count: int) -> None:
+        with tracker.track(name):
+            barrier.wait(timeout=2)
+            tracker.increment_files(count)
+
+    threads = [
+        threading.Thread(target=run, args=("first", 1)),
+        threading.Thread(target=run, args=("second", 2)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    first = tracker.get_metrics("first")
+    second = tracker.get_metrics("second")
+    assert first is not None
+    assert second is not None
+    assert first.files_processed == 1
+    assert second.files_processed == 2
 
 
 def test_global_resource_monitor_uses_shared_monitors() -> None:

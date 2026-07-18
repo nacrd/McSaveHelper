@@ -39,14 +39,17 @@ pyright
 
 ### Building Executables
 ```bash
+# Install build dependencies
+python -m pip install nuitka ordered-set ziglang zstandard
+
 # Single-file executable
-pyinstaller build-onefile.spec
+python build_nuitka.py onefile
 
 # Portable multi-file version
-pyinstaller build-portable.spec
+python build_nuitka.py portable
 ```
 
-Output: `dist/` directory
+Output: `dist/MCSaveHelper.exe` and `dist/MCSaveHelper/`
 
 ### Debug Packaged Executable
 ```bash
@@ -95,18 +98,15 @@ When implementing similar features, refer to:
 
 ### Flet API Compatibility
 
-**IMPORTANT**: This project includes extensive Flet 0.85+ API compatibility patches in `main.py` (`_patch_flet_api()`). These monkey-patches handle breaking API changes:
+The project uses the native Flet 0.85+ API directly. Do not add global monkey-patches
+to `main.py`; compatibility belongs at the component or adapter boundary.
 
-1. `ft.alignment.center` and similar convenience properties
-2. `ft.ImageFit` → `ft.BoxFit` rename
-3. `ft.Image` constructor `src` parameter requirements
-4. `ft.Dropdown` constructor `on_change` parameter handling
-5. `ft.Spacer` removal (replaced with `ft.Container(expand=True)`)
-6. `ft.border.all()` deprecation
-7. `page.set_clipboard()` → `page.set_clipboard_async()` change
-8. `page.run_task()` async function requirements
-
-When working with Flet components, be aware these patches exist and avoid breaking them.
+- Use `ft.Alignment`, `ft.BoxFit`, `ft.Border.all`, and `ft.Container(expand=True)`.
+- Bind dropdown changes through `on_select`.
+- Show dialogs and snack bars with `page.show_dialog()`.
+- Use `page.clipboard.set()` through `page.run_task()`.
+- Pass only async callables to `page.run_task()`; use `app.ui.utils.run_on_ui()`
+  when scheduling a synchronous UI callback from a worker thread.
 
 ### Type Checking Configuration
 
@@ -208,3 +208,20 @@ The `WorldSession` class (`core/omni/world_session.py`) provides the main interf
 - Error logs for packaged builds are written to `startup_error.log` in the executable directory
 - Use `app/ui/components/` for reusable UI components (`buttons.py`, `cards.py`, `fields.py`, `layout.py`)
 - The `Application` class (`app/application.py`) is the central coordinator - avoid creating global state elsewhere
+
+## Refactor Boundary Rules
+
+Keep dependency direction one-way: UI -> controllers -> services -> core.
+
+- Extract large Flet trees into nearby chrome builder modules that return typed control bundles.
+- Keep pure decisions (selection formatting, resource path guesses, report text) outside views.
+- Put Minecraft-format algorithms in core; services orchestrate callbacks, I/O, and application ports.
+- Controllers must not import the UI package.
+- Business services are application-scoped or factory-created instances. Do not add module-level business singletons.
+
+Intentional process-wide infrastructure (not page/business state):
+
+- Theme proxy and theme manager
+- Logging manager, translation manager, and performance tracker
+- MCA surface/tile performance caches
+- Replaceable UI defaults: shortcut manager, performance monitor, and feedback collector

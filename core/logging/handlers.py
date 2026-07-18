@@ -1,4 +1,5 @@
 """Log handlers: base, console, file, UI."""
+import os
 import sys
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -86,17 +87,21 @@ class FileHandler(LogHandler):
     def _rotate(self) -> None:
         if self.backup_count <= 0:
             return
-        if self._file and not self._file.closed:
-            self._file.close()
-        for i in range(self.backup_count - 1, 0, -1):
-            old_file = self.filepath.with_suffix(f".{i}.log")
-            new_file = self.filepath.with_suffix(f".{i + 1}.log")
-            if old_file.exists():
-                old_file.rename(new_file)
-        backup_file = self.filepath.with_suffix(".1.log")
-        if self.filepath.exists():
-            self.filepath.rename(backup_file)
-        self._open_file()
+        try:
+            if self._file and not self._file.closed:
+                self._file.close()
+            oldest = self.filepath.with_suffix(f".{self.backup_count}.log")
+            oldest.unlink(missing_ok=True)
+            for i in range(self.backup_count - 1, 0, -1):
+                old_file = self.filepath.with_suffix(f".{i}.log")
+                new_file = self.filepath.with_suffix(f".{i + 1}.log")
+                if old_file.exists():
+                    os.replace(old_file, new_file)
+            backup_file = self.filepath.with_suffix(".1.log")
+            if self.filepath.exists():
+                os.replace(self.filepath, backup_file)
+        finally:
+            self._open_file()
 
     def handle(self, record: LogRecord) -> None:
         if not self.can_handle(record):

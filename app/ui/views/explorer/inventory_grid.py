@@ -1,10 +1,11 @@
 """Inventory Grid component - Minecraft 风格物品栏，支持纹理图片"""
 import flet as ft
-from typing import Any, Dict, List, Optional
+from typing import Any, cast, Dict, List, Optional
 
 from app.services.item_service import ItemService
 from app.services.texture_service import TextureService
 from app.ui.theme import THEME
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.item_slot import (
     ItemSlotControl,
@@ -30,6 +31,8 @@ class InventoryGrid(ft.Column):
         self._slot_controls: Dict[int, ItemSlotControl] = {}
         self._item_service = item_service
         self._texture_service = texture_service
+        self._texture_generation = 0
+        self._slot_item_ids: Dict[int, str] = {}
 
         def make_slot(nbt_slot: int) -> ft.Container:
             slot = create_item_slot(slot_size)
@@ -64,6 +67,7 @@ class InventoryGrid(ft.Column):
         ]
 
     def set_inventory(self, inventory: List[Dict[str, Any]]) -> None:
+        self._texture_generation += 1
         for nbt_slot, s in self._slots.items():
             reset_item_slot(self._slot_controls[nbt_slot])
 
@@ -92,21 +96,36 @@ class InventoryGrid(ft.Column):
             pass
 
         safe_update(self)
+        self._slot_item_ids = dict(item_ids_to_load)
 
         # 异步加载真实纹理
         if item_ids_to_load:
-            self._load_textures_async(item_ids_to_load)
+            self._load_textures_async(item_ids_to_load, self._texture_generation)
 
-    def _load_textures_async(self, slot_item_map: Dict[int, str]) -> None:
+    def _load_textures_async(
+        self,
+        slot_item_map: Dict[int, str],
+        generation: int,
+    ) -> None:
         """异步加载纹理，成功后隐藏 Emoji，显示图片"""
         def _on_loaded(item_id: str, uri: Optional[str]):
             if uri is None:
                 return
-            for slot_idx, iid in slot_item_map.items():
-                if iid == item_id:
-                    slot = self._slot_controls.get(slot_idx)
-                    if slot is not None:
-                        apply_texture_to_slot(slot, uri)
+
+            def apply_loaded() -> None:
+                if generation != self._texture_generation:
+                    return
+                for slot_idx, iid in slot_item_map.items():
+                    if iid == item_id and self._slot_item_ids.get(slot_idx) == item_id:
+                        slot = self._slot_controls.get(slot_idx)
+                        if slot is not None:
+                            apply_texture_to_slot(slot, uri)
+
+            try:
+                page = cast(Optional[ft.Page], self.page)
+            except RuntimeError:
+                page = None
+            run_on_ui(page, apply_loaded)
 
         unique_ids = list(set(slot_item_map.values()))
         self._texture_service.load_textures_async(

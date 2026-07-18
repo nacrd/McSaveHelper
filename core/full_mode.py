@@ -60,17 +60,17 @@ def run_full(
         custom_mappings)
     if not mappings:
         log("未生成任何 UUID 映射，终止", "ERROR")
-        return
+        raise RuntimeError("未生成任何 UUID 映射，完整迁移已中止")
     log(f"生成 {len(mappings)} 条映射", "INFO")
 
     # 3. 处理核心 NBT 文件
     log("处理核心 NBT 文件...", "NBT")
-    l_c = process_nbt_file(dest_world / "level.dat", mappings, log)
+    l_c = process_nbt_file(dest_world / "level.dat", mappings, log, required=True)
     log(f"level.dat 修改 {l_c} 处", "INFO")
 
     for data_dir in find_data_dirs(dest_world):
         for df in data_dir.glob("*.dat"):
-            process_nbt_file(df, mappings, log)
+            process_nbt_file(df, mappings, log, required=True)
 
     # 4. 物理重命名（兼容 26.1 新旧路径）
     log("重命名玩家文件...", "FILE")
@@ -112,7 +112,8 @@ def run_full(
     # 7. 纯净扫描
     if pure_clean:
         log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
-        purge_mod_blocks_and_entities(dest_world, log)
+        if not purge_mod_blocks_and_entities(dest_world, log):
+            raise RuntimeError("纯净扫描未完整处理所有区域文件")
     else:
         log("跳过纯净扫描", "INFO")
 
@@ -123,7 +124,8 @@ def run_full(
 def process_nbt_file(
     path: Path,
     mappings: List[UUIDMapping],
-    log: LogCallback
+    log: LogCallback,
+    required: bool = False,
 ) -> int:
     """处理单个 NBT 文件
 
@@ -143,4 +145,6 @@ def process_nbt_file(
         return c
     except Exception as e:
         log(f"处理失败 {path.name}: {e}", "ERROR")
+        if required:
+            raise RuntimeError(f"必要 NBT 文件处理失败: {path}") from e
         return 0

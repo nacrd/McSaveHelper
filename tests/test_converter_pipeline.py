@@ -1,7 +1,9 @@
 from pathlib import Path
 from typing import Any
+import gzip
 
 import core.converter as converter
+import pytest
 
 
 class _Tracker:
@@ -14,6 +16,48 @@ class _Tracker:
 
     def increment_errors(self, count: int = 1) -> None:
         self.errors += count
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (b"\x0a\x00\x01x\x00", "big"),
+        (b"\x0a\x01\x00x\x00", "little"),
+        (b"\x0a\x00\x00\x00", "big"),
+    ],
+)
+def test_detect_endian_uses_root_name_length_offset(
+    tmp_path: Path,
+    payload: bytes,
+    expected: str,
+) -> None:
+    path = tmp_path / "root.nbt"
+    path.write_bytes(payload)
+    assert converter.detect_endian(path) == expected
+
+
+def test_detect_endian_handles_gzip_nbt(tmp_path: Path) -> None:
+    path = tmp_path / "root.dat"
+    path.write_bytes(gzip.compress(b"\x0a\x01\x00x\x00"))
+    assert converter.detect_endian(path) == "little"
+
+
+@pytest.mark.parametrize(
+    ("platform", "version"),
+    [("bedrock", None), ("java", 1343)],
+)
+def test_convert_world_rejects_unsupported_conversion(
+    tmp_path: Path,
+    platform: str,
+    version: int | None,
+) -> None:
+    with pytest.raises(converter.ConversionError, match="尚未"):
+        converter.convert_world(
+            tmp_path,
+            tmp_path,
+            target_platform=platform,
+            target_version=version,
+        )
 
 
 def test_prepare_work_path_copies_world_and_ignores_transient_files(

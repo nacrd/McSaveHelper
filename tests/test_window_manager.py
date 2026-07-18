@@ -63,3 +63,11 @@ def test_responsive_layout_uses_attached_shell_host() -> None:
     assert sidebar.collapsed is False
     assert sidebar.width == 230
     assert compact_modes[-1] is False
+
+
+def test_shutdown_does_not_schedule_forced_process_exit() -> None:
+    from pathlib import Path
+
+    source = Path("app/core/window_manager.py").read_text(encoding="utf-8")
+    assert "os._exit" not in source
+    assert "_schedule_force_exit" not in source

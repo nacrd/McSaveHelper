@@ -2,14 +2,22 @@
 import os
 import platform
 import subprocess
+import shutil
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from core.batch_processor import BatchProcessor, scan_worlds_directory
+from core.batch_processor import (
+    BatchCancelledError,
+    BatchProcessor,
+    scan_worlds_directory,
+)
 from core.logger import logger
 from core.types import LogCallback, ProgressCallback
 from core.i18n import t
 from app.services.config_service import ConfigService
+from app.services.backup_service import BackupService
 
 # run_fast / run_full 延迟导入：它们经 core.full_mode 顶层 `import nbtlib`
 # 触发重型 NBT 库加载，启动期不需要。在实际调用 migrate 时才导入。
@@ -26,8 +34,13 @@ class MigrationService:
       - 管理进度回调
     """
 
-    def __init__(self, config: ConfigService) -> None:
+    def __init__(
+        self,
+        config: ConfigService,
+        backup_service: Optional[BackupService] = None,
+    ) -> None:
         self._config: ConfigService = config
+        self._backup_service = backup_service or BackupService()
         self._batch_processor: Optional[BatchProcessor] = None
         self._batch_worlds: List[Path] = []
         self._scan_result: str = ""
@@ -112,50 +125,33 @@ class MigrationService:
         Returns:
             str: 输出目录路径
         """
-        src_path = Path(src)
-        dest_path = Path(dest)
+        src_path, dest_path, output_path = self._validate_single_inputs(
+            src,
+            dest,
+            world_name,
+            mode,
+        )
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
 
         from core.performance import get_tracker
         tracker = get_tracker()
-        # 延迟导入：nbtlib 重库，仅迁移时需要
-        from core.fast_mode import run_fast
-        from core.full_mode import run_full
         with tracker.track("存档迁移", {"name": world_name, "mode": mode}):
-            if mode == "fast":
-                run_fast(
-                    src_path,
-                    dest_path,
-                    world_name,
-                    offline,
-                    clean,
-                    pure_clean,
-                    manual,
-                    log_cb)
-            else:
-                custom_mappings = (
-                    self._config.custom_uuid_mappings
-                    if self._config.use_custom_mapping
-                    else None
-                )
-                run_full(
-                    src_path,
-                    dest_path,
-                    world_name,
-                    offline,
-                    clean,
-                    pure_clean,
-                    manual,
-                    log_cb,
-                    progress_cb,
-                    custom_mappings,
-                )
-
-            output_path = dest_path / world_name
-            if not self._apply_version_conversion(
-                    output_path, target_platform, target_version, log_cb):
-                raise RuntimeError("版本/平台转换失败，请查看日志获取详细信息")
-        return str(output_path)
+            published = self._execute_single_transaction(
+                src_path=src_path,
+                dest_path=dest_path,
+                output_path=output_path,
+                world_name=world_name,
+                mode=mode,
+                offline=offline,
+                clean=clean,
+                pure_clean=pure_clean,
+                target_platform=target_platform,
+                target_version=target_version,
+                manual=manual,
+                log_cb=log_cb,
+                progress_cb=progress_cb,
+            )
+        return str(published)
 
     def run_batch(
         self,
@@ -187,10 +183,44 @@ class MigrationService:
         Returns:
             Dict[str, Any]: 处理结果字典
         """
-        dest_path = Path(dest_dir)
+        if not dest_dir.strip():
+            raise ValueError("批量目标输出目录不能为空")
+        dest_path = Path(dest_dir).expanduser().resolve()
+        dest_path.mkdir(parents=True, exist_ok=True)
         manual = [n.strip() for n in manual_names_str.split(",") if n.strip()]
         world_names = [
             f"world_{i + 1}" for i in range(len(self._batch_worlds))]
+
+        def migrate_task(
+            source: Path,
+            destination: Path,
+            world_name: str,
+            local_log: LogCallback,
+            cancel_event: threading.Event,
+        ) -> Dict[str, Any]:
+            src_path, task_dest, output_path = self._validate_single_inputs(
+                str(source),
+                str(destination),
+                world_name,
+                mode,
+            )
+            published = self._execute_single_transaction(
+                src_path=src_path,
+                dest_path=task_dest,
+                output_path=output_path,
+                world_name=world_name,
+                mode=mode,
+                offline=offline,
+                clean=clean,
+                pure_clean=pure_clean,
+                target_platform=target_platform,
+                target_version=target_version,
+                manual=manual,
+                log_cb=local_log,
+                progress_cb=lambda value: None,
+                cancel_event=cancel_event,
+            )
+            return {"success": True, "output_path": str(published)}
 
         self._batch_processor = BatchProcessor(
             max_concurrent,
@@ -200,21 +230,138 @@ class MigrationService:
                 if self._config.use_custom_mapping
                 else None
             ),
+            task_handler=migrate_task,
         )
         results = self._batch_processor.process_batch(
             self._batch_worlds, dest_path, world_names, mode,
             offline, clean, pure_clean, manual, log_cb, progress_cb,
         )
-        for result in results.values():
-            if result.get("success"):
-                output_name = result.get("world_name")
-                if output_name:
-                    converted = self._apply_version_conversion(
-                        dest_path / output_name, target_platform, target_version, log_cb)
-                    if not converted:
-                        result["success"] = False
-                        result["error"] = "版本/平台转换失败，请查看日志获取详细信息"
         return results
+
+    def cancel_batch(self) -> bool:
+        """Request cancellation for the active batch operation."""
+        processor = self._batch_processor
+        if processor is None or not processor.is_running:
+            return False
+        processor.stop()
+        return True
+
+    def _validate_single_inputs(
+        self,
+        src: str,
+        dest: str,
+        world_name: str,
+        mode: str,
+    ) -> tuple[Path, Path, Path]:
+        if not dest.strip():
+            raise ValueError("目标输出目录不能为空")
+        if mode not in {"fast", "full"}:
+            raise ValueError(f"不支持的迁移模式: {mode}")
+        src_path = Path(src).expanduser().resolve()
+        dest_path = Path(dest).expanduser().resolve()
+        if not src_path.is_dir() or not (src_path / "level.dat").is_file():
+            raise ValueError("源目录不是有效 Minecraft 存档")
+        from core.utils import safe_destination_world
+
+        output_path = safe_destination_world(src_path, dest_path, world_name)
+        if output_path.exists() and (
+            not output_path.is_dir()
+            or (any(output_path.iterdir()) and not (output_path / "level.dat").is_file())
+        ):
+            raise ValueError(f"目标目录不是 Minecraft 存档，拒绝覆盖: {output_path}")
+        dest_path.mkdir(parents=True, exist_ok=True)
+        return src_path, dest_path, output_path
+
+    def _execute_single_transaction(
+        self,
+        *,
+        src_path: Path,
+        dest_path: Path,
+        output_path: Path,
+        world_name: str,
+        mode: str,
+        offline: bool,
+        clean: bool,
+        pure_clean: bool,
+        target_platform: str,
+        target_version: str,
+        manual: List[str],
+        log_cb: LogCallback,
+        progress_cb: ProgressCallback,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Path:
+        from core.fast_mode import run_fast
+        from core.full_mode import run_full
+        from core.utils import publish_directory_tree, update_server_properties
+
+        with self._backup_service.exclusive_operation(output_path):
+            self._raise_if_batch_cancelled(cancel_event)
+            if (output_path / "level.dat").is_file():
+                backup_record = self._backup_service.create_backup(
+                    output_path,
+                    label="迁移覆盖前自动备份",
+                )
+                log_cb(f"已备份现有目标: {backup_record.backup_path}", "BACKUP")
+
+            staging_root = Path(tempfile.mkdtemp(
+                prefix=f".mcsavehelper_migrate_{world_name}_",
+                dir=dest_path,
+            ))
+            try:
+                self._raise_if_batch_cancelled(cancel_event)
+                if mode == "fast":
+                    run_fast(
+                        src_path,
+                        staging_root,
+                        world_name,
+                        offline,
+                        clean,
+                        pure_clean,
+                        manual,
+                        log_cb,
+                    )
+                else:
+                    custom_mappings = (
+                        self._config.custom_uuid_mappings
+                        if self._config.use_custom_mapping
+                        else None
+                    )
+                    run_full(
+                        src_path,
+                        staging_root,
+                        world_name,
+                        offline,
+                        clean,
+                        pure_clean,
+                        manual,
+                        log_cb,
+                        progress_cb,
+                        custom_mappings,
+                    )
+
+                prepared_world = staging_root / world_name
+                if not (prepared_world / "level.dat").is_file():
+                    raise RuntimeError("迁移产物无效：缺少 level.dat")
+                if not self._apply_version_conversion(
+                    prepared_world,
+                    target_platform,
+                    target_version,
+                    log_cb,
+                ):
+                    raise RuntimeError("版本/平台转换失败，请查看日志获取详细信息")
+                self._raise_if_batch_cancelled(cancel_event)
+                publish_directory_tree(prepared_world, output_path)
+                update_server_properties(dest_path, world_name, log_cb)
+                return output_path
+            finally:
+                shutil.rmtree(staging_root, ignore_errors=True)
+
+    @staticmethod
+    def _raise_if_batch_cancelled(
+        cancel_event: Optional[threading.Event],
+    ) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise BatchCancelledError("批量迁移已取消，产物未发布")
 
     def _apply_version_conversion(
         self,
@@ -223,13 +370,13 @@ class MigrationService:
         target_version: str,
         log_cb: LogCallback,
     ) -> bool:
+        if target_platform != "java":
+            log_cb("尚未接入可靠的基岩版转换引擎，已拒绝迁移", "ERROR")
+            return False
         version_value = None
         if target_version.strip():
-            try:
-                version_value = int(target_version.strip())
-            except ValueError:
-                log_cb(f"目标版本 ID 无效，已跳过版本降级: {target_version}", "WARNING")
-                return True
+            log_cb("尚未实现可靠的跨版本数据迁移，已拒绝版本降级", "ERROR")
+            return False
 
         if target_platform == "java" and version_value is None:
             return True

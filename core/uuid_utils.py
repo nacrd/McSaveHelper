@@ -191,15 +191,11 @@ def _resolve_player_name(
     old_uuid: str,
     cache: dict,
     offline_mode: bool,
-    manual_names: Optional[List[str]],
     log: LogCallback,
 ) -> Optional[str]:
     name = cache.get(old_uuid)
     if not name and not offline_mode:
         name = get_name_from_uuid(old_uuid, log)
-    if not name and manual_names:
-        name = manual_names[0]
-        log(f"使用手动输入的玩家名: {name}", "MANUAL")
     return name
 
 
@@ -213,26 +209,6 @@ def _target_uuid_for_name(
         log(f"使用自定义UUID映射: {name} -> {custom_uuid}", "SUCCESS")
         return custom_uuid
     return get_offline_uuid_str(name)
-
-
-def _append_unmatched_manual_names(
-    maps: List[UUIDMapping],
-    manual_names: Optional[List[str]],
-    processed_names: set[str],
-    custom_mappings: Dict[str, str],
-    log: LogCallback,
-) -> None:
-    for name in manual_names or []:
-        if name in processed_names:
-            continue
-        offline_uuid = get_offline_uuid_str(name)
-        new_uuid = custom_mappings.get(name)
-        if new_uuid:
-            log(f"为手动玩家 {name} 使用自定义UUID: {new_uuid}", "SUCCESS")
-        else:
-            new_uuid = offline_uuid
-            log(f"为手动玩家 {name} 生成离线UUID: {new_uuid}", "INFO")
-        maps.append(_make_uuid_mapping(offline_uuid, new_uuid))
 
 
 def build_mappings(
@@ -264,7 +240,7 @@ def build_mappings(
         return []
     maps: List[UUIDMapping] = []
     new_uuids: set[str] = set()
-    processed_names: set[str] = set()
+    unresolved: List[str] = []
 
     # 处理自定义UUID映射
     custom_mappings = custom_mappings or {}
@@ -280,24 +256,38 @@ def build_mappings(
             old_u,
             cache,
             offline_mode,
-            manual_names,
             log,
         )
 
         if name:
-            processed_names.add(name)
             new_u = _target_uuid_for_name(name, custom_mappings, log)
             maps.append(_make_uuid_mapping(old_u, new_u))
             new_uuids.add(new_u)
             log(f"映射: {name} ({old_u} -> {new_u})", "INFO")
         else:
+            unresolved.append(old_u)
+
+    if manual_names:
+        names = [name.strip() for name in manual_names if name.strip()]
+        if len(names) != len(unresolved) or len(set(names)) != len(names):
+            raise ValueError(
+                f"未知玩家数量为 {len(unresolved)}，手动名称数量为 {len(names)}，"
+                "必须一对一且名称不能重复"
+            )
+        for old_u, name in zip(sorted(unresolved), names):
+            new_u = _target_uuid_for_name(name, custom_mappings, log)
+            maps.append(_make_uuid_mapping(old_u, new_u))
+            new_uuids.add(new_u)
+            log(f"手动映射: {name} ({old_u} -> {new_u})", "MANUAL")
+    elif unresolved:
+        for old_u in unresolved:
             log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
 
-    _append_unmatched_manual_names(
-        maps,
-        manual_names,
-        processed_names,
-        custom_mappings,
-        log,
-    )
+    target_owners: Dict[str, str] = {}
+    for mapping in maps:
+        old_u, new_u = mapping[2], mapping[3]
+        owner = target_owners.get(new_u)
+        if owner is not None and owner != old_u:
+            raise ValueError(f"多个玩家映射到了同一个目标 UUID: {new_u}")
+        target_owners[new_u] = old_u
     return maps

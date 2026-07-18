@@ -146,50 +146,36 @@ class TestSaveNbtResourceManagement:
             # 创建一个无效的 NBT 数据来触发保存失败
             invalid_data = "not a valid nbt"
 
-            try:
+            with pytest.raises(Exception):
                 save_nbt(test_file, cast(Any, invalid_data))
-                assert False, "Expected exception"
-            except Exception:
-                pass
 
             # 检查是否有遗留的临时文件
             temp_files = list(tmp_path.glob(".*.tmp"))
             assert len(temp_files) == 0, f"残留临时文件: {temp_files}"
 
-    def test_convert_world_reports_file_errors(self):
-        """测试世界转换会返回文件级错误"""
-        from core.converter import convert_world
+    def test_convert_world_rejects_unimplemented_downgrade(self):
+        """测试世界转换拒绝未实现的跨版本降级"""
+        from core.converter import ConversionError, convert_world
 
         with tempfile.TemporaryDirectory() as tmpdir:
             world_path = Path(tmpdir)
             (world_path / "level.dat").write_bytes(b"bad")
 
-            result = convert_world(
-                world_path,
-                world_path,
-                target_platform="java",
-                target_version=1)
+            with pytest.raises(ConversionError, match="尚未实现"):
+                convert_world(
+                    world_path,
+                    world_path,
+                    target_platform="java",
+                    target_version=1)
 
-            assert result.success is False
-            assert bool(result) is False
-            assert len(result.errors) == 1
-
-    def test_migration_conversion_failure_is_visible(self, monkeypatch):
-        """测试迁移服务会暴露版本转换失败"""
+    def test_migration_rejects_unimplemented_conversion(self):
+        """测试迁移服务会暴露未实现的版本转换"""
         from app.services.config_service import ConfigService
         from app.services.migration_service import MigrationService
-        from core.converter import ConversionResult
 
         with tempfile.TemporaryDirectory() as tmpdir:
             service = MigrationService(ConfigService(Path(tmpdir) / "config"))
             logs = []
-
-            def fake_convert_world(*args, **kwargs):
-                return ConversionResult(errors=["bad file"])
-
-            monkeypatch.setattr(
-                "core.converter.convert_world",
-                fake_convert_world)
 
             ok = service._apply_version_conversion(
                 Path(tmpdir), "java", "1", lambda msg, level: logs.append(
@@ -197,7 +183,7 @@ class TestSaveNbtResourceManagement:
 
             assert ok is False
             assert any(
-                level == "ERROR" and "bad file" in msg for msg,
+                level == "ERROR" and "尚未实现" in msg for msg,
                 level in logs)
 
 
@@ -230,7 +216,7 @@ class TestReplaceDirectoryTreeAtomicity:
             # 验证目标目录内容被正确替换
             assert dst_dir.exists(), "目标目录不存在"
             assert (
-                dst_dir / "level.dat").read_text() == "source content", "内容未被替换"
+                dst_dir / "level.dat").read_text(encoding="utf-8") == "source content", "内容未被替换"
             assert (dst_dir / "playerdata" / "test.dat").exists(), "子目录未被复制"
             assert not (dst_dir / "region").exists(), "旧目录内容未被删除"
 
@@ -268,7 +254,7 @@ class TestReplaceDirectoryTreeAtomicity:
             assert (dst_dir / "level.dat").exists(), "level.dat 丢失"
             assert (dst_dir / "region").exists(), "region 目录丢失"
             assert (
-                dst_dir / "level.dat").read_text() == "existing content", "原内容被修改"
+                dst_dir / "level.dat").read_text(encoding="utf-8") == "existing content", "原内容被修改"
 
     def test_temp_directory_cleanup(self):
         """测试失败时临时目录被清理"""

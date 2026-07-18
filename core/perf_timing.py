@@ -23,7 +23,7 @@ _runtime_path: Optional[Path] = None
 
 def _project_root() -> Path:
     """日志写入目录：打包版取 exe 同级，源码态取项目根。"""
-    if hasattr(sys, "_MEIPASS"):
+    if hasattr(sys, "_MEIPASS") or "__compiled__" in globals():
         return Path(sys.executable).parent
     return Path(__file__).resolve().parent.parent
 

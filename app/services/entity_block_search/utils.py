@@ -70,6 +70,14 @@ def get_dimension_region_files(world_path: Path, dimension: str) -> List[Path]:
     return scan_region_dir(dimension_path / "region")
 
 
+def get_dimension_entity_files(world_path: Path, dimension: str) -> List[Path]:
+    """Return 1.18+ entity region files for one dimension."""
+    dimension_path = get_dimension_path(world_path, dimension)
+    if not dimension_path:
+        return []
+    return scan_region_dir(dimension_path / "entities")
+
+
 def get_entities(chunk: Any) -> List[Any]:
     data = chunk.data if hasattr(chunk, "data") else chunk
     return _get_child_list(data, ("entities", "Entities"))

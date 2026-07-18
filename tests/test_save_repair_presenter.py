@@ -31,6 +31,7 @@ def test_format_detect_report_splits_world_info_and_result() -> None:
 
 def test_format_repair_report_includes_backup_and_fixed_fields() -> None:
     report = RepairReport(
+        success=True,
         chunks_checked=4,
         players_checked=2,
         players_fixed=1,
@@ -45,3 +46,9 @@ def test_format_repair_report_includes_backup_and_fixed_fields() -> None:
     assert "玩家修复: 1" in text
     assert "level.dat: 已修复 (DataVersion)" in text
     assert "备份: backup" in text
+
+
+def test_format_repair_report_marks_incomplete_operation() -> None:
+    text = format_repair_report(RepairReport(success=False))
+
+    assert "修复未完成" in text

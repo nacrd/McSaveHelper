@@ -7,12 +7,17 @@
 from pathlib import Path
 import re
 import shutil
-from typing import List
+from typing import List, Optional
 
 from .types import LogCallback
 
 
-_INVALID_WORLD_NAME_CHARS = re.compile(r"[\\/\r\n]")
+_INVALID_WORLD_NAME_CHARS = re.compile(r"[<>:\"/\\|?*\r\n]")
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 # ══════════════════════════════════════════════════════════
@@ -129,6 +134,10 @@ def validate_world_name(world_name: str) -> str:
         raise ValueError("世界名称不能为空")
     if name in {".", ".."} or _INVALID_WORLD_NAME_CHARS.search(name):
         raise ValueError(f"不安全的世界名称: {world_name!r}")
+    if name != name.rstrip(". "):
+        raise ValueError(f"世界名称不能以点或空格结尾: {world_name!r}")
+    if name.split(".", 1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+        raise ValueError(f"世界名称是系统保留名称: {world_name!r}")
     if Path(name).is_absolute():
         raise ValueError(f"世界名称不能是绝对路径: {world_name!r}")
     return name
@@ -141,7 +150,10 @@ def safe_destination_world(
     """Return a validated destination world path under dest_dir."""
     safe_name = validate_world_name(world_name)
     base = dest_dir.resolve()
-    dest_world = (base / safe_name).resolve()
+    candidate = base / safe_name
+    if candidate.is_symlink():
+        raise ValueError(f"拒绝使用符号链接作为目标存档目录: {candidate}")
+    dest_world = candidate.resolve()
     try:
         dest_world.relative_to(base)
     except ValueError as exc:
@@ -178,8 +190,9 @@ def replace_directory_tree(
     如果复制过程中发生错误，原目标目录会被保留。
     """
     import tempfile
-    import os
 
+    if src_path.is_symlink() or dst_path.is_symlink():
+        raise ValueError("源目录和目标目录不能是符号链接")
     src_resolved = src_path.resolve()
     dst_resolved = dst_path.resolve()
     _ensure_distinct_tree(src_resolved, dst_resolved)
@@ -211,19 +224,50 @@ def replace_directory_tree(
             temp_path / dst_resolved.name,
             ignore=ignore)
 
-        # 原子替换：先删除旧目录（如果存在），再移动临时目录
         final_temp_path = temp_path / dst_resolved.name
-        if dst_resolved.exists():
-            shutil.rmtree(dst_resolved)
-
-        # 使用 os.replace 进行原子移动
-        os.replace(str(final_temp_path), str(dst_resolved))
+        publish_directory_tree(final_temp_path, dst_resolved)
         temp_dir = None  # 标记为已成功处理
 
     finally:
         # 清理临时目录（如果还有）
         if temp_dir and Path(temp_dir).exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def publish_directory_tree(prepared_path: Path, dst_path: Path) -> None:
+    """Publish a prepared world directory with rollback on exchange failure."""
+    import os
+    import secrets
+
+    if prepared_path.is_symlink() or dst_path.is_symlink():
+        raise ValueError("待发布目录和目标目录不能是符号链接")
+    prepared = prepared_path.resolve()
+    destination = dst_path.resolve()
+    _ensure_distinct_tree(prepared, destination)
+    if not prepared.is_dir() or not (prepared / "level.dat").is_file():
+        raise ValueError(f"待发布目录不是有效 Minecraft 存档: {prepared}")
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    rollback: Optional[Path] = None
+    if destination.exists():
+        if not destination.is_dir():
+            raise ValueError(f"目标路径不是目录: {destination}")
+        if any(destination.iterdir()) and not (destination / "level.dat").is_file():
+            raise ValueError(f"目标目录不是 Minecraft 存档目录，拒绝替换: {destination}")
+        rollback = destination.parent / (
+            f".{destination.name}.rollback-{secrets.token_hex(4)}"
+        )
+        os.replace(destination, rollback)
+
+    try:
+        os.replace(prepared, destination)
+    except Exception:
+        if rollback is not None and rollback.exists() and not destination.exists():
+            os.replace(rollback, destination)
+        raise
+
+    if rollback is not None:
+        shutil.rmtree(rollback, ignore_errors=True)
 
 
 def update_server_properties(

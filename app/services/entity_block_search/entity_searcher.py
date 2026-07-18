@@ -1,15 +1,45 @@
 """Entity search implementation."""
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from .base_searcher import BaseSearcher
-from .utils import get_entities, matches_target, tag_to_str, tag_value
+from .utils import (
+    get_dimension_entity_files,
+    get_dimension_region_files,
+    get_entities,
+    matches_target,
+    tag_to_str,
+    tag_value,
+)
 
 
 class EntitySearcher(BaseSearcher):
     """搜索区域区块中的实体。"""
 
     progress_label = "区块文件"
+
+    def search_dimension(
+        self,
+        world_path: Path,
+        dimension: str,
+        target: str,
+        log: Callable[[str, str], None],
+        progress: Callable[[float, str], None],
+    ) -> None:
+        """Scan modern entity regions and legacy chunk-embedded entities."""
+        entity_files = get_dimension_entity_files(world_path, dimension)
+        chunk_files = get_dimension_region_files(world_path, dimension)
+        region_files = entity_files + chunk_files
+        if not region_files:
+            log(f"维度 {dimension} 没有实体或区块文件", "WARNING")
+            return
+        log(
+            f"在 {dimension} 中找到 {len(entity_files)} 个实体文件、"
+            f"{len(chunk_files)} 个区块文件",
+            "INFO",
+        )
+        self._scan_regions(region_files, dimension, target, log, progress)
 
     def search_chunk(self, chunk: Any, target: str, dimension: str) -> None:
         try:

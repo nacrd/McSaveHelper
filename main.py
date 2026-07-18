@@ -12,14 +12,19 @@ import traceback
 from pathlib import Path
 
 if not hasattr(builtins, 'exit'):
-    builtins.exit = sys.exit
+    setattr(builtins, 'exit', sys.exit)
 if not hasattr(builtins, 'quit'):
-    builtins.quit = sys.exit
+    setattr(builtins, 'quit', sys.exit)
+
+
+def _is_packaged() -> bool:
+    """Return whether the entrypoint runs from a frozen executable."""
+    return hasattr(sys, '_MEIPASS') or '__compiled__' in globals()
 
 
 def _setup_console() -> None:
     """为 GUI 子系统的 exe 分配控制台（仅在 --console 参数时）"""
-    if sys.platform != 'win32' or not hasattr(sys, '_MEIPASS'):
+    if sys.platform != 'win32' or not _is_packaged():
         return
     try:
         import ctypes
@@ -42,7 +47,7 @@ def _setup_console() -> None:
 
 def _get_log_path() -> Path:
     """获取启动错误日志路径"""
-    if hasattr(sys, '_MEIPASS'):
+    if _is_packaged():
         log_dir = Path(sys.executable).parent
     else:
         log_dir = Path(__file__).parent

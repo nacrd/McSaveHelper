@@ -81,14 +81,14 @@ class WorldInfoPanel(ft.Column):
     def _build_backup_card(self) -> ft.Container:
         backup_buttons = ft.Row([
             ft.ElevatedButton(
-                "📦 创建备份",
+                self._t("explorer.create_backup", "创建备份"),
                 icon=ft.Icons.BACKUP,
                 bgcolor=THEME.accent,
                 color=THEME.text_invert,
                 on_click=self._on_backup_click,
             ),
             ft.ElevatedButton(
-                "🔄 恢复备份",
+                self._t("explorer.manage_backups", "管理恢复点"),
                 icon=ft.Icons.RESTORE,
                 bgcolor=THEME.bg_card,
                 color=THEME.text_primary,
@@ -98,14 +98,17 @@ class WorldInfoPanel(ft.Column):
         return card(
             ft.Column([
                 ft.Text(
-                    "🛡️ 备份与恢复",
+                    self._t("explorer.backup_title", "备份与恢复"),
                     size=15,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_primary,
                 ),
                 ft.Divider(height=6, color=THEME.border_subtle),
                 ft.Text(
-                    "创建存档备份以防数据丢失，或从之前的备份恢复",
+                    self._t(
+                        "explorer.backup_subtitle",
+                        "创建恢复点或打开备份中心管理已有快照",
+                    ),
                     size=12,
                     color=THEME.text_muted,
                 ),

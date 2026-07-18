@@ -15,7 +15,7 @@ on:
         default: ''
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -77,30 +77,25 @@ jobs:
         Set-Content -Path core/version.py -Value "APP_VERSION = `"$tag`"" -Encoding utf8
         Write-Host "core/version.py -> APP_VERSION = $tag"
 
-    - name: Delete auto tag
-      if: github.ref == 'refs/tags/auto'
-      run: |
-        git push origin --delete auto || true
-
-    - name: Set up Python 3.14.3
+    - name: Set up Python 3.13
       uses: actions/setup-python@v5
       with:
-        python-version: "3.14.3"
+        python-version: "3.13"
         architecture: "x64"
         cache: 'pip'
 
-    - name: Cache PyInstaller
+    - name: Cache Nuitka
       uses: actions/cache@v4
       with:
-        path: ~\AppData\Local\pyinstaller
-        key: ${{ runner.os }}-pyinstaller-${{ hashFiles('requirements.txt') }}
+        path: ~\AppData\Local\Nuitka
+        key: ${{ runner.os }}-nuitka-${{ hashFiles('requirements.txt', 'build_nuitka.py') }}
         restore-keys: |
-          ${{ runner.os }}-pyinstaller-
+          ${{ runner.os }}-nuitka-
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pyinstaller
+        pip install flake8 nuitka ordered-set pytest ziglang zstandard
         if (Test-Path requirements.txt) { pip install -r requirements.txt }
 
     - name: Lint with flake8
@@ -108,11 +103,14 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+    - name: Run tests
+      run: pytest -q tests/
+
     - name: Build portable version (directory mode)
-      run: pyinstaller build-portable.spec --noconfirm
+      run: python build_nuitka.py portable
 
     - name: Build onefile version
-      run: pyinstaller build-onefile.spec --noconfirm
+      run: python build_nuitka.py onefile
 
     - name: Create portable package
       run: 7z a -tzip MCSaveHelper-Windows-portable.zip ./dist/MCSaveHelper
@@ -142,8 +140,18 @@ jobs:
     needs: build
     if: needs.build.outputs.create_release == 'true'
     runs-on: ubuntu-latest 
+    permissions:
+      contents: write
 
     steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Delete auto tag
+      if: github.ref == 'refs/tags/auto'
+      run: git push origin --delete auto || true
+
     - name: Download portable artifact
       uses: actions/download-artifact@v4
       with:

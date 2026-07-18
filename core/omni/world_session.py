@@ -5,6 +5,8 @@
 采用模块化设计，各功能拆分到独立模块。
 """
 from pathlib import Path
+from contextlib import nullcontext
+from contextlib import AbstractContextManager
 from typing import Dict, List, Optional, Tuple, Any, Callable, Union
 
 from .models import WorldInfo
@@ -13,7 +15,6 @@ from .nbt_loader import NbtLoader
 from .player_manager import PlayerManager
 from .action_queue import ActionQueue
 from .action_executor import ActionExecutor
-from .backup_manager import BackupManager
 from ..types import LogCallback
 from nbtlib import Compound
 
@@ -21,7 +22,15 @@ from nbtlib import Compound
 class WorldSession:
     """存档会话管理器，提供延迟加载与任务队列（门面模式）"""
 
-    def __init__(self, world_path: Path, log: Optional[LogCallback] = None) -> None:
+    def __init__(
+        self,
+        world_path: Path,
+        log: Optional[LogCallback] = None,
+        write_lease_factory: Optional[
+            Callable[[Path], AbstractContextManager[Any]]
+        ] = None,
+        backup_callback: Optional[Callable[[Path], Path]] = None,
+    ) -> None:
         """初始化会话，仅读取基础信息并扫描目录结构
 
         Args:
@@ -30,16 +39,17 @@ class WorldSession:
         """
         self.world_path = world_path.resolve()
         self.log = log or (lambda msg, lvl="INFO": None)
+        self._write_lease_factory = write_lease_factory
+        self._backup_callback = backup_callback
 
         # 初始化各模块
         self._scanner = WorldScanner(self.world_path, self.log)
         self._nbt_loader = NbtLoader(self.world_path, self.log)
         self._player_manager = PlayerManager(self.log)
-        self._backup_manager = BackupManager(self.world_path, self.log)
 
         # 存储扫描结果
         self._player_files: Dict[str, Path] = {}
-        self._region_files: Dict[Tuple[int, int], Path] = {}
+        self._region_files: Dict[object, Path] = {}
         self._data_files: List[Path] = []
 
         # 性能追踪
@@ -66,7 +76,11 @@ class WorldSession:
             )
 
             # 初始化执行器
-            self._executor = ActionExecutor(self.world_path, self.log)
+            self._executor = ActionExecutor(
+                self.world_path,
+                self.log,
+                backup_callback=self._backup_callback,
+            )
 
             tracker.add_metadata("players", len(self._player_files))
             tracker.add_metadata("regions", len(self._region_files))
@@ -172,10 +186,12 @@ class WorldSession:
         Returns:
             区域文件路径，若不存在则返回 None
         """
-        if (x, z) not in self._region_files:
+        path = self._region_files.get((x, z))
+        if path is None:
+            path = self._region_files.get(f"region/r.{x}.{z}.mca")
+        if path is None:
             self.log(f"区域文件不存在: r.{x}.{z}.mca", "WARNING")
             return None
-        path = self._region_files[(x, z)]
         self._nbt_loader.cache_region(x, z, path)
         return path
 
@@ -221,9 +237,14 @@ class WorldSession:
         """队列化一个 JSON 修改操作"""
         self._action_queue.queue_modify_json(target, key_path, value, operation)
 
-    def queue_delete_region(self, x: int, z: int) -> None:
+    def queue_delete_region(
+        self,
+        x: int,
+        z: int,
+        region_path: Optional[Path] = None,
+    ) -> None:
         """队列化删除指定区域文件的操作"""
-        self._action_queue.queue_delete_region(x, z)
+        self._action_queue.queue_delete_region(x, z, region_path)
 
     def queue_rename_player(self, old_uuid: str, new_uuid: str) -> None:
         """队列化重命名玩家文件的操作"""
@@ -274,28 +295,32 @@ class WorldSession:
             成功返回 True，失败返回 False
         """
         actions = self._action_queue.get_queue()
-        success = self._executor.execute_all(actions, dest_path, backup)
+        target = (dest_path or self.world_path).resolve()
+        lease = (
+            self._write_lease_factory(target)
+            if self._write_lease_factory
+            else nullcontext()
+        )
+        try:
+            with lease:
+                success = self._executor.execute_all(actions, dest_path, backup)
+        except Exception as exc:
+            self.log(f"存档写操作冲突: {exc}", "ERROR")
+            return False
 
         if success:
             self._action_queue.clear_queue()
 
         return success
 
-    # ════════════════════════════════════════════
-    #  备份和恢复
-    # ════════════════════════════════════════════
-
-    def create_backup(self, backup_name: Optional[str] = None) -> Optional[Path]:
-        """创建当前存档的备份"""
-        return self._backup_manager.create_backup(backup_name)
-
-    def restore_backup(self, backup_path: Path, replace_current: bool = False) -> bool:
-        """从备份恢复存档"""
-        return self._backup_manager.restore_backup(backup_path, replace_current)
-
-    def list_backups(self) -> List[Path]:
-        """列出当前存档的所有备份"""
-        return self._backup_manager.list_backups()
+    def spawn(self) -> "WorldSession":
+        """Reload this world while preserving application write dependencies."""
+        return WorldSession(
+            self.world_path,
+            log=self.log,
+            write_lease_factory=self._write_lease_factory,
+            backup_callback=self._backup_callback,
+        )
 
     # ════════════════════════════════════════════
     #  工具方法

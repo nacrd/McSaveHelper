@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import nbtlib
+import pytest
 
 from core.mca import (
     RegionFile,
@@ -12,6 +13,7 @@ from core.mca import (
     delete_chunk_entries,
 )
 from core.mca.format import HEADER_SIZE
+from core.mca.errors import McaError
 
 
 def _mini_chunk(x: int = 0, z: int = 0, marker: str = "full") -> nbtlib.File:
@@ -52,7 +54,7 @@ def test_writable_delete_and_reopen(tmp_path: Path) -> None:
     wr2 = WritableRegion.open(path)
     assert wr2.delete_chunk(5, 5)
     wr2.save(path, backup=True)
-    assert path.with_suffix(".mca.bak").is_file() or (path.suffix + ".bak")
+    assert path.with_suffix(".mca.bak").is_file()
 
     with RegionFile.open(path) as rf:
         assert rf.has_chunk(0, 0)
@@ -88,6 +90,27 @@ def test_mutate_chunk_nbt_in_place(tmp_path: Path) -> None:
 
     with RegionFile.open(path) as rf:
         assert str(rf.read_chunk(0, 1)["Status"]) == "new"
+
+
+def test_delete_unknown_or_already_deleted_chunk_returns_false(tmp_path: Path) -> None:
+    region = WritableRegion.empty(tmp_path / "r.0.0.mca")
+    assert region.delete_chunk(1, 1) is False
+    region.set_chunk(2, 2, _mini_chunk())
+    assert region.delete_chunk(2, 2) is True
+    assert region.delete_chunk(2, 2) is False
+
+
+def test_writable_region_refuses_partial_load(tmp_path: Path) -> None:
+    path = tmp_path / "r.0.0.mca"
+    region = WritableRegion.empty(path)
+    region.set_chunk(0, 0, _mini_chunk())
+    region.save(backup=False)
+    raw = bytearray(path.read_bytes())
+    raw[HEADER_SIZE + 4] = 4  # unsupported LZ4 compression
+    path.write_bytes(raw)
+
+    with pytest.raises(McaError, match=r"chunk \(0, 0\)"):
+        WritableRegion.open(path)
 
 
 def test_copy_chunk_record_preserves_source_and_updates_destination(

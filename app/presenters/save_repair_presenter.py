@@ -87,6 +87,8 @@ def format_repair_report(report: RepairReport) -> str:
     lines: List[str] = []
     if report.cancelled:
         lines.append("(操作已取消)\n")
+    elif not report.success:
+        lines.append("(修复未完成)\n")
     lines.append(f"区块检查: {report.chunks_checked}")
     if report.chunks_damaged > 0:
         lines.append(f"区块损坏: {report.chunks_damaged}")

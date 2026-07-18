@@ -1,7 +1,10 @@
 """纹理服务 - 管理 Minecraft 物品纹理的获取、缓存和提供"""
 import base64
 import logging
+import os
+import re
 import threading
+import tempfile
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
@@ -28,6 +31,9 @@ _RESOURCE_BASE_URL = "https://resources.download.minecraft.net"
 _JAR_TEXTURE_PREFIX = "assets/minecraft/textures/"
 _REQUEST_TIMEOUT = 10
 _MAX_MEMORY_CACHE = 500
+_MAX_TEXTURE_BYTES = 16 * 1024 * 1024
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+_RESOURCE_LOCATION_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
 
 
 class TextureService:
@@ -48,10 +54,11 @@ class TextureService:
         self._asset_index_loaded = False
         self._jar_download_attempted = False
         self._lock = threading.Lock()
+        self._jar_lock = threading.Lock()
         self._tried_paths: Dict[str, str] = {}
 
     def get_texture_path(self, item_id: str) -> Optional[Path]:
-        if not item_id or ":" not in item_id:
+        if not self._is_safe_item_id(item_id):
             return None
 
         cached = self._try_memory_cache(item_id)
@@ -81,7 +88,7 @@ class TextureService:
 
     def get_texture_base64(self, item_id: str) -> Optional[str]:
         """获取物品纹理的 base64 data URI，可直接用于 ft.Image.src"""
-        if not item_id or ":" not in item_id:
+        if not self._is_safe_item_id(item_id):
             return None
 
         with self._lock:
@@ -94,8 +101,10 @@ class TextureService:
             return None
 
         try:
+            if path.stat().st_size > _MAX_TEXTURE_BYTES:
+                return None
             data = path.read_bytes()
-            if len(data) == 0:
+            if not data.startswith(_PNG_SIGNATURE):
                 return None
             b64 = base64.b64encode(data).decode("ascii")
             uri = f"data:image/png;base64,{b64}"
@@ -135,8 +144,11 @@ class TextureService:
 
     def _try_file_cache(self, item_id: str) -> Optional[Path]:
         texture_res = self._resolve_texture_resource(item_id)
-        path = self._cache_dir / texture_res
-        if path.exists() and path.stat().st_size > 0:
+        try:
+            path = self._safe_cache_path(texture_res)
+        except ValueError:
+            return None
+        if path.exists() and 0 < path.stat().st_size <= _MAX_TEXTURE_BYTES:
             return path
         return None
 
@@ -208,10 +220,42 @@ class TextureService:
         return None
 
     def _save_to_cache(self, texture_res: str, data: bytes) -> Path:
-        path = self._cache_dir / texture_res
+        if len(data) > _MAX_TEXTURE_BYTES or not data.startswith(_PNG_SIGNATURE):
+            raise ValueError("纹理数据不是受支持的 PNG")
+        path = self._safe_cache_path(texture_res)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(fd, "wb") as texture_file:
+                texture_file.write(data)
+                texture_file.flush()
+                os.fsync(texture_file.fileno())
+            os.replace(temp_path, path)
+        finally:
+            temp_path.unlink(missing_ok=True)
         return path
+
+    def _safe_cache_path(self, texture_res: str) -> Path:
+        relative = Path(texture_res)
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix != ".png":
+            raise ValueError(f"无效纹理资源路径: {texture_res}")
+        root = self._cache_dir.resolve()
+        path = (root / relative).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(f"纹理资源越过缓存目录: {texture_res}") from exc
+        return path
+
+    @staticmethod
+    def _is_safe_item_id(item_id: str) -> bool:
+        if not item_id or not _RESOURCE_LOCATION_RE.fullmatch(item_id):
+            return False
+        _namespace, local_id = item_id.split(":", 1)
+        return ".." not in Path(local_id).parts
 
     def _put_memory_cache(self, item_id: str, path: Path) -> None:
         with self._lock:
@@ -221,20 +265,19 @@ class TextureService:
                 self._memory_cache.popitem(last=False)
 
     def _find_or_get_jar(self) -> Optional[Path]:
-        if self._minecraft_jar and self._minecraft_jar.exists():
+        with self._jar_lock:
+            if self._minecraft_jar and self._minecraft_jar.exists():
+                return self._minecraft_jar
+
+            self._minecraft_jar = self.find_minecraft_jar()
+            if self._minecraft_jar:
+                return self._minecraft_jar
+
+            if not self._jar_download_attempted:
+                self._jar_download_attempted = True
+                self._minecraft_jar = self._download_client_jar()
+
             return self._minecraft_jar
-
-        # 尝试从本地查找
-        self._minecraft_jar = self.find_minecraft_jar()
-        if self._minecraft_jar:
-            return self._minecraft_jar
-
-        # 尝试从缓存下载的 JAR
-        if not self._jar_download_attempted:
-            self._minecraft_jar = self._download_client_jar()
-            self._jar_download_attempted = True
-
-        return self._minecraft_jar
 
     def find_minecraft_jar(self) -> Optional[Path]:
         return find_local_minecraft_jar()

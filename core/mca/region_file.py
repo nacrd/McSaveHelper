@@ -138,8 +138,19 @@ class RegionFile:
         off, sectors = self.chunk_location(local_cx, local_cz)
         if off == 0 and sectors == 0:
             raise ChunkMissing(f"Chunk ({local_cx}, {local_cz}) not present")
+        if off == 0 or sectors == 0:
+            raise CorruptChunk(
+                f"Chunk ({local_cx}, {local_cz}) has invalid location "
+                f"(offset={off}, sectors={sectors})"
+            )
 
         byte_off = off * SECTOR_SIZE
+        allocated_end = byte_off + sectors * SECTOR_SIZE
+        if allocated_end > len(self._data):
+            raise CorruptChunk(
+                f"Chunk ({local_cx}, {local_cz}) allocation exceeds file "
+                f"(need {allocated_end}, have {len(self._data)})"
+            )
         if byte_off + LENGTH_HEADER_SIZE > len(self._data):
             raise CorruptChunk(
                 f"Chunk ({local_cx}, {local_cz}) offset past EOF "
@@ -156,6 +167,11 @@ class RegionFile:
 
         comp_off = byte_off + LENGTH_HEADER_SIZE
         end = comp_off + length
+        if end > allocated_end:
+            raise CorruptChunk(
+                f"Chunk ({local_cx}, {local_cz}) payload exceeds allocated sectors "
+                f"(need {end}, allocated through {allocated_end})"
+            )
         if end > len(self._data):
             raise CorruptChunk(
                 f"Chunk ({local_cx}, {local_cz}) payload truncated "

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flet as ft
 
@@ -35,7 +35,7 @@ class NbtCommitHandler:
         error: DialogCallback,
         handle_error: ErrorCallback,
         log: LogCallback,
-        session_factory: SessionFactory = WorldSession,
+        session_factory: Optional[SessionFactory] = None,
     ) -> None:
         self._store = store
         self._get_world_session = get_world_session
@@ -144,12 +144,22 @@ class NbtCommitHandler:
             changes = self._store.changes
             chunk_changes, normal_changes = self._partition_changes(changes)
             self._queue_normal_changes(session, normal_changes)
-            for target in chunk_changes.values():
+            for target, target_changes in chunk_changes.values():
+                loaded = session.load_chunk_nbt(
+                    target.region_path,
+                    target.chunk_x,
+                    target.chunk_z,
+                )
+                if loaded is None:
+                    raise ValueError(f"无法重新加载待提交区块: {target.key}")
+                chunk_data = loaded[0]
+                for change in target_changes:
+                    self._apply_change(chunk_data, change)
                 session.queue_modify_chunk(
                     target.region_path,
                     target.chunk_x,
                     target.chunk_z,
-                    target.data,
+                    chunk_data,
                 )
 
             queued = session.get_queue_size()
@@ -162,7 +172,11 @@ class NbtCommitHandler:
 
             committed = self._store.clear()
             self._refresh_stage()
-            new_session = self._session_factory(session.world_path, self._log)
+            new_session = (
+                self._session_factory(session.world_path, self._log)
+                if self._session_factory
+                else session.spawn()
+            )
             self._replace_world_session(new_session)
             self._reload_current_target()
             self._info(
@@ -175,15 +189,34 @@ class NbtCommitHandler:
     @staticmethod
     def _partition_changes(
         changes: Tuple[NbtChange, ...],
-    ) -> Tuple[Dict[str, ChunkNbtTarget], List[NbtChange]]:
-        chunk_changes: Dict[str, ChunkNbtTarget] = {}
+    ) -> Tuple[Dict[str, Tuple[ChunkNbtTarget, List[NbtChange]]], List[NbtChange]]:
+        chunk_changes: Dict[str, Tuple[ChunkNbtTarget, List[NbtChange]]] = {}
         normal_changes: List[NbtChange] = []
         for change in changes:
             if isinstance(change.target, ChunkNbtTarget):
-                chunk_changes.setdefault(change.target.key, change.target)
+                entry = chunk_changes.setdefault(
+                    change.target.key,
+                    (change.target, []),
+                )
+                entry[1].append(change)
             else:
                 normal_changes.append(change)
         return chunk_changes, normal_changes
+
+    @staticmethod
+    def _apply_change(data: Any, change: NbtChange) -> None:
+        if not change.path:
+            raise ValueError("区块变更路径不能为空")
+        node = data
+        for part in change.path[:-1]:
+            node = node[part]
+        key = change.path[-1]
+        if change.operation == "delete":
+            del node[key]
+        elif change.operation == "add" and isinstance(key, int):
+            node.insert(key, change.new_value)
+        else:
+            node[key] = change.new_value
 
     @staticmethod
     def _queue_normal_changes(

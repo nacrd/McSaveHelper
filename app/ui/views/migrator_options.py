@@ -6,24 +6,10 @@ from typing import Optional, Sequence, Tuple
 VersionOption = Tuple[str, int, str]
 PlatformOption = Tuple[str, str]
 
-VERSION_OPTIONS: Sequence[VersionOption] = [
-    ("1.21.4", 3953, '最新正式版'),
-    ("1.21.0", 3952, ""),
-    ("1.20.6", 3839, '数据组件重构'),
-    ("1.20.4", 3700, ""),
-    ("1.20.2", 3698, ""),
-    ("1.20.0", 3692, ""),
-    ("1.19.4", 3337, ""),
-    ("1.19.2", 3120, ""),
-    ("1.18.2", 2975, ""),
-    ("1.17.1", 2730, ""),
-    ("1.16.5", 2586, ""),
-    ("1.12.2", 1343, '扁平化前'),
-]
+VERSION_OPTIONS: Sequence[VersionOption] = []
 
 PLATFORM_OPTIONS: Sequence[PlatformOption] = [
     ("java", 'Java 版'),
-    ("bedrock", '基岩版'),
 ]
 
 # Data version threshold where large downgrades become risky.

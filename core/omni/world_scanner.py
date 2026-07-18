@@ -5,7 +5,7 @@ WorldScanner - 存档文件扫描器
 """
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Set, Callable
+from typing import Any, Dict, List, Mapping, Optional, Set, Callable
 from ..region_utils import discover_dimension_region_dirs
 from ..scanner import scan_all_regions
 from ..utils import find_player_data_dirs, find_data_dirs
@@ -61,25 +61,25 @@ class WorldScanner:
         self._log(f"发现 {len(player_files)} 个玩家数据文件", "SCAN")
         return player_files
 
-    def _scan_regions(self) -> Dict[Tuple[int, int], Path]:
+    def _scan_regions(self) -> Dict[object, Path]:
         """扫描区域文件
 
         Returns:
             (x, z) -> 文件路径的映射
         """
-        region_files = {}
+        region_files: Dict[object, Path] = {}
         all_regions = scan_all_regions(self.world_path)
 
         for f in all_regions:
             # 解析文件名 r.x.z.mca
             if f.stem.startswith("r."):
                 parts = f.stem.split(".")
-                if len(parts) == 3:
-                    try:
-                        x, z = int(parts[1]), int(parts[2])
-                        region_files[(x, z)] = f
-                    except ValueError:
-                        pass
+                coordinates = parts[1:]
+                if len(coordinates) == 2 and all(
+                    value.lstrip("-").isdigit() for value in coordinates
+                ):
+                    key = f.relative_to(self.world_path).as_posix()
+                    region_files[key] = f
 
         self._log(f"发现 {len(region_files)} 个区域文件", "SCAN")
         return region_files
@@ -184,7 +184,7 @@ class WorldScanner:
 
     def scan_dimensions(
         self,
-        region_files: Dict[Tuple[int, int], Path],
+        region_files: Mapping[object, Path],
     ) -> List[Dict[str, str]]:
         """扫描存档中所有可用的维度目录（兼容 Minecraft 26.1 新旧路径）
 

@@ -48,3 +48,17 @@ def test_dimension_scan_ignores_directories_without_region_files(
     )
 
     assert WorldScanner(tmp_path).scan_dimensions({}) == []
+
+
+def test_region_scan_keeps_dimension_in_key_for_same_coordinates(
+    tmp_path: Path,
+) -> None:
+    overworld = _create_region_file(tmp_path / "region")
+    nether = _create_region_file(tmp_path / "DIM-1" / "region")
+
+    regions = WorldScanner(tmp_path)._scan_regions()
+
+    assert regions == {
+        "DIM-1/region/r.0.0.mca": nether,
+        "region/r.0.0.mca": overworld,
+    }

@@ -8,7 +8,11 @@ from app.services.entity_block_search.container_searcher import (
 )
 from app.services.entity_block_search.entity_searcher import EntitySearcher
 from app.services.entity_block_search.models import SearchCondition, SearchResult, SearchSummary
-from app.services.entity_block_search.utils import get_dimension_region_files, matches_target
+from app.services.entity_block_search.utils import (
+    get_dimension_entity_files,
+    get_dimension_region_files,
+    matches_target,
+)
 
 
 class MockChunk:
@@ -210,6 +214,23 @@ def test_dimension_region_files_do_not_cross_dimensions(tmp_path):
         nether_region / "r.1.0.mca"]
     assert get_dimension_region_files(world, "end") == [
         end_region / "r.2.0.mca"]
+
+
+def test_dimension_entity_files_scan_modern_storage(tmp_path):
+    world = tmp_path / "world"
+    overworld_entities = world / "entities"
+    nether_entities = world / "DIM-1" / "entities"
+    overworld_entities.mkdir(parents=True)
+    nether_entities.mkdir(parents=True)
+    (overworld_entities / "r.0.0.mca").write_bytes(b"")
+    (nether_entities / "r.1.0.mca").write_bytes(b"")
+
+    assert get_dimension_entity_files(world, "overworld") == [
+        overworld_entities / "r.0.0.mca"
+    ]
+    assert get_dimension_entity_files(world, "nether") == [
+        nether_entities / "r.1.0.mca"
+    ]
 
 
 # ==================== SearchCondition 测试 ====================

@@ -4,6 +4,7 @@ __pycache__/
 *.so
 build/
 dist/
+nuitka-crash-report.xml
 *.manifest
 *.swp
 *.swo

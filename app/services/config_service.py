@@ -1,7 +1,9 @@
 """配置服务 —— 统一管理持久化配置和运行时迁移参数"""
 import json
+import os
 import shutil
 import threading
+import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -79,8 +81,21 @@ class ConfigService:
         """保存配置到磁盘（线程安全）"""
         config_path = self._config_dir / self.CONFIG_FILENAME
         with self._lock:
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(self._config, f, indent=2, ensure_ascii=False)
+            content = json.dumps(self._config, indent=2, ensure_ascii=False)
+            fd, temp_name = tempfile.mkstemp(
+                prefix=f".{config_path.name}.",
+                suffix=".tmp",
+                dir=config_path.parent,
+            )
+            temp_path = Path(temp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as config_file:
+                    config_file.write(content)
+                    config_file.flush()
+                    os.fsync(config_file.fileno())
+                os.replace(temp_path, config_path)
+            finally:
+                temp_path.unlink(missing_ok=True)
 
     @staticmethod
     def _defaults() -> Dict[str, Any]:
@@ -124,13 +139,16 @@ class ConfigService:
         Returns:
             Dict: 合并后的配置字典
         """
-        merged = defaults.copy()
-        for key, value in user.items():
-            if key in merged:
-                if isinstance(merged[key], dict) and isinstance(value, dict):
-                    merged[key] = {**merged[key], **value}
-                else:
-                    merged[key] = value
+        merged = deepcopy(defaults)
+        for key, default_value in defaults.items():
+            if key not in user:
+                continue
+            value = user[key]
+            if isinstance(default_value, dict):
+                if isinstance(value, dict):
+                    merged[key] = ConfigService._merge(default_value, value)
+            elif type(value) is type(default_value):
+                merged[key] = deepcopy(value)
         return merged
 
     def _auto_fix(self) -> None:
@@ -249,7 +267,8 @@ class ConfigService:
         Returns:
             dict: 界面设置字典
         """
-        return self._config.get("ui_settings", {})
+        with self._lock:
+            return deepcopy(self._config.get("ui_settings", {}))
 
     @property
     def language(self) -> str:
@@ -283,7 +302,8 @@ class ConfigService:
         Returns:
             list: 模式列表
         """
-        return self._config.get("cleanup_patterns", [])
+        with self._lock:
+            return list(self._config.get("cleanup_patterns", []))
 
     @cleanup_patterns.setter
     def cleanup_patterns(self, value: list) -> None:
@@ -297,7 +317,8 @@ class ConfigService:
         Returns:
             dict: 批量处理设置字典
         """
-        return self._config.get("batch_processing", {})
+        with self._lock:
+            return deepcopy(self._config.get("batch_processing", {}))
 
     def get_config_dict(self) -> Dict[str, Any]:
         """获取完整配置字典（用于视图展示）

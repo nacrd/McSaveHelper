@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from core.logger import logger
+from app.services.backup_service import (
+    BackupCancelledError,
+    BackupError,
+    BackupService,
+)
+from app.services.world_write_coordinator import WorldOperationBusyError
 
 from .save_repair.models import (
     IssueLevel,
@@ -20,7 +26,6 @@ from .save_repair.detector import WorldDetector
 from .save_repair.chunk_repairer import ChunkRepairer
 from .save_repair.player_repairer import PlayerRepairer
 from .save_repair.level_repairer import LevelRepairer
-from .save_repair.backup_helper import BackupHelper
 
 
 class SaveRepairService:
@@ -29,12 +34,14 @@ class SaveRepairService:
     门面模式，协调各个修复器，保持原有 API 不变。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, backup_service: Optional[BackupService] = None) -> None:
         self._cancel_event = threading.Event()
+        self._backup_service = backup_service or BackupService()
 
     def cancel(self) -> None:
         """请求取消正在进行的修复操作"""
         self._cancel_event.set()
+        self._backup_service.cancel()
 
     @property
     def is_cancelled(self) -> bool:
@@ -122,6 +129,43 @@ class SaveRepairService:
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> RepairReport:
+        """Run one repair while excluding backup and restore publication."""
+        try:
+            with self._backup_service.exclusive_operation(world_path):
+                return self._repair_world_exclusive(
+                    world_path=world_path,
+                    fix_chunks=fix_chunks,
+                    fix_players=fix_players,
+                    fix_level_dat=fix_level_dat,
+                    backup=backup,
+                    max_workers=max_workers,
+                    progress_callback=progress_callback,
+                    log_callback=log_callback,
+                )
+        except (BackupError, WorldOperationBusyError) as exc:
+            logger.error(str(exc), module="SaveRepair")
+            if log_callback:
+                log_callback(str(exc), "ERROR")
+            return RepairReport(
+                success=False,
+                issues=[RepairIssue(
+                    level=IssueLevel.ERROR,
+                    category="general",
+                    message=str(exc),
+                )],
+            )
+
+    def _repair_world_exclusive(
+        self,
+        world_path: Path,
+        fix_chunks: bool = True,
+        fix_players: bool = True,
+        fix_level_dat: bool = True,
+        backup: bool = True,
+        max_workers: int = 4,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        log_callback: Optional[Callable[[str, str], None]] = None,
+    ) -> RepairReport:
         """修复世界存档
 
         Args:
@@ -169,15 +213,7 @@ class SaveRepairService:
 
             # 备份
             if backup and not self.is_cancelled:
-                progress(0.02, "创建备份...")
-                try:
-                    backup_helper = BackupHelper(self._cancel_event)
-                    backup_path = backup_helper.create_backup(world_path, progress)
-                    report.backup_path = str(backup_path)
-                    log(f"已创建备份: {backup_path}", "SUCCESS")
-                except Exception as e:
-                    log(f"备份失败: {e}", "ERROR")
-                    report.backup_path = ""
+                self._create_safety_backup(world_path, report, progress, log)
 
             # 修复区块
             if fix_chunks and not self.is_cancelled:
@@ -202,15 +238,45 @@ class SaveRepairService:
                 log("修复操作已取消", "WARNING")
 
             progress(1.0, "修复完成")
+            report.success = not self.is_cancelled
             log(
                 f"修复完成 - 区块: {report.chunks_checked} 检查/{report.chunks_damaged} 损坏, "
                 f"玩家: {report.players_checked} 检查/{report.players_fixed} 修复",
                 "SUCCESS",
             )
 
+        except BackupCancelledError:
+            report.cancelled = True
+            log("修复操作已取消", "WARNING")
         except Exception as e:
+            report.success = False
             log(f"修复失败: {e}", "ERROR")
             logger.error(str(e), module="SaveRepair")
 
         report.elapsed_seconds = time.monotonic() - start_time
         return report
+
+    def _create_safety_backup(
+        self,
+        world_path: Path,
+        report: RepairReport,
+        progress: Callable[[float, str], None],
+        log: Callable[[str, str], None],
+    ) -> None:
+        """Create the mandatory pre-repair snapshot or abort the workflow."""
+        progress(0.02, "创建备份...")
+        try:
+            backup_record = self._backup_service.create_backup(
+                world_path,
+                label="修复前自动备份",
+                progress_callback=lambda value, message: progress(
+                    0.02 + value * 0.08,
+                    message,
+                ),
+            )
+        except BackupCancelledError:
+            raise
+        except Exception as exc:
+            raise BackupError(f"安全备份失败，已中止修复: {exc}") from exc
+        report.backup_path = str(backup_record.backup_path)
+        log(f"已创建备份: {backup_record.backup_path}", "SUCCESS")

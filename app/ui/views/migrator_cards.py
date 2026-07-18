@@ -12,8 +12,6 @@ from app.ui.components.fields import checkbox, current_save_field, label, text_f
 from app.ui.theme import THEME, mc_border
 from app.ui.views.migrator_options import (
     PLATFORM_OPTIONS,
-    VERSION_OPTIONS,
-    format_version_label,
     mode_description,
 )
 
@@ -217,21 +215,15 @@ def build_version_card(
 
     platform_dd = ft.Dropdown(
         options=[ft.dropdown.Option(k, v) for k, v in PLATFORM_OPTIONS],
-        value=target_platform or "java",
+        value="java",
         width=150,
         border_color=THEME.border_standard,
         text_size=13,
         on_select=lambda e: on_platform_change(e.control.value),
     )
     version_dd = ft.Dropdown(
-        options=[
-            ft.dropdown.Option(
-                str(ver),
-                format_version_label(name, ver, note),
-            )
-            for name, ver, note in VERSION_OPTIONS
-        ],
-        value=target_version or str(VERSION_OPTIONS[0][1]),
+        options=[ft.dropdown.Option("", "保持源版本")],
+        value="",
         width=280,
         border_color=THEME.border_standard,
         text_size=13,

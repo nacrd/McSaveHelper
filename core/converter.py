@@ -3,9 +3,10 @@
 
 实现 Java ↔ Bedrock 桥接、版本软着陆等转换功能。
 """
-import struct
+import io
 import os
 import tempfile
+import zlib
 import nbtlib
 from dataclasses import dataclass, field
 from nbtlib import File, Compound, String, List
@@ -13,6 +14,10 @@ from typing import Dict, Any, Optional, Tuple, List as TList
 from pathlib import Path
 
 from .utils import replace_directory_tree
+
+
+MAX_COMPRESSED_NBT_BYTES = 64 * 1024 * 1024
+MAX_DECOMPRESSED_NBT_BYTES = 256 * 1024 * 1024
 
 
 class ConversionError(Exception):
@@ -41,27 +46,43 @@ def detect_endian(file_path: Path) -> str:
     通过读取第一个字节（标签 ID）和后续长度来判断。
     Java 版 NBT 以大端序存储，Bedrock 版以小端序存储。
     """
-    with open(file_path, 'rb') as f:
-        data = f.read(4)
-        if len(data) < 4:
-            raise ConversionError("文件太小，无法检测字节序")
-        # 检查是否可能是有效的小端序根标签
-        # 假设根标签是 Compound (0x0A)
-        if data[0] == 0x0A:
-            # 大端序：标签 ID 在前，后跟两个字节的键长度
-            # 小端序：标签 ID 在前，但后续的 short 是小端序
-            # 尝试解析键长度
-            key_len = struct.unpack('>H', data[2:4])[0]  # 大端序假设
-            # 如果长度合理（例如 < 1000），可能是大端序
-            if key_len < 1000:
-                return 'big'
-            # 否则尝试小端序
-            key_len_le = struct.unpack('<H', data[2:4])[0]
-            if key_len_le < 1000:
-                return 'little'
-        # 回退到尝试加载两种字节序
-    # 默认返回大端序（Java 版）
-    return 'big'
+    try:
+        encoded = file_path.read_bytes()
+    except OSError as exc:
+        raise ConversionError(f"读取 NBT 文件失败: {exc}") from exc
+    if len(encoded) > MAX_COMPRESSED_NBT_BYTES:
+        raise ConversionError("NBT 文件超过 64 MiB 压缩输入限制")
+    if encoded.startswith(b"\x1f\x8b"):
+        try:
+            stream = zlib.decompressobj(16 + zlib.MAX_WBITS)
+            data = stream.decompress(encoded, MAX_DECOMPRESSED_NBT_BYTES + 1)
+            if len(data) > MAX_DECOMPRESSED_NBT_BYTES or not stream.eof:
+                raise ConversionError("NBT 解压结果超过 256 MiB 限制")
+        except zlib.error as exc:
+            raise ConversionError(f"NBT gzip 数据损坏: {exc}") from exc
+    else:
+        data = encoded
+    if len(data) < 3 or data[0] != 0x0A:
+        raise ConversionError("NBT 根标签无效，无法检测字节序")
+
+    parsed: TList[str] = []
+    for byteorder in ("big", "little"):
+        try:
+            nbtlib.File.parse(io.BytesIO(data), byteorder=byteorder)
+        except Exception:
+            continue
+        parsed.append(byteorder)
+    if len(parsed) == 1:
+        return parsed[0]
+    if not parsed:
+        raise ConversionError("NBT 无法按大端或小端格式解析")
+
+    # 空根名在两种字节序下相同；Java NBT 是更保守的默认值。
+    big_length = int.from_bytes(data[1:3], "big")
+    little_length = int.from_bytes(data[1:3], "little")
+    if little_length < big_length:
+        return "little"
+    return "big"
 
 
 def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:
@@ -420,6 +441,13 @@ def convert_world(
     Returns:
         ConversionResult: 转换结果，包含成功状态、已转换文件数和错误摘要
     """
+    if target_platform != "java":
+        raise ConversionError("尚未接入可靠的 Java/Bedrock 转换引擎，已拒绝转换")
+    if target_version is not None:
+        raise ConversionError("尚未实现可靠的跨版本数据迁移，已拒绝版本降级")
+    if src_path.resolve() == dst_path.resolve():
+        return ConversionResult()
+
     from core.performance import get_tracker
     from core.logger import logger as _logger
     tracker = get_tracker()

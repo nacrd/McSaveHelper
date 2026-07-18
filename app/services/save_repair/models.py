@@ -27,6 +27,7 @@ class RepairIssue:
 @dataclass
 class RepairReport:
     """修复报告"""
+    success: bool = False
     chunks_checked: int = 0
     chunks_damaged: int = 0
     chunks_quarantined_regions: int = 0

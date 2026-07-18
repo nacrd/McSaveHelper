@@ -35,3 +35,28 @@ def scan_all_regions(world_path: Path) -> List[Path]:
         tracker.increment_bytes(total_bytes)
 
     return files
+
+
+def scan_all_entity_regions(world_path: Path) -> List[Path]:
+    """Scan entity-region siblings for every discovered dimension."""
+    files: List[Path] = []
+    candidates = [world_path / "entities"]
+    if world_path.is_dir():
+        candidates.extend(
+            path / "entities"
+            for path in world_path.iterdir()
+            if path.is_dir() and path.name.startswith("DIM")
+        )
+    dimensions_root = world_path / "dimensions"
+    if dimensions_root.is_dir():
+        for namespace in dimensions_root.iterdir():
+            if not namespace.is_dir():
+                continue
+            candidates.extend(
+                dimension / "entities"
+                for dimension in namespace.iterdir()
+                if dimension.is_dir()
+            )
+    for entity_dir in candidates:
+        files.extend(scan_region_dir(entity_dir))
+    return sorted(set(files), key=lambda path: str(path))

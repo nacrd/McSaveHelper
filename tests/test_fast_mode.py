@@ -1,10 +1,11 @@
 from pathlib import Path
+import pytest
 
 from core.fast_mode import _collect_player_names, _create_dual_player_files
 from core.uuid_utils import get_offline_uuid_str
 
 
-def test_collect_player_names_combines_manual_and_cached_players(
+def test_collect_player_names_rejects_manual_name_without_unknown_player(
     tmp_path: Path,
 ) -> None:
     player_dir = tmp_path / "playerdata"
@@ -14,17 +15,38 @@ def test_collect_player_names_combines_manual_and_cached_players(
     player_file.touch()
     logs = []
 
+    with pytest.raises(ValueError, match="必须一对一"):
+        _collect_player_names(
+            tmp_path,
+            {old_uuid: "CachedPlayer"},
+            offline_mode=True,
+            manual_names=["ManualPlayer"],
+            log=lambda message, level: logs.append((message, level)),
+        )
+
+
+def test_collect_player_names_associates_each_unknown_file(tmp_path: Path) -> None:
+    player_dir = tmp_path / "playerdata"
+    player_dir.mkdir()
+    files = []
+    for old_uuid in (
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+    ):
+        path = player_dir / f"{old_uuid}.dat"
+        path.touch()
+        files.append(path)
+
     names, templates = _collect_player_names(
         tmp_path,
-        {old_uuid: "CachedPlayer"},
+        {},
         offline_mode=True,
-        manual_names=["ManualPlayer"],
-        log=lambda message, level: logs.append((message, level)),
+        manual_names=["Alice", "Bob"],
+        log=lambda _message, _level: None,
     )
 
-    assert names == {"CachedPlayer", "ManualPlayer"}
-    assert templates == {"CachedPlayer": player_file}
-    assert any(level == "MANUAL" for _message, level in logs)
+    assert names == {"Alice", "Bob"}
+    assert templates == {"Alice": files[0], "Bob": files[1]}
 
 
 def test_create_dual_player_files_copies_offline_variant(tmp_path: Path) -> None:

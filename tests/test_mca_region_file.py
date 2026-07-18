@@ -15,6 +15,7 @@ from core.mca.format import (
     SECTOR_SIZE,
 )
 from core.mca.region_file import local_chunk_index, world_to_local
+from core.mca import chunk_codec
 
 
 def _build_minimal_chunk_nbt(
@@ -113,6 +114,16 @@ class TestRegionFileSynthetic:
         with pytest.raises(CorruptChunk):
             rf.read_chunk(0, 0)
 
+    def test_chunk_payload_cannot_cross_allocated_sector(self) -> None:
+        header = bytearray(HEADER_SIZE)
+        header[0:3] = (2).to_bytes(3, "big")
+        header[3] = 1
+        record = (5000).to_bytes(4, "big") + bytes([COMPRESSION_ZLIB])
+        blob = bytes(header) + record + b"x" * (SECTOR_SIZE * 2 - len(record))
+
+        with pytest.raises(CorruptChunk, match="allocated sectors"):
+            RegionFile.from_bytes(blob).read_chunk_raw(0, 0)
+
     def test_too_small_file(self) -> None:
         with pytest.raises(Exception):
             RegionFile.from_bytes(b"short")
@@ -124,3 +135,11 @@ class TestRegionFileSynthetic:
             assert rf.has_chunk(0, 0)
         with pytest.raises(Exception):
             rf.has_chunk(0, 0)
+
+
+def test_decompression_has_output_limit(monkeypatch) -> None:
+    monkeypatch.setattr(chunk_codec, "MAX_DECOMPRESSED_CHUNK_BYTES", 1024)
+    payload = zlib.compress(b"x" * 2048)
+
+    with pytest.raises(CorruptChunk, match="解压结果"):
+        chunk_codec.decompress_chunk(COMPRESSION_ZLIB, payload)

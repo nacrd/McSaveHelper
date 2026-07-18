@@ -14,6 +14,7 @@ class LogManager:
 
     _instance: Optional['LogManager'] = None
     _lock = threading.Lock()
+    _STOP = object()
 
     def __new__(cls) -> 'LogManager':
         with cls._lock:
@@ -44,11 +45,15 @@ class LogManager:
         self._worker_thread.start()
 
     def _process_queue(self) -> None:
-        while self._running:
+        while True:
             try:
                 record = self._queue.get(timeout=0.1)
-                self._dispatch(record)
-                self._queue.task_done()
+                try:
+                    if record is self._STOP:
+                        return
+                    self._dispatch(record)
+                finally:
+                    self._queue.task_done()
             except Empty:
                 continue
             except Exception as e:
@@ -136,7 +141,9 @@ class LogManager:
     def shutdown(self) -> None:
         self._running = False
         if self._worker_thread:
+            self._queue.put(self._STOP)
             self._worker_thread.join(timeout=2.0)
+        self.flush()
         for handler in self.handlers:
             try:
                 handler.close()

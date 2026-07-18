@@ -63,29 +63,34 @@ def test_map_export_region_scanning_logic():
         assert region_files[1] == overworld_mca2
 
 
-def test_map_export_service_raises_on_missing_region_dir():
-    """Test that map export raises error when region directory doesn't exist."""
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_path = Path(tmp_dir)
+def test_map_export_service_reports_missing_region_dir(tmp_path: Path):
+    """The public export contract reports failure for a missing region dir."""
+    from app.services.map_export_service import MapExportService, PIL_AVAILABLE
 
-        # Create a world without region directory
-        world = tmp_path / "world"
-        world.mkdir()
-        (world / "level.dat").touch()
+    if not PIL_AVAILABLE:
+        pytest.skip("PIL not available")
+    world = tmp_path / "world"
+    world.mkdir()
+    (world / "level.dat").touch()
 
-        # Test the region directory check logic
-        region_dir = world / "region"
-        assert not region_dir.exists()
+    result = MapExportService().export_map(world, tmp_path / "map.png")
 
-        # This would raise ValueError in the service
-        # We can't test the full service without PIL, but we can test the logic
-        try:
-            from app.services.map_export_service import MapExportService, PIL_AVAILABLE
-            if not PIL_AVAILABLE:
-                pytest.skip("PIL not available")
+    assert result["success"] is False
+    assert result["output_path"] is None
 
-            MapExportService()
-            # The service would fail when trying to scan
-        except ImportError:
-            pytest.skip("PIL not available")
+
+def test_map_export_reports_failure_when_all_regions_are_unreadable(tmp_path: Path):
+    from app.services.map_export_service import MapExportService, PIL_AVAILABLE
+
+    if not PIL_AVAILABLE:
+        pytest.skip("PIL not available")
+    world = tmp_path / "world"
+    region_dir = world / "region"
+    region_dir.mkdir(parents=True)
+    (region_dir / "r.0.0.mca").write_bytes(b"\x00" * 8192)
+
+    result = MapExportService().export_map(world, tmp_path / "map.png", scale=16)
+
+    assert result["success"] is False
+    assert result["chunks_processed"] == 0
+    assert not (tmp_path / "map.png").exists()

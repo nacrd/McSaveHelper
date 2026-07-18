@@ -92,9 +92,10 @@ class WritableRegion:
                     if not isinstance(nbt, nbtlib.File):
                         nbt = nbtlib.File(dict(nbt))
                     self._chunks[(cx, cz)] = nbt
-                except Exception:
-                    # Skip corrupt chunks rather than failing the whole region
-                    continue
+                except Exception as exc:
+                    raise McaError(
+                        f"Cannot safely load chunk ({cx}, {cz}) from {self.path}: {exc}"
+                    ) from exc
         self._loaded = True
 
     def _ensure_loaded(self) -> None:
@@ -133,7 +134,7 @@ class WritableRegion:
     def delete_chunk(self, local_cx: int, local_cz: int) -> bool:
         self._ensure_loaded()
         key = (local_cx, local_cz)
-        existed = key in self._chunks or key not in self._deleted
+        existed = key in self._chunks and key not in self._deleted
         self._chunks.pop(key, None)
         self._deleted.add(key)
         return existed
