@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from app.presenters.save_repair_presenter import (
     format_detect_report,
     format_repair_report,
@@ -38,7 +36,7 @@ def test_format_repair_report_includes_backup_and_fixed_fields() -> None:
         players_fixed=1,
         level_dat_fixed=True,
         level_dat_repaired_fields=["DataVersion"],
-        backup_path=Path("backup"),
+        backup_path="backup",
         elapsed_seconds=2.0,
     )
 

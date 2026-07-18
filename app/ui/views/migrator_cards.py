@@ -6,7 +6,7 @@ from typing import Any, Callable
 
 import flet as ft
 
-from app.ui.components.buttons import btn_ghost, btn_primary
+from app.ui.components.buttons import McButton, btn_ghost, btn_primary
 from app.ui.components.cards import card, section_title
 from app.ui.components.fields import checkbox, current_save_field, label, text_field
 from app.ui.theme import THEME, mc_border
@@ -26,9 +26,9 @@ ValueCallback = Callable[[Any], None]
 @dataclass
 class DirectoryCardControls:
     container: ft.Container
-    src_field: ft.Control
-    dest_field: ft.Control
-    name_field: ft.Control
+    src_field: ft.TextField
+    dest_field: ft.TextField
+    name_field: ft.TextField
 
 
 @dataclass
@@ -44,8 +44,8 @@ class VersionCardControls:
 @dataclass
 class PlayerCardControls:
     container: ft.Container
-    manual_field: ft.Control
-    query_field: ft.Control
+    manual_field: ft.TextField
+    query_field: ft.TextField
     query_result: ft.Text
 
 
@@ -59,17 +59,17 @@ class ModeCardControls:
 @dataclass
 class OptionsCardControls:
     container: ft.Container
-    offline_cb: ft.Control
-    clean_cb: ft.Control
-    pure_clean_cb: ft.Control
+    offline_cb: ft.Checkbox
+    clean_cb: ft.Checkbox
+    pure_clean_cb: ft.Checkbox
 
 
 @dataclass
 class BatchCardControls:
     container: ft.Container
-    batch_mode_cb: ft.Control
-    batch_dir_field: ft.Control
-    batch_scan_btn: ft.Control
+    batch_mode_cb: ft.Checkbox
+    batch_dir_field: ft.TextField
+    batch_scan_btn: McButton
     batch_result: ft.Text
     batch_detail_col: ft.Column
 
