@@ -6,6 +6,12 @@ import flet as ft
 from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui
+from app.ui.components.floating_position import (
+    DragTracker,
+    FloatingBounds,
+    SharedPositionStore,
+    clamp_position,
+)
 
 
 def _is_app_closing() -> bool:
@@ -37,11 +43,10 @@ class FloatingLogPanel(ft.Container):
         self._title = title
         self._expanded = False
         self._auto_scroll = True
-        self._is_dragging = False
         self._offset_left = 50.0
         self._offset_top = 200.0
-        self._last_x = 0.0
-        self._last_y = 0.0
+        self._drag = DragTracker()
+        self._position_store = SharedPositionStore(page, self.STORAGE_KEY)
 
         # 创建日志列表（使用ListView以获得更好的滚动体验）
         self._log_col = ft.ListView(
@@ -165,31 +170,17 @@ class FloatingLogPanel(ft.Container):
 
     def _load_position(self) -> None:
         """从共享偏好加载保存的位置。"""
-        try:
-            async def _load() -> None:
-                pos = await self._page.shared_preferences.get(self.STORAGE_KEY)
-                if isinstance(pos, list) and len(pos) >= 2:
-                    self._offset_left = float(pos[0])
-                    self._offset_top = float(pos[1])
-                    self.left = self._offset_left
-                    self.top = self._offset_top
+        self._position_store.load(self._apply_position)
 
-            self._page.run_task(_load)
-        except Exception:
-            pass
+    def _apply_position(self, left: float, top: float) -> None:
+        self._offset_left = left
+        self._offset_top = top
+        self.left = left
+        self.top = top
 
     def _save_position(self) -> None:
         """保存位置到共享偏好。"""
-        try:
-            async def _save() -> None:
-                await self._page.shared_preferences.set(
-                    self.STORAGE_KEY,
-                    [str(self._offset_left), str(self._offset_top)],
-                )
-
-            self._page.run_task(_save)
-        except Exception:
-            pass
+        self._position_store.save(self._offset_left, self._offset_top)
 
     def _scroll_to_end(self) -> None:
         try:
@@ -200,43 +191,38 @@ class FloatingLogPanel(ft.Container):
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
         """开始拖拽"""
         try:
-            self._is_dragging = True
-            self._last_x = e.local_position.x
-            self._last_y = e.local_position.y
+            self._drag.start(e.local_position.x, e.local_position.y)
         except Exception:
             pass
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
         """拖拽更新"""
         try:
-            if self._is_dragging:
-                dx = e.local_position.x - self._last_x
-                dy = e.local_position.y - self._last_y
-
-                self._offset_left += dx
-                self._offset_top += dy
-                max_left = float(self._page.width or 1024) - float(
-                    self.width or self.DEFAULT_WIDTH
+            delta = self._drag.update(
+                e.local_position.x,
+                e.local_position.y,
+            )
+            if delta is not None:
+                bounds = FloatingBounds(
+                    viewport_width=float(self._page.width or 1024),
+                    viewport_height=float(self._page.height or 768),
+                    control_width=float(self.width or self.DEFAULT_WIDTH),
+                    control_height=float(self.height or self.DEFAULT_HEIGHT),
                 )
-                max_top = float(self._page.height or 768) - float(
-                    self.height or self.DEFAULT_HEIGHT
+                left, top = clamp_position(
+                    self._offset_left + delta[0],
+                    self._offset_top + delta[1],
+                    bounds,
                 )
-                self._offset_left = max(0, min(max_left, self._offset_left))
-                self._offset_top = max(0, min(max_top, self._offset_top))
-
-                self.left = self._offset_left
-                self.top = self._offset_top
+                self._apply_position(left, top)
                 self.update()
-
-                self._last_x = e.local_position.x
-                self._last_y = e.local_position.y
         except Exception:
             pass
 
     def _on_pan_end(self, e: ft.DragEndEvent) -> None:
         """拖拽结束"""
         try:
-            self._is_dragging = False
+            self._drag.end()
             self._save_position()
         except Exception:
             pass
@@ -404,12 +390,11 @@ class FloatingLogButton(ft.Container):
         self._floating_panel = floating_panel
         self._on_click_handler = on_click
         self._page = page
-        self._is_dragging = False
         self._offset_right = 20.0
         self._offset_bottom = 20.0
-        self._last_x = 0.0
-        self._last_y = 0.0
         self._storage_key = "floating_log_button_position"
+        self._drag = DragTracker()
+        self._position_store = SharedPositionStore(page, self._storage_key)
 
         # 按钮容器 — Material Icon 代替 emoji
         self._button = ft.Container(
@@ -444,81 +429,60 @@ class FloatingLogButton(ft.Container):
 
     def _load_position(self) -> None:
         """加载保存的位置"""
-        try:
-            async def _load() -> None:
-                pos = await self._page.shared_preferences.get(
-                    self._storage_key
-                )
-                if isinstance(pos, list) and len(pos) >= 2:
-                    self._offset_right = float(pos[0])
-                    self._offset_bottom = float(pos[1])
-                    self.right = self._offset_right
-                    self.bottom = self._offset_bottom
+        self._position_store.load(self._apply_position)
 
-            self._page.run_task(_load)
-        except Exception:
-            pass
+    def _apply_position(self, right: float, bottom: float) -> None:
+        self._offset_right = right
+        self._offset_bottom = bottom
+        self.right = right
+        self.bottom = bottom
 
     def _save_position(self) -> None:
         """保存位置"""
-        try:
-            async def _save() -> None:
-                await self._page.shared_preferences.set(
-                    self._storage_key,
-                    [str(self._offset_right), str(self._offset_bottom)],
-                )
-
-            self._page.run_task(_save)
-        except Exception:
-            pass
+        self._position_store.save(self._offset_right, self._offset_bottom)
 
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
         """开始拖拽"""
         try:
-            self._is_dragging = True
-            self._last_x = e.local_position.x
-            self._last_y = e.local_position.y
+            self._drag.start(e.local_position.x, e.local_position.y)
         except Exception:
             pass
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
         """拖拽更新"""
         try:
-            if self._is_dragging:
-                dx = e.local_position.x - self._last_x
-                dy = e.local_position.y - self._last_y
-
-                self._offset_right -= dx  # 修正左右方向
-                self._offset_bottom -= dy
-                max_right = float(self._page.width or 1024) - 48
-                max_bottom = float(self._page.height or 768) - 48
-                self._offset_right = max(
-                    0, min(max_right, self._offset_right)
+            delta = self._drag.update(
+                e.local_position.x,
+                e.local_position.y,
+            )
+            if delta is not None:
+                bounds = FloatingBounds(
+                    viewport_width=float(self._page.width or 1024),
+                    viewport_height=float(self._page.height or 768),
+                    control_width=48,
+                    control_height=48,
                 )
-                self._offset_bottom = max(
-                    0, min(max_bottom, self._offset_bottom)
+                right, bottom = clamp_position(
+                    self._offset_right - delta[0],
+                    self._offset_bottom - delta[1],
+                    bounds,
                 )
-
-                self.right = self._offset_right
-                self.bottom = self._offset_bottom
+                self._apply_position(right, bottom)
                 self.update()
-
-                self._last_x = e.local_position.x
-                self._last_y = e.local_position.y
         except Exception:
             pass
 
     def _on_pan_end(self, e: ft.DragEndEvent) -> None:
         """拖拽结束"""
         try:
-            self._is_dragging = False
+            self._drag.end()
             self._save_position()
         except Exception:
             pass
 
     def _click(self) -> None:
         """点击事件 - 如果不是拖拽就触发点击"""
-        if self._is_dragging:
+        if self._drag.active:
             return  # 正在拖拽，不触发点击
         try:
             if self._floating_panel.is_visible:
