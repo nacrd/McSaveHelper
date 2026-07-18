@@ -61,6 +61,10 @@ def main() -> None:
         _setup_console()
 
     try:
+        from core.threading_runtime import configure_thread_fairness
+
+        configure_thread_fairness()
+
         import flet as ft
 
         from app.application import Application

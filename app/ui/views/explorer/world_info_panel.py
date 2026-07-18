@@ -71,7 +71,7 @@ class WorldInfoPanel(ft.Column):
             safe_update(self)
             return
 
-        for section in build_world_info_sections(world_info, stats):
+        for section in build_world_info_sections(world_info, stats, self._t):
             rows = [self._row(row.label, row.value) for row in section.rows]
             self.controls.append(self._section_card(section.title, rows))
 

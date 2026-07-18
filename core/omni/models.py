@@ -6,6 +6,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 
 
+@dataclass(frozen=True)
+class ModInfo:
+    """One mod entry recorded or inferred from world metadata."""
+
+    mod_id: str
+    version: Optional[str] = None
+    name: Optional[str] = None
+
+
 @dataclass
 class WorldInfo:
     """从 level.dat 提取的完整信息"""
@@ -34,6 +43,17 @@ class WorldInfo:
     was_modded: Optional[bool] = None
     clear_weather_time: Optional[int] = None
     initialized: Optional[bool] = None
+    difficulty_locked: Optional[bool] = None
+    spawn_angle: Optional[float] = None
+    generate_features: Optional[bool] = None
+    bonus_chest: Optional[bool] = None
+    border_center_x: Optional[float] = None
+    border_center_z: Optional[float] = None
+    border_size: Optional[float] = None
+    border_warning_blocks: Optional[int] = None
+    mods: Optional[List[ModInfo]] = None
+    mod_loaders: Optional[List[str]] = None
+    mod_list_complete: bool = False
 
 
 @dataclass

@@ -1,11 +1,16 @@
 from typing import Any, cast
 
 from core.mca.surface import (
+    _DECODE_WORKERS,
     _build_sample_jobs,
     _needed_chunks,
     _resize_nearest,
     _sample_coarse_grid,
 )
+
+
+def test_nested_chunk_decode_pool_keeps_a_small_cpu_budget() -> None:
+    assert 1 <= _DECODE_WORKERS <= 2
 
 
 class _Region:

@@ -356,6 +356,7 @@ class EntityBlockSearchView(ft.Column):
                     target=condition.target,
                     dimensions=condition.dimensions,
                 )
+                result_controls = self._build_result_controls(results)
 
                 def _update_ui():
                     self._search_results = results
@@ -364,7 +365,7 @@ class EntityBlockSearchView(ft.Column):
                         "target": condition.target,
                         "dimensions": condition.dimensions,
                     }
-                    self._render_results()
+                    self._render_results(result_controls)
                     self._status_title_text.value = "✅ 搜索完成"
                     self._status_title_text.color = THEME.mc_grass
                     self._status_summary_text.value = f"找到 {len(results)} 个结果"
@@ -399,12 +400,14 @@ class EntityBlockSearchView(ft.Column):
 
         threading.Thread(target=_search, daemon=True).start()
 
-    def _render_results(self) -> None:
-        """渲染搜索结果"""
-        self._results_list.controls.clear()
-
-        if not self._search_results:
-            self._results_list.controls.append(
+    def _build_result_controls(
+        self,
+        results: List[SearchResult],
+    ) -> List[ft.Control]:
+        """Create detached result controls without occupying the UI loop."""
+        controls: List[ft.Control] = []
+        if not results:
+            controls.append(
                 placeholder(
                     icon=IconSet.SEARCH,
                     title="未找到结果",
@@ -413,20 +416,34 @@ class EntityBlockSearchView(ft.Column):
                 )
             )
         else:
-            displayed = min(len(self._search_results), self.DISPLAY_LIMIT)
-            for i, result in enumerate(self._search_results[:displayed]):
-                self._results_list.controls.append(
-                    self._build_result_row(i, result))
+            displayed = min(len(results), self.DISPLAY_LIMIT)
+            controls.extend(
+                self._build_result_row(index, result)
+                for index, result in enumerate(results[:displayed])
+            )
 
-            if len(self._search_results) > displayed:
-                self._results_list.controls.append(
+            if len(results) > displayed:
+                controls.append(
                     ft.Text(
-                        f"显示前 {displayed} 个结果，共 {len(self._search_results)} 个",
+                        f"显示前 {displayed} 个结果，共 {len(results)} 个",
                         size=12,
                         color=THEME.warning,
                     )
                 )
+        return controls
 
+    def _render_results(
+        self,
+        controls: List[ft.Control] | None = None,
+    ) -> None:
+        """Attach prepared search controls and refresh once."""
+        rendered = (
+            controls
+            if controls is not None
+            else self._build_result_controls(self._search_results)
+        )
+        self._results_list.controls.clear()
+        self._results_list.controls.extend(rendered)
         self._results_list.update()
 
     def _build_result_row(

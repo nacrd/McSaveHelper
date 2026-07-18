@@ -99,18 +99,19 @@ class CompareView(ft.Column):
             def _run():
                 try:
                     result = self._service.compare_worlds(left, right)
+                    summary = (
+                        f"变更项: {result.summary['changed']} / "
+                        f"{sum(v for k, v in result.summary.items() if k != 'changed')}"
+                    )
+                    groups = [
+                        self._group("WorldInfo 差异", result.world_info),
+                        self._group("玩家数据差异", result.players),
+                        self._group("区域文件差异", result.regions),
+                    ]
 
                     def _update_ui() -> None:
-                        self._summary.value = f"变更项: {
-                            result.summary['changed']} / {
-                            sum(
-                                v for k,
-                                v in result.summary.items() if k != 'changed')}"
-                        self._result.controls.extend([
-                            self._group("WorldInfo 差异", result.world_info),
-                            self._group("玩家数据差异", result.players),
-                            self._group("区域文件差异", result.regions),
-                        ])
+                        self._summary.value = summary
+                        self._result.controls.extend(groups)
                         self._comparing = False
                         self.update()
                     run_on_ui(self.app.page, _update_ui)

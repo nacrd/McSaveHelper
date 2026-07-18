@@ -7,6 +7,7 @@ from typing import Dict, Optional, Callable, Any, Tuple
 import nbtlib
 from nbtlib import Compound, File
 from .models import WorldInfo
+from .mod_metadata import detect_mod_metadata
 
 
 class NbtLoader:
@@ -62,6 +63,8 @@ class NbtLoader:
             difficulty = data.get("Difficulty", None)
             hardcore = data.get("hardcore", None)
             allow_commands = data.get("allowCommands", None)
+            difficulty_locked = data.get("DifficultyLocked", None)
+            spawn_angle = data.get("SpawnAngle", None)
 
             # 提取时间和天气信息
             day_time = data.get("DayTime", None)
@@ -74,9 +77,13 @@ class NbtLoader:
 
             # 提取种子
             seed = None
+            generate_features = None
+            bonus_chest = None
             wgs = data.get("WorldGenSettings")
             if wgs:
                 seed = wgs.get("seed", None)
+                generate_features = wgs.get("generate_features", None)
+                bonus_chest = wgs.get("bonus_chest", None)
 
             # 提取数据包信息
             data_packs = None
@@ -91,9 +98,25 @@ class NbtLoader:
                     }
 
             # 提取其他信息
-            server_brands = data.get("ServerBrands", None)
+            server_brand_tags = data.get("ServerBrands", None)
+            server_brands = (
+                [str(brand) for brand in server_brand_tags]
+                if server_brand_tags else None
+            )
             was_modded = data.get("WasModded", None)
             initialized = data.get("initialized", None)
+            mod_metadata = detect_mod_metadata(
+                root,
+                data,
+                data_packs=data_packs,
+                server_brands=server_brands,
+            )
+
+            # 世界边界
+            border_center_x = data.get("BorderCenterX", None)
+            border_center_z = data.get("BorderCenterZ", None)
+            border_size = data.get("BorderSize", None)
+            border_warning_blocks = data.get("BorderWarningBlocks", None)
 
             self._world_info = WorldInfo(
                 version=version,
@@ -121,6 +144,17 @@ class NbtLoader:
                 was_modded=was_modded,
                 clear_weather_time=clear_weather_time,
                 initialized=initialized,
+                difficulty_locked=difficulty_locked,
+                spawn_angle=spawn_angle,
+                generate_features=generate_features,
+                bonus_chest=bonus_chest,
+                border_center_x=border_center_x,
+                border_center_z=border_center_z,
+                border_size=border_size,
+                border_warning_blocks=border_warning_blocks,
+                mods=list(mod_metadata.mods),
+                mod_loaders=list(mod_metadata.loaders),
+                mod_list_complete=mod_metadata.list_complete,
             )
 
             self._log(f"已加载存档信息：版本 {version} ({version_name})", "INFO")

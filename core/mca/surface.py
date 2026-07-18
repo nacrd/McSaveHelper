@@ -28,7 +28,10 @@ DEFAULT_EMPTY = (45, 60, 50)
 DEFAULT_WATERISH = (64, 164, 223)
 DEFAULT_UNKNOWN = (100, 100, 100)
 
-_DECODE_WORKERS = max(4, min(8, (os.cpu_count() or 4)))
+# RegionMapService renders multiple regions concurrently.  Keep this nested
+# decoder pool deliberately small; large pools mostly contend on the GIL while
+# starving the UI and unrelated workers.
+_DECODE_WORKERS = min(2, max(1, (os.cpu_count() or 2) // 2))
 
 # (path_str, mtime_ns, cx, cz) -> ChunkBlocks | None
 _CHUNK_LRU: "OrderedDict[Tuple[str, int, int, int], Optional[Any]]" = OrderedDict()

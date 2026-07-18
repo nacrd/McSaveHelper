@@ -70,10 +70,10 @@ class RegionMapService:
         self._topview_tile_sizes: Dict[Tuple[int, int], int] = {}
         # 瓦片变更回调（由 UI 注册，在 UI 线程调度）
         self._tile_ready_callback: Optional[Any] = None
-        # Bounded topview queue: never spawn one thread per region.
-        # anvil chunk decode is CPU+IO heavy; 2 workers keep hang detector calm.
+        # Bounded topview queue: rendering also performs limited parallel chunk
+        # decoding, so keep the outer pool small to avoid nested thread storms.
         cpu = os.cpu_count() or 2
-        self._topview_max_workers: int = max(2, min(4, (cpu or 2) // 2 or 2))
+        self._topview_max_workers: int = min(2, max(1, cpu // 2))
         self._topview_active: int = 0
         self._topview_queue: Deque[Tuple[Tuple[int, int], str, int, int]] = deque()
         self._topview_executor: Optional[ThreadPoolExecutor] = None

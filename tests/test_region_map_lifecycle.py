@@ -28,6 +28,14 @@ def test_region_map_service_instances_are_fresh() -> None:
     second.close()
 
 
+def test_topview_outer_pool_is_bounded_for_nested_decode_work() -> None:
+    service = RegionMapService()
+
+    assert 1 <= service._topview_max_workers <= 2
+
+    service.close()
+
+
 def test_close_releases_executor_and_rejects_new_scan(tmp_path) -> None:
     service = RegionMapService()
     executor = service._ensure_topview_executor()
