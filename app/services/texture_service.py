@@ -1,17 +1,25 @@
 """纹理服务 - 管理 Minecraft 物品纹理的获取、缓存和提供"""
 import base64
-import hashlib
 import logging
-import os
-import platform
 import threading
 import zipfile
 from collections import OrderedDict
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import requests
+
+from core.texture.block_guess import (
+    guess_is_block,
+    resolve_texture_resource_key,
+)
+from core.texture.client_jar import (
+    ClientJarInfo,
+    download_client_jar,
+    find_local_minecraft_jar,
+)
+
+__all__ = ["ClientJarInfo", "TextureService"]
 
 logger = logging.getLogger(__name__)
 
@@ -20,67 +28,6 @@ _RESOURCE_BASE_URL = "https://resources.download.minecraft.net"
 _JAR_TEXTURE_PREFIX = "assets/minecraft/textures/"
 _REQUEST_TIMEOUT = 10
 _MAX_MEMORY_CACHE = 500
-
-
-@dataclass(frozen=True)
-class ClientJarInfo:
-    version_id: str
-    url: str
-    sha1: Optional[str]
-    size: int
-
-
-_BLOCK_SUFFIXES = (
-    "_block", "_ore", "_log", "_wood", "_stem", "_planks", "_stone",
-    "_bricks", "_glass", "_wool", "_carpet", "_bed", "_door", "_fence",
-    "_wall", "_slab", "_stairs", "_pane", "_shulker_box", "_leaves",
-    "_sand", "_concrete", "_terracotta", "_glazed_terracotta",
-    "_copper", "_nylium", "_basalt", "_blackstone", "_deepslate",
-    "_concrete_powder",
-)
-_BLOCK_PREFIXES = (
-    "chest", "barrel", "composter", "lectern", "beehive", "campfire",
-    "torch", "lantern", "anvil", "cauldron", "brewing_stand",
-    "enchanting_table", "end_rod", "observer", "piston", "hopper",
-    "dispenser", "dropper", "furnace", "tnt", "note_block",
-    "jukebox", "respawn_anchor", "lodestone",
-)
-_BLOCK_EXACT = {
-    "dirt", "grass_block", "stone", "cobblestone", "glass", "sand",
-    "gravel", "obsidian", "crying_obsidian", "bedrock", "crafting_table",
-    "chest", "ender_chest", "beacon", "moss_block", "mud", "clay",
-    "snow_block", "ice", "packed_ice", "blue_ice", "sponge", "wet_sponge",
-    "melon", "pumpkin", "hay_block", "bone_block", "dried_kelp_block",
-    "slime_block", "honey_block", "mushroom_stem",
-    "smooth_stone", "sandstone", "red_sandstone", "prismarine",
-    "netherrack", "nether_bricks", "red_nether_bricks", "end_stone",
-    "purpur_block", "quartz_block", "amethyst_block", "calcite",
-    "tuff", "dripstone_block", "pointed_dripstone",
-    "sculk", "sculk_catalyst", "sculk_shrieker", "sculk_sensor",
-    "mangrove_roots", "muddy_mangrove_roots",
-    "ochre_froglight", "verdant_froglight", "pearlescent_froglight",
-    "reinforced_deepslate", "frogspawn",
-    "sea_lantern", "glowstone", "redstone_lamp",
-    "coal_block", "iron_block", "gold_block", "diamond_block",
-    "emerald_block", "lapis_block", "redstone_block", "netherite_block",
-    "copper_block", "raw_iron_block", "raw_gold_block", "raw_copper_block",
-    "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
-    "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
-    "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
-    "brown_wool", "green_wool", "red_wool", "black_wool",
-}
-
-
-def _guess_is_block(local_id: str) -> bool:
-    if local_id in _BLOCK_EXACT:
-        return True
-    for prefix in _BLOCK_PREFIXES:
-        if local_id.startswith(prefix):
-            return True
-    for suffix in _BLOCK_SUFFIXES:
-        if local_id.endswith(suffix):
-            return True
-    return False
 
 
 class TextureService:
@@ -207,37 +154,18 @@ class TextureService:
         return result
 
     def _find_texture_resource(self, item_id: str, local_id: str) -> str:
+        del item_id
         asset_keys = self._get_asset_index_keys()
-
-        if _guess_is_block(local_id):
-            block_key = f"textures/block/{local_id}.png"
-            if self._asset_index_has(asset_keys, block_key):
-                return block_key
-            item_key = f"textures/item/{local_id}.png"
-            if self._asset_index_has(asset_keys, item_key):
-                return item_key
-            return block_key
-
-        item_key = f"textures/item/{local_id}.png"
-        if self._asset_index_has(asset_keys, item_key):
-            return item_key
-        block_key = f"textures/block/{local_id}.png"
-        if self._asset_index_has(asset_keys, block_key):
-            return block_key
-        return item_key
+        return resolve_texture_resource_key(
+            local_id,
+            prefer_block=guess_is_block(local_id),
+            asset_keys=asset_keys,
+        )
 
     def _get_asset_index_keys(self) -> Optional[Dict[str, str]]:
         if not self._asset_index_loaded:
             self._load_asset_index()
         return self._asset_index
-
-    @staticmethod
-    def _asset_index_has(
-            asset_keys: Optional[Dict[str, str]], res_path: str) -> bool:
-        if asset_keys is None:
-            return False
-        mc_key = f"minecraft/{res_path}"
-        return mc_key in asset_keys
 
     def _try_extract_from_jar(self, texture_res: str) -> Optional[bytes]:
         jar = self._find_or_get_jar()
@@ -309,175 +237,14 @@ class TextureService:
         return self._minecraft_jar
 
     def find_minecraft_jar(self) -> Optional[Path]:
-        system = platform.system()
-        if system == "Windows":
-            mc_dir = Path(os.environ.get("APPDATA", "")) / ".minecraft"
-        elif system == "Darwin":
-            mc_dir = Path.home() / "Library" / "Application Support" / "minecraft"
-        else:
-            mc_dir = Path.home() / ".minecraft"
-
-        versions_dir = mc_dir / "versions"
-        if not versions_dir.exists():
-            return None
-
-        jars: list[tuple[str, Path]] = []
-        for version_dir in versions_dir.iterdir():
-            if not version_dir.is_dir():
-                continue
-            jar_path = version_dir / f"{version_dir.name}.jar"
-            if jar_path.exists():
-                jars.append((version_dir.name, jar_path))
-
-        if not jars:
-            return None
-
-        jars.sort(key=lambda x: x[0], reverse=True)
-        return jars[0][1]
+        return find_local_minecraft_jar()
 
     def set_minecraft_jar(self, path: Path) -> None:
         self._minecraft_jar = path
 
     def _download_client_jar(self) -> Optional[Path]:
-        """从 Mojang 官方下载客户端 JAR，并自动清理旧版本"""
-        try:
-            logger.info("开始下载 Minecraft 客户端 JAR...")
-            self._cleanup_old_jars(keep_count=1)
-            info = self._resolve_latest_client_jar()
-            if info is None:
-                return None
-            jar_path = self._jar_cache_dir / (
-                f"minecraft-{info.version_id}-client.jar"
-            )
-            if self._is_cached_jar_valid(jar_path, info.sha1):
-                logger.info(f"使用缓存的 JAR: {jar_path}")
-                return jar_path
-            if self._stream_client_jar(info, jar_path):
-                logger.info(f"JAR 下载完成: {jar_path}")
-                return jar_path
-        except Exception as exc:
-            logger.error(f"下载 JAR 失败: {exc}")
-        return None
-
-    def _resolve_latest_client_jar(self) -> Optional[ClientJarInfo]:
-        manifest = self._request_json(_ASSET_INDEX_URL, "无法获取版本清单")
-        if manifest is None:
-            return None
-        latest_id = manifest.get("latest", {}).get("release")
-        if not latest_id:
-            logger.warning("无法获取最新版本 ID")
-            return None
-        logger.info(f"最新版本: {latest_id}")
-        version_url = next(
-            (
-                version.get("url")
-                for version in manifest.get("versions", [])
-                if version.get("id") == latest_id
-            ),
-            None,
-        )
-        if not version_url:
-            logger.warning("无法获取版本 URL")
-            return None
-        version_data = self._request_json(version_url, "无法获取版本数据")
-        if version_data is None:
-            return None
-        client = version_data.get("downloads", {}).get("client")
-        if not client:
-            logger.warning("无法获取客户端下载信息")
-            return None
-        jar_url = client.get("url")
-        if not jar_url:
-            logger.warning("无法获取 JAR 下载 URL")
-            return None
-        return ClientJarInfo(
-            version_id=str(latest_id),
-            url=str(jar_url),
-            sha1=client.get("sha1"),
-            size=int(client.get("size", 0)),
-        )
-
-    @staticmethod
-    def _request_json(url: str, warning: str) -> Optional[Dict[str, Any]]:
-        response = requests.get(url, timeout=_REQUEST_TIMEOUT)
-        if response.status_code != 200:
-            logger.warning(warning)
-            return None
-        data = response.json()
-        return data if isinstance(data, dict) else None
-
-    @staticmethod
-    def _file_sha1(path: Path) -> str:
-        digest = hashlib.sha1()
-        with open(path, "rb") as file:
-            for chunk in iter(lambda: file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
-    def _is_cached_jar_valid(self, jar_path: Path, expected_sha1: Optional[str]) -> bool:
-        if not jar_path.exists():
-            return False
-        if expected_sha1 and self._file_sha1(jar_path) == expected_sha1:
-            return True
-        logger.warning("缓存的 JAR SHA1 校验失败，重新下载")
-        jar_path.unlink(missing_ok=True)
-        return False
-
-    @staticmethod
-    def _stream_client_jar(info: ClientJarInfo, jar_path: Path) -> bool:
-        logger.info(f"开始下载 JAR ({info.size / 1024 / 1024:.1f} MB)...")
-        response = requests.get(info.url, timeout=300, stream=True)
-        if response.status_code != 200:
-            logger.warning(f"下载失败: HTTP {response.status_code}")
-            return False
-        temp_path = jar_path.with_suffix(jar_path.suffix + ".part")
-        try:
-            with open(temp_path, "wb") as file:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
-                    if not chunk:
-                        continue
-                    file.write(chunk)
-                    downloaded += len(chunk)
-                    if downloaded % (1024 * 1024) == 0:
-                        logger.debug(
-                            f"已下载: {downloaded / 1024 / 1024:.1f} MB"
-                        )
-            temp_path.replace(jar_path)
-            return True
-        except Exception:
-            temp_path.unlink(missing_ok=True)
-            raise
-
-    def _cleanup_old_jars(self, keep_count: int = 1) -> None:
-        """清理旧版本 JAR 文件，只保留最新的 N 个版本"""
-        try:
-            if not self._jar_cache_dir.exists():
-                return
-
-            # 获取所有 JAR 文件
-            jar_files = list(
-                self._jar_cache_dir.glob("minecraft-*-client.jar"))
-            if len(jar_files) <= keep_count:
-                return  # 文件数量未超过保留数量，无需清理
-
-            # 按修改时间排序（最新的在前）
-            jar_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-
-            # 删除旧文件
-            for old_jar in jar_files[keep_count:]:
-                try:
-                    size_mb = old_jar.stat().st_size / 1024 / 1024
-                    old_jar.unlink()
-                    logger.info(
-                        f"已清理旧版本 JAR: {
-                            old_jar.name} ({
-                            size_mb:.1f} MB)")
-                except Exception as e:
-                    logger.warning(f"清理 JAR 失败 {old_jar.name}: {e}")
-
-        except Exception as e:
-            logger.warning(f"清理旧 JAR 文件时出错: {e}")
+        """从 Mojang 官方下载客户端 JAR，并自动清理旧版本。"""
+        return download_client_jar(self._jar_cache_dir)
 
     def _load_asset_index(self) -> None:
         try:
