@@ -272,6 +272,7 @@ def test_migration_controller_does_not_hold_application() -> None:
 
     assert "self.app" not in source
     assert "app: Any" not in source
+    assert "app.ui" not in source
     assert "MigrationControllerDependencies" in source
 
 
