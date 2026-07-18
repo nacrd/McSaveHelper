@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 import flet as ft
 
 from app.models.nbt_edit import ChunkNbtTarget, NbtEditFormat, NbtPathPart
-from app.services.block_data_service import BlockDataService
+from core.mca.block_data_service import BlockDataService
 from app.ui.components.cards import placeholder
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
