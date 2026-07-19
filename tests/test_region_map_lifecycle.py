@@ -66,6 +66,50 @@ def test_topview_queue_is_bounded_for_large_worlds() -> None:
     service.close()
 
 
+def test_full_topview_queue_reports_only_retained_requests() -> None:
+    service = RegionMapService()
+    service._topview_active = service._topview_max_workers
+    coords = [(index, 0) for index in range(service.TOPVIEW_QUEUE_LIMIT + 8)]
+    service._region_paths = {
+        coord: f"r.{coord[0]}.{coord[1]}.mca" for coord in coords
+    }
+
+    accepted = service.request_topview_tiles(coords, tile_size=32)
+
+    queued_coords = {job[0] for job in service._topview_queue}
+    assert accepted == queued_coords
+    assert len(accepted) == service.TOPVIEW_QUEUE_LIMIT - service._topview_active
+    rejected = coords[-1]
+    assert rejected not in accepted
+    assert service.is_topview_tile_pending(rejected, min_size=32) is False
+    service.close()
+
+
+def test_priority_eviction_removes_dropped_request_from_pending_state() -> None:
+    service = RegionMapService()
+    service._topview_active = service._topview_max_workers
+    queued_count = service.TOPVIEW_QUEUE_LIMIT - service._topview_active
+    normal_coords = [(index, 0) for index in range(queued_count)]
+    priority_coord = (queued_count, 0)
+    all_coords = [*normal_coords, priority_coord]
+    service._region_paths = {
+        coord: f"r.{coord[0]}.{coord[1]}.mca" for coord in all_coords
+    }
+    service.request_topview_tiles(normal_coords, tile_size=32)
+    dropped_coord = normal_coords[-1]
+
+    accepted = service.request_topview_tiles(
+        [priority_coord],
+        tile_size=64,
+        priority=True,
+    )
+
+    assert accepted == {priority_coord}
+    assert service.is_topview_tile_pending(priority_coord, min_size=64) is True
+    assert service.is_topview_tile_pending(dropped_coord, min_size=32) is False
+    service.close()
+
+
 def test_detail_request_upgrades_a_queued_preview() -> None:
     service = RegionMapService()
     service._topview_active = service._topview_max_workers
@@ -89,8 +133,8 @@ def test_topview_request_clamps_renderer_size() -> None:
 
     service.request_topview_tiles([coord], tile_size=1000)
 
-    assert list(service._topview_queue)[0][2] == 256
-    assert service._topview_pending_sizes[coord] == 256
+    assert list(service._topview_queue)[0][2] == 512
+    assert service._topview_pending_sizes[coord] == 512
     service.close()
 
 

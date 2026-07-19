@@ -14,12 +14,12 @@ from typing import Any, Dict, Optional, Sequence, Union
 
 PathLike = Union[str, Path]
 
-ALGO_VERSION = "v8-native-surface-sampling"
+ALGO_VERSION = "v14-biome-strata-soft-relief-leaf512"
 
 _CACHE_DIR: Optional[Path] = None
 _LOCK = threading.Lock()
 _MAX_FILES = 4000
-_LADDER: Sequence[int] = (16, 32, 64, 128)
+_LADDER: Sequence[int] = (16, 32, 64, 128, 256, 512)
 
 
 def cache_dir() -> Path:
@@ -39,7 +39,16 @@ def _cache_key(region_path: Path, tile_size: int) -> str:
     except OSError:
         mtime_ns = 0
         size = 0
-    raw = f"{region_path.resolve()}|{mtime_ns}|{size}|{tile_size}|{ALGO_VERSION}"
+    try:
+        from core.mca.texture_palette import texture_palette_signature
+
+        texture_signature = texture_palette_signature()
+    except Exception:
+        texture_signature = "fallback"
+    raw = (
+        f"{region_path.resolve()}|{mtime_ns}|{size}|{tile_size}|"
+        f"{ALGO_VERSION}|{texture_signature}"
+    )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 

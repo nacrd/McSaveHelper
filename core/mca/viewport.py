@@ -7,6 +7,8 @@ from typing import Collection, Iterable, Literal, Optional, Tuple
 
 from core.mca.format import CHUNKS_PER_SIDE
 
+BLOCKS_PER_REGION = CHUNKS_PER_SIDE * 16
+
 
 RegionCoord = Tuple[int, int]
 ChunkCoord = Tuple[int, int]
@@ -98,7 +100,7 @@ class McaViewport:
     offset_x: float = 0.0
     offset_y: float = 0.0
     cell_size: float = 32.0
-    cell_gap: float = 2.0
+    cell_gap: float = 0.0
     min_scale: float = MIN_SCALE
     max_scale: float = MAX_SCALE
 
@@ -146,13 +148,103 @@ class McaViewport:
             (screen_y - self.offset_y) / self.scale,
         )
 
+    def block_to_world(self, block_x: float, block_z: float) -> Tuple[float, float]:
+        """Project Minecraft block coordinates into the region-map plane.
+
+        Keeping this conversion here means markers, search results, and future
+        overlay layers share exactly the same transform as the base tiles.
+        """
+        region_x = math.floor(float(block_x) / BLOCKS_PER_REGION)
+        region_z = math.floor(float(block_z) / BLOCKS_PER_REGION)
+        local_x = float(block_x) - region_x * BLOCKS_PER_REGION
+        local_z = float(block_z) - region_z * BLOCKS_PER_REGION
+        return (
+            region_x * self.cell_pitch + local_x / BLOCKS_PER_REGION * self.cell_size,
+            region_z * self.cell_pitch + local_z / BLOCKS_PER_REGION * self.cell_size,
+        )
+
+    def block_to_screen(self, block_x: float, block_z: float) -> Tuple[float, float]:
+        """Project Minecraft block coordinates directly to screen pixels."""
+        world_x, world_z = self.block_to_world(block_x, block_z)
+        return self.world_to_screen(world_x, world_z)
+
+    def world_to_block(
+        self,
+        world_x: float,
+        world_z: float,
+    ) -> Optional[Tuple[int, int]]:
+        """Inverse-project a map-plane point to a block coordinate.
+
+        With the default zero cell gap, every point belongs to one continuous
+        region plane.  A non-zero gap remains supported for legacy callers and
+        returns ``None`` inside that explicitly requested gap.
+        """
+        region_x = math.floor(float(world_x) / self.cell_pitch)
+        region_z = math.floor(float(world_z) / self.cell_pitch)
+        local_x = float(world_x) - region_x * self.cell_pitch
+        local_z = float(world_z) - region_z * self.cell_pitch
+        if not (0.0 <= local_x < self.cell_size and 0.0 <= local_z < self.cell_size):
+            return None
+        block_x = math.floor(local_x / self.cell_size * BLOCKS_PER_REGION)
+        block_z = math.floor(local_z / self.cell_size * BLOCKS_PER_REGION)
+        return (
+            region_x * BLOCKS_PER_REGION + min(BLOCKS_PER_REGION - 1, block_x),
+            region_z * BLOCKS_PER_REGION + min(BLOCKS_PER_REGION - 1, block_z),
+        )
+
+    def screen_to_block(
+        self,
+        screen_x: float,
+        screen_y: float,
+    ) -> Optional[Tuple[int, int]]:
+        """Inverse-project screen pixels to Minecraft block coordinates."""
+        world_x, world_z = self.screen_to_world(screen_x, screen_y)
+        return self.world_to_block(world_x, world_z)
+
+    def nearest_block_at_screen(
+        self,
+        screen_x: float,
+        screen_y: float,
+    ) -> Tuple[int, int]:
+        """Return the closest block, including legacy non-zero cell gaps."""
+        world_x, world_z = self.screen_to_world(screen_x, screen_y)
+        return (
+            self._nearest_block_axis(world_x),
+            self._nearest_block_axis(world_z),
+        )
+
+    def _nearest_block_axis(self, world_value: float) -> int:
+        region = math.floor(float(world_value) / self.cell_pitch)
+        local = float(world_value) - region * self.cell_pitch
+        if local >= self.cell_size:
+            distance_to_previous = local - self.cell_size
+            distance_to_next = self.cell_pitch - local
+            if distance_to_next < distance_to_previous:
+                region += 1
+                local = 0.0
+            else:
+                local = math.nextafter(self.cell_size, 0.0)
+        block = math.floor(local / self.cell_size * BLOCKS_PER_REGION)
+        return region * BLOCKS_PER_REGION + min(BLOCKS_PER_REGION - 1, block)
+
     def region_rect(self, coord: RegionCoord) -> ScreenRect:
-        screen_x, screen_y = self.world_to_screen(
+        left, top = self.world_to_screen(
             coord[0] * self.cell_pitch,
             coord[1] * self.cell_pitch,
         )
-        size = self.cell_size * self.scale
-        return screen_x, screen_y, size, size
+        right, bottom = self.world_to_screen(
+            coord[0] * self.cell_pitch + self.cell_size,
+            coord[1] * self.cell_pitch + self.cell_size,
+        )
+        if self.cell_gap == 0.0:
+            # Shared rounded edges prevent hairline seams when separate Canvas
+            # images land on fractional pixels. Adjacent regions calculate the
+            # same boundary from the same world coordinate.
+            left = float(round(left))
+            top = float(round(top))
+            right = float(round(right))
+            bottom = float(round(bottom))
+        return left, top, max(0.0, right - left), max(0.0, bottom - top)
 
     def region_at_screen(
         self,
@@ -171,6 +263,22 @@ class McaViewport:
         if available is not None and coord not in available:
             return None
         return coord
+
+    def nearest_region_at_screen(
+        self,
+        screen_x: float,
+        screen_y: float,
+    ) -> RegionCoord:
+        """Return the region grid coordinate nearest a screen point.
+
+        Unlike ``region_at_screen``, this intentionally includes cell gaps and
+        absent regions, which makes it suitable for center-first tile queues.
+        """
+        world_x, world_z = self.screen_to_world(screen_x, screen_y)
+        return (
+            int(math.floor(world_x / self.cell_pitch)),
+            int(math.floor(world_z / self.cell_pitch)),
+        )
 
     def chunk_at_screen(
         self,

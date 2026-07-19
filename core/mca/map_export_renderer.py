@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, cast
@@ -25,6 +26,10 @@ class MapImageSpec:
     width: int
     height: int
     estimated_mb: float
+
+
+class MapRenderCancelled(Exception):
+    """地图渲染被调用方取消。"""
 
 
 def analyze_region_bounds(region_files: List[Path]) -> Dict[str, int]:
@@ -83,24 +88,37 @@ class MapExportRenderer:
         scale: int,
         log: Callable[[str, str], None],
         progress: Callable[[float, str], None],
+        *,
+        block_bounds: Optional[Tuple[int, int, int, int]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> Any:
         """创建地图图像
 
         Args:
-            world_path: 存档路径
             region_files: 区块文件列表
-            bounds: 区块范围
+            bounds: inclusive region 坐标范围
             map_type: 地图类型
             scale: 缩放比例
             log: 日志回调
             progress: 进度回调
+            block_bounds: 可选的 inclusive 方块裁剪范围
+            cancel_event: 可选的取消事件
 
         Returns:
             PIL 图像对象
         """
+        self._raise_if_cancelled(cancel_event)
         if not PIL_AVAILABLE:
             raise ImportError("需要安装 Pillow 库才能导出地图")
-        spec = self.calculate_image_spec(bounds, scale)
+        normalized_block_bounds = self._normalize_block_bounds(
+            block_bounds,
+            bounds,
+        )
+        spec = self.calculate_image_spec(
+            bounds,
+            scale,
+            block_bounds=block_bounds,
+        )
         log(
             f"创建 {spec.width}x{spec.height} 的图像 "
             f"(预计 {spec.estimated_mb:.0f} MB)",
@@ -111,35 +129,55 @@ class MapExportRenderer:
             (spec.width, spec.height),
             color=(135, 206, 235),
         )
+        self.last_rendered_chunks = 0
         try:
-            self.last_rendered_chunks = self._render_regions(
-                image,
-                region_files,
-                bounds,
-                map_type,
-                scale,
-                log,
-                progress,
-            )
-        except ImportError:
-            log("地图渲染后端不可用，使用简化渲染", "WARNING")
-            self.draw_fallback_grid(image, scale)
-        if self.last_rendered_chunks == 0:
+            try:
+                self.last_rendered_chunks = self._render_regions(
+                    image,
+                    region_files,
+                    bounds,
+                    map_type,
+                    scale,
+                    log,
+                    progress,
+                    block_bounds=normalized_block_bounds,
+                    cancel_event=cancel_event,
+                )
+            except ImportError:
+                log("地图渲染后端不可用，使用简化渲染", "WARNING")
+                self.draw_fallback_grid(image, scale)
+            if self.last_rendered_chunks == 0:
+                raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
+            self._raise_if_cancelled(cancel_event)
+        except Exception:
             image.close()
-            raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
+            raise
         return image
 
     @staticmethod
     def calculate_image_spec(
         bounds: Dict[str, int],
         scale: int,
+        *,
+        block_bounds: Optional[Tuple[int, int, int, int]] = None,
     ) -> MapImageSpec:
-        region_width = bounds["max_x"] - bounds["min_x"] + 1
-        region_height = bounds["max_z"] - bounds["min_z"] + 1
-        full_width = region_width * 32 * 16
-        full_height = region_height * 32 * 16
-        width = full_width // scale
-        height = full_height // scale
+        if not isinstance(scale, int) or isinstance(scale, bool) or scale <= 0:
+            raise ValueError("缩放比例必须是正整数")
+        if block_bounds is None:
+            region_width = bounds["max_x"] - bounds["min_x"] + 1
+            region_height = bounds["max_z"] - bounds["min_z"] + 1
+            full_width = region_width * 32 * 16
+            full_height = region_height * 32 * 16
+            width = full_width // scale
+            height = full_height // scale
+        else:
+            min_x, min_z, max_x, max_z = block_bounds
+            if max_x < min_x or max_z < min_z:
+                raise ValueError("方块范围无效")
+            full_width = max_x - min_x + 1
+            full_height = max_z - min_z + 1
+            width = (full_width + scale - 1) // scale
+            height = (full_height + scale - 1) // scale
         max_dimension = 32768
         if width > max_dimension or height > max_dimension:
             needed_scale = max(
@@ -167,6 +205,9 @@ class MapExportRenderer:
         scale: int,
         log: Callable[[str, str], None],
         progress: Callable[[float, str], None],
+        *,
+        block_bounds: Tuple[int, int, int, int],
+        cancel_event: Optional[threading.Event],
     ) -> int:
         from core.mca import NativeRegion
 
@@ -174,8 +215,9 @@ class MapExportRenderer:
         total = len(region_files)
         rendered_chunks = 0
         for index, region_file in enumerate(region_files):
+            self._raise_if_cancelled(cancel_event)
             progress(
-                0.25 + (index / total) * 0.70,
+                0.25 + (index / max(total, 1)) * 0.70,
                 f"渲染区块 {index + 1}/{total}",
             )
             try:
@@ -193,7 +235,11 @@ class MapExportRenderer:
                         bounds,
                         map_type,
                         scale,
+                        block_bounds=block_bounds,
+                        cancel_event=cancel_event,
                     )
+            except MapRenderCancelled:
+                raise
             except Exception as exc:
                 log(f"处理区块文件 {region_file.name} 失败: {exc}", "WARNING")
         return rendered_chunks
@@ -208,6 +254,9 @@ class MapExportRenderer:
         bounds: Dict[str, int],
         map_type: str,
         scale: int,
+        *,
+        block_bounds: Tuple[int, int, int, int],
+        cancel_event: Optional[threading.Event],
     ) -> int:
         rendered_chunks = 0
         try:
@@ -219,6 +268,17 @@ class MapExportRenderer:
                 for chunk_z in range(32)
             )
         for chunk_x, chunk_z in coordinates:
+            self._raise_if_cancelled(cancel_event)
+            chunk_min_x = region_x * 512 + chunk_x * 16
+            chunk_min_z = region_z * 512 + chunk_z * 16
+            min_x, min_z, max_x, max_z = block_bounds
+            if (
+                chunk_min_x + 15 < min_x
+                or chunk_min_x > max_x
+                or chunk_min_z + 15 < min_z
+                or chunk_min_z > max_z
+            ):
+                continue
             try:
                 chunk = region.get_chunk(chunk_x, chunk_z)
                 if chunk is not None:
@@ -233,8 +293,12 @@ class MapExportRenderer:
                         map_type,
                         scale,
                         pixels,
+                        block_bounds=block_bounds,
+                        cancel_event=cancel_event,
                     )
                     rendered_chunks += 1
+            except MapRenderCancelled:
+                raise
             except Exception:
                 continue
         return rendered_chunks
@@ -268,6 +332,9 @@ class MapExportRenderer:
         map_type: str,
         scale: int,
         pixels: Any = None,
+        *,
+        block_bounds: Optional[Tuple[int, int, int, int]] = None,
+        cancel_event: Optional[threading.Event] = None,
     ) -> None:
         """渲染单个区块
 
@@ -287,13 +354,22 @@ class MapExportRenderer:
             if pixels is None:
                 pixels = image.load()
 
-            # 计算区块在图像中的位置
-            chunk_x = (rx - bounds["min_x"]) * 32 + cx
-            chunk_z = (rz - bounds["min_z"]) * 32 + cz
+            if block_bounds is None:
+                block_bounds = self._normalize_block_bounds(None, bounds)
+            origin_x, origin_z, max_x, max_z = block_bounds
+            world_chunk_x = rx * 32 + cx
+            world_chunk_z = rz * 32 + cz
 
             # 获取区块的最高方块
             for bx in range(16):
+                self._raise_if_cancelled(cancel_event)
+                world_x = world_chunk_x * 16 + bx
+                if world_x < origin_x or world_x > max_x:
+                    continue
                 for bz in range(16):
+                    world_z = world_chunk_z * 16 + bz
+                    if world_z < origin_z or world_z > max_z:
+                        continue
                     try:
                         # 获取最高非空气方块
                         y = self.highest_block_y(chunk, bx, bz)
@@ -302,9 +378,8 @@ class MapExportRenderer:
                             block = chunk.get_block(bx, y, bz)
                             color = self._get_block_color(block, y, map_type)
 
-                            # 计算像素位置
-                            px = (chunk_x * 16 + bx) // scale
-                            py = (chunk_z * 16 + bz) // scale
+                            px = (world_x - origin_x) // scale
+                            py = (world_z - origin_z) // scale
 
                             # 绘制像素（使用像素访问对象，比 putpixel 快 5-10 倍）
                             if 0 <= px < image.width and 0 <= py < image.height:
@@ -312,8 +387,40 @@ class MapExportRenderer:
                     except Exception:
                         pass  # 跳过无效方块
 
+        except MapRenderCancelled:
+            raise
         except Exception:
             pass  # 跳过损坏的区块数据
+
+    @staticmethod
+    def _raise_if_cancelled(
+        cancel_event: Optional[threading.Event],
+    ) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise MapRenderCancelled("地图导出已取消")
+
+    @staticmethod
+    def _normalize_block_bounds(
+        block_bounds: Optional[Tuple[int, int, int, int]],
+        region_bounds: Dict[str, int],
+    ) -> Tuple[int, int, int, int]:
+        if block_bounds is not None:
+            if len(block_bounds) != 4:
+                raise ValueError("方块范围必须包含四个坐标")
+            min_x, min_z, max_x, max_z = (
+                int(block_bounds[0]),
+                int(block_bounds[1]),
+                int(block_bounds[2]),
+                int(block_bounds[3]),
+            )
+        else:
+            min_x = int(region_bounds["min_x"]) * 512
+            min_z = int(region_bounds["min_z"]) * 512
+            max_x = (int(region_bounds["max_x"]) + 1) * 512 - 1
+            max_z = (int(region_bounds["max_z"]) + 1) * 512 - 1
+        if max_x < min_x or max_z < min_z:
+            raise ValueError("方块范围无效")
+        return min_x, min_z, max_x, max_z
 
     def highest_block_y(self, chunk: Any, x: int, z: int) -> Optional[int]:
         try:

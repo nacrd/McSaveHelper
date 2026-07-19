@@ -36,6 +36,8 @@ def test_dimension_scan_discovers_colliding_region_coordinates(
     assert by_id["minecraft:the_nether"]["region_dir"] == str(
         modern_nether.parent
     )
+    assert by_id["minecraft:the_nether"]["coordinate_scale"] == 8.0
+    assert by_id["overworld"]["coordinate_scale"] == 1.0
     assert by_id["example:moon"]["region_dir"] == str(custom_dimension.parent)
 
 

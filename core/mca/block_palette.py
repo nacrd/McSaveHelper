@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from core.mca.heightmaps import (
+    DEFAULT_HEIGHTMAP_NAMES,
+    WORLD_SURFACE_HEIGHTMAP_NAMES,
     decode_heightmap_raw,
     heightmap_value_to_block_y,
 )
+from core.mca.biome_palette import ChunkBiomes
 from core.mca.nbt_access import (
     as_int,
     as_str,
@@ -26,6 +29,90 @@ _AIR_NAMES = frozenset({
 })
 _AIR_BLOCK_ID = "minecraft:air"
 _SECTION_BLOCK_COUNT = 16 * 16 * 16
+
+_TRANSPARENT_SURFACE_EXACT = frozenset(
+    {
+        "grass",
+        "short_grass",
+        "tall_grass",
+        "fern",
+        "large_fern",
+        "dead_bush",
+        "vine",
+        "lily_pad",
+        "seagrass",
+        "tall_seagrass",
+        "kelp",
+        "kelp_plant",
+        "bamboo",
+        "bamboo_sapling",
+        "moss_carpet",
+        "snow",
+        "leaf_litter",
+        "sugar_cane",
+        "sweet_berry_bush",
+        "allium",
+        "azure_bluet",
+        "blue_orchid",
+        "closed_eyeblossom",
+        "cornflower",
+        "dandelion",
+        "flowering_azalea",
+        "lilac",
+        "lily_of_the_valley",
+        "open_eyeblossom",
+        "orange_tulip",
+        "oxeye_daisy",
+        "peony",
+        "pink_petals",
+        "pink_tulip",
+        "poppy",
+        "red_tulip",
+        "rose_bush",
+        "sunflower",
+        "torchflower",
+        "white_tulip",
+        "wither_rose",
+        "wildflowers",
+        "firefly_bush",
+        "bush",
+        "wheat",
+        "carrots",
+        "potatoes",
+        "beetroots",
+    }
+)
+
+
+def is_transparent_surface_name(name: Optional[str]) -> bool:
+    """Return whether a top block should reveal an underlying surface.
+
+    This is intentionally a conservative material classifier rather than a
+    full block-model implementation.  It covers common foliage/decorations
+    that otherwise make ``WORLD_SURFACE`` maps look like isolated noise while
+    leaving fluids, glass and ice as visible primary map materials.
+    """
+    if not name:
+        return False
+    path = name.strip().lower().rsplit(":", 1)[-1]
+    if path in _TRANSPARENT_SURFACE_EXACT:
+        return True
+    if "leaves" in path or path.endswith("_leaf"):
+        return True
+    if path.endswith("_flower") or path.endswith("_flowers"):
+        return True
+    if path.endswith("_sapling") or path.endswith("_plant"):
+        return True
+    return path in {
+        "cave_vines",
+        "cave_vines_plant",
+        "twisting_vines",
+        "weeping_vines",
+        "sweet_berry_bush",
+        "nether_sprouts",
+        "warped_roots",
+        "crimson_roots",
+    }
 
 
 def is_air_name(name: Optional[str]) -> bool:
@@ -266,10 +353,15 @@ class ChunkBlocks:
 
     __slots__ = (
         "root", "version", "sections", "heightmap", "section_ys_desc",
-        "_section_raw", "_stretch", "_legacy",
+        "_section_raw", "_stretch", "_legacy", "_biomes",
     )
 
-    def __init__(self, chunk_nbt: Any) -> None:
+    def __init__(
+        self,
+        chunk_nbt: Any,
+        *,
+        heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
+    ) -> None:
         self.root, self.version = chunk_root_and_version(chunk_nbt)
         self.sections: Dict[int, _SectionData] = {}
         self.heightmap: Optional[List[int]] = None
@@ -277,10 +369,14 @@ class ChunkBlocks:
         self._section_raw: Dict[int, Any] = {}
         self._stretch = False
         self._legacy = False
+        self._biomes: Optional[ChunkBiomes] = None
         if self.root is None:
             return
 
-        hm, ver = decode_heightmap_raw(chunk_nbt)
+        hm, ver = decode_heightmap_raw(
+            chunk_nbt,
+            heightmap_names=heightmap_names,
+        )
         if ver is not None:
             self.version = ver
         self.heightmap = hm
@@ -401,20 +497,82 @@ class ChunkBlocks:
         return None
 
     def surface_block_id(self, x: int, z: int) -> Optional[str]:
+        name, _y = self.surface_sample(x, z)
+        return name
+
+    def biome_at(self, x: int, y: int, z: int) -> Optional[str]:
+        """Return the modern 4x4x4 biome sample at one block position."""
+        if self._biomes is None:
+            self._biomes = ChunkBiomes(self.root)
+        return self._biomes.biome_at(x, y, z)
+
+    def surface_strata(
+        self,
+        x: int,
+        z: int,
+        max_depth: int = 8,
+    ) -> Tuple[Tuple[str, int], ...]:
+        """Return transparent top layers followed by the visible base.
+
+        The first entry is the heightmap surface.  Scanning stops after the
+        first material that should not be alpha-composited, so callers retain
+        leaves/plants without letting them replace the terrain underneath.
+        """
         y = self.surface_y(x, z)
         if y is None:
-            return None
-        for dy in range(0, 4):
+            return ()
+        strata: List[Tuple[str, int]] = []
+        for depth in range(max(0, int(max_depth)) + 1):
+            sample_y = y - depth
+            name = self.block_id_at(x, sample_y, z)
+            if is_air_name(name):
+                continue
+            assert name is not None
+            strata.append((name, sample_y))
+            if not is_transparent_surface_name(name):
+                break
+        return tuple(strata)
+
+    def surface_sample(
+        self,
+        x: int,
+        z: int,
+    ) -> Tuple[Optional[str], Optional[int]]:
+        """Return the visible surface block and its world height together.
+
+        Keeping the height beside the already decoded palette lookup lets the
+        top-view renderer add terrain relief without scanning the same column
+        a second time.
+        """
+        y = self.surface_y(x, z)
+        if y is None:
+            return None, None
+        # Transparent foliage/plants often form several layers above the
+        # terrain.  Walking a little deeper mirrors the map mods' strata
+        # fallback and prevents a single leaf from hiding an entire hill.
+        for dy in range(0, 9):
             name = self.block_id_at(x, y - dy, z)
             if not is_air_name(name):
-                return name
-        return self.block_id_at(x, y, z)
+                return name, y - dy
+        return self.block_id_at(x, y, z), y
 
 
-def get_chunk_blocks(chunk_nbt: Any) -> ChunkBlocks:
+def get_chunk_blocks(
+    chunk_nbt: Any,
+    *,
+    heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
+) -> ChunkBlocks:
     # NBT objects are mutable; an id-based cache can return stale block states
     # after an editor changes palette/data in place.
-    return ChunkBlocks(chunk_nbt)
+    return ChunkBlocks(chunk_nbt, heightmap_names=heightmap_names)
+
+
+def get_world_surface_chunk_blocks(chunk_nbt: Any) -> ChunkBlocks:
+    """Build a chunk view using the visible-world heightmap for map tiles."""
+    return get_chunk_blocks(
+        chunk_nbt,
+        heightmap_names=WORLD_SURFACE_HEIGHTMAP_NAMES,
+    )
 
 
 def block_id_at(chunk_nbt: Any, x: int, y: int, z: int) -> Optional[str]:
@@ -427,3 +585,17 @@ def scan_surface_y(chunk_nbt: Any, x: int, z: int) -> Optional[int]:
 
 def surface_block_id(chunk_nbt: Any, x: int, z: int) -> Optional[str]:
     return get_chunk_blocks(chunk_nbt).surface_block_id(x, z)
+
+
+def surface_strata(
+    chunk_nbt: Any,
+    x: int,
+    z: int,
+    max_depth: int = 8,
+) -> Tuple[Tuple[str, int], ...]:
+    """Return transparent surface layers plus their first opaque base."""
+    return get_world_surface_chunk_blocks(chunk_nbt).surface_strata(
+        x,
+        z,
+        max_depth=max_depth,
+    )

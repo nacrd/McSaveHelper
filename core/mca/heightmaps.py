@@ -17,12 +17,26 @@ from core.mca.nbt_access import (
 )
 from core.mca.versions import DATA_VERSION_1_18
 
-# Prefer solid terrain maps for topview coloring.
-_HEIGHTMAP_NAMES = (
+# Keep the historical default for callers that use the heightmap for collision
+# or statistics decisions.  The map renderer opts into WORLD_SURFACE below.
+DEFAULT_HEIGHTMAP_NAMES: Tuple[str, ...] = (
     "MOTION_BLOCKING",
     "MOTION_BLOCKING_NO_LEAVES",
     "WORLD_SURFACE",
     "WORLD_SURFACE_WG",
+)
+# Keep the old private name available for integrations that imported it while
+# the decoder still had a single implicit preference list.
+_HEIGHTMAP_NAMES = DEFAULT_HEIGHTMAP_NAMES
+
+# WORLD_SURFACE follows the highest non-air column, which is the height a
+# top-down map needs for foliage, water and terrain silhouettes.  Keep motion
+# maps as fallbacks for older or partially written chunks.
+WORLD_SURFACE_HEIGHTMAP_NAMES: Tuple[str, ...] = (
+    "WORLD_SURFACE",
+    "WORLD_SURFACE_WG",
+    "MOTION_BLOCKING",
+    "MOTION_BLOCKING_NO_LEAVES",
 )
 
 
@@ -56,8 +70,15 @@ def unpack_heightmap_values(
 
 def decode_heightmap_raw(
     chunk_nbt: Any,
+    *,
+    heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
 ) -> Tuple[Optional[List[int]], Optional[int]]:
-    """Return (256 packed height values, data_version) or (None, version)."""
+    """Return packed height values using an explicit heightmap preference.
+
+    ``MOTION_BLOCKING`` remains the default for compatibility.  Renderers that
+    need the visible world silhouette should pass
+    :data:`WORLD_SURFACE_HEIGHTMAP_NAMES` explicitly.
+    """
     root, version = chunk_root_and_version(chunk_nbt)
     if root is None:
         return None, version
@@ -66,7 +87,7 @@ def decode_heightmap_raw(
         return None, version
 
     raw = None
-    for name in _HEIGHTMAP_NAMES:
+    for name in heightmap_names:
         raw = mapping_get(heightmaps, name)
         if raw is not None:
             break
@@ -106,12 +127,19 @@ def heightmap_value_to_block_y(
 
 
 def surface_y_from_heightmap(
-    chunk_nbt: Any, local_x: int, local_z: int
+    chunk_nbt: Any,
+    local_x: int,
+    local_z: int,
+    *,
+    heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
 ) -> Optional[int]:
-    """Return surface block Y for column (local_x, local_z), or None."""
+    """Return a selected heightmap's block Y for one local column."""
     if not (0 <= local_x < 16 and 0 <= local_z < 16):
         return None
-    values, version = decode_heightmap_raw(chunk_nbt)
+    values, version = decode_heightmap_raw(
+        chunk_nbt,
+        heightmap_names=heightmap_names,
+    )
     if not values:
         return None
     index = local_z * 16 + local_x
@@ -122,6 +150,13 @@ def surface_y_from_heightmap(
     return heightmap_value_to_block_y(value, version)
 
 
-def has_heightmap(chunk_nbt: Any) -> bool:
-    values, _ = decode_heightmap_raw(chunk_nbt)
+def has_heightmap(
+    chunk_nbt: Any,
+    *,
+    heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
+) -> bool:
+    values, _ = decode_heightmap_raw(
+        chunk_nbt,
+        heightmap_names=heightmap_names,
+    )
     return values is not None

@@ -15,7 +15,7 @@ from typing import Any, Deque, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 from core.region_utils import parse_region_coords, scan_region_dir
-from core.mca.topview_renderer import render_region_topview
+from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
 from core.mca.region_meta import scan_region_meta
 from core.mca.region_file import RegionFile
 
@@ -79,6 +79,7 @@ class RegionMapService:
         self._scan_progress: float = 0.0
         self._scan_task: Optional[asyncio.Task] = None
         self._scan_generation: int = 0
+        self._data_revision: int = 0
         self._closed: bool = False
         self._scanned_count: int = 0
         self._total_count: int = 0
@@ -285,6 +286,7 @@ class RegionMapService:
         meta_tasks: list[asyncio.Task]
         with self._data_lock:
             self._scan_generation += 1
+            self._data_revision += 1
             self._is_scanning = False
             self._mca_data.clear()
             self._region_meta.clear()
@@ -371,6 +373,52 @@ class RegionMapService:
         with self._data_lock:
             return int(self._topview_tile_revisions.get(coord, 0) or 0)
 
+    def is_topview_tile_pending(
+        self,
+        coord: Tuple[int, int],
+        *,
+        min_size: int = 0,
+    ) -> bool:
+        """Return whether the current generation owns a request for ``coord``.
+
+        The map view keeps only a small request ledger to avoid rebuilding the
+        same batch on every frame.  The queue is bounded and priority requests
+        may evict an older job, so that ledger must be reconciled against the
+        service instead of assuming every submitted coordinate was retained.
+        """
+        required = max(0, int(min_size))
+        with self._data_lock:
+            generation = self._topview_generation
+            if self._topview_pending.get(coord) != generation:
+                return False
+            pending_size = int(self._topview_pending_sizes.get(coord, 0) or 0)
+            upgrade_size = int(self._topview_upgrade_sizes.get(coord, 0) or 0)
+            return max(pending_size, upgrade_size) >= required
+
+    def get_topview_snapshot(
+        self,
+        coords: list[Tuple[int, int]],
+    ) -> tuple[int, Dict[Tuple[int, int], bytes], Dict[Tuple[int, int], int]]:
+        """Read a consistent tile/revision snapshot for one surface frame."""
+        tiles: Dict[Tuple[int, int], bytes] = {}
+        revisions: Dict[Tuple[int, int], int] = {}
+        with self._data_lock:
+            generation = self._topview_generation
+            for coord in coords:
+                tile = self._topview_tiles.get(coord)
+                if tile is not None:
+                    self._topview_tiles.move_to_end(coord)
+                    tiles[coord] = tile
+                revisions[coord] = int(
+                    self._topview_tile_revisions.get(coord, 0) or 0
+                )
+        return generation, tiles, revisions
+
+    def get_data_revision(self) -> int:
+        """Return a monotonic revision for scan data changes."""
+        with self._data_lock:
+            return self._data_revision
+
     def get_topview_generation(self) -> int:
         with self._data_lock:
             return self._topview_generation
@@ -383,7 +431,7 @@ class RegionMapService:
         generation: int,
         cancel_event: threading.Event,
     ) -> bool:
-        if coord not in self._topview_pending:
+        if self._topview_pending.get(coord) != generation:
             return False
         pending_size = int(self._topview_pending_sizes.get(coord, 0) or 0)
         if size > pending_size:
@@ -490,7 +538,7 @@ class RegionMapService:
         *,
         force: bool = False,
         priority: bool = False,
-    ) -> None:
+    ) -> set[Tuple[int, int]]:
         """Enqueue topview rendering for coords missing a cached tile.
 
         Uses a bounded worker pool instead of one thread per region. Visible
@@ -501,14 +549,20 @@ class RegionMapService:
             force: prioritize an incomplete/upgrade request; complete same-size
                 tiles remain cached to avoid redundant decoding.
             priority: put jobs at the front of the queue (selected region).
+
+        Returns:
+            Coordinates retained by the current generation.  A bounded queue
+            can reject the tail of a visible batch, so callers must record only
+            this returned set and allow rejected coordinates to be retried.
         """
         size = max(
             8,
-            min(256, int(tile_size or self._topview_tile_size)),
+            min(LEAF_TILE_SIZE, int(tile_size or self._topview_tile_size)),
         )
+        accepted: set[Tuple[int, int]] = set()
         with self._data_lock:
             if self._closed or not self._topview_enabled:
-                return
+                return accepted
             generation = self._topview_generation
             cancel_event = self._topview_cancel_event
             queued = len(self._topview_queue) + self._topview_active
@@ -520,6 +574,7 @@ class RegionMapService:
                     generation,
                     cancel_event,
                 ):
+                    accepted.add(coord)
                     continue
                 path = self._topview_path_for_request_locked(coord, size, force)
                 if path is None:
@@ -550,7 +605,9 @@ class RegionMapService:
                 else:
                     self._topview_queue.append(job)
                 queued += 1
+                accepted.add(coord)
         self._pump_topview_queue()
+        return accepted
 
     def _pump_topview_queue(self) -> None:
         """Start queued jobs up to the worker cap."""
@@ -687,7 +744,7 @@ class RegionMapService:
                 path,
                 tile_size=tile_size,
                 cancel_check=cancel_event.is_set,
-                decode_workers=1,
+                decode_workers=2 if tile_size >= LEAF_TILE_SIZE else 1,
                 status_out=render_status,
             )
             if render_status:
@@ -794,6 +851,7 @@ class RegionMapService:
         """标记数据变更，下次 get_statistics/get_all_data 时重算。"""
         self._stats_dirty = True
         self._cached_data_snapshot = None
+        self._data_revision += 1
         self._cached_snapshot_count = -1
 
     async def start_silent_scan(
@@ -903,6 +961,7 @@ class RegionMapService:
         with self._data_lock:
             meta_tasks = list(self._region_meta_tasks.values())
             self._region_meta_tasks.clear()
+            self._data_revision += 1
             self._mca_data.clear()
             self._region_meta.clear()
             self._region_paths.clear()

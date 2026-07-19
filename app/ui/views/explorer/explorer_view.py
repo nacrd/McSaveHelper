@@ -31,6 +31,7 @@ from app.ui.views.explorer.explorer_helpers import (
     coerce_like_tag,
     world_coords_to_region_chunk,
 )
+from app.controllers.map_controller import MapController
 
 
 class ExplorerView(
@@ -56,6 +57,7 @@ class ExplorerView(
         self._current_chunk_target: Optional[ChunkNbtTarget] = None
         self._nbt_stage_store = NbtStageStore()
         self._map_service = self.app.create_region_map_service()
+        self._map_controller = MapController()
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
@@ -375,6 +377,7 @@ class ExplorerView(
         # 更新存档信息面板
         world_info = session.get_world_info()
         dimensions = session.get_dimensions()
+        self._map_controller.bind_world(session.world_path, dimensions)
         stats = {
             "world_path": str(session.world_path),
             "player_count": len(session.get_player_uuids()),

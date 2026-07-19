@@ -15,6 +15,7 @@ from .nbt_loader import NbtLoader
 from .player_manager import PlayerManager
 from .action_queue import ActionQueue
 from .action_executor import ActionExecutor
+from ..region_utils import DimensionInfo
 from ..types import LogCallback
 from nbtlib import Compound
 
@@ -93,7 +94,7 @@ class WorldSession:
         """返回已加载的世界信息"""
         return self._nbt_loader._world_info
 
-    def get_dimensions(self) -> List[Dict[str, str]]:
+    def get_dimensions(self) -> List[DimensionInfo]:
         """扫描存档中所有可用的维度目录
 
         Returns:

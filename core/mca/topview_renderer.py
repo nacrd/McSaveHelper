@@ -11,6 +11,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
+from core.mca.texture_palette import average_block_texture
+
 try:
     from PIL import Image
 
@@ -19,11 +21,14 @@ except ImportError:  # pragma: no cover
     PIL_AVAILABLE = False
 
 # Progressive tile ladder (pixels per region edge).
-# 16 -> fast first paint; 32 overview; 64 region focus; 128 chunk inspection.
+# 16 -> fast first paint; 32 overview; 64 region focus; 128 chunk inspection;
+# 256 -> deep inspection; 512 -> one pixel per Minecraft block at high zoom.
 PREVIEW_TILE_SIZE = 16
 DEFAULT_TILE_SIZE = 32
 DETAIL_TILE_SIZE = 64
 HIRES_TILE_SIZE = 128
+ULTRA_TILE_SIZE = 256
+LEAF_TILE_SIZE = 512
 
 # Shared palette with map export (subset + common terrain).
 BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {
@@ -100,42 +105,403 @@ BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {
     "minecraft:dripstone_block": (134, 107, 92),
     "minecraft:amethyst_block": (133, 97, 191),
 }
+Color = Tuple[int, int, int]
+ColorGrid = List[List[Color]]
+
+_MATERIAL_RULES: Tuple[Tuple[Tuple[str, ...], Color], ...] = (
+    (("leaves",), (0, 100, 0)),
+    (("log", "wood", "planks"), (120, 85, 45)),
+    (("water",), (64, 164, 223)),
+    (("lava",), (207, 16, 32)),
+    (("ore",), (118, 116, 105)),
+    (("sand",), (238, 214, 175)),
+    (("dirt", "podzol"), (139, 69, 19)),
+    (("grass", "moss"), (34, 139, 34)),
+    (("stone", "deepslate"), (128, 128, 128)),
+    (("nether", "netherrack"), (139, 0, 0)),
+    (("snow", "ice"), (220, 240, 255)),
+    (("brick",), (150, 72, 55)),
+    (("terracotta",), (177, 92, 65)),
+    (("concrete",), (150, 150, 150)),
+    (("quartz", "calcite"), (225, 222, 210)),
+    (("prismarine",), (75, 155, 145)),
+    (("copper",), (184, 108, 78)),
+    (("coral",), (224, 105, 130)),
+)
+
+# Wood is represented by several blocks in a world, but those blocks share
+# one map material.  Keep the structural suffixes explicit so an unrelated
+# block such as ``stone_pressure_plate`` cannot be mistaken for wood.
+_WOOD_FAMILY_TOKENS = frozenset(
+    {
+        "acacia",
+        "bamboo",
+        "birch",
+        "cherry",
+        "crimson",
+        "jungle",
+        "mangrove",
+        "oak",
+        "spruce",
+        "warped",
+    }
+)
+_WOOD_COMPONENT_TOKENS = frozenset(
+    {
+        "button",
+        "door",
+        "fence",
+        "gate",
+        "hyphae",
+        "log",
+        "planks",
+        "plate",
+        "roots",
+        "sign",
+        "slab",
+        "stairs",
+        "stem",
+        "trapdoor",
+        "wall",
+        "wood",
+    }
+)
+_WOOD_COLOR: Color = (120, 85, 45)
+_DIRT_PATH_COLOR: Color = BLOCK_COLORS["minecraft:dirt"]
+_MATERIAL_COMPONENT_SUFFIXES = frozenset(
+    {
+        "button",
+        "door",
+        "fence",
+        "gate",
+        "hanging",
+        "log",
+        "plate",
+        "planks",
+        "pressure",
+        "sign",
+        "slab",
+        "stairs",
+        "trapdoor",
+        "wall",
+        "wood",
+    }
+)
+_MATERIAL_VARIANT_COLORS: Dict[str, Color] = {
+    block_name.split(":", 1)[-1]: color
+    for block_name, color in BLOCK_COLORS.items()
+}
+
+_NATURAL_SURFACE_COLORS: Dict[str, Color] = {
+    "vine": (65, 112, 52),
+    "short_grass": (79, 139, 58),
+    "tall_grass": (72, 132, 54),
+    "fern": (68, 119, 54),
+    "large_fern": (61, 111, 49),
+    "leaf_litter": (113, 101, 62),
+    "lily_pad": (57, 108, 56),
+    "seagrass": (48, 119, 91),
+    "tall_seagrass": (44, 111, 84),
+    "kelp": (51, 105, 64),
+    "kelp_plant": (48, 99, 61),
+    "sugar_cane": (106, 153, 75),
+    "sweet_berry_bush": (76, 116, 58),
+    "firefly_bush": (72, 118, 61),
+    "bush": (78, 123, 62),
+    "dead_bush": (116, 103, 69),
+    "moss_carpet": (82, 111, 48),
+    "wheat": (145, 142, 67),
+    "carrots": (83, 132, 58),
+    "potatoes": (91, 130, 62),
+    "beetroots": (82, 119, 62),
+}
+_FLOWER_COLOR: Color = (139, 125, 91)
+_FLOWER_BLOCKS = frozenset(
+    {
+        "allium",
+        "azure_bluet",
+        "blue_orchid",
+        "closed_eyeblossom",
+        "cornflower",
+        "dandelion",
+        "flowering_azalea",
+        "lilac",
+        "lily_of_the_valley",
+        "open_eyeblossom",
+        "orange_tulip",
+        "oxeye_daisy",
+        "peony",
+        "pink_petals",
+        "pink_tulip",
+        "poppy",
+        "red_tulip",
+        "rose_bush",
+        "sunflower",
+        "torchflower",
+        "white_tulip",
+        "wither_rose",
+    }
+)
+
+# Vanilla temperature maps are unavailable when only an MCA is open.  These
+# subdued category colors approximate their role without inventing saturated
+# colors for unknown or modded biomes.
+_DEFAULT_BIOME_TINTS: Dict[str, Color] = {
+    "grass": (127, 178, 80),
+    "foliage": (113, 167, 78),
+    "water": (63, 118, 228),
+}
+_BIOME_TINT_RULES: Tuple[
+    Tuple[Tuple[str, ...], Dict[str, Color]],
+    ...,
+] = (
+    (
+        ("swamp", "mangrove"),
+        {
+            "grass": (106, 134, 61),
+            "foliage": (82, 121, 61),
+            "water": (91, 134, 116),
+        },
+    ),
+    (
+        ("jungle", "bamboo"),
+        {
+            "grass": (78, 171, 58),
+            "foliage": (62, 157, 53),
+            "water": (52, 129, 211),
+        },
+    ),
+    (
+        ("dark_forest",),
+        {
+            "grass": (80, 130, 61),
+            "foliage": (64, 115, 54),
+            "water": (58, 113, 191),
+        },
+    ),
+    (
+        ("forest", "grove"),
+        {
+            "grass": (95, 157, 70),
+            "foliage": (75, 139, 62),
+            "water": (60, 119, 210),
+        },
+    ),
+    (
+        ("taiga", "old_growth"),
+        {
+            "grass": (126, 154, 85),
+            "foliage": (102, 137, 77),
+            "water": (58, 111, 181),
+        },
+    ),
+    (
+        ("snow", "frozen", "ice_spikes"),
+        {
+            "grass": (128, 154, 137),
+            "foliage": (110, 143, 123),
+            "water": (62, 87, 146),
+        },
+    ),
+    (
+        ("desert", "badlands", "savanna"),
+        {
+            "grass": (169, 164, 84),
+            "foliage": (143, 148, 77),
+            "water": (55, 128, 204),
+        },
+    ),
+    (
+        ("lukewarm_ocean",),
+        {"water": (46, 129, 218)},
+    ),
+    (
+        ("warm_ocean",),
+        {"water": (38, 139, 218)},
+    ),
+    (
+        ("cold_ocean",),
+        {"water": (55, 105, 175)},
+    ),
+)
+
+
+def _block_path(name: str) -> str:
+    """Return a lowercase block path without its optional namespace."""
+    normalized = name.strip().lower()
+    return normalized.rsplit(":", 1)[-1]
+
+
+def _biome_material_kind(block_path: str) -> Optional[str]:
+    """Return the tint family used by vanilla biome color resolvers."""
+    tokens = frozenset(block_path.split("_"))
+    if (
+        "water" in tokens
+        or block_path == "bubble_column"
+        or block_path in {"ice", "packed_ice", "blue_ice", "frosted_ice"}
+    ):
+        return "water"
+    if (
+        "leaves" in tokens
+        or "leaf" in tokens
+        or block_path in {
+            "vine",
+            "lily_pad",
+            "seagrass",
+            "tall_seagrass",
+            "kelp",
+            "kelp_plant",
+            "sugar_cane",
+            "sweet_berry_bush",
+            "firefly_bush",
+            "bush",
+        }
+    ):
+        return "foliage"
+    if (
+        block_path in {
+            "grass_block",
+            "grass",
+            "short_grass",
+            "tall_grass",
+            "fern",
+            "large_fern",
+            "moss_block",
+            "moss_carpet",
+            "wheat",
+            "carrots",
+            "potatoes",
+            "beetroots",
+        }
+        or block_path.endswith("_grass")
+    ):
+        return "grass"
+    return None
+
+
+def _natural_surface_color(block_path: str) -> Optional[Color]:
+    exact = _NATURAL_SURFACE_COLORS.get(block_path)
+    if exact is not None:
+        return exact
+    if (
+        block_path in _FLOWER_BLOCKS
+        or block_path.endswith("_flower")
+        or block_path.endswith("_flowers")
+    ):
+        return _FLOWER_COLOR
+    if block_path.endswith("_bush"):
+        return (82, 116, 66)
+    if block_path.endswith("_vine") or block_path.endswith("_vines"):
+        return _NATURAL_SURFACE_COLORS["vine"]
+    return None
+
+
+def _is_gray_texture(color: Color) -> bool:
+    """Detect vanilla tint-mask textures that should not render as grey."""
+    return max(color) - min(color) <= 18
+
+
+def _biome_tint(biome: Optional[str], kind: str) -> Optional[Color]:
+    if not biome:
+        return None
+    path = biome.strip().lower().rsplit(":", 1)[-1]
+    if not path or any(token in path for token in ("nether", "end", "void")):
+        return None
+    for biome_tokens, colors in _BIOME_TINT_RULES:
+        if any(token in path for token in biome_tokens):
+            return colors.get(kind, _DEFAULT_BIOME_TINTS.get(kind))
+    return _DEFAULT_BIOME_TINTS.get(kind)
+
+
+def _blend_biome_tint(base: Color, tint: Color, amount: float) -> Color:
+    amount = max(0.0, min(1.0, amount))
+    return (
+        int(round(base[0] * (1.0 - amount) + tint[0] * amount)),
+        int(round(base[1] * (1.0 - amount) + tint[1] * amount)),
+        int(round(base[2] * (1.0 - amount) + tint[2] * amount)),
+    )
+
+
+def _variant_material_color(block_path: str) -> Optional[Color]:
+    """Resolve structural variants to the material shown by the map."""
+    tokens = frozenset(block_path.split("_"))
+
+    # A path is ground, not grass.  Check this before the generic grass rule.
+    if "path" in tokens and tokens.intersection({"dirt", "grass"}):
+        return _DIRT_PATH_COLOR
+
+    if "leaves" in tokens or "leaf" in tokens:
+        return BLOCK_COLORS["minecraft:oak_leaves"]
+
+    material_tokens = list(block_path.split("_"))
+    while material_tokens and material_tokens[-1] in _MATERIAL_COMPONENT_SUFFIXES:
+        material_tokens.pop()
+    material_stem = "_".join(material_tokens)
+    material_color = _MATERIAL_VARIANT_COLORS.get(material_stem)
+    if material_color is not None:
+        return material_color
+
+    if tokens.intersection(_WOOD_FAMILY_TOKENS) and tokens.intersection(
+        _WOOD_COMPONENT_TOKENS
+    ):
+        return _WOOD_COLOR
+
+    return None
 
 
 def _color_for_block_name(name: str) -> Tuple[int, int, int]:
-    try:
-        if name in BLOCK_COLORS:
-            return BLOCK_COLORS[name]
-        if "leaves" in name:
-            return (0, 100, 0)
-        if "log" in name or "wood" in name:
-            return (120, 85, 45)
-        if "water" in name:
-            return (64, 164, 223)
-        if "lava" in name:
-            return (207, 16, 32)
-        if "ore" in name:
-            return (100, 100, 100)
-        if "sand" in name:
-            return (238, 214, 175)
-        if "dirt" in name or "podzol" in name:
-            return (139, 69, 19)
-        if "grass" in name:
-            return (34, 139, 34)
-        if "stone" in name or "deepslate" in name:
-            return (128, 128, 128)
-        if "nether" in name or "netherrack" in name:
-            return (139, 0, 0)
-        if "snow" in name or "ice" in name:
-            return (220, 240, 255)
-        h = hashlib.md5(name.encode("utf-8")).digest()
-        return (h[0], h[1], h[2])
-    except Exception:
-        return (128, 128, 128)
+    """Map a block id to a stable, Minecraft-style top-view material color."""
+    normalized = name.strip().lower()
+    block_path = _block_path(normalized)
+    texture_color = average_block_texture(normalized)
+    tint_kind = _biome_material_kind(block_path)
+    if texture_color is not None and not (
+        tint_kind is not None and _is_gray_texture(texture_color)
+    ):
+        return texture_color
+
+    exact = BLOCK_COLORS.get(normalized)
+    if exact is not None:
+        return exact
+
+    exact = BLOCK_COLORS.get(f"minecraft:{block_path}")
+    if exact is not None:
+        return exact
+
+    natural = _natural_surface_color(block_path)
+    if natural is not None:
+        return natural
+
+    variant = _variant_material_color(block_path)
+    if variant is not None:
+        return variant
+
+    tokens = frozenset(block_path.split("_"))
+    for material_tokens, color in _MATERIAL_RULES:
+        if tokens.intersection(material_tokens):
+            return color
+
+    # Unknown modded blocks should remain distinguishable without the
+    # saturated MD5 rainbow that made terrain look like random noise.
+    h = hashlib.md5(normalized.encode("utf-8")).digest()
+    return (
+        48 + int(h[0] * 0.55),
+        48 + int(h[1] * 0.55),
+        48 + int(h[2] * 0.55),
+    )
 
 
-Color = Tuple[int, int, int]
-ColorGrid = List[List[Color]]
+def _color_for_surface_sample(name: str, biome: Optional[str]) -> Color:
+    """Resolve a material color and apply a restrained biome tint."""
+    base = _color_for_block_name(name)
+    kind = _biome_material_kind(_block_path(name))
+    if kind is None:
+        return base
+    tint = _biome_tint(biome, kind)
+    if tint is None:
+        return base
+    amount = {"grass": 0.42, "foliage": 0.38, "water": 0.34}[kind]
+    return _blend_biome_tint(base, tint, amount)
 
 
 def _load_cached_tile(region_path: Path, tile_size: int) -> Optional[bytes]:
@@ -191,6 +557,7 @@ def _sample_surface_grid(
             region_path,
             tile_size=tile_size,
             color_for_block=_color_for_block_name,
+            color_for_surface=_color_for_surface_sample,
             cancel_check=cancel_check,
             decode_workers=decode_workers,
             failed_chunks=failed_chunks,
@@ -259,7 +626,7 @@ def render_region_topview(
     if cancel_check is not None and cancel_check():
         return None
 
-    tile_size = max(8, min(256, int(tile_size)))
+    tile_size = max(8, min(LEAF_TILE_SIZE, int(tile_size)))
     render_status = status_out if status_out is not None else []
 
     cache_allowed = use_disk_cache and not _uses_external_streams(region_path)

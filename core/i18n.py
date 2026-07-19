@@ -102,7 +102,7 @@ class TranslationManager:
     def _load_translations(self) -> None:
         """加载当前语言的翻译文件"""
         lang_code = self._current_language
-        lang_str = str(lang_code)
+        lang_str = lang_code.value
 
         translation_file = self.translations_dir / f"{lang_str}.json"
 
@@ -137,6 +137,8 @@ class TranslationManager:
         self._language_display_map.clear()
 
         for file in self.translations_dir.glob("*.json"):
+            if file.stem.startswith("Language."):
+                continue
             lang_code, display_name = self._parse_language_metadata(file)
             languages.append(lang_code)
             self._language_display_map[lang_code] = display_name
@@ -277,7 +279,7 @@ class TranslationManager:
         if self._language_saver is None:
             return
         try:
-            self._language_saver(str(self._current_language))
+            self._language_saver(self._current_language.value)
         except Exception as e:
             print(f"保存语言配置时出错: {e}")
 

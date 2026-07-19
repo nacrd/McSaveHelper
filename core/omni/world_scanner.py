@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Set, Callable
 from ..region_utils import (
+    DimensionInfo,
     DimensionRegionDirectory,
     discover_dimension_region_dirs,
 )
@@ -192,7 +193,7 @@ class WorldScanner:
     def scan_dimensions(
         self,
         region_files: Mapping[object, Path],
-    ) -> List[Dict[str, str]]:
+    ) -> List[DimensionInfo]:
         """扫描存档中所有可用的维度目录（兼容 Minecraft 26.1 新旧路径）
 
         Args:
@@ -203,11 +204,12 @@ class WorldScanner:
         """
         # region_files remains part of the public scan contract for callers.
         del region_files
-        dimensions = [
+        dimensions: List[DimensionInfo] = [
             {
                 "id": dimension.id,
                 "name": dimension.name,
                 "region_dir": str(dimension.region_dir),
+                "coordinate_scale": dimension.coordinate_scale,
             }
             for dimension in self._get_dimensions()
         ]

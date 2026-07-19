@@ -13,15 +13,20 @@ import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
-from core.mca.block_palette import get_chunk_blocks, is_air_name
+from core.mca.block_palette import (
+    get_world_surface_chunk_blocks,
+    is_air_name,
+    is_transparent_surface_name,
+)
 from core.mca.errors import McaError
 from core.mca.region_file import RegionFile
 
 PathLike = Union[str, Path]
 Color = Tuple[int, int, int]
 ColorFunc = Callable[[str], Color]
+SurfaceColorFunc = Callable[[str, Optional[str]], Color]
 SampleJob = Tuple[int, int, int, int, int, int]
 
 DEFAULT_EMPTY = (45, 60, 50)
@@ -38,7 +43,31 @@ _DECODE_WORKERS = min(2, max(1, (os.cpu_count() or 2) // 2))
 # chunk so a changed .mcc stream does not invalidate every ordinary chunk in
 # the region or every lower-resolution LOD.
 # Do not retain ChunkBlocks/NBT trees here: modded chunk trees can be very large.
-SurfaceSamples = Dict[Tuple[int, int], Optional[str]]
+SurfaceSample = Tuple[Optional[str], Optional[int], int]
+SurfaceSampleBiome = Tuple[Optional[str], Optional[int], int, Optional[str]]
+SurfaceSampleOverlay = Tuple[
+    Optional[str],
+    Optional[int],
+    int,
+    Optional[str],
+    Optional[str],
+    float,
+]
+SurfaceValue = Union[
+    Optional[str],
+    SurfaceSample,
+    SurfaceSampleBiome,
+    SurfaceSampleOverlay,
+]
+_NormalizedSurface = Tuple[
+    Optional[str],
+    Optional[int],
+    int,
+    Optional[str],
+    Optional[str],
+    float,
+]
+SurfaceSamples = Dict[Tuple[int, int], SurfaceValue]
 ChunkCacheKey = Tuple[str, int, int, int, int, str]
 _CHUNK_LRU: "OrderedDict[ChunkCacheKey, SurfaceSamples]" = OrderedDict()
 _CHUNK_LRU_LOCK = threading.Lock()
@@ -52,11 +81,12 @@ def _coarse_edge(tile_size: int) -> int:
     """How many samples along a region edge before upscaling."""
     if tile_size <= 16:
         return 8   # 64 chunks
+    # Focused LODs retain their requested spatial resolution.  A 512px leaf
+    # tile samples every block, matching the native region resolution used by
+    # JourneyMap and the finest Xaero world-map texture level.
     if tile_size <= 32:
-        return 16  # 256 chunks
-    if tile_size <= 64:
-        return 24  # 576 chunks
-    return 32      # 1024 chunks
+        return 32
+    return min(512, int(tile_size))
 
 
 def _path_signature(path: Path) -> Tuple[str, int, int]:
@@ -108,8 +138,12 @@ class _SurfaceView:
     def __init__(self, samples: SurfaceSamples) -> None:
         self._samples = samples
 
+    def surface_sample(self, x: int, z: int) -> SurfaceValue:
+        value = self._samples.get((x, z))
+        return _coerce_surface_sample(value)
+
     def surface_block_id(self, x: int, z: int) -> Optional[str]:
-        return self._samples.get((x, z))
+        return _surface_parts(self.surface_sample(x, z))[0]
 
 
 def _decode_one(
@@ -119,13 +153,158 @@ def _decode_one(
     samples: List[Tuple[int, int]],
 ) -> Tuple[Tuple[int, int], SurfaceSamples]:
     nbt = region.read_chunk(cx, cz)
-    blocks = get_chunk_blocks(nbt)
+    blocks = get_world_surface_chunk_blocks(nbt)
     return (
         (cx, cz),
         {
-            (local_x, local_z): blocks.surface_block_id(local_x, local_z)
+            (local_x, local_z): _sample_column(blocks, local_x, local_z)
             for local_x, local_z in samples
         },
+    )
+
+
+def _surface_parts(value: SurfaceValue) -> _NormalizedSurface:
+    """Normalize old and extended compact samples for internal consumers."""
+    if not isinstance(value, tuple):
+        return value, None, 0, None, None, 0.0
+    name = value[0] if value else None
+    try:
+        height = int(value[1]) if len(value) > 1 and value[1] is not None else None
+    except (TypeError, ValueError):
+        height = None
+    try:
+        water_depth = max(0, int(value[2])) if len(value) > 2 else 0
+    except (TypeError, ValueError):
+        water_depth = 0
+    biome = value[3] if len(value) > 3 else None
+    overlay = value[4] if len(value) > 4 else None
+    try:
+        alpha = max(0.0, min(1.0, float(value[5]))) if len(value) > 5 else 0.0
+    except (TypeError, ValueError):
+        alpha = 0.0
+    return name, height, water_depth, biome, overlay, alpha
+
+
+def _surface_value(
+    name: Optional[str],
+    height: Optional[int],
+    water_depth: int,
+    biome: Optional[str],
+    overlay: Optional[str],
+    alpha: float,
+    *,
+    include_biome: bool,
+    include_overlay: bool,
+) -> SurfaceValue:
+    """Pack a sample while retaining the arity of legacy test fixtures."""
+    if include_overlay:
+        return name, height, water_depth, biome, overlay, alpha
+    if include_biome:
+        return name, height, water_depth, biome
+    return name, height, water_depth
+
+
+def _overlay_alpha(name: Optional[str]) -> float:
+    if not name:
+        return 0.0
+    path = name.lower().rsplit(":", 1)[-1]
+    if "leaves" in path or path.endswith("_leaf"):
+        return 0.52
+    if path in {"lily_pad", "kelp", "kelp_plant", "seagrass", "tall_seagrass"}:
+        return 0.72
+    if path in {"vine", "cave_vines", "cave_vines_plant", "twisting_vines", "weeping_vines"}:
+        return 0.48
+    if path in {"grass", "short_grass", "tall_grass", "fern", "large_fern"}:
+        return 0.42
+    if path.endswith("_flower") or path.endswith("_flowers"):
+        return 0.46
+    if path.endswith("_sapling") or path.endswith("_plant"):
+        return 0.48
+    if path == "moss_carpet":
+        return 0.62
+    if path == "snow":
+        return 0.70
+    if is_transparent_surface_name(name):
+        return 0.44
+    return 0.0
+
+
+def _select_surface_strata(
+    strata: Sequence[Tuple[str, int]],
+) -> Tuple[Optional[str], Optional[int], Optional[str], float]:
+    """Choose an opaque base and retain the first transparent overlay."""
+    if not strata:
+        return None, None, None, 0.0
+    top_name, top_height = strata[0]
+    base_name: Optional[str] = None
+    base_height: Optional[int] = None
+    overlay_name: Optional[str] = None
+    for name, height in strata:
+        alpha = _overlay_alpha(name)
+        if alpha > 0.0 and overlay_name is None:
+            overlay_name = name
+            continue
+        base_name = name
+        base_height = height
+        break
+    if base_name is None:
+        # A column containing only transparent decorations should remain
+        # visible instead of becoming an empty pixel.
+        return top_name, top_height, None, 0.0
+    return base_name, base_height, overlay_name, _overlay_alpha(overlay_name)
+
+
+def _sample_column(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
+    sample = getattr(blocks, "surface_sample", None)
+    raw_sample: SurfaceValue
+    if callable(sample):
+        raw_sample = cast(SurfaceValue, sample(local_x, local_z))
+    else:
+        raw_sample = blocks.surface_block_id(local_x, local_z)
+    name, height, _unused_depth, biome, overlay, alpha = _surface_parts(raw_sample)
+
+    strata_getter = getattr(blocks, "surface_strata", None)
+    has_overlay_metadata = len(raw_sample) >= 5 if isinstance(raw_sample, tuple) else False
+    if callable(strata_getter):
+        try:
+            base_name, base_height, strata_overlay, strata_alpha = _select_surface_strata(
+                cast(Sequence[Tuple[str, int]], strata_getter(local_x, local_z))
+            )
+        except (TypeError, ValueError):
+            base_name = base_height = strata_overlay = None
+            strata_alpha = 0.0
+        if base_name is not None:
+            name, height = base_name, base_height
+        if strata_overlay is not None:
+            overlay, alpha = strata_overlay, strata_alpha
+            has_overlay_metadata = True
+
+    biome_getter = getattr(blocks, "biome_at", None)
+    include_biome = len(raw_sample) >= 4 if isinstance(raw_sample, tuple) else False
+    if callable(biome_getter) and height is not None:
+        try:
+            biome = cast(Optional[str], biome_getter(local_x, height, local_z))
+            include_biome = True
+        except (TypeError, ValueError):
+            pass
+
+    water_depth = _unused_depth
+    if name and "water" in name.lower() and height is not None:
+        for depth in range(1, 9):
+            below = blocks.block_id_at(local_x, height - depth, local_z)
+            if below and "water" in below.lower():
+                water_depth = depth
+            else:
+                break
+    return _surface_value(
+        name,
+        height,
+        water_depth,
+        biome,
+        overlay,
+        alpha,
+        include_biome=include_biome,
+        include_overlay=has_overlay_metadata,
     )
 
 
@@ -142,15 +321,20 @@ def _build_sample_jobs(edge: int) -> List[SampleJob]:
     return jobs
 
 
-def _build_all_lod_samples() -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
+def _build_all_lod_samples(
+    max_edge: int = 512,
+) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
     by_chunk: Dict[Tuple[int, int], Set[Tuple[int, int]]] = {}
-    for edge in (8, 16, 24, 32):
+    for edge in (8, 32, 64, 128, 256, 512):
+        if edge > max_edge:
+            continue
         for _, _, chunk_x, chunk_z, local_x, local_z in _build_sample_jobs(edge):
             by_chunk.setdefault((chunk_x, chunk_z), set()).add((local_x, local_z))
     return {chunk: sorted(samples) for chunk, samples in by_chunk.items()}
 
 
 _ALL_LOD_SAMPLES = _build_all_lod_samples()
+_FOCUSED_LOD_SAMPLES = _build_all_lod_samples(256)
 
 
 def _needed_chunks(region: RegionFile, jobs: List[SampleJob]) -> Set[Tuple[int, int]]:
@@ -182,6 +366,16 @@ def _load_chunk_views(
                 (local_x, local_z)
             )
     misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
+    requested_edge = 0
+    if jobs:
+        requested_edge = max(
+            max(int(job[0]), int(job[1])) + 1
+            for job in jobs
+        )
+    # Preview LODs should only decode the points they display.  Once a focused
+    # tile reaches 64px, preload the higher-detail positions for that chunk so
+    # subsequent 128/256/512 upgrades reuse one NBT decode.
+    preload_detail_positions = requested_edge >= 64
     external_signatures = external_signatures or {}
     cache_epoch = _lru_epoch()
     for chunk_x, chunk_z in needed:
@@ -200,10 +394,18 @@ def _load_chunk_views(
         if hit and all(position in view for position in requested):
             views[(chunk_x, chunk_z)] = _SurfaceView(view)
         else:
-            all_lod_positions = _ALL_LOD_SAMPLES.get(
-                (chunk_x, chunk_z),
-                requested,
-            )
+            if preload_detail_positions:
+                source_samples = (
+                    _ALL_LOD_SAMPLES
+                    if requested_edge >= 512
+                    else _FOCUSED_LOD_SAMPLES
+                )
+                all_lod_positions = source_samples.get(
+                    (chunk_x, chunk_z),
+                    requested,
+                )
+            else:
+                all_lod_positions = requested
             missing_positions = [
                 position for position in all_lod_positions if position not in view
             ]
@@ -352,8 +554,8 @@ def _sample_coarse_grid(
     edge: int,
     jobs: List[SampleJob],
     views: Dict[Tuple[int, int], Optional[Any]],
-) -> List[List[Optional[str]]]:
-    grid: List[List[Optional[str]]] = [
+) -> List[List[SurfaceValue]]:
+    grid: List[List[SurfaceValue]] = [
         [None for _ in range(edge)] for _ in range(edge)
     ]
     for column, row, chunk_x, chunk_z, local_x, local_z in jobs:
@@ -361,20 +563,27 @@ def _sample_coarse_grid(
         if view is None:
             continue
         try:
-            grid[row][column] = view.surface_block_id(local_x, local_z)
+            sample = getattr(view, "surface_sample", None)
+            if callable(sample):
+                grid[row][column] = cast(
+                    SurfaceValue,
+                    sample(local_x, local_z),
+                )
+            else:
+                grid[row][column] = view.surface_block_id(local_x, local_z)
         except Exception:
             grid[row][column] = None
     return grid
 
 
 def _resize_nearest(
-    source: Sequence[Sequence[Optional[str]]],
+    source: Sequence[Sequence[SurfaceValue]],
     target_size: int,
-) -> List[List[Optional[str]]]:
+) -> List[List[SurfaceValue]]:
     source_size = len(source)
     if source_size == target_size:
         return [list(row) for row in source]
-    target: List[List[Optional[str]]] = [
+    target: List[List[SurfaceValue]] = [
         [None for _ in range(target_size)] for _ in range(target_size)
     ]
     for target_z in range(target_size):
@@ -390,16 +599,88 @@ def _resize_nearest(
     return target
 
 
-def sample_region_surface_ids(
+def _aggregate_surface_values(values: Sequence[SurfaceValue]) -> SurfaceValue:
+    samples = [_surface_parts(value) for value in values]
+    named = [sample for sample in samples if sample[0] and not is_air_name(sample[0])]
+    pool = named or [sample for sample in samples if sample[0]] or samples
+    names: Dict[str, int] = {}
+    for name, _height, _depth, _biome, _overlay, _alpha in pool:
+        if name:
+            names[name] = names.get(name, 0) + 1
+    name = max(names, key=lambda key: names[key]) if names else None
+    heights = [sample[1] for sample in pool if sample[1] is not None]
+    depths = [sample[2] for sample in pool]
+    height = int(round(sum(heights) / len(heights))) if heights else None
+    depth = int(round(sum(depths) / len(depths))) if depths else 0
+    biome_names: Dict[str, int] = {}
+    for _name, _height, _depth, biome, _overlay, _alpha in pool:
+        if biome:
+            biome_names[biome] = biome_names.get(biome, 0) + 1
+    biome = max(biome_names, key=lambda key: biome_names[key]) if biome_names else None
+    overlay_names: Dict[str, int] = {}
+    overlay_alphas: List[float] = []
+    for _name, _height, _depth, _biome, overlay, alpha in pool:
+        if overlay:
+            overlay_names[overlay] = overlay_names.get(overlay, 0) + 1
+            overlay_alphas.append(alpha)
+    overlay = max(overlay_names, key=lambda key: overlay_names[key]) if overlay_names else None
+    alpha = sum(overlay_alphas) / len(overlay_alphas) if overlay_alphas else 0.0
+    include_biome = any(
+        isinstance(value, tuple) and len(value) >= 4
+        for value in values
+    )
+    include_overlay = any(
+        isinstance(value, tuple) and len(value) >= 5
+        for value in values
+    )
+    return _surface_value(
+        name,
+        height,
+        depth,
+        biome,
+        overlay,
+        alpha,
+        include_biome=include_biome,
+        include_overlay=include_overlay,
+    )
+
+
+def _downsample_surface_values(
+    source: Sequence[Sequence[SurfaceValue]],
+    target_size: int,
+) -> List[List[SurfaceValue]]:
+    """Reduce a 2x oversampled grid while retaining material boundaries."""
+    if len(source) <= target_size:
+        return [list(row) for row in source]
+    factor = len(source) / max(1, target_size)
+    target: List[List[SurfaceValue]] = []
+    for z in range(target_size):
+        row: List[SurfaceValue] = []
+        z0 = int(z * factor)
+        z1 = max(z0 + 1, int((z + 1) * factor))
+        for x in range(target_size):
+            x0 = int(x * factor)
+            x1 = max(x0 + 1, int((x + 1) * factor))
+            values = [
+                source[yy][xx]
+                for yy in range(z0, min(z1, len(source)))
+                for xx in range(x0, min(x1, len(source[yy])))
+            ]
+            row.append(_aggregate_surface_values(values))
+        target.append(row)
+    return target
+
+
+def sample_region_surface_samples(
     region_file: PathLike,
     tile_size: int = 64,
     *,
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
-) -> Optional[List[List[Optional[str]]]]:
-    """Return tile_size x tile_size grid of surface block ids (or None)."""
-    tile_size = max(8, min(256, int(tile_size)))
+) -> Optional[List[List[SurfaceValue]]]:
+    """Return visible block, height and water depth for each map pixel."""
+    tile_size = max(8, min(512, int(tile_size)))
     region_path = Path(region_file)
     try:
         rf = RegionFile.open(region_path)
@@ -411,7 +692,8 @@ def sample_region_surface_ids(
             return None
         path_key, mtime_ns, file_size = _path_signature(region_path)
         edge = _coarse_edge(tile_size)
-        jobs = _build_sample_jobs(edge)
+        sampling_edge = edge * 2 if 32 <= edge < 256 else edge
+        jobs = _build_sample_jobs(sampling_edge)
         needed = _needed_chunks(rf, jobs)
         external_signatures = rf.external_chunk_signatures(
             needed,
@@ -431,10 +713,153 @@ def sample_region_surface_ids(
         )
         if cancel_check is not None and cancel_check():
             return None
-        coarse = _sample_coarse_grid(edge, jobs, chunk_views)
+        coarse = _sample_coarse_grid(sampling_edge, jobs, chunk_views)
+        if sampling_edge > tile_size:
+            return _downsample_surface_values(coarse, tile_size)
         return _resize_nearest(coarse, tile_size)
     finally:
         rf.close()
+
+
+def sample_region_surface_ids(
+    region_file: PathLike,
+    tile_size: int = 64,
+    *,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    decode_workers: Optional[int] = None,
+    failed_chunks: Optional[Set[Tuple[int, int]]] = None,
+) -> Optional[List[List[Optional[str]]]]:
+    """Return the compatibility grid of surface block IDs only."""
+    samples = sample_region_surface_samples(
+        region_file,
+        tile_size=tile_size,
+        cancel_check=cancel_check,
+        decode_workers=decode_workers,
+        failed_chunks=failed_chunks,
+    )
+    if samples is None:
+        return None
+    return [
+        [_surface_parts(value)[0] for value in row]
+        for row in samples
+    ]
+
+
+def _coerce_surface_sample(value: SurfaceValue) -> SurfaceValue:
+    if isinstance(value, tuple):
+        name = value[0] if value else None
+        try:
+            height = int(value[1]) if len(value) > 1 and value[1] is not None else None
+        except (TypeError, ValueError):
+            height = None
+        try:
+            water_depth = max(0, int(value[2])) if len(value) > 2 else 0
+        except (TypeError, ValueError):
+            water_depth = 0
+        biome = value[3] if len(value) > 3 else None
+        overlay = value[4] if len(value) > 4 else None
+        try:
+            alpha = max(0.0, min(1.0, float(value[5]))) if len(value) > 5 else 0.0
+        except (TypeError, ValueError):
+            alpha = 0.0
+        return _surface_value(
+            name,
+            height,
+            water_depth,
+            biome,
+            overlay,
+            alpha,
+            include_biome=len(value) >= 4,
+            include_overlay=len(value) >= 5,
+        )
+    return value, None, 0
+
+
+def _sample_height(
+    samples: Sequence[Sequence[SurfaceValue]],
+    x: int,
+    z: int,
+    fallback: int,
+) -> int:
+    if not samples:
+        return fallback
+    z = min(max(0, z), len(samples) - 1)
+    row = samples[z]
+    if not row:
+        return fallback
+    x = min(max(0, x), len(row) - 1)
+    height = _surface_parts(row[x])[1]
+    return fallback if height is None else height
+
+
+def _relief_factor(
+    samples: Sequence[Sequence[SurfaceValue]],
+    x: int,
+    z: int,
+    height: Optional[int],
+    name: Optional[str],
+    water_depth: int,
+) -> float:
+    if height is None:
+        return 1.0
+    north = _sample_height(samples, x, z - 1, height)
+    west = _sample_height(samples, x - 1, z, height)
+    north_west = _sample_height(samples, x - 1, z - 1, height)
+    edge = _coarse_edge(len(samples))
+    sample_spacing = max(1.0, 512.0 / max(1, edge))
+    spacing_scale = min(1.0, 2.0 / sample_spacing)
+    slope = spacing_scale * (
+        (height - north) * 0.055
+        + (height - west) * 0.040
+        + (height - north_west) * 0.025
+    )
+    elevation = max(-0.06, min(0.10, (height - 64) * 0.0007))
+    factor = 1.0 + slope + elevation
+    if name and "water" in name.lower():
+        # Deeper water is visibly darker, while shallow shore pixels retain
+        # the sand/terrain contrast underneath them.
+        factor *= 1.0 - min(8, max(0, water_depth)) * 0.030
+    return max(0.72, min(1.28, factor))
+
+
+def _shade_color(color: Color, factor: float) -> Color:
+    return (
+        max(0, min(255, int(color[0] * factor))),
+        max(0, min(255, int(color[1] * factor))),
+        max(0, min(255, int(color[2] * factor))),
+    )
+
+
+def _blend_surface_color(bottom: Color, overlay: Color, alpha: float) -> Color:
+    """Alpha-composite a transparent stratum while clamping channel values."""
+    amount = max(0.0, min(1.0, float(alpha)))
+    channels = tuple(
+        max(
+            0,
+            min(
+                255,
+                int(round(bottom[index] * (1.0 - amount) + overlay[index] * amount)),
+            ),
+        )
+        for index in range(3)
+    )
+    return cast(Color, channels)
+
+
+def _resolve_surface_color(
+    name: str,
+    biome: Optional[str],
+    color_for_block: Optional[ColorFunc],
+    color_for_surface: Optional[SurfaceColorFunc],
+) -> Color:
+    try:
+        if color_for_surface is not None:
+            return color_for_surface(name, biome)
+        if color_for_block is not None:
+            return color_for_block(name)
+    except Exception:
+        return DEFAULT_UNKNOWN
+    return DEFAULT_UNKNOWN
 
 
 def sample_region_surface_colors(
@@ -442,43 +867,65 @@ def sample_region_surface_colors(
     tile_size: int = 64,
     color_for_block: Optional[ColorFunc] = None,
     *,
+    color_for_surface: Optional[SurfaceColorFunc] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
 ) -> Optional[List[List[Color]]]:
-    """Return tile_size x tile_size RGB grid for a region top-down view."""
-    ids = sample_region_surface_ids(
+    """Return material colors with Xaero/JourneyMap-style terrain relief."""
+    samples = sample_region_surface_samples(
         region_file,
         tile_size=tile_size,
         cancel_check=cancel_check,
         decode_workers=decode_workers,
         failed_chunks=failed_chunks,
     )
-    if ids is None:
+    if samples is None:
         return None
 
-    # Flatten color conversion — faster than nested append loops with branches.
-    flat: List[Color] = []
-    for row in ids:
-        for name in row:
-            if name is None:
-                flat.append(DEFAULT_EMPTY)
-            elif is_air_name(name):
-                flat.append(DEFAULT_WATERISH)
-            elif color_for_block is not None:
-                try:
-                    flat.append(color_for_block(name))
-                except Exception:
-                    flat.append(DEFAULT_UNKNOWN)
-            else:
-                flat.append(DEFAULT_UNKNOWN)
-
-    # Rebuild 2D for callers that expect nested lists.
     colors: List[List[Color]] = []
-    w = len(ids[0]) if ids else 0
-    for r in range(len(ids)):
-        base = r * w
-        colors.append(flat[base : base + w])
+    processed = 0
+    for z, row in enumerate(samples):
+        color_row: List[Color] = []
+        for x, value in enumerate(row):
+            parts = _surface_parts(value)
+            name, height, water_depth, biome, overlay, overlay_alpha = parts
+            if name is None:
+                base = DEFAULT_EMPTY
+            elif is_air_name(name):
+                base = DEFAULT_WATERISH
+            else:
+                base = _resolve_surface_color(
+                    name,
+                    biome,
+                    color_for_block,
+                    color_for_surface,
+                )
+            if overlay and overlay_alpha > 0.0:
+                overlay_color = _resolve_surface_color(
+                    overlay,
+                    biome,
+                    color_for_block,
+                    color_for_surface,
+                )
+                base = _blend_surface_color(base, overlay_color, overlay_alpha)
+            factor = _relief_factor(
+                samples,
+                x,
+                z,
+                height,
+                name,
+                water_depth,
+            )
+            color_row.append(_shade_color(base, factor))
+            processed += 1
+            if (
+                cancel_check is not None
+                and processed % 4096 == 0
+                and cancel_check()
+            ):
+                return None
+        colors.append(color_row)
     return colors
 
 
@@ -487,6 +934,7 @@ def sample_region_surface_colors_with_status(
     tile_size: int = 64,
     color_for_block: Optional[ColorFunc] = None,
     *,
+    color_for_surface: Optional[SurfaceColorFunc] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
 ) -> Tuple[Optional[List[List[Color]]], bool]:
@@ -496,6 +944,7 @@ def sample_region_surface_colors_with_status(
         region_file,
         tile_size=tile_size,
         color_for_block=color_for_block,
+        color_for_surface=color_for_surface,
         cancel_check=cancel_check,
         decode_workers=decode_workers,
         failed_chunks=failed_chunks,

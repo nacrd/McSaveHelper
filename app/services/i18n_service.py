@@ -41,7 +41,7 @@ class I18nService:
         Returns:
             str: 当前语言代码
         """
-        return str(self._manager.current_language)
+        return self._manager.current_language.value
 
     def translate(self, key: str, default: str = "", **kwargs) -> str:
         """翻译指定的键，支持格式化参数

@@ -8,6 +8,7 @@ import nbtlib
 from core.mca.block_palette import (
     ChunkBlocks,
     block_id_at,
+    get_world_surface_chunk_blocks,
     is_air_name,
     surface_block_id,
 )
@@ -116,6 +117,26 @@ def test_block_id_single_palette() -> None:
     assert block_id_at(chunk, 0, 64, 0) == "minecraft:stone"
     assert block_id_at(chunk, 0, 0, 0) == "minecraft:air"
     assert surface_block_id(chunk, 0, 0) == "minecraft:stone"
+
+
+def test_world_surface_chunk_view_uses_world_surface_without_changing_default() -> None:
+    chunk = nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "sections": nbtlib.List[nbtlib.Compound]([
+            _single_block_section(4, "minecraft:stone"),
+            _single_block_section(5, "minecraft:oak_leaves"),
+        ]),
+        "Heightmaps": nbtlib.Compound({
+            "MOTION_BLOCKING": nbtlib.LongArray(_pack_heightmap([129] * 256)),
+            "WORLD_SURFACE": nbtlib.LongArray(_pack_heightmap([145] * 256)),
+        }),
+    })
+
+    assert ChunkBlocks(chunk).surface_sample(0, 0) == ("minecraft:stone", 64)
+    assert get_world_surface_chunk_blocks(chunk).surface_sample(0, 0) == (
+        "minecraft:oak_leaves",
+        80,
+    )
 
 
 def test_block_id_multi_palette_compact() -> None:

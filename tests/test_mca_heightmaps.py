@@ -4,6 +4,7 @@ from __future__ import annotations
 import nbtlib
 
 from core.mca.heightmaps import (
+    WORLD_SURFACE_HEIGHTMAP_NAMES,
     heightmap_value_to_block_y,
     surface_y_from_heightmap,
     unpack_heightmap_values,
@@ -63,3 +64,21 @@ def test_surface_y_from_synthetic_chunk_modern() -> None:
     })
     assert surface_y_from_heightmap(chunk, 0, 0) == 64
     assert surface_y_from_heightmap(chunk, 15, 15) == 64
+
+
+def test_surface_heightmap_priority_is_explicit_and_default_stays_motion_blocking() -> None:
+    chunk = nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "Heightmaps": nbtlib.Compound({
+            "MOTION_BLOCKING": nbtlib.LongArray(_pack_heightmap([129] * 256)),
+            "WORLD_SURFACE": nbtlib.LongArray(_pack_heightmap([145] * 256)),
+        }),
+    })
+
+    assert surface_y_from_heightmap(chunk, 0, 0) == 64
+    assert surface_y_from_heightmap(
+        chunk,
+        0,
+        0,
+        heightmap_names=WORLD_SURFACE_HEIGHTMAP_NAMES,
+    ) == 80

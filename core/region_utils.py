@@ -1,6 +1,6 @@
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, TypedDict, Union
 import re
 
 
@@ -24,6 +24,23 @@ class DimensionRegionDirectory:
     id: str
     name: str
     region_dir: Path
+    coordinate_scale: float = 1.0
+
+
+class DimensionInfo(TypedDict):
+    """Serialized dimension metadata shared by the session and map UI."""
+
+    id: str
+    name: str
+    region_dir: str
+    coordinate_scale: float
+
+
+def _coordinate_scale(dimension_id: str) -> float:
+    """Return the vanilla portal coordinate scale for a dimension id."""
+    if dimension_id in {"minecraft:the_nether", "the_nether", "DIM-1"}:
+        return 8.0
+    return 1.0
 
 
 def parse_region_coords(
@@ -90,7 +107,14 @@ def discover_dimension_region_dirs(
     def add(dim_id: str, name: str, region_dir: Path) -> None:
         if dim_id in seen or not has_region_file(region_dir):
             return
-        dimensions.append(DimensionRegionDirectory(dim_id, name, region_dir))
+        dimensions.append(
+            DimensionRegionDirectory(
+                dim_id,
+                name,
+                region_dir,
+                coordinate_scale=_coordinate_scale(dim_id),
+            )
+        )
         seen.add(dim_id)
 
     modern_root = world_path / "dimensions" / "minecraft"

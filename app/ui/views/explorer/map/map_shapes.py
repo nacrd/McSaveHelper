@@ -4,7 +4,7 @@ Keeps pure layout/label drawing out of the interactive Flet container.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import flet as ft
 
@@ -24,12 +24,14 @@ from core.mca.map_coordinates import (
     format_region_block_range,
 )
 from core.mca.viewport import MapViewLevel
+from core.mca.map_models import MapMarker
 
 
 Coord = Tuple[int, int]
 ScreenRect = Tuple[float, float, float, float]
 TileSource = Callable[[Coord], Optional[str]]
 CoordLabel = Callable[[Coord, float], str]
+BlockToScreen = Callable[[float, float], Tuple[float, float]]
 
 
 def empty_background(
@@ -97,6 +99,7 @@ def region_cell(
     show_coordinates: bool,
     tile_src: Optional[str],
     coord_label: CoordLabel,
+    value_label: Optional[str] = None,
 ) -> List[cv.Shape]:
     shapes: List[cv.Shape] = []
     if tile_src:
@@ -107,23 +110,25 @@ def region_cell(
                 y=y,
                 width=size,
                 height=size,
+                paint=ft.Paint(anti_alias=False),
             )
         )
     else:
         shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
-    shapes.append(
-        cv.Rect(
-            x,
-            y,
-            size,
-            size,
-            paint=ft.Paint(
-                color=SELECTED_BORDER_COLOR if selected else "#00000055",
-                style=ft.PaintingStyle.STROKE,
-                stroke_width=3 if selected else 1,
-            ),
+    if selected:
+        shapes.append(
+            cv.Rect(
+                x,
+                y,
+                size,
+                size,
+                paint=ft.Paint(
+                    color=SELECTED_BORDER_COLOR,
+                    style=ft.PaintingStyle.STROKE,
+                    stroke_width=3,
+                ),
+            )
         )
-    )
     if show_coordinates and size >= 22 and view_level != "block":
         label = coord_label(coord, size)
         text_color = "#FFFFFF" if tile_src else "#F5F5DC"
@@ -152,6 +157,18 @@ def region_cell(
                     ),
                 )
             )
+    if value_label and size >= 56 and view_level not in {"chunk", "block"}:
+        # Metadata labels live in a separate lower strip so they never cover
+        # the coordinate label or change the region cell dimensions.
+        label = value_label.replace("\n", " ")[:38]
+        shapes.append(
+            cv.Text(
+                x=x + 4,
+                y=y + size - 15,
+                value=label,
+                style=ft.TextStyle(size=9, color="#FFF3C4"),
+            )
+        )
     return shapes
 
 
@@ -244,6 +261,97 @@ def chunk_grid(
     return shapes, chunk_bounds, block_bounds
 
 
+def marker_overlay(
+    markers: Iterable[MapMarker],
+    *,
+    block_to_screen: BlockToScreen,
+    width: float,
+    height: float,
+    scale: float,
+    selected_id: Optional[str] = None,
+) -> Tuple[List[cv.Shape], Dict[str, ScreenRect]]:
+    """Draw visible waypoint markers and return their hit rectangles.
+
+    Marker geometry is deliberately independent from the base region shapes.
+    A small clamp keeps an off-screen waypoint discoverable at the edge, as in
+    Xaero's world map, while the returned hit boxes remain stable per frame.
+    """
+    shapes: List[cv.Shape] = []
+    bounds: Dict[str, ScreenRect] = {}
+    radius = max(4.0, min(10.0, 4.0 + float(scale) * 0.7))
+    for marker in markers:
+        if not marker.enabled:
+            continue
+        try:
+            screen_x, screen_y = block_to_screen(marker.x, marker.z)
+        except (TypeError, ValueError):
+            continue
+        # Skip markers that are far outside the viewport, but clamp nearby
+        # ones so a search result remains visible while panning.
+        if screen_x < -radius * 8 or screen_x > width + radius * 8:
+            continue
+        if screen_y < -radius * 8 or screen_y > height + radius * 8:
+            continue
+        draw_x = min(max(screen_x, radius + 2), max(radius + 2, width - radius - 2))
+        draw_y = min(max(screen_y, radius + 2), max(radius + 2, height - radius - 2))
+        selected = marker.id == selected_id
+        bounds[marker.id] = (
+            draw_x - radius - 4,
+            draw_y - radius - 4,
+            radius * 2 + 8,
+            radius * 2 + 8,
+        )
+        shapes.append(
+            cv.Circle(
+                draw_x,
+                draw_y,
+                radius + (2 if selected else 0),
+                paint=ft.Paint(color="#FFFFFF" if selected else "#000000AA"),
+            )
+        )
+        shapes.append(
+            cv.Circle(
+                draw_x,
+                draw_y,
+                radius,
+                paint=ft.Paint(color=marker.color),
+            )
+        )
+        # A tiny stem gives the generic pin icon a recognizable silhouette.
+        shapes.append(
+            cv.Line(
+                draw_x,
+                draw_y + radius,
+                draw_x,
+                draw_y + radius + 5,
+                paint=ft.Paint(color=marker.color, stroke_width=2),
+            )
+        )
+        if marker.show_label and (scale >= 0.55 or selected):
+            label = marker.name[:24]
+            text_width = max(34, len(label) * 7 + 10)
+            label_x = min(max(draw_x + radius + 4, 4), max(4, width - text_width - 4))
+            label_y = min(max(draw_y - 8, 4), max(4, height - 20))
+            shapes.append(
+                cv.Rect(
+                    label_x - 3,
+                    label_y - 2,
+                    text_width,
+                    18,
+                    paint=ft.Paint(color="#101810CC"),
+                )
+            )
+            shapes.append(
+                cv.Text(
+                    x=label_x + 2,
+                    y=label_y + 2,
+                    value=label,
+                    style=ft.TextStyle(size=10, color="#F6E7B0"),
+                )
+            )
+    return shapes, bounds
+
+
 def block_grid_for_region(
     region_x: float,
     region_y: float,
@@ -328,6 +436,7 @@ def info_overlay(
     scan_progress: float,
     selected_region: Optional[Coord],
     selected_chunk: Optional[Coord],
+    show_coordinates: bool = False,
 ) -> List[cv.Shape]:
     shapes: List[cv.Shape] = []
     level_title = {
@@ -346,16 +455,6 @@ def info_overlay(
             style=ft.TextStyle(size=12, color="#D7CCC8"),
         )
     )
-    shapes.append(cv.Rect(10, 42, 310, 24, paint=ft.Paint(color="#00000066")))
-    shapes.append(
-        cv.Text(
-            x=15,
-            y=47,
-            value="拖拽平移 · 滚轮缩放切层级 · 双击深入 · 右键返回",
-            style=ft.TextStyle(size=11, color="#A5D6A7"),
-        )
-    )
-
     if is_scanning:
         shapes.append(
             cv.Rect(10, height - 34, 120, 24, paint=ft.Paint(color="#00000088"))
@@ -369,7 +468,7 @@ def info_overlay(
             )
         )
 
-    if selected_region:
+    if show_coordinates and selected_region:
         if selected_chunk is not None:
             cx, cz = selected_chunk
             prefix = "区块内" if view_level == "block" else "区块"

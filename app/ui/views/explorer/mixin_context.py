@@ -12,6 +12,7 @@ from app.models.nbt_edit import (
     NbtTarget,
 )
 from app.services.region_map_service import RegionMapService
+from app.controllers.map_controller import MapController
 from core.omni.world_session import WorldSession
 
 if TYPE_CHECKING:
@@ -41,6 +42,7 @@ class ExplorerMixinHost:
 
     _nbt_stage_store: NbtStageStore
     _map_service: RegionMapService
+    _map_controller: MapController
 
     _tab_world_info: ft.Container
     _tab_player: ft.Container

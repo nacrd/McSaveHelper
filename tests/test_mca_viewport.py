@@ -7,6 +7,7 @@ from core.mca.viewport import (
     ViewportTarget,
     view_level_from_scale,
 )
+from core.mca.map_models import MapMarker
 from app.services.region_map_service import RegionMapService
 from app.ui.views.explorer.map.mca_map_view import McaMapView
 
@@ -49,12 +50,22 @@ def test_region_and_chunk_projection_support_negative_coordinates() -> None:
     assert viewport.chunk_at_screen(screen_x, screen_y, {(-2, -1)}) == (-40, -24)
 
 
-def test_region_projection_rejects_cell_gap_and_missing_regions() -> None:
+def test_region_projection_is_contiguous_and_rejects_missing_regions() -> None:
     viewport = McaViewport()
 
-    assert viewport.region_at_screen(32.5, 10.0, {(0, 0), (1, 0)}) is None
+    assert viewport.region_at_screen(32.5, 10.0, {(0, 0), (1, 0)}) == (1, 0)
     assert viewport.region_at_screen(35.0, 10.0, {(0, 0)}) is None
     assert viewport.region_at_screen(35.0, 10.0, {(1, 0)}) == (1, 0)
+
+
+def test_adjacent_region_rects_share_the_same_pixel_edge_at_fractional_scale() -> None:
+    viewport = McaViewport(scale=1.37, offset_x=11.25, offset_y=-7.5)
+    first = viewport.region_rect((0, 0))
+    second = viewport.region_rect((1, 0))
+    assert first[0] + first[2] == second[0]
+
+    negative = viewport.region_rect((-1, 0))
+    assert negative[0] + negative[2] == first[0]
 
 
 def test_zoom_about_preserves_world_point_under_pointer_and_clamps() -> None:
@@ -109,6 +120,61 @@ def test_visible_region_bounds_expand_with_margin() -> None:
     assert max_z >= 2
 
 
+def test_block_projection_round_trips_across_negative_regions() -> None:
+    viewport = McaViewport(scale=1.75, offset_x=220.0, offset_y=-90.0)
+
+    for block in [(-1025, -1), (-512, 0), (-1, -513), (0, 0), (511, 511), (512, 9)]:
+        screen = viewport.block_to_screen(*block)
+        assert viewport.screen_to_block(*screen) == block
+
+
+def test_screen_to_block_crosses_region_boundary_without_a_gap() -> None:
+    viewport = McaViewport()
+
+    # Region 0 ends at map pixel 32 and region 1 starts at the same edge.
+    assert viewport.world_to_block(33.0, 4.0) == (528, 64)
+    assert viewport.screen_to_block(33.0, 4.0) == (528, 64)
+
+
+def test_nearest_block_follows_the_contiguous_region_projection() -> None:
+    viewport = McaViewport()
+
+    assert viewport.nearest_block_at_screen(32.25, 4.0) == (516, 64)
+    assert viewport.nearest_block_at_screen(33.75, 4.0) == (540, 64)
+
+
+def test_map_view_center_uses_contiguous_block_projection() -> None:
+    service = RegionMapService()
+    view = McaMapView(map_service=service, width=640, height=360)
+    view._viewport.offset_x = 320.0 - 33.75
+    view._viewport.offset_y = 180.0 - 4.0
+
+    assert view.get_center_block() == (540, 64)
+    service.close()
+
+
+def test_map_view_selects_marker_from_external_list_action() -> None:
+    service = RegionMapService()
+    view = McaMapView(map_service=service)
+    view.set_markers(
+        [
+            MapMarker(
+                id="home",
+                name="Home",
+                x=0,
+                y=64,
+                z=0,
+                dimension_id="overworld",
+            )
+        ]
+    )
+
+    view.select_marker("home")
+
+    assert view._marker_layer.selected_id == "home"
+    service.close()
+
+
 def test_map_view_rebuild_consumes_core_viewport() -> None:
     service = RegionMapService()
     service._mca_data.update({(-1, 0): 1024, (0, 0): 2048})
@@ -120,4 +186,17 @@ def test_map_view_rebuild_consumes_core_viewport() -> None:
     assert view._viewport.is_default is False
     assert set(view._cell_bounds) == {(-1, 0), (0, 0)}
     assert view._region_at_screen(*view._viewport.world_to_screen(1, 1)) == (0, 0)
+    service.close()
+
+
+def test_map_view_unmount_releases_only_its_own_tile_callback() -> None:
+    service = RegionMapService()
+    first = McaMapView(map_service=service)
+    second = McaMapView(map_service=service)
+
+    first.did_unmount()
+    assert service._tile_ready_callback is second._tile_ready_callback
+
+    second.did_unmount()
+    assert service._tile_ready_callback is None
     service.close()

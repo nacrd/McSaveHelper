@@ -6,9 +6,12 @@ from core.mca.surface import (
     _CHUNK_LRU_MAX,
     _coarse_edge,
     _build_sample_jobs,
+    _decode_one,
     _needed_chunks,
     _resize_nearest,
+    _downsample_surface_values,
     _sample_coarse_grid,
+    _shade_color,
     _load_chunk_views,
     clear_chunk_decode_cache,
 )
@@ -19,10 +22,93 @@ def test_nested_chunk_decode_pool_keeps_a_small_cpu_budget() -> None:
     assert _CHUNK_LRU_MAX == 4096
 
 
+def test_topview_chunk_decode_uses_world_surface_view(monkeypatch) -> None:
+    marker = object()
+    calls = []
+
+    class _Region:
+        def read_chunk(self, _chunk_x: int, _chunk_z: int) -> object:
+            return marker
+
+    class _Blocks:
+        def surface_sample(
+            self,
+            _local_x: int,
+            _local_z: int,
+        ) -> tuple[str, int, int]:
+            return "minecraft:stone", 64, 0
+
+    def fake_get_blocks(chunk: object) -> _Blocks:
+        calls.append(chunk)
+        return _Blocks()
+
+    monkeypatch.setattr(surface_module, "get_world_surface_chunk_blocks", fake_get_blocks)
+
+    key, samples = _decode_one(
+        cast(Any, _Region()),
+        2,
+        3,
+        [(0, 0)],
+    )
+
+    assert calls == [marker]
+    assert key == (2, 3)
+    assert samples[(0, 0)] == ("minecraft:stone", 64, 0)
+
+
+def test_topview_chunk_decode_keeps_biome_and_transparent_stratum(
+    monkeypatch,
+) -> None:
+    class _RegionWithBiome:
+        def read_chunk(self, _chunk_x: int, _chunk_z: int) -> object:
+            return object()
+
+    class _BiomeBlocks:
+        def surface_sample(self, _local_x: int, _local_z: int):
+            return "minecraft:short_grass", 65
+
+        def surface_strata(self, _local_x: int, _local_z: int):
+            return (
+                ("minecraft:short_grass", 65),
+                ("minecraft:grass_block", 64),
+            )
+
+        def biome_at(self, _local_x: int, _height: int, _local_z: int) -> str:
+            return "minecraft:forest"
+
+        def block_id_at(self, _local_x: int, _height: int, _local_z: int) -> str:
+            return "minecraft:dirt"
+
+    monkeypatch.setattr(
+        surface_module,
+        "get_world_surface_chunk_blocks",
+        lambda _chunk: _BiomeBlocks(),
+    )
+
+    _key, samples = _decode_one(
+        cast(Any, _RegionWithBiome()),
+        0,
+        0,
+        [(2, 3)],
+    )
+
+    assert samples[(2, 3)] == (
+        "minecraft:grass_block",
+        64,
+        0,
+        "minecraft:forest",
+        "minecraft:short_grass",
+        0.42,
+    )
+
+
 def test_topview_sampling_keeps_original_sampling_quality() -> None:
-    assert _coarse_edge(32) == 16
-    assert _coarse_edge(64) == 24
-    assert _coarse_edge(128) == 32
+    assert _coarse_edge(16) == 8
+    assert _coarse_edge(32) == 32
+    assert _coarse_edge(64) == 64
+    assert _coarse_edge(128) == 128
+    assert _coarse_edge(256) == 256
+    assert _coarse_edge(512) == 512
 
 
 class _Region:
@@ -69,7 +155,7 @@ def test_lod_upgrades_decode_each_sampled_chunk_only_once(monkeypatch) -> None:
     monkeypatch.setattr(surface_module, "_decode_one", fake_decode)
     region = cast(Any, _FullRegion())
     try:
-        for edge in (8, 16, 24, 32):
+        for edge in (8, 32, 64, 128, 256):
             jobs = _build_sample_jobs(edge)
             _load_chunk_views(
                 region,
@@ -80,8 +166,52 @@ def test_lod_upgrades_decode_each_sampled_chunk_only_once(monkeypatch) -> None:
                 decode_workers=1,
             )
 
-        assert len(calls) == 1024
+        assert len(calls) >= 1024
         assert len(set(calls)) == 1024
+    finally:
+        clear_chunk_decode_cache()
+
+
+def test_leaf_lod_does_not_expand_normal_lod_chunk_sampling(monkeypatch) -> None:
+    sample_counts = []
+
+    def fake_decode(_region, chunk_x, chunk_z, samples):
+        sample_counts.append(len(samples))
+        return (
+            (chunk_x, chunk_z),
+            {position: "minecraft:stone" for position in samples},
+        )
+
+    monkeypatch.setattr(surface_module, "_decode_one", fake_decode)
+    region = cast(Any, _FullRegion())
+    try:
+        clear_chunk_decode_cache()
+        jobs = _build_sample_jobs(64)
+        _load_chunk_views(
+            region,
+            _needed_chunks(region, jobs),
+            "normal-lod",
+            1,
+            jobs,
+            decode_workers=1,
+        )
+        assert sample_counts
+        # The focused cache merges the staggered 64/128/256 grids, but must
+        # remain far below the 256 columns required by a full 512 leaf tile.
+        assert max(sample_counts) <= 96
+
+        sample_counts.clear()
+        clear_chunk_decode_cache()
+        jobs = _build_sample_jobs(512)
+        _load_chunk_views(
+            region,
+            _needed_chunks(region, jobs),
+            "leaf-lod",
+            1,
+            jobs,
+            decode_workers=1,
+        )
+        assert max(sample_counts) == 256
     finally:
         clear_chunk_decode_cache()
 
@@ -238,3 +368,85 @@ def test_nearest_resize_expands_each_source_cell() -> None:
         ["c", "c", "d", "d"],
     ]
     assert _resize_nearest(source, 2) == source
+
+
+def test_detail_samples_are_area_reduced_in_their_own_quadrants() -> None:
+    source = [
+        [("a", 1, 0), ("a", 1, 0), ("b", 2, 0), ("b", 2, 0)],
+        [("a", 1, 0), ("a", 1, 0), ("b", 2, 0), ("b", 2, 0)],
+        [("c", 3, 0), ("c", 3, 0), ("d", 4, 0), ("d", 4, 0)],
+        [("c", 3, 0), ("c", 3, 0), ("d", 4, 0), ("d", 4, 0)],
+    ]
+
+    assert _downsample_surface_values(source, 2) == [
+        [("a", 1, 0), ("b", 2, 0)],
+        [("c", 3, 0), ("d", 4, 0)],
+    ]
+
+
+def test_relief_shading_preserves_material_color_but_changes_brightness() -> None:
+    base = (80, 140, 60)
+
+    assert _shade_color(base, 0.75) == (60, 105, 45)
+    assert _shade_color(base, 1.25) == (100, 175, 75)
+
+
+def test_surface_colors_use_local_height_gradient(monkeypatch) -> None:
+    samples = [
+        [("minecraft:grass_block", 60, 0)] * 3,
+        [
+            ("minecraft:grass_block", 60, 0),
+            ("minecraft:grass_block", 72, 0),
+            ("minecraft:grass_block", 72, 0),
+        ],
+        [("minecraft:grass_block", 72, 0)] * 3,
+    ]
+    monkeypatch.setattr(
+        surface_module,
+        "sample_region_surface_samples",
+        lambda *_args, **_kwargs: samples,
+    )
+
+    colors = surface_module.sample_region_surface_colors(
+        "ignored.mca",
+        tile_size=3,
+        color_for_block=lambda _name: (100, 100, 100),
+    )
+
+    assert colors is not None
+    assert colors[1][1] != colors[0][0]
+
+
+def test_surface_colors_pass_biome_and_blend_transparent_overlay(monkeypatch) -> None:
+    samples = [[(
+        "minecraft:grass_block",
+        64,
+        0,
+        "minecraft:forest",
+        "minecraft:short_grass",
+        0.5,
+    )]]
+    calls = []
+    monkeypatch.setattr(
+        surface_module,
+        "sample_region_surface_samples",
+        lambda *_args, **_kwargs: samples,
+    )
+
+    def color_for_surface(name: str, biome: str | None):
+        calls.append((name, biome))
+        if name.endswith("short_grass"):
+            return 0, 200, 0
+        return 100, 100, 100
+
+    colors = surface_module.sample_region_surface_colors(
+        "ignored.mca",
+        tile_size=1,
+        color_for_surface=color_for_surface,
+    )
+
+    assert calls == [
+        ("minecraft:grass_block", "minecraft:forest"),
+        ("minecraft:short_grass", "minecraft:forest"),
+    ]
+    assert colors == [[(50, 150, 50)]]

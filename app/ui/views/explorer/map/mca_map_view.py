@@ -12,12 +12,14 @@ Zoom levels (auto-switched by scale thresholds on wheel):
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
     Coroutine,
     Dict,
+    Iterable,
     List,
     Optional,
     Tuple,
@@ -36,20 +38,24 @@ from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,
     ORIGIN_COLOR,
+    get_biome_color,
     get_region_color,
+    get_region_value_label,
+    get_structure_color,
 )
 from app.ui.views.explorer.map import map_shapes
 from app.ui.views.explorer.map.map_hit_testing import hit_bounds
 from app.ui.views.explorer.map.camera_animator import MapCameraAnimator
 from app.ui.views.explorer.map.rebuild_scheduler import RebuildScheduler
 from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
-from core.mca.topview_renderer import (
-    DEFAULT_TILE_SIZE,
-    DETAIL_TILE_SIZE,
-)
+from app.ui.views.explorer.map.marker_layer import MapMarkerLayer
+from app.ui.views.explorer.map.map_surface_layer import MapSurfaceLayer
+from app.controllers.topview_tile_requests import TopviewTileRequestCoordinator
+from core.mca.map_tiles import prioritize_regions
 from core.mca.map_coordinates import (
     format_region_coordinate_label,
 )
+from core.mca.map_models import MapLayerState, MapMarker
 from core.mca.map_navigation import (
     McaMapNavigator,
     SelectionNotification,
@@ -69,6 +75,7 @@ from core.mca.viewport import (
     SCALE_CHUNK,
     SCALE_REGION,
     McaViewport,
+    ViewportTarget,
     view_level_from_scale,
 )
 
@@ -79,6 +86,7 @@ if TYPE_CHECKING:
 MapSelectionCallback = Callable[
     [Optional[Tuple[int, int]], Optional[int], Optional[Dict[str, Any]]], None
 ]
+MapMarkerCallback = Callable[[MapMarker], None]
 
 
 class McaMapView(ft.Container):
@@ -88,7 +96,9 @@ class McaMapView(ft.Container):
     EMPTY_REGION_COLOR = EMPTY_REGION_COLOR
     ORIGIN_COLOR = ORIGIN_COLOR
     CELL_SIZE = 32
-    CELL_GAP = 2
+    CELL_GAP = 0
+    SURFACE_BUFFER_REGIONS = 2
+    SURFACE_MAX_REGIONS = 192
 
     MIN_SCALE = MIN_SCALE
     MAX_SCALE = MAX_SCALE
@@ -100,6 +110,7 @@ class McaMapView(ft.Container):
         self,
         map_service: RegionMapService,
         on_selection_changed: Optional[MapSelectionCallback] = None,
+        on_marker_selected: Optional[MapMarkerCallback] = None,
         width: int = 700,
         height: int = 450,
         **kwargs: Any,
@@ -108,6 +119,7 @@ class McaMapView(ft.Container):
 
         self._service = map_service
         self._on_selection_changed = on_selection_changed
+        self._on_marker_selected = on_marker_selected
 
         self._viewport = McaViewport(
             cell_size=float(self.CELL_SIZE),
@@ -115,7 +127,8 @@ class McaMapView(ft.Container):
             min_scale=self.MIN_SCALE,
             max_scale=self.MAX_SCALE,
         )
-        self._show_coordinates = True
+        self._show_coordinates = False
+        self._show_grid = False
         self._show_empty_regions = False
         self._display_mode = "topview"
         self._detail_level = "region"
@@ -129,6 +142,10 @@ class McaMapView(ft.Container):
         self._block_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         self._tile_sources = TileSourceCache()
+        self._metadata_pending: set[Tuple[int, int]] = set()
+        self._marker_layer = MapMarkerLayer()
+        self._tile_ready_callback = self._on_tile_ready
+        self._tile_requests = TopviewTileRequestCoordinator(self._service)
 
         self._last_x = 0.0
         self._last_y = 0.0
@@ -136,6 +153,10 @@ class McaMapView(ft.Container):
         self._update_task: Optional[ScheduledTask] = None
         self._last_drawn_count = -1
         self._mounted = False
+        self._visible_regions: set[Tuple[int, int]] = set()
+        self._rebuild_state_lock = threading.Lock()
+        self._rebuild_enqueued = False
+        self._rebuild_dirty = False
 
         # Pointer used for level auto-switch while zooming.
         self._zoom_pivot_x = 0.0
@@ -152,6 +173,7 @@ class McaMapView(ft.Container):
         self._rebuild_scheduler = RebuildScheduler(
             self._request_rebuild,
             is_active=lambda: self._mounted,
+            min_interval=1.0 / 30.0,
         )
 
         self.width = width
@@ -160,11 +182,23 @@ class McaMapView(ft.Container):
         self.border_radius = 0
         self.expand = True
 
+        self._surface_layer = MapSurfaceLayer(
+            self._service,
+            schedule_task=self._schedule_task,
+            request_rebuild=self._request_rebuild,
+            is_active=self._surface_is_active,
+            background_color=self.BACKGROUND_COLOR,
+            cell_size=self.CELL_SIZE,
+            buffer_regions=self.SURFACE_BUFFER_REGIONS,
+            max_regions=self.SURFACE_MAX_REGIONS,
+        )
+        self._surface_enabled = self._surface_layer.enabled
+        self._surface_host = self._surface_layer.control
+        self._surface_image = self._surface_layer.image
+
         self._canvas = cv.Canvas(
-            width=width,
-            height=height,
             expand=True,
-            shapes=self._empty_shapes(),
+            shapes=[] if self._surface_enabled else self._empty_shapes(),
             resize_interval=50,
             on_resize=self._on_canvas_resize,
         )
@@ -175,17 +209,20 @@ class McaMapView(ft.Container):
             on_double_tap=self._on_double_tap,
             on_secondary_tap=self._on_secondary_tap,
             on_scroll=self._on_scroll,
-            width=width,
-            height=height,
             expand=True,
         )
+        layers: List[ft.Control] = []
+        if self._surface_host is not None:
+            layers.append(self._surface_host)
+        layers.extend([self._canvas, self._gesture])
         self.content = ft.Stack(
-            [self._canvas, self._gesture],
+            layers,
             expand=True,
+            fit=ft.StackFit.EXPAND,
         )
 
         # Progressive topview: service notifies when a tile finishes rendering.
-        self._service.set_tile_ready_callback(self._on_tile_ready)
+        self._service.set_tile_ready_callback(self._tile_ready_callback)
 
     @property
     def _scale(self) -> float:
@@ -242,9 +279,24 @@ class McaMapView(ft.Container):
     def _on_tile_ready(self, coord: Tuple[int, int]) -> None:
         """Called from a worker thread when a topview PNG is cached."""
         try:
-            # Only rebuild if the cell is currently relevant.
-            if coord in self._current_data or not self._current_data:
-                self._schedule_rebuild()
+            retry_deferred = self._tile_requests.on_tile_ready(coord)
+            # A completed tile outside the buffered surface cannot affect the
+            # current frame.  If a bounded queue previously rejected visible
+            # work, however, any completion may free a slot for a retry.
+            if self._surface_enabled:
+                if coord not in self._visible_regions:
+                    if retry_deferred:
+                        self._schedule_rebuild()
+                    return
+                if not self._surface_layer.mark_tile_ready(coord):
+                    if retry_deferred:
+                        self._schedule_rebuild()
+                    return
+            elif self._current_data and coord not in self._current_data:
+                if retry_deferred:
+                    self._schedule_rebuild()
+                return
+            self._schedule_rebuild()
         except Exception:
             pass
 
@@ -279,15 +331,33 @@ class McaMapView(ft.Container):
             return
         if page is None:
             return
+        with self._rebuild_state_lock:
+            if self._rebuild_enqueued:
+                self._rebuild_dirty = True
+                return
+            self._rebuild_enqueued = True
         run_on_ui(cast(ft.Page, page), self._rebuild_canvas_safe)
 
     def _rebuild_canvas_safe(self) -> None:
         if not self._mounted or self.page is None:
+            with self._rebuild_state_lock:
+                self._rebuild_enqueued = False
+                self._rebuild_dirty = False
             return
+        schedule_tail = False
         try:
             self._rebuild_canvas()
         except Exception:
             pass
+        finally:
+            with self._rebuild_state_lock:
+                if self._rebuild_dirty and self._mounted and self.page is not None:
+                    self._rebuild_dirty = False
+                    schedule_tail = True
+                else:
+                    self._rebuild_enqueued = False
+            if schedule_tail and self.page is not None:
+                run_on_ui(cast(ft.Page, self.page), self._rebuild_canvas_safe)
 
     def _schedule_rebuild(self) -> None:
         self._rebuild_scheduler.schedule()
@@ -311,6 +381,12 @@ class McaMapView(ft.Container):
     def _on_tap(self, e: ft.TapEvent) -> None:
         local_position = e.local_position
         if local_position is None:
+            return
+        marker = self._marker_layer.hit_test(local_position.x, local_position.y)
+        if marker is not None:
+            if self._on_marker_selected is not None:
+                self._on_marker_selected(marker)
+            self._request_rebuild()
             return
         result = decide_tap(
             navigator=self._navigator,
@@ -381,15 +457,29 @@ class McaMapView(ft.Container):
             self._request_rebuild()
 
     def _hit_region(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
-        return hit_bounds(
-            tap_x,
-            tap_y,
-            self._cell_bounds,
-            allowed=self._current_data,
-        )
+        try:
+            return self._viewport.region_at_screen(
+                tap_x,
+                tap_y,
+                self._current_data,
+            )
+        except (TypeError, ValueError):
+            return hit_bounds(
+                tap_x,
+                tap_y,
+                self._cell_bounds,
+                allowed=self._current_data,
+            )
 
     def _hit_chunk(self, tap_x: float, tap_y: float) -> Optional[Tuple[int, int]]:
-        return hit_bounds(tap_x, tap_y, self._chunk_bounds)
+        try:
+            return self._viewport.chunk_at_screen(
+                tap_x,
+                tap_y,
+                self._current_data,
+            )
+        except (TypeError, ValueError):
+            return hit_bounds(tap_x, tap_y, self._chunk_bounds)
 
     def _coord_label_for_region(self, coord: Tuple[int, int], cell_size: float) -> str:
         return format_region_coordinate_label(
@@ -422,14 +512,7 @@ class McaMapView(ft.Container):
 
         # Prefer detail tiles for the focused region and its neighbors.
         if self._use_topview:
-            neighbors = [
-                (coord[0] + dx, coord[1] + dz)
-                for dz in (-1, 0, 1)
-                for dx in (-1, 0, 1)
-                if (coord[0] + dx, coord[1] + dz) in self._current_data
-                or (dx, dz) == (0, 0)
-            ]
-            self._request_detail_tiles(neighbors, force=True, priority=True)
+            self._tile_requests.request_region_detail(coord, self._current_data)
 
         if animate:
             self._camera.animate_to(
@@ -608,11 +691,18 @@ class McaMapView(ft.Container):
     def _rebuild_canvas(self) -> None:
         self._current_data = self._service.get_all_data()
         self._cached_stats = self._service.get_statistics()
-        shapes: List[cv.Shape] = list(self._empty_shapes())
-        view_w = self.width or 800
-        view_h = self.height or 600
+        view_w = float(self.width or 800)
+        view_h = float(self.height or 600)
+        # RawImage owns the opaque base layer.  Keeping the Canvas transparent
+        # is essential: a full-size background shape would cover the texture.
+        shapes: List[cv.Shape] = (
+            [] if self._surface_enabled else list(self._empty_shapes())
+        )
 
         if not self._current_data:
+            self._visible_regions.clear()
+            self._tile_requests.reset()
+            self._surface_layer.clear()
             shapes.extend(self._build_empty_state(view_w, view_h))
             shapes.extend(self._build_info_overlay())
             self._apply_shapes(shapes)
@@ -622,24 +712,150 @@ class McaMapView(ft.Container):
         self._cell_bounds.clear()
         self._chunk_bounds.clear()
         self._block_bounds.clear()
-        shapes.extend(self._build_origin_marker(self._offset_x, self._offset_y))
 
         draw_bounds = self._prepare_visible_bounds(coords, view_w, view_h)
         if draw_bounds is None:
             self._apply_shapes(shapes)
             return
-        region_shapes, missing = self._build_visible_regions(
-            draw_bounds,
-            view_w,
-            view_h,
-        )
-        shapes.extend(region_shapes)
+
+        if self._surface_enabled:
+            missing = self._prepare_surface(view_w, view_h)
+            shapes.extend(self._build_surface_overlays(view_w, view_h))
+        else:
+            region_shapes, missing = self._build_visible_regions(
+                draw_bounds,
+                view_w,
+                view_h,
+            )
+            shapes.extend(region_shapes)
+        shapes.extend(self._build_marker_overlay())
         self._request_visible_tiles(missing)
         self._request_selected_detail_tiles()
 
         shapes.extend(self._build_info_overlay())
         self._apply_shapes(shapes)
         self._needs_initial_draw = False
+
+    def _region_fill_color(self, coord: Tuple[int, int], size: int) -> str:
+        meta = self._service.get_region_meta(coord)
+        if self._display_mode == "biome":
+            return get_biome_color(str(meta.get("dominant_biome", "unknown")))
+        if self._display_mode == "structure":
+            return get_structure_color(
+                int(meta.get("structure_count", 0) or 0),
+                str(meta.get("dominant_structure", "none")),
+            )
+        return get_region_color(size, self._cached_stats or {})
+
+    def _surface_is_active(self) -> bool:
+        try:
+            return self._mounted and self.page is not None
+        except RuntimeError:
+            return False
+
+    def _prepare_surface(self, view_w: float, view_h: float) -> List[Tuple[int, int]]:
+        layer = self._surface_layer
+        missing = layer.sync(
+            self._viewport,
+            width=view_w,
+            height=view_h,
+            data=self._current_data,
+            display_mode=self._display_mode,
+            use_topview=self._use_topview,
+            color_for_region=self._region_fill_color,
+        )
+        self._visible_regions = layer.visible_regions
+        self._record_cell_bounds(view_w, view_h)
+        self._request_visible_metadata_for_surface(self._visible_regions)
+        return missing
+
+    def _record_cell_bounds(self, view_w: float, view_h: float) -> None:
+        self._cell_bounds.clear()
+        if self._mounted and not self._show_coordinates:
+            selected = self._selected_cell
+            if selected is not None and selected in self._visible_regions:
+                rect = self._viewport.region_rect(selected)
+                if not self._rect_outside_view(rect, view_w, view_h):
+                    self._cell_bounds[selected] = rect
+            return
+        for coord in self._visible_regions:
+            rect = self._viewport.region_rect(coord)
+            if not self._rect_outside_view(rect, view_w, view_h):
+                self._cell_bounds[coord] = rect
+
+    def _request_visible_metadata_for_surface(
+        self,
+        coords: Iterable[Tuple[int, int]],
+    ) -> None:
+        if self._display_mode not in {"biome", "structure"}:
+            return
+        missing = [
+            coord
+            for coord in coords
+            if coord in self._current_data
+            and not self._service.get_region_meta(coord)
+        ]
+        self._request_visible_metadata(missing)
+
+    def _build_surface_overlays(
+        self,
+        view_w: float,
+        view_h: float,
+    ) -> List[cv.Shape]:
+        del view_w, view_h
+        shapes: List[cv.Shape] = []
+        selected = self._selected_cell
+        if selected is not None and selected in self._current_data:
+            x, y, width, height = self._viewport.region_rect(selected)
+            shapes.append(
+                cv.Rect(
+                    x,
+                    y,
+                    width,
+                    height,
+                    paint=ft.Paint(
+                        color="#FFD54F",
+                        style=ft.PaintingStyle.STROKE,
+                        stroke_width=3,
+                    ),
+                )
+            )
+            if self._show_coordinates and width >= 22:
+                shapes.append(
+                    cv.Text(
+                        x=x + 4,
+                        y=y + 5,
+                        value=self._coord_label_for_region(selected, width),
+                        style=ft.TextStyle(size=10, color="#FFFFFF"),
+                    )
+                )
+            if self._show_grid:
+                shapes.extend(
+                    self._build_chunk_grid(
+                        x,
+                        y,
+                        width,
+                        selected,
+                        show_block_grid=self._view_level == "block",
+                    )
+                )
+
+        if self._show_coordinates:
+            for coord, (x, y, width, _height) in self._cell_bounds.items():
+                if coord == selected or width < 22:
+                    continue
+                shapes.append(
+                    cv.Text(
+                        x=x + 4,
+                        y=y + 5,
+                        value=self._coord_label_for_region(coord, width),
+                        style=ft.TextStyle(
+                            size=9 if width < 70 else 10,
+                            color="#FFFFFF",
+                        ),
+                    )
+                )
+        return shapes
 
     def _build_empty_state(self, view_w: float, view_h: float) -> List[cv.Shape]:
         return map_shapes.empty_state(view_w, view_h)
@@ -684,14 +900,19 @@ class McaMapView(ft.Container):
     ) -> Tuple[List[cv.Shape], List[Tuple[int, int]]]:
         shapes: List[cv.Shape] = []
         missing: List[Tuple[int, int]] = []
-        show_chunk_grid = (
+        metadata_missing: List[Tuple[int, int]] = []
+        self._visible_regions.clear()
+        show_chunk_grid = self._show_grid and (
             self._view_level in {"chunk", "block"}
             or self._scale >= self.SCALE_CHUNK
         )
-        show_block_grid = (
+        show_block_grid = self._show_grid and (
             self._view_level == "block" or self._scale >= self.SCALE_BLOCK
         )
         min_x, max_x, min_z, max_z = bounds
+        desired_tile_size = self._tile_requests.visible_base_tile_size(
+            self._scale,
+        )
         for z in range(min_z, max_z + 1):
             for x in range(min_x, max_x + 1):
                 coord = (x, z)
@@ -700,16 +921,29 @@ class McaMapView(ft.Container):
                     continue
                 self._cell_bounds[coord] = rect
                 if coord in self._current_data:
+                    self._visible_regions.add(coord)
+                    if (
+                        self._display_mode in {"biome", "structure"}
+                        and not self._service.get_region_meta(coord)
+                    ):
+                        metadata_missing.append(coord)
                     shapes.extend(self._build_present_region(
                         coord,
                         rect,
                         show_chunk_grid,
                         show_block_grid,
                     ))
-                    if self._use_topview and not self._service.has_topview_tile(coord):
+                    if (
+                        self._use_topview
+                        and not self._service.has_topview_tile(
+                            coord,
+                            min_size=desired_tile_size,
+                        )
+                    ):
                         missing.append(coord)
                 elif self._show_empty_regions:
                     shapes.append(self._build_empty_region(rect))
+        self._request_visible_metadata(metadata_missing)
         return shapes, missing
 
     @staticmethod
@@ -730,9 +964,18 @@ class McaMapView(ft.Container):
     ) -> List[cv.Shape]:
         x, y, size, _ = rect
         file_size = self._current_data[coord]
-        color = get_region_color(file_size, self._cached_stats or {})
+        meta = self._service.get_region_meta(coord)
+        if self._display_mode == "biome":
+            color = get_biome_color(str(meta.get("dominant_biome", "unknown")))
+        elif self._display_mode == "structure":
+            color = get_structure_color(
+                int(meta.get("structure_count", 0) or 0),
+                str(meta.get("dominant_structure", "none")),
+            )
+        else:
+            color = get_region_color(file_size, self._cached_stats or {})
         shapes = self._build_region_cell(x, y, size, color, coord, file_size)
-        if show_chunk_grid or size >= 160:
+        if show_chunk_grid:
             shapes.extend(self._build_chunk_grid(
                 x,
                 y,
@@ -742,6 +985,42 @@ class McaMapView(ft.Container):
             ))
         return shapes
 
+    def _request_visible_metadata(self, coords: List[Tuple[int, int]]) -> None:
+        """Load visible biome/structure summaries without blocking the UI."""
+        if not self._mounted:
+            return
+        pending = [
+            coord
+            for coord in coords
+            if coord not in self._metadata_pending
+        ]
+        if not pending:
+            return
+        pending = prioritize_regions(pending, self._viewport_center_region())[:24]
+        self._metadata_pending.update(pending)
+        self._schedule_task(self._load_visible_metadata(pending))
+
+    async def _load_visible_metadata(
+        self,
+        coords: List[Tuple[int, int]],
+    ) -> None:
+        # Metadata sampling opens MCA files. The caller caps each batch so a
+        # world overview cannot flood asyncio.to_thread with hundreds of jobs.
+        try:
+            for coord in coords:
+                if not self._mounted:
+                    break
+                await self._service.ensure_region_meta(coord)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        finally:
+            for coord in coords:
+                self._metadata_pending.discard(coord)
+            self._surface_layer.mark_dirty()
+            self._schedule_rebuild()
+
     def _build_empty_region(
         self,
         rect: Tuple[float, float, float, float],
@@ -749,59 +1028,53 @@ class McaMapView(ft.Container):
         return map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
 
     def _request_visible_tiles(self, missing: List[Tuple[int, int]]) -> None:
-        if missing:
-            self._service.request_topview_tiles(
-                missing,
-                tile_size=DEFAULT_TILE_SIZE,
+        if not self._mounted:
+            self._tile_requests.reset()
+            return
+        self._tile_requests.request_visible(
+            missing,
+            visible_regions=self._visible_regions,
+            scale=self._scale,
+            center=self._viewport_center_region(),
+        )
+
+    def _visible_tile_size(self) -> int:
+        """Return the current region texture LOD for the on-screen size."""
+        return self._tile_requests.visible_tile_size(self._scale)
+
+    def _viewport_center_region(self) -> Tuple[int, int]:
+        """Return the region nearest the screen center, including empty space."""
+        try:
+            return self._viewport.nearest_region_at_screen(
+                float(self.width or 800) / 2.0,
+                float(self.height or 600) / 2.0,
             )
+        except ValueError:
+            return (0, 0)
 
     def _request_selected_detail_tiles(self) -> None:
-        if (
-            not self._use_topview
-            or self._selected_cell is None
-            or self._scale < 2.2
-        ):
-            return
-        selected = self._selected_cell
-        nearby = [
-            (selected[0] + dx, selected[1] + dz)
-            for dz in (-1, 0, 1)
-            for dx in (-1, 0, 1)
-            if (selected[0] + dx, selected[1] + dz) in self._current_data
-        ]
-        missing = [
-            coord
-            for coord in nearby
-            if not self._service.has_topview_tile(
-                coord,
-                min_size=DETAIL_TILE_SIZE,
-            )
-        ]
-        if not missing:
-            return
-        self._request_detail_tiles(missing, force=True, priority=True)
+        self._tile_requests.request_selected_detail(
+            scale=self._scale,
+            selected=self._selected_cell,
+            center=self._viewport_center_region(),
+            available_regions=self._current_data,
+            enabled=self._use_topview,
+        )
 
     def _request_detail_tiles(
         self,
         coords: List[Tuple[int, int]],
         *,
+        tile_size: Optional[int] = None,
         force: bool = False,
         priority: bool = False,
     ) -> None:
-        if not coords:
-            return
-        try:
-            self._service.request_topview_tiles(
-                coords,
-                tile_size=DETAIL_TILE_SIZE,
-                force=force,
-                priority=priority,
-            )
-        except TypeError:
-            self._service.request_topview_tiles(
-                coords,
-                tile_size=DETAIL_TILE_SIZE,
-            )
+        self._tile_requests.request_detail(
+            coords,
+            tile_size=tile_size,
+            force=force,
+            priority=priority,
+        )
 
     def _apply_shapes(self, shapes: List[cv.Shape]) -> None:
         if not self._mounted or self.page is None:
@@ -823,6 +1096,16 @@ class McaMapView(ft.Container):
         file_size: int,
     ) -> List[cv.Shape]:
         del file_size
+        meta = self._service.get_region_meta(coord)
+        value_label = None
+        if self._display_mode in {"biome", "structure"}:
+            value_label = get_region_value_label(
+                self._display_mode,
+                coord,
+                self._current_data.get(coord, 0),
+                meta,
+                self._cached_stats or {},
+            )
         return map_shapes.region_cell(
             x,
             y,
@@ -834,6 +1117,7 @@ class McaMapView(ft.Container):
             show_coordinates=self._show_coordinates,
             tile_src=self._tile_src(coord) if self._use_topview else None,
             coord_label=self._coord_label_for_region,
+            value_label=value_label,
         )
 
     def _build_chunk_grid(
@@ -878,6 +1162,14 @@ class McaMapView(ft.Container):
             scan_progress=self._service.scan_progress,
             selected_region=self._selected_cell,
             selected_chunk=self._selected_chunk,
+            show_coordinates=self._show_coordinates,
+        )
+
+    def _build_marker_overlay(self) -> List[cv.Shape]:
+        return self._marker_layer.draw(
+            self._viewport,
+            width=float(self.width or 800),
+            height=float(self.height or 600),
         )
 
     # ------------------------------------------------------------------ lifecycle / scan
@@ -910,7 +1202,7 @@ class McaMapView(ft.Container):
     def did_mount(self) -> None:
         super().did_mount()
         self._mounted = True
-        self._service.set_tile_ready_callback(self._on_tile_ready)
+        self._service.set_tile_ready_callback(self._tile_ready_callback)
         if self._needs_initial_draw:
             self._request_rebuild()
         if self._service.is_scanning:
@@ -919,11 +1211,15 @@ class McaMapView(ft.Container):
     def did_unmount(self) -> None:
         self._mounted = False
         self._camera.cancel()
+        self._metadata_pending.clear()
         self._cancel_rebuild_timer()
         self._stop_update_loop()
         # Drop callback so worker threads do not touch a dead view.
         try:
-            if getattr(self._service, "_tile_ready_callback", None) is self._on_tile_ready:
+            if (
+                getattr(self._service, "_tile_ready_callback", None)
+                is self._tile_ready_callback
+            ):
                 self._service.set_tile_ready_callback(None)
         except Exception:
             pass
@@ -1002,10 +1298,6 @@ class McaMapView(ft.Container):
             return
         self.width = width
         self.height = height
-        self._canvas.width = width
-        self._canvas.height = height
-        self._gesture.width = width
-        self._gesture.height = height
         if refit:
             self.fit_to_view()
         else:
@@ -1033,11 +1325,97 @@ class McaMapView(ft.Container):
         self._request_rebuild()
         return self._show_empty_regions
 
+    def toggle_grid(self) -> bool:
+        """Toggle the optional selected-region grid without touching tiles."""
+        self._show_grid = not self._show_grid
+        self._request_rebuild()
+        return self._show_grid
+
+    def toggle_markers(self) -> bool:
+        """Toggle the dynamic waypoint overlay."""
+        visible = self._marker_layer.toggle()
+        self._request_rebuild()
+        return visible
+
+    def apply_layer_state(self, layers: MapLayerState) -> None:
+        """Apply persisted layer switches when a dimension is restored."""
+        self._show_coordinates = bool(layers.show_coordinates)
+        self._show_grid = bool(layers.show_grid)
+        self._show_empty_regions = bool(layers.show_empty_regions)
+        self._marker_layer.set_visible(bool(layers.show_markers))
+        self._request_rebuild()
+
+    def set_markers(self, markers: List[MapMarker]) -> None:
+        """Replace the marker snapshot without sharing mutable metadata."""
+        self._marker_layer.set_markers(markers)
+        self._request_rebuild()
+
+    def get_markers(self) -> list[MapMarker]:
+        return self._marker_layer.snapshot()
+
+    def select_marker(self, marker_id: Optional[str]) -> None:
+        """Highlight a marker selected outside the canvas hit-test layer."""
+        self._marker_layer.select(marker_id)
+        self._request_rebuild()
+
+    def focus_block(
+        self,
+        block_x: int,
+        block_z: int,
+        *,
+        animate: bool = True,
+        target_scale: Optional[float] = None,
+    ) -> None:
+        """Center the camera on a Minecraft block coordinate."""
+        view_w = float(self.width or 800)
+        view_h = float(self.height or 600)
+        scale = (
+            max(self._scale, self.SCALE_REGION)
+            if target_scale is None
+            else float(target_scale)
+        )
+        world_x, world_z = self._viewport.block_to_world(block_x, block_z)
+        target = ViewportTarget(
+            scale,
+            view_w / 2.0 - world_x * scale,
+            view_h / 2.0 - world_z * scale,
+        )
+        if animate:
+            self._camera.animate_to(
+                target.scale,
+                target.offset_x,
+                target.offset_y,
+                duration=0.28,
+            )
+        else:
+            self._viewport.apply(target)
+            self._sync_view_level_from_scale(notify=True)
+            self._request_rebuild()
+
+    def block_at_screen(self, x: float, y: float) -> Optional[Tuple[int, int]]:
+        return self._viewport.screen_to_block(x, y)
+
+    def get_center_block(self) -> Tuple[int, int]:
+        """Return a stable block anchor for dimension-specific camera state."""
+        center_x = float(self.width or 800) / 2.0
+        center_y = float(self.height or 600) / 2.0
+        block = self._viewport.screen_to_block(center_x, center_y)
+        if block is not None:
+            return block
+        return self._viewport.nearest_block_at_screen(center_x, center_y)
+
+    def get_camera_scale(self) -> float:
+        return float(self._scale)
+
+    def get_selected_chunk(self) -> Optional[Tuple[int, int]]:
+        return self._selected_chunk
+
     def set_display_mode(self, mode: str) -> None:
         if mode not in {"activity", "topview", "biome", "structure"}:
             return
         self._display_mode = mode
         self._use_topview = mode in {"activity", "topview"}
+        self._surface_layer.mark_dirty()
         self._request_rebuild()
 
     def get_display_mode(self) -> str:
@@ -1090,7 +1468,7 @@ class McaMapView(ft.Container):
             self._sync_view_level_from_scale(notify=False)
         except Exception:
             pass
-        self._request_rebuild()
+        self._schedule_rebuild()
 
     def _on_camera_complete(self) -> None:
         try:

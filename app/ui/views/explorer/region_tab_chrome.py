@@ -1,21 +1,25 @@
-"""UI composition helpers for the Explorer region map tab."""
+"""Explorer 地图页的 Flet 外壳构建器。
+
+布局采用 Xaero 风格的全幅地图、边缘工具列和半透明状态条。业务状态仍由
+controller/service 管理，这里只创建控件并返回稳定引用。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import flet as ft
 
-from app.ui.components.buttons import btn_danger, btn_ghost, btn_primary
+from app.ui.components.buttons import btn_danger, btn_ghost
 from app.ui.components.cards import card
 from app.ui.theme import THEME, mc_border
 
 EventCallback = Callable[[Any], None]
 SimpleCallback = Callable[[], None]
+Translate = Callable[[str, str], str]
 
 REGION_DISPLAY_HELP = (
-    "按区域最高方块着色的俯视图；扫描时渐进加载，"
-    "未加载前显示绿色占位。"
+    "拖拽平移，滚轮缩放；双击深入区块，右键返回上一级。"
 )
 REGION_LEGEND = (
     ("#228B22", "草地", "植被"),
@@ -23,7 +27,15 @@ REGION_LEGEND = (
     ("#EED6AF", "沙地", "沙漠"),
     ("#808080", "岩石", "石/深板岩"),
     ("#4CAF50", "占位", "未加载"),
-    ("#FFD54F", "选中", "边框"),
+    ("#FFD54F", "选中", "边框/标记"),
+)
+REGION_LEGEND_KEYS = (
+    ("map.legend_grass", "map.legend_vegetation"),
+    ("map.legend_water", "map.legend_sea_river"),
+    ("map.legend_sand", "map.legend_desert"),
+    ("map.legend_rock", "map.legend_stone"),
+    ("map.legend_placeholder", "map.legend_unloaded"),
+    ("map.legend_selected", "map.legend_border_marker"),
 )
 
 
@@ -32,9 +44,16 @@ class RegionTabChrome:
     layout: ft.Row
     dimension_dropdown: ft.Dropdown
     display_mode_dropdown: ft.Dropdown
-    coord_button: Any
-    empty_button: Any
-    fullscreen_button: Any
+    search_field: ft.TextField
+    search_button: ft.IconButton
+    coord_button: ft.IconButton
+    empty_button: ft.IconButton
+    marker_button: ft.IconButton
+    fullscreen_button: ft.IconButton
+    add_marker_button: ft.IconButton
+    delete_marker_button: ft.IconButton
+    marker_list: ft.ListView
+    marker_count_text: ft.Text
     help_text: ft.Text
     stats_text: ft.Text
     status_text: ft.Text
@@ -46,25 +65,64 @@ class RegionTabChrome:
     side_panel: ft.Container
 
 
-def build_region_legend_content() -> ft.Column:
-    """Build the fixed top-view legend displayed in the side rail."""
-    rows = [
-        ft.Row(
+def _translator(translate: Optional[Translate]) -> Translate:
+    return translate or (lambda _key, fallback: fallback)
+
+
+def _icon_button(
+    icon: ft.IconData,
+    tooltip: str,
+    callback: SimpleCallback,
+    *,
+    selected: bool = False,
+) -> ft.IconButton:
+    return ft.IconButton(
+        icon=icon,
+        selected=selected,
+        icon_color=THEME.text_primary,
+        selected_icon_color=THEME.mc_gold,
+        bgcolor="#101810DD",
+        hover_color=THEME.bg_card_hover,
+        tooltip=tooltip,
+        width=40,
+        height=40,
+        on_click=lambda _event: callback(),
+    )
+
+
+def build_region_legend_content(
+    translate: Optional[Translate] = None,
+) -> ft.Column:
+    """构建固定地表图例。"""
+    t = _translator(translate)
+    rows = []
+    for (color, title, description), (title_key, description_key) in zip(
+        REGION_LEGEND,
+        REGION_LEGEND_KEYS,
+    ):
+        rows.append(ft.Row(
             [
-                ft.Container(width=18, height=18, bgcolor=color, border_radius=2),
-                ft.Text(title, size=11, color=THEME.text_primary, width=58),
-                ft.Text(description, size=10, color=THEME.text_muted),
+                ft.Container(width=16, height=16, bgcolor=color, border_radius=2),
+                ft.Text(
+                    t(title_key, title),
+                    size=11,
+                    color=THEME.text_primary,
+                    width=54,
+                ),
+                ft.Text(
+                    t(description_key, description),
+                    size=10,
+                    color=THEME.text_muted,
+                ),
             ],
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        for color, title, description in REGION_LEGEND
-    ]
+        ))
     return ft.Column(
         [
             ft.Text(
-                "🗺️ 俯视图例",
-                size=13,
+                t("map.legend", "地图图例"),
+                size=12,
                 weight=ft.FontWeight.BOLD,
                 color=THEME.text_primary,
             ),
@@ -74,20 +132,21 @@ def build_region_legend_content() -> ft.Column:
     )
 
 
-def build_map_fallback() -> ft.Container:
-    """Build the fallback shown when the MCA map control cannot initialize."""
+def build_map_fallback(translate: Optional[Translate] = None) -> ft.Container:
+    """地图 Canvas 无法初始化时显示的降级界面。"""
+    t = _translator(translate)
     return ft.Container(
         content=ft.Column(
             [
-                ft.Icon(ft.Icons.WARNING, size=48, color="#FF9800"),
+                ft.Icon(ft.Icons.WARNING, size=48, color=THEME.warning),
                 ft.Text(
-                    "区域地图组件不可用",
+                    t("map.unavailable", "区域地图组件不可用"),
                     size=16,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_primary,
                 ),
                 ft.Text(
-                    "请升级 Flet 版本以启用区域地图功能",
+                    t("map.upgrade_flet", "请升级 Flet 版本以启用区域地图功能"),
                     size=13,
                     color=THEME.text_muted,
                 ),
@@ -97,7 +156,7 @@ def build_map_fallback() -> ft.Container:
         ),
         padding=50,
         bgcolor=THEME.bg_card,
-        border_radius=8,
+        border_radius=6,
     )
 
 
@@ -115,171 +174,332 @@ def build_region_tab_chrome(
     on_toggle_fullscreen: SimpleCallback,
     on_fill_nbt: EventCallback,
     on_delete_region: EventCallback,
+    on_search: Optional[EventCallback] = None,
+    on_toggle_markers: Optional[SimpleCallback] = None,
+    on_add_marker: Optional[EventCallback] = None,
+    on_delete_marker: Optional[EventCallback] = None,
+    translate: Optional[Translate] = None,
 ) -> RegionTabChrome:
-    """Build the region tab controls and return stable control references."""
+    """创建地图页面，并返回 controller 需要更新的控件引用。"""
+    t = _translator(translate)
+    search_callback = on_search or (lambda _event: None)
+    marker_callback = on_toggle_markers or (lambda: None)
+    add_marker_callback = on_add_marker or (lambda _event: None)
+    delete_marker_callback = on_delete_marker or (lambda _event: None)
+
+    def sync_map_size(event: Any) -> None:
+        """Propagate the expanding host's measured size to the map camera."""
+        resize = getattr(map_content, "resize_map", None)
+        if not callable(resize):
+            return
+        try:
+            width = int(getattr(event, "width", 0) or 0)
+            height = int(getattr(event, "height", 0) or 0)
+        except (TypeError, ValueError):
+            return
+        if width >= 80 and height >= 80:
+            resize(width, height)
+
     dimension_dropdown = ft.Dropdown(
+        label=t("map.dimension", "维度"),
         options=[],
         on_select=on_dimension_changed,
         border_color=THEME.border_standard,
-        text_size=13,
-        width=180,
+        focused_border_color=THEME.mc_diamond,
+        bgcolor="#101810EE",
+        color=THEME.text_primary,
+        text_size=12,
+        width=190,
+        height=48,
     )
-    dimension_row = ft.Row(
-        [
-            ft.Text(
-                "维度：",
-                size=14,
-                weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary,
-            ),
-            dimension_dropdown,
+    display_mode_dropdown = ft.Dropdown(
+        label=t("map.style", "地图样式"),
+        value="topview",
+        width=150,
+        height=48,
+        options=[
+            ft.dropdown.Option("topview", t("map.style_topview", "地表")),
+            ft.dropdown.Option("activity", t("map.style_region", "区域")),
+            ft.dropdown.Option("biome", t("map.style_biome", "群系")),
+            ft.dropdown.Option("structure", t("map.style_structure", "结构")),
         ],
-        spacing=8,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        on_select=lambda _event: on_display_mode_changed(),
+        border_color=THEME.border_standard,
+        focused_border_color=THEME.mc_diamond,
+        color=THEME.text_primary,
+        bgcolor="#101810EE",
+        text_size=12,
+    )
+    search_field = ft.TextField(
+        hint_text=t(
+            "map.search_hint",
+            "坐标 x,z / x y z / r.x.z / c.x.z / 标记名",
+        ),
+        width=300,
+        height=42,
+        text_size=12,
+        color=THEME.text_primary,
+        bgcolor="#101810EE",
+        border_color=THEME.border_standard,
+        focused_border_color=THEME.mc_diamond,
+        content_padding=ft.Padding(left=12, right=8, top=8, bottom=8),
+        on_submit=search_callback,
+    )
+    search_button = ft.IconButton(
+        icon=ft.Icons.SEARCH,
+        icon_color=THEME.text_primary,
+        bgcolor="#101810EE",
+        hover_color=THEME.bg_card_hover,
+        tooltip=t("map.search", "搜索地图"),
+        width=40,
+        height=40,
+        on_click=search_callback,
+    )
+
+    coord_button = _icon_button(
+        ft.Icons.LABEL_OUTLINE,
+        t("map.show_coordinates", "显示坐标"),
+        on_toggle_coordinates,
+        selected=False,
+    )
+    empty_button = _icon_button(
+        ft.Icons.GRID_ON,
+        t("map.show_empty", "显示空区域"),
+        on_toggle_empty,
+    )
+    marker_button = _icon_button(
+        ft.Icons.LOCATION_ON,
+        t("map.hide_markers", "隐藏标记"),
+        marker_callback,
+        selected=True,
+    )
+    fullscreen_button = _icon_button(
+        ft.Icons.FULLSCREEN,
+        t("map.fullscreen", "全屏地图"),
+        on_toggle_fullscreen,
+    )
+
+    top_bar = ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(ft.Icons.MAP_OUTLINED, size=20, color=THEME.mc_gold),
+                dimension_dropdown,
+                display_mode_dropdown,
+                ft.Container(expand=True),
+                search_field,
+                search_button,
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        left=12,
+        top=12,
+        right=12,
+        height=56,
+        padding=ft.Padding(left=10, right=8, top=4, bottom=4),
+        bgcolor="#0B120BE8",
+        border=mc_border(1),
+        border_radius=6,
+    )
+
+    left_toolbar = ft.Container(
+        content=ft.Column(
+            [
+                _icon_button(
+                    ft.Icons.ZOOM_IN,
+                    t("map.zoom_in", "放大"),
+                    on_zoom_in,
+                ),
+                _icon_button(
+                    ft.Icons.ZOOM_OUT,
+                    t("map.zoom_out", "缩小"),
+                    on_zoom_out,
+                ),
+                _icon_button(
+                    ft.Icons.MY_LOCATION,
+                    t("map.fit_world", "显示完整世界"),
+                    on_reset,
+                ),
+            ],
+            spacing=4,
+            tight=True,
+        ),
+        left=12,
+        top=82,
+        padding=4,
+        bgcolor="#0B120BCC",
+        border_radius=6,
+    )
+    right_toolbar = ft.Container(
+        content=ft.Column(
+            [
+                _icon_button(
+                    ft.Icons.REFRESH,
+                    t("map.refresh", "刷新地图"),
+                    on_refresh,
+                ),
+                coord_button,
+                empty_button,
+                marker_button,
+                fullscreen_button,
+            ],
+            spacing=4,
+            tight=True,
+        ),
+        right=12,
+        top=82,
+        padding=4,
+        bgcolor="#0B120BCC",
+        border_radius=6,
     )
 
     help_text = ft.Text(
-        "滚轮缩放自动切层级 · 双击深入区块/区块内 · "
-        "右键逐级返回 · 坐标随缩放变为游戏坐标",
+        t("map.help", REGION_DISPLAY_HELP),
         size=11,
-        color=THEME.text_muted,
+        color="#D0D8C8",
         no_wrap=True,
         overflow=ft.TextOverflow.ELLIPSIS,
     )
-    display_mode_dropdown = ft.Dropdown(
-        label="显示方式",
-        value="topview",
-        width=150,
-        options=[ft.dropdown.Option("topview", "方块俯视")],
-        on_select=lambda _event: on_display_mode_changed(),
-        border_color=THEME.border_light,
-        focused_border_color=THEME.accent,
-        color=THEME.text_primary,
-        bgcolor=THEME.bg_card,
+    bottom_bar = ft.Container(
+        content=help_text,
+        left=12,
+        right=12,
+        bottom=12,
+        height=30,
+        padding=ft.Padding(left=10, right=10, top=6, bottom=5),
+        bgcolor="#0B120BCC",
+        border_radius=4,
     )
 
-    coord_button = btn_ghost(
-        "隐藏坐标",
-        width=88,
-        on_click=lambda _event: on_toggle_coordinates(),
+    toolbar = top_bar
+    map_host = ft.Container(
+        content=ft.Stack(
+            [map_content, top_bar, left_toolbar, right_toolbar, bottom_bar],
+            expand=True,
+            fit=ft.StackFit.EXPAND,
+        ),
+        bgcolor="#0B120B",
+        border=mc_border(2),
+        border_radius=0,
+        padding=0,
+        expand=True,
+        alignment=ft.Alignment(0, 0),
+        on_size_change=sync_map_size,
     )
-    empty_button = btn_ghost(
-        "显示空格",
-        width=88,
-        on_click=lambda _event: on_toggle_empty(),
-    )
-    fullscreen_button = btn_ghost(
-        "⛶ 全屏",
-        width=88,
-        on_click=lambda _event: on_toggle_fullscreen(),
-    )
+    # Compatibility alias consumed by fullscreen/layout code.
+    map_card = map_host
+
     stats_text = ft.Text(
-        "等待设置当前存档...",
+        t("map.waiting", "等待设置当前存档..."),
         size=11,
         color=THEME.text_muted,
     )
     status_text = ft.Text(
-        "👆 点击方块查看详情",
+        t("map.select_hint", "点击地图查看区域详情"),
         size=12,
         color=THEME.text_secondary,
+        selectable=True,
+    )
+    marker_count_text = ft.Text(
+        t("map.marker_count_empty", "0 个标记"),
+        size=11,
+        color=THEME.text_muted,
+    )
+    marker_list = ft.ListView(
+        controls=[],
+        spacing=3,
+        height=150,
+        padding=0,
+    )
+    add_marker_button = ft.IconButton(
+        icon=ft.Icons.ADD_LOCATION_ALT,
+        icon_color=THEME.success,
+        tooltip=t("map.add_marker", "添加标记"),
+        on_click=add_marker_callback,
+    )
+    delete_marker_button = ft.IconButton(
+        icon=ft.Icons.DELETE_OUTLINE,
+        icon_color=THEME.error,
+        tooltip=t("map.delete_marker", "删除选中标记"),
+        disabled=True,
+        on_click=delete_marker_callback,
     )
 
-    view_options = ft.Row(
-        [coord_button, empty_button, fullscreen_button],
-        spacing=6,
-    )
-    toolbar = card(
-        ft.Row(
-            [
-                dimension_row,
-                display_mode_dropdown,
-                btn_primary(
-                    "🔄 刷新",
-                    width=84,
-                    on_click=lambda _event: on_refresh(),
-                ),
-                btn_ghost(
-                    "🔍+",
-                    width=52,
-                    on_click=lambda _event: on_zoom_in(),
-                ),
-                btn_ghost(
-                    "🔍−",
-                    width=52,
-                    on_click=lambda _event: on_zoom_out(),
-                ),
-                btn_ghost(
-                    "🏠",
-                    width=52,
-                    on_click=lambda _event: on_reset(),
-                ),
-                view_options,
-                help_text,
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            wrap=True,
-        ),
-        padding=8,
-    )
-
-    map_host = ft.Container(
-        content=map_content,
-        bgcolor=THEME.bg_secondary,
-        border=mc_border(2),
-        border_radius=0,
-        padding=2,
-        expand=True,
-        alignment=ft.alignment.Alignment(0, 0),
-    )
-    map_card = card(map_host, padding=4)
-    map_card.expand = True
-    legend_container = ft.Container(content=build_region_legend_content())
-
-    selection_card = card(
+    selection_panel = card(
         ft.Column(
             [
                 ft.Text(
-                    "👆 选中",
+                    t("map.selection", "选区"),
                     size=12,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_primary,
                 ),
                 status_text,
             ],
-            spacing=4,
+            spacing=5,
         ),
         padding=8,
     )
-    stats_card = card(
+    stats_panel = card(
         ft.Column(
             [
                 ft.Text(
-                    "📊 概况",
+                    t("map.overview", "地图概况"),
                     size=12,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_primary,
                 ),
                 stats_text,
             ],
-            spacing=4,
+            spacing=5,
         ),
         padding=8,
     )
-    action_card = card(
+    marker_panel = card(
+        ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Icon(ft.Icons.LOCATION_ON, size=16, color=THEME.mc_gold),
+                        ft.Text(
+                            t("map.markers", "地图标记"),
+                            size=12,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.text_primary,
+                        ),
+                        ft.Container(expand=True),
+                        marker_count_text,
+                        add_marker_button,
+                        delete_marker_button,
+                    ],
+                    spacing=3,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                marker_list,
+            ],
+            spacing=5,
+        ),
+        padding=8,
+    )
+    legend_container = ft.Container(content=build_region_legend_content(translate))
+    action_panel = card(
         ft.Column(
             [
                 ft.Text(
-                    "🛠️ 操作",
+                    t("map.region_actions", "区域操作"),
                     size=12,
                     weight=ft.FontWeight.BOLD,
                     color=THEME.text_primary,
                 ),
                 ft.Row(
                     [
-                        btn_ghost("填入 NBT", width=100, on_click=on_fill_nbt),
+                        btn_ghost(
+                            t("map.fill_nbt", "填入 NBT"),
+                            width=100,
+                            on_click=on_fill_nbt,
+                        ),
                         btn_danger(
-                            "删除区域",
+                            t("map.delete_region", "删除区域"),
                             width=100,
                             on_click=on_delete_region,
                         ),
@@ -292,26 +512,25 @@ def build_region_tab_chrome(
         padding=8,
     )
 
-    left_panel = ft.Container(
-        content=ft.Column([toolbar, map_card], spacing=6, expand=True),
-        expand=True,
-    )
+    left_panel = ft.Container(content=map_host, expand=True)
     side_panel = ft.Container(
         content=ft.Column(
             [
-                selection_card,
-                stats_card,
+                selection_panel,
+                stats_panel,
+                marker_panel,
                 card(legend_container, padding=8),
-                action_card,
+                action_panel,
             ],
             spacing=6,
+            scroll=ft.ScrollMode.AUTO,
         ),
         width=280,
         expand=False,
     )
     layout = ft.Row(
         [left_panel, side_panel],
-        spacing=10,
+        spacing=8,
         expand=True,
         vertical_alignment=ft.CrossAxisAlignment.STRETCH,
     )
@@ -319,9 +538,16 @@ def build_region_tab_chrome(
         layout=layout,
         dimension_dropdown=dimension_dropdown,
         display_mode_dropdown=display_mode_dropdown,
+        search_field=search_field,
+        search_button=search_button,
         coord_button=coord_button,
         empty_button=empty_button,
+        marker_button=marker_button,
         fullscreen_button=fullscreen_button,
+        add_marker_button=add_marker_button,
+        delete_marker_button=delete_marker_button,
+        marker_list=marker_list,
+        marker_count_text=marker_count_text,
         help_text=help_text,
         stats_text=stats_text,
         status_text=status_text,
