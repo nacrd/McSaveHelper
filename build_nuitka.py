@@ -6,8 +6,9 @@ import argparse
 import shutil
 import subprocess
 import sys
+from io import TextIOWrapper
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal, Sequence, cast
 
 
 BuildMode = Literal["onefile", "portable"]
@@ -18,6 +19,12 @@ ICON_PATH = PROJECT_ROOT / "mcsavehelper_icon.ico"
 TRANSLATIONS_DIR = PROJECT_ROOT / "translations"
 BUILD_ROOT = PROJECT_ROOT / "build"
 DIST_ROOT = PROJECT_ROOT / "dist"
+
+
+def _configure_output_encoding() -> None:
+    """Use UTF-8 for CLI diagnostics on Windows CI runners."""
+    cast(TextIOWrapper, sys.stdout).reconfigure(encoding="utf-8", errors="replace")
+    cast(TextIOWrapper, sys.stderr).reconfigure(encoding="utf-8", errors="replace")
 
 
 def build_command(mode: BuildMode, output_dir: Path) -> list[str]:
@@ -118,6 +125,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    _configure_output_encoding()
     args = parse_args(argv)
     build(args.mode)
     return 0
