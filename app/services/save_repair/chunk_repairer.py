@@ -104,16 +104,23 @@ class ChunkRepairer:
     def _count_damaged_chunks(self, region_file: Path) -> tuple[int, bool]:
         damaged = 0
         with Region.from_file(str(region_file)) as region:
-            for chunk_x in range(32):
-                for chunk_z in range(32):
-                    if self.is_cancelled:
-                        return damaged, False
-                    try:
-                        chunk = region.get_chunk(chunk_x, chunk_z)
-                        if chunk is not None and not validate_chunk(chunk):
-                            damaged += 1
-                    except Exception:
+            try:
+                coordinates = region.iter_present_chunks()
+            except AttributeError:
+                coordinates = (
+                    (chunk_x, chunk_z)
+                    for chunk_x in range(32)
+                    for chunk_z in range(32)
+                )
+            for chunk_x, chunk_z in coordinates:
+                if self.is_cancelled:
+                    return damaged, False
+                try:
+                    chunk = region.get_chunk(chunk_x, chunk_z)
+                    if chunk is not None and not validate_chunk(chunk):
                         damaged += 1
+                except Exception:
+                    damaged += 1
         return damaged, True
 
     def _quarantine_file(

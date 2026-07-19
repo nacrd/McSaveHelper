@@ -59,3 +59,35 @@ def test_floating_button_uses_independent_position_key() -> None:
 
     assert button.right == 30
     assert button.bottom == 40
+
+
+def test_hidden_log_panel_batches_controls_until_visible() -> None:
+    page = FakePage()
+    panel = FloatingLogPanel(cast(ft.Page, page))
+
+    panel.log("first", "info")
+    panel.log("second", "warn")
+
+    assert panel._log_col.controls == []
+    assert len(panel._pending_logs) == 2
+
+    panel.set_visible(True)
+
+    assert [cast(ft.Text, control).value for control in panel._log_col.controls] == [
+        "first",
+        "second",
+    ]
+    assert len(panel._pending_logs) == 0
+
+
+def test_hidden_panel_does_not_flush_a_callback_queued_before_collapse() -> None:
+    page = FakePage()
+    panel = FloatingLogPanel(cast(ft.Page, page))
+    panel.visible = True
+    panel.log("queued", "info")
+
+    panel.set_visible(False)
+    panel._flush_pending_ui()
+
+    assert panel._log_col.controls == []
+    assert list(panel._pending_logs) == [("queued", "info")]

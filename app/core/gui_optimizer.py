@@ -22,6 +22,7 @@ from app.ui.performance import (
 from app.ui.hang_detector import get_hang_detector
 from app.ui.notifications import NotificationManager
 from app.ui.accessibility import validate_theme_accessibility
+from app.ui.utils import run_on_ui
 from core.logger import logger
 from core.performance import PerformanceMetrics, set_metrics_sink
 
@@ -334,7 +335,7 @@ class GUIOptimizer:
 
         def _beat_loop() -> None:
             while not self._heartbeat_stop.is_set():
-                self._health_monitor.heartbeat()
+                run_on_ui(self.page, self._health_monitor.heartbeat)
                 self._heartbeat_stop.wait(3.0)
 
         self._heartbeat_thread = threading.Thread(
@@ -362,7 +363,7 @@ class GUIOptimizer:
         def _hang_beat_loop() -> None:
             hang_detector = get_hang_detector()
             while not self._hang_heartbeat_stop.is_set():
-                hang_detector.ui_heartbeat()
+                run_on_ui(self.page, hang_detector.ui_heartbeat)
                 self._hang_heartbeat_stop.wait(2.0)
 
         self._hang_heartbeat_thread = threading.Thread(

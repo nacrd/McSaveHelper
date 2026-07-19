@@ -65,17 +65,26 @@ class BaseSearcher(ABC):
                 log(f"读取区块文件 {region_file.name} 失败: {e}", "WARNING")
 
     def _scan_region(self, region: Any, target: str, dimension: str) -> None:
-        for cx in range(32):
-            for cz in range(32):
-                if self._limit_reached():
-                    return
-                try:
-                    chunk = region.get_chunk(cx, cz)
-                    if chunk is not None:
-                        self.summary.scanned_chunks += 1
-                        self.search_chunk(chunk, target, dimension)
-                except Exception:
-                    self.summary.skipped_chunks += 1
+        try:
+            # Sort by (x, z) to preserve the previous search/result order even
+            # though the MCA location table itself is stored z-major.
+            coordinates = sorted(region.iter_present_chunks())
+        except AttributeError:
+            coordinates = [
+                (cx, cz)
+                for cx in range(32)
+                for cz in range(32)
+            ]
+        for cx, cz in coordinates:
+            if self._limit_reached():
+                return
+            try:
+                chunk = region.get_chunk(cx, cz)
+                if chunk is not None:
+                    self.summary.scanned_chunks += 1
+                    self.search_chunk(chunk, target, dimension)
+            except Exception:
+                self.summary.skipped_chunks += 1
 
     def _limit_reached(self) -> bool:
         return len(self.results) >= MAX_RESULTS

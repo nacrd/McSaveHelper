@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Callable, Optional
 import flet as ft
 
@@ -32,6 +33,11 @@ class ProgressManager:
         self._progress_bar: Optional[McProgressBar] = None
         self._progress_label: Optional[ft.Text] = None
         self._progress_container: Optional[ft.Container] = None
+        self._progress_lock = threading.Lock()
+        self._last_progress_key: Optional[tuple[str, int]] = None
+        self._desired_visible = False
+        self._desired_value = 0.0
+        self._desired_label = ""
 
     def create_progress_ui(self) -> ft.Container:
         """创建进度条UI组件
@@ -56,6 +62,10 @@ class ProgressManager:
             weight=ft.FontWeight.BOLD,
             font_family="monospace",
         )
+        with self._progress_lock:
+            self._desired_visible = False
+            self._desired_value = 0.0
+            self._desired_label = self._progress_label.value or "就绪"
 
         # 进度条容器（默认隐藏）
         self._progress_container = ft.Container(
@@ -84,6 +94,22 @@ class ProgressManager:
             except Exception:
                 pass
 
+    def _apply_desired_state(self) -> None:
+        """Apply the latest aggregate state, regardless of callback order."""
+        container = self._progress_container
+        progress_bar = self._progress_bar
+        progress_label = self._progress_label
+        if container is None or progress_bar is None or progress_label is None:
+            return
+        with self._progress_lock:
+            visible = self._desired_visible
+            value = self._desired_value
+            label = self._desired_label
+        container.visible = visible
+        progress_bar.set_value(value, refresh=False)
+        progress_label.value = label
+        self._refresh_container(container)
+
     def update_progress(self, value: float) -> None:
         """更新进度条
 
@@ -95,20 +121,22 @@ class ProgressManager:
         progress_label = self._progress_label
         if container is None or progress_bar is None or progress_label is None:
             return
-
-        def _update() -> None:
-            # 确保进度条可见
-            if not container.visible:
-                container.visible = True
-
-            # 更新进度值和标签
-            progress_bar.set_value(value)
-            progress_label.value = self._translate(
+        percent = max(0, min(100, int(value * 100)))
+        with self._progress_lock:
+            key = ("", percent)
+            if key == self._last_progress_key:
+                return
+            self._last_progress_key = key
+            self._desired_visible = True
+            self._desired_value = value
+            self._desired_label = self._translate(
                 "top_bar.progress",
                 "进度 {percent}%",
-                percent=int(value * 100),
+                percent=percent,
             )
-            self.page.update()
+
+        def _update() -> None:
+            self._apply_desired_state()
 
         self._update_ui_safe(_update)
 
@@ -123,17 +151,14 @@ class ProgressManager:
         progress_label = self._progress_label
         if container is None or progress_bar is None or progress_label is None:
             return
+        with self._progress_lock:
+            self._last_progress_key = None
+            self._desired_visible = True
+            self._desired_value = 0.0
+            self._desired_label = task_name or "处理中..."
 
         def _update() -> None:
-            container.visible = True
-
-            if task_name:
-                progress_label.value = task_name
-            else:
-                progress_label.value = "处理中..."
-
-            progress_bar.set_value(0.0)
-            self.page.update()
+            self._apply_desired_state()
 
         self._update_ui_safe(_update)
 
@@ -144,12 +169,14 @@ class ProgressManager:
         progress_label = self._progress_label
         if container is None or progress_bar is None or progress_label is None:
             return
+        with self._progress_lock:
+            self._last_progress_key = None
+            self._desired_visible = False
+            self._desired_value = 0.0
+            self._desired_label = self._translate("top_bar.ready", "就绪")
 
         def _update() -> None:
-            container.visible = False
-            progress_label.value = self._translate("top_bar.ready", "就绪")
-            progress_bar.set_value(0.0)
-            self.page.update()
+            self._apply_desired_state()
 
         self._update_ui_safe(_update)
 
@@ -165,20 +192,22 @@ class ProgressManager:
         progress_label = self._progress_label
         if container is None or progress_bar is None or progress_label is None:
             return
+        percent = max(0, min(100, int(value * 100)))
+        with self._progress_lock:
+            key = (task_name, percent)
+            if key == self._last_progress_key:
+                return
+            self._last_progress_key = key
+            self._desired_visible = True
+            self._desired_value = value
+            self._desired_label = (
+                f"{task_name} {int(value * 100)}%"
+                if 0 <= value <= 1.0
+                else task_name
+            )
 
         def _update() -> None:
-            # 确保进度条可见
-            if not container.visible:
-                container.visible = True
-
-            # 设置任务名称和进度
-            if value >= 0 and value <= 1.0:
-                progress_label.value = f"{task_name} {int(value * 100)}%"
-            else:
-                progress_label.value = task_name
-
-            progress_bar.set_value(value)
-            self.page.update()
+            self._apply_desired_state()
 
         self._update_ui_safe(_update)
 
@@ -192,14 +221,13 @@ class ProgressManager:
         progress_label = self._progress_label
         if container is None or progress_label is None:
             return
+        with self._progress_lock:
+            self._last_progress_key = None
+            self._desired_visible = True
+            self._desired_label = text
 
         def _update() -> None:
-            # 确保进度条可见
-            if not container.visible:
-                container.visible = True
-
-            progress_label.value = text
-            self.page.update()
+            self._apply_desired_state()
 
         self._update_ui_safe(_update)
 
@@ -212,9 +240,18 @@ class ProgressManager:
         progress_bar = self._progress_bar
         if progress_bar is None:
             return
+        with self._progress_lock:
+            self._last_progress_key = None
+            self._desired_value = value
 
         def _update() -> None:
-            progress_bar.set_value(value)
-            self.page.update()
+            self._apply_desired_state()
 
         self._update_ui_safe(_update)
+
+    def _refresh_container(self, control: ft.Control) -> None:
+        """Refresh only the progress subtree; fake/unmounted pages use fallback."""
+        try:
+            control.update()
+        except (RuntimeError, AttributeError):
+            self.page.update()

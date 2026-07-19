@@ -2,15 +2,18 @@
 from __future__ import annotations
 
 import io
+import mmap
 import struct
 import zlib
+from pathlib import Path
 
 import nbtlib
 import pytest
 
-from core.mca import ChunkMissing, CorruptChunk, RegionFile
+from core.mca import ChunkMissing, CorruptChunk, NativeRegion, RegionFile
 from core.mca.format import (
     COMPRESSION_ZLIB,
+    EXTERNAL_CHUNK_STREAM_FLAG,
     HEADER_SIZE,
     SECTOR_SIZE,
 )
@@ -55,6 +58,18 @@ def _build_region_with_chunk(
     header[b_off : b_off + 3] = sector_offset.to_bytes(3, "big")
     header[b_off + 3] = data_sectors
 
+    return bytes(header) + payload
+
+
+def _build_region_with_external_chunk(local_cx: int, local_cz: int) -> bytes:
+    marker = EXTERNAL_CHUNK_STREAM_FLAG | COMPRESSION_ZLIB
+    chunk_record = struct.pack(">I", 1) + bytes([marker])
+    payload = chunk_record + b"\x00" * (SECTOR_SIZE - len(chunk_record))
+    header = bytearray(HEADER_SIZE)
+    index = local_chunk_index(local_cx, local_cz)
+    b_off = index * 4
+    header[b_off : b_off + 3] = (2).to_bytes(3, "big")
+    header[b_off + 3] = 1
     return bytes(header) + payload
 
 
@@ -135,6 +150,71 @@ class TestRegionFileSynthetic:
             assert rf.has_chunk(0, 0)
         with pytest.raises(Exception):
             rf.has_chunk(0, 0)
+
+    def test_open_uses_read_only_mmap(self, tmp_path: Path, monkeypatch) -> None:
+        path = tmp_path / "r.0.0.mca"
+        path.write_bytes(_build_region_with_chunk(0, 0, _build_minimal_chunk_nbt()))
+
+        def reject_read_bytes(self: Path) -> bytes:
+            raise AssertionError(f"unexpected full-file read: {self}")
+
+        monkeypatch.setattr(Path, "read_bytes", reject_read_bytes)
+        with RegionFile.open(path) as region:
+            assert isinstance(region._data, mmap.mmap)
+            assert int(region.read_chunk(0, 0)["DataVersion"]) == 3463
+
+        assert region._data == b""
+
+    def test_reads_standard_external_mcc_chunk(self, tmp_path: Path) -> None:
+        local_cx, local_cz = 31, 3
+        region_path = tmp_path / "r.-1.2.mca"
+        region_path.write_bytes(
+            _build_region_with_external_chunk(local_cx, local_cz)
+        )
+        external_path = tmp_path / "c.-1.67.mcc"
+        external_path.write_bytes(
+            zlib.compress(_build_minimal_chunk_nbt(x=-1, z=67))
+        )
+
+        with RegionFile.open(region_path) as region:
+            assert region.external_chunk_path(local_cx, local_cz) == external_path
+            chunk = region.read_chunk(local_cx, local_cz)
+
+        assert int(chunk["xPos"]) == -1
+        assert int(chunk["zPos"]) == 67
+
+        with RegionFile.open(region_path) as region:
+            assert region.has_external_chunks() is True
+            first_signature = region.external_chunk_signature([(local_cx, local_cz)])
+        external_path.write_bytes(
+            zlib.compress(_build_minimal_chunk_nbt(x=-1, z=67) + b"changed")
+        )
+        with RegionFile.open(region_path) as region:
+            assert region.external_chunk_signature([(local_cx, local_cz)]) != first_signature
+
+    def test_native_region_iterates_only_present_chunks(self, tmp_path: Path) -> None:
+        region_path = tmp_path / "r.-2.3.mca"
+        region_path.write_bytes(
+            _build_region_with_chunk(1, 4, _build_minimal_chunk_nbt(x=1, z=4))
+        )
+
+        with NativeRegion.from_file(region_path) as region:
+            assert list(region.iter_present_chunks()) == [(1, 4)]
+            chunks = list(region.iter_chunks())
+
+        assert [(cx, cz) for cx, cz, _chunk in chunks] == [(1, 4)]
+        assert chunks[0][2] is not None
+
+    def test_missing_external_mcc_isolated_as_corrupt_chunk(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        region_path = tmp_path / "r.0.0.mca"
+        region_path.write_bytes(_build_region_with_external_chunk(1, 2))
+
+        with RegionFile.open(region_path) as region:
+            with pytest.raises(CorruptChunk, match="external chunk"):
+                region.read_chunk_raw(1, 2)
 
 
 def test_decompression_has_output_limit(monkeypatch) -> None:

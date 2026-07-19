@@ -210,26 +210,33 @@ class MapExportRenderer:
         scale: int,
     ) -> int:
         rendered_chunks = 0
-        for chunk_x in range(32):
-            for chunk_z in range(32):
-                try:
-                    chunk = region.get_chunk(chunk_x, chunk_z)
-                    if chunk is not None:
-                        self._render_chunk(
-                            image,
-                            chunk,
-                            region_x,
-                            region_z,
-                            chunk_x,
-                            chunk_z,
-                            bounds,
-                            map_type,
-                            scale,
-                            pixels,
-                        )
-                        rendered_chunks += 1
-                except Exception:
-                    continue
+        try:
+            coordinates = region.iter_present_chunks()
+        except AttributeError:
+            coordinates = (
+                (chunk_x, chunk_z)
+                for chunk_x in range(32)
+                for chunk_z in range(32)
+            )
+        for chunk_x, chunk_z in coordinates:
+            try:
+                chunk = region.get_chunk(chunk_x, chunk_z)
+                if chunk is not None:
+                    self._render_chunk(
+                        image,
+                        chunk,
+                        region_x,
+                        region_z,
+                        chunk_x,
+                        chunk_z,
+                        bounds,
+                        map_type,
+                        scale,
+                        pixels,
+                    )
+                    rendered_chunks += 1
+            except Exception:
+                continue
         return rendered_chunks
 
     @staticmethod

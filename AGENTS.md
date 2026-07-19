@@ -71,6 +71,17 @@ Core Layer (core/)
 - **Service Layer**: Business logic for save operations, NBT parsing, region analysis, entity/block search, etc. Services typically return dataclass results and accept log/progress callbacks.
 - **Core Layer**: Low-level utilities for UUID conversion, NBT operations, region file handling, logging, and i18n.
 
+### Native MCA Reader
+
+- MCA region access is implemented in-house under `core/mca/` through
+  `RegionFile`, `NativeRegion`, the chunk codec, and related adapters.
+- Do not import, restore, or add `anvil-parser`, `anvil-parser2`, or the
+  `anvil` Python package for region reads. Extend `core/mca/` when a Minecraft
+  region format or compression variant needs support.
+- `RegionFile.open()` uses read-only memory mapping and supports standard
+  external oversized chunk streams (`c.<x>.<z>.mcc`). Keep reads bounded at
+  the individual chunk compression/decompression boundary, not by MCA size.
+
 ### Key Design Patterns
 
 **View + Service + Test Pattern**: When adding new features, create:
@@ -111,7 +122,7 @@ to `main.py`; compatibility belongs at the component or adapter boundary.
 ### Type Checking Configuration
 
 - **mypy** (pyproject.toml): Strict mode enabled with specific overrides
-  - External libraries (`nbtlib`, `anvil`, `flet`, `requests`) ignore missing imports
+  - External libraries (`nbtlib`, `flet`, `requests`) ignore missing imports
   - Many internal modules have `ignore_errors = true` due to incomplete type annotations
 - **pyright** (pyrightconfig.json): Basic type checking mode
 - **flake8** (.flake8): Max line length 100, complexity 15, ignores E203/W503
@@ -188,7 +199,7 @@ class MyService:
 Core dependencies (requirements.txt):
 - `flet>=0.84.0` and `flet-desktop>=0.84.0` - GUI framework
 - `nbtlib` - NBT data parsing
-- `anvil-parser2` - Minecraft region file parsing
+- `core/mca/` - Project-owned MCA and external MCC region parsing
 - `psutil` - Performance monitoring
 - `Pillow` - Image processing
 - `send2trash` - Safe file deletion
@@ -197,7 +208,10 @@ Core dependencies (requirements.txt):
 
 ## Working with NBT Data
 
-This project uses `nbtlib` for NBT manipulation and `anvil-parser2` for region file access. Core utilities in `core/nbt_utils.py` and `core/omni/` provide higher-level abstractions.
+This project uses `nbtlib` for NBT manipulation and the project-owned
+`core/mca/` implementation for `.mca`/`.mcc` region access. Do not introduce
+`anvil-parser` or `anvil-parser2`. Core utilities in `core/nbt_utils.py` and
+`core/omni/` provide higher-level abstractions.
 
 The `WorldSession` class (`core/omni/world_session.py`) provides the main interface for accessing world data (level.dat, player data, region files).
 

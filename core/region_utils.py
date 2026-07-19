@@ -51,6 +51,23 @@ def scan_region_dir(region_dir: Path) -> List[Path]:
     return sorted(files)
 
 
+def has_region_file(region_dir: Path) -> bool:
+    """Return whether a directory contains at least one valid MCA file.
+
+    Dimension discovery only needs an existence check; avoid materializing and
+    sorting every region path before the caller performs the actual scan.
+    """
+    if not region_dir.is_dir():
+        return False
+    try:
+        return any(
+            path.is_file() and parse_region_coords(path) is not None
+            for path in region_dir.iterdir()
+        )
+    except OSError:
+        return False
+
+
 def _iter_directories(parent: Path) -> List[Path]:
     if not parent.is_dir():
         return []
@@ -71,7 +88,7 @@ def discover_dimension_region_dirs(
     seen: set[str] = set()
 
     def add(dim_id: str, name: str, region_dir: Path) -> None:
-        if dim_id in seen or not scan_region_dir(region_dir):
+        if dim_id in seen or not has_region_file(region_dir):
             return
         dimensions.append(DimensionRegionDirectory(dim_id, name, region_dir))
         seen.add(dim_id)

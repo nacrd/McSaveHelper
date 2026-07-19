@@ -1,6 +1,6 @@
 """Floating log panel component — 可拖拽移动的悬浮球日志面板"""
 import threading
-import time
+from collections import deque
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
@@ -36,6 +36,7 @@ class FloatingLogPanel(ft.Container):
 
     DEFAULT_WIDTH = 380
     DEFAULT_HEIGHT = 280
+    MAX_LINES = 300
     STORAGE_KEY = "floating_log_panel_position"
 
     def __init__(self, page: ft.Page, title: str = "日志") -> None:
@@ -47,6 +48,13 @@ class FloatingLogPanel(ft.Container):
         self._offset_top = 200.0
         self._drag = DragTracker()
         self._position_store = SharedPositionStore(page, self.STORAGE_KEY)
+        self._pending_logs: deque[tuple[str, str]] = deque(
+            maxlen=self.MAX_LINES
+        )
+        self._log_lock = threading.Lock()
+        self._flush_timer: threading.Timer | None = None
+        self._log_flush_scheduled = False
+        self._flush_generation = 0
 
         # 创建日志列表（使用ListView以获得更好的滚动体验）
         self._log_col = ft.ListView(
@@ -266,6 +274,7 @@ class FloatingLogPanel(ft.Container):
         try:
             self.visible = True
             self._expanded = True
+            self._flush_pending_ui(refresh=False)
             self.update()
         except Exception:
             pass
@@ -273,12 +282,18 @@ class FloatingLogPanel(ft.Container):
     def _collapse(self) -> None:
         """收起面板"""
         try:
-            # 清理定时器
-            if hasattr(self, '_flush_timer') and self._flush_timer is not None:
-                self._flush_timer.cancel()
-                self._flush_timer = None
-
+            # Mark hidden before touching the timer so a queued UI callback
+            # observes the hidden state and leaves pending messages queued.
             self.visible = False
+            # 清理定时器
+            with self._log_lock:
+                timer = self._flush_timer
+                self._flush_timer = None
+                self._log_flush_scheduled = False
+                self._flush_generation += 1
+            if timer is not None:
+                timer.cancel()
+
             self._expanded = False
             self._save_position()
             self._page.update()
@@ -288,10 +303,11 @@ class FloatingLogPanel(ft.Container):
     def _clear(self) -> None:
         """清除日志"""
         try:
+            with self._log_lock:
+                self._pending_logs.clear()
             self._log_col.controls.clear()
             self._status_text.value = ""
-            self._log_col.update()
-            self._status_text.update()
+            self.update()
         except Exception:
             pass
 
@@ -301,74 +317,107 @@ class FloatingLogPanel(ft.Container):
         if _is_app_closing():
             return
 
-        try:
-            color_map = {
-                "info": THEME.text_primary,
-                "success": THEME.terminal_green,
-                "warn": THEME.terminal_yellow,
-                "error": THEME.terminal_red,
-                "api": THEME.terminal_blue,
-                "timestamp": THEME.text_muted,
-                "header": THEME.accent,
-                "separator": THEME.border_standard,
-            }
-            self._log_col.controls.append(
-                ft.Text(
-                    message,
-                    color=color_map.get(level, THEME.text_primary),
-                    size=11,
-                    font_family="monospace",
-                )
-            )
-            # 限制日志行数
-            max_lines = 300  # 进一步降低最大行数
-            while len(self._log_col.controls) > max_lines:
-                self._log_col.controls.pop(0)
-            # 更新计数
-            self._status_text.value = f"({len(self._log_col.controls)})"
-
-            # 优化：使用单个定时器，避免创建多个 Timer
-            if self.visible:
-                now = time.monotonic()
-                last = getattr(self, '_last_log_update', 0.0)
-
-                if (now - last) >= 0.3:  # 增加更新间隔到 0.3 秒
-                    self._last_log_update = now
-                    self._schedule_flush()
-                elif not hasattr(self, '_log_flush_scheduled') or not self._log_flush_scheduled:
-                    self._log_flush_scheduled = True
-                    self._schedule_flush()
-        except Exception:
-            pass
+        should_schedule = False
+        with self._log_lock:
+            self._pending_logs.append((message, level))
+            if self.visible and not self._log_flush_scheduled:
+                self._log_flush_scheduled = True
+                should_schedule = True
+        if should_schedule:
+            self._schedule_flush()
 
     def _schedule_flush(self) -> None:
         """延迟刷新 UI，避免频繁更新"""
-        if not hasattr(self, '_flush_timer') or self._flush_timer is None:
-            def _flush_ui():
-                try:
-                    if self.visible:
-                        self.update()
-                        if self._auto_scroll:
-                            self._scroll_to_end()
-                except Exception:
-                    pass
-                self._log_flush_scheduled = False
-                self._last_log_update = time.monotonic()
+        with self._log_lock:
+            if (
+                self._flush_timer is not None
+                or not self.visible
+                or not self._log_flush_scheduled
+            ):
+                return
+            self._flush_generation += 1
+            generation = self._flush_generation
+
+            def _flush() -> None:
+                run_on_ui(
+                    self._page,
+                    self._flush_pending_ui,
+                    generation=generation,
+                )
+
+            timer = threading.Timer(0.3, _flush)
+            timer.daemon = True
+            self._flush_timer = timer
+        timer.start()
+
+    def _flush_pending_ui(
+        self,
+        *,
+        refresh: bool = True,
+        generation: int | None = None,
+    ) -> None:
+        """Create controls for a pending batch on the UI event loop."""
+        with self._log_lock:
+            if generation is not None and generation != self._flush_generation:
+                return
+            if not self.visible:
+                # The timer can race with collapse/set_visible(False).  Do not
+                # allocate Flet controls for a hidden panel; the next expand
+                # will drain this plain-text queue on the UI thread.
                 self._flush_timer = None
+                self._log_flush_scheduled = False
+                return
+            batch = list(self._pending_logs)
+            self._pending_logs.clear()
+            self._flush_timer = None
+            self._log_flush_scheduled = False
+        if not batch:
+            return
 
-            def _flush():
-                run_on_ui(self._page, _flush_ui)
-
-            self._flush_timer = threading.Timer(0.3, _flush)
-            self._flush_timer.daemon = True
-            self._flush_timer.start()
+        color_map = {
+            "info": THEME.text_primary,
+            "success": THEME.terminal_green,
+            "warn": THEME.terminal_yellow,
+            "error": THEME.terminal_red,
+            "api": THEME.terminal_blue,
+            "timestamp": THEME.text_muted,
+            "header": THEME.accent,
+            "separator": THEME.border_standard,
+        }
+        self._log_col.controls.extend(
+            ft.Text(
+                message,
+                color=color_map.get(level, THEME.text_primary),
+                size=11,
+                font_family="monospace",
+            )
+            for message, level in batch
+        )
+        del self._log_col.controls[:-self.MAX_LINES]
+        self._status_text.value = f"({len(self._log_col.controls)})"
+        if refresh and self.visible:
+            self.update()
+            if self._auto_scroll:
+                self._scroll_to_end()
 
     def set_visible(self, visible: bool) -> None:
         """设置可见性"""
         try:
-            self.visible = visible
+            timer = None
+            if not visible:
+                self.visible = False
+                with self._log_lock:
+                    timer = self._flush_timer
+                    self._flush_timer = None
+                    self._log_flush_scheduled = False
+                    self._flush_generation += 1
+                if timer is not None:
+                    timer.cancel()
+            else:
+                self.visible = True
             if visible:
                 self._expanded = True
+                self._flush_pending_ui(refresh=False)
             self._page.update()
         except Exception:
             pass

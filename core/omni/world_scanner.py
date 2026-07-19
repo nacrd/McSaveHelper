@@ -6,7 +6,10 @@ WorldScanner - 存档文件扫描器
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Set, Callable
-from ..region_utils import discover_dimension_region_dirs
+from ..region_utils import (
+    DimensionRegionDirectory,
+    discover_dimension_region_dirs,
+)
 from ..scanner import scan_all_regions
 from ..utils import find_player_data_dirs, find_data_dirs
 
@@ -17,6 +20,7 @@ class WorldScanner:
     def __init__(self, world_path: Path, log_callback: Optional[Callable] = None):
         self.world_path = world_path
         self._log = log_callback or (lambda msg, lvl="INFO": None)
+        self._dimensions: Optional[List[DimensionRegionDirectory]] = None
 
     def scan_all(self) -> Dict[str, Any]:
         """扫描所有文件并返回扫描结果
@@ -68,7 +72,10 @@ class WorldScanner:
             (x, z) -> 文件路径的映射
         """
         region_files: Dict[object, Path] = {}
-        all_regions = scan_all_regions(self.world_path)
+        all_regions = scan_all_regions(
+            self.world_path,
+            (dimension.region_dir for dimension in self._get_dimensions()),
+        )
 
         for f in all_regions:
             # 解析文件名 r.x.z.mca
@@ -202,10 +209,16 @@ class WorldScanner:
                 "name": dimension.name,
                 "region_dir": str(dimension.region_dir),
             }
-            for dimension in discover_dimension_region_dirs(self.world_path)
+            for dimension in self._get_dimensions()
         ]
         self._log(f"发现 {len(dimensions)} 个维度", "SCAN")
         return dimensions
+
+    def _get_dimensions(self) -> List[DimensionRegionDirectory]:
+        """Discover dimension directories once for this immutable scan session."""
+        if self._dimensions is None:
+            self._dimensions = discover_dimension_region_dirs(self.world_path)
+        return list(self._dimensions)
 
     @staticmethod
     def _normalize_uuid(uuid: str) -> str:

@@ -14,7 +14,7 @@ from typing import Any, Dict, Optional, Sequence, Union
 
 PathLike = Union[str, Path]
 
-ALGO_VERSION = "v6-chunk-lru"
+ALGO_VERSION = "v8-native-surface-sampling"
 
 _CACHE_DIR: Optional[Path] = None
 _LOCK = threading.Lock()

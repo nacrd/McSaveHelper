@@ -101,6 +101,28 @@ def test_entity_search_multi_target():
     assert results[1].name == "minecraft:cow"
 
 
+def test_region_search_reads_only_present_chunks_in_stable_order():
+    results = []
+    summary = SearchSummary()
+    searcher = EntitySearcher(results, summary)
+    calls = []
+
+    class Region:
+        @staticmethod
+        def iter_present_chunks():
+            return iter([(1, 0), (0, 2)])
+
+        @staticmethod
+        def get_chunk(cx, cz):
+            calls.append((cx, cz))
+            return MockChunk({})
+
+    searcher._scan_region(Region(), "*", "overworld")
+
+    assert calls == [(0, 2), (1, 0)]
+    assert summary.scanned_chunks == 2
+
+
 # ==================== 容器搜索测试 ====================
 
 def test_container_search_chunk_extracts_items():

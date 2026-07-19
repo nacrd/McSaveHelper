@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark native MCA read path (and optional anvil comparison).
+"""Benchmark the project-owned native MCA read path.
 
 Examples
 --------
@@ -16,17 +16,17 @@ import sys
 import time
 import zlib
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import nbtlib
+import nbtlib  # noqa: E402
 
-from core.mca import RegionFile
-from core.mca.format import COMPRESSION_ZLIB, HEADER_SIZE, SECTOR_SIZE
-from core.mca.region_file import local_chunk_index
+from core.mca import RegionFile  # noqa: E402
+from core.mca.format import COMPRESSION_ZLIB, HEADER_SIZE, SECTOR_SIZE  # noqa: E402
+from core.mca.region_file import local_chunk_index  # noqa: E402
 
 
 def _ms(seconds: float) -> float:
@@ -68,24 +68,6 @@ def _time_reads(rf: RegionFile, coords: List[Tuple[int, int]], loops: int) -> Li
     return samples
 
 
-def _try_anvil_read(path: Path, coords: List[Tuple[int, int]], loops: int) -> Optional[List[float]]:
-    try:
-        import anvil
-    except ImportError:
-        return None
-    samples: List[float] = []
-    for _ in range(loops):
-        t0 = time.perf_counter()
-        region = anvil.Region.from_file(str(path))
-        for cx, cz in coords:
-            try:
-                region.get_chunk(cx, cz)
-            except Exception:
-                pass
-        samples.append(time.perf_counter() - t0)
-    return samples
-
-
 def _summary(name: str, samples: List[float], n_ops: int) -> None:
     xs = [_ms(s) for s in samples]
     print(
@@ -119,11 +101,6 @@ def main() -> int:
         samples = _time_reads(rf, coords, args.loops)
         _summary("native read batch", samples, len(coords))
 
-        anvil_samples = _try_anvil_read(path, coords, args.loops)
-        if anvil_samples:
-            _summary("anvil  read batch", anvil_samples, len(coords))
-        else:
-            print("  anvil: not available (skip comparison)")
         rf.close()
     else:
         print("file: <synthetic in-memory region>")

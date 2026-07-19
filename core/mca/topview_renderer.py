@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 try:
     from PIL import Image
@@ -133,15 +134,6 @@ def _color_for_block_name(name: str) -> Tuple[int, int, int]:
         return (128, 128, 128)
 
 
-def _color_for_block(block: Any) -> Tuple[int, int, int]:
-    """Back-compat for callers that still pass anvil Block-like objects."""
-    try:
-        name = block.name() if hasattr(block, "name") else str(getattr(block, "id", block))
-        return _color_for_block_name(str(name))
-    except Exception:
-        return (128, 128, 128)
-
-
 Color = Tuple[int, int, int]
 ColorGrid = List[List[Color]]
 
@@ -155,19 +147,60 @@ def _load_cached_tile(region_path: Path, tile_size: int) -> Optional[bytes]:
         return None
 
 
+@lru_cache(maxsize=4096)
+def _uses_external_streams_cached(
+    path: str,
+    _mtime_ns: int,
+    _size: int,
+) -> bool:
+    try:
+        from core.mca.region_file import RegionFile
+
+        with RegionFile.open(path) as region:
+            return region.has_external_chunks()
+    except Exception:
+        return False
+
+
+def _uses_external_streams(region_path: Path) -> bool:
+    """External MCC payloads bypass the disk PNG cache for freshness."""
+    try:
+        stat = region_path.stat()
+        return _uses_external_streams_cached(
+            str(region_path.resolve()),
+            stat.st_mtime_ns,
+            stat.st_size,
+        )
+    except OSError:
+        return False
+
+
 def _sample_surface_grid(
     region_path: Path,
     tile_size: int,
+    *,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    decode_workers: Optional[int] = None,
+    status_out: Optional[List[bool]] = None,
 ) -> Optional[ColorGrid]:
     try:
         from core.mca.surface import sample_region_surface_colors
 
-        return sample_region_surface_colors(
+        failed_chunks: set[Tuple[int, int]] = set()
+        grid = sample_region_surface_colors(
             region_path,
             tile_size=tile_size,
             color_for_block=_color_for_block_name,
+            cancel_check=cancel_check,
+            decode_workers=decode_workers,
+            failed_chunks=failed_chunks,
         )
+        if status_out is not None:
+            status_out.append(grid is not None and not failed_chunks)
+        return grid
     except Exception:
+        if status_out is not None:
+            status_out.append(False)
         return None
 
 
@@ -211,6 +244,9 @@ def render_region_topview(
     tile_size: int = DEFAULT_TILE_SIZE,
     *,
     use_disk_cache: bool = True,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    decode_workers: Optional[int] = None,
+    status_out: Optional[List[bool]] = None,
 ) -> Optional[bytes]:
     """Render one MCA region to PNG bytes (RGB) via core.mca."""
     if not PIL_AVAILABLE:
@@ -220,21 +256,41 @@ def render_region_topview(
     if not region_path.is_file():
         return None
 
-    tile_size = max(8, min(256, int(tile_size)))
+    if cancel_check is not None and cancel_check():
+        return None
 
-    if use_disk_cache:
+    tile_size = max(8, min(256, int(tile_size)))
+    render_status = status_out if status_out is not None else []
+
+    cache_allowed = use_disk_cache and not _uses_external_streams(region_path)
+    if cache_allowed:
         cached = _load_cached_tile(region_path, tile_size)
         if cached:
+            if cancel_check is not None and cancel_check():
+                return None
+            render_status.append(True)
             return cached
 
-    grid = _sample_surface_grid(region_path, tile_size)
+    grid = _sample_surface_grid(
+        region_path,
+        tile_size,
+        cancel_check=cancel_check,
+        decode_workers=decode_workers,
+        status_out=render_status,
+    )
     if grid is None:
+        return None
+
+    if cancel_check is not None and cancel_check():
         return None
 
     png = _encode_png(grid, tile_size)
     if png is None:
         return None
-    if use_disk_cache and png:
+    if cancel_check is not None and cancel_check():
+        return None
+    complete = bool(render_status and render_status[-1])
+    if cache_allowed and png and complete:
         _store_cached_tile(region_path, tile_size, png)
     return png
 

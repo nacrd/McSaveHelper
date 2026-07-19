@@ -87,21 +87,37 @@ class WorldStatsService:
 
                     from core.mca import NativeRegion
                     with NativeRegion.from_file(region_path) as region:
-                        for x in range(32):
-                            for z in range(32):
-                                try:
-                                    chunk = region.get_chunk(x, z)
-                                    if chunk is not None:
-                                        stats.total_chunks += 1
-                                        stats.loaded_chunks += 1
+                        present = None
+                        try:
+                            present = list(region.iter_present_chunks())
+                        except AttributeError:
+                            # Keep compatibility with test doubles and older
+                            # adapters that only expose get_chunk().
+                            pass
+                        if present is not None:
+                            stats.empty_chunks += max(0, 1024 - len(present))
+                            coordinates = present
+                        else:
+                            coordinates = [
+                                (x, z)
+                                for x in range(32)
+                                for z in range(32)
+                            ]
+                        for x, z in coordinates:
+                            try:
+                                chunk = region.get_chunk(x, z)
+                                if chunk is not None:
+                                    stats.total_chunks += 1
+                                    stats.loaded_chunks += 1
 
-                                        chunk_blocks, chunk_entities = self._analyze_chunk(
-                                            chunk)
-                                        block_counter.update(chunk_blocks)
-                                        entity_counter.update(chunk_entities)
-                                    else:
-                                        stats.empty_chunks += 1
-                                except Exception:
+                                    chunk_blocks, chunk_entities = self._analyze_chunk(
+                                        chunk)
+                                    block_counter.update(chunk_blocks)
+                                    entity_counter.update(chunk_entities)
+                                elif present is None:
+                                    stats.empty_chunks += 1
+                            except Exception:
+                                if present is None:
                                     stats.empty_chunks += 1
 
                     if progress_callback:
@@ -187,14 +203,9 @@ class WorldStatsService:
 
         counter: Counter[str] = Counter()
         blocks = ChunkBlocks(data)
-        for section_y in blocks.section_ys_desc:
-            y_base = section_y * 16
-            for local_y in range(16):
-                for z in range(16):
-                    for x in range(16):
-                        block_id = blocks.block_id_at(x, y_base + local_y, z)
-                        if block_id and block_id not in self.AIR_BLOCKS:
-                            counter[block_id] += 1
+        for block_id, count in blocks.count_block_ids().items():
+            if block_id and block_id not in self.AIR_BLOCKS:
+                counter[block_id] += count
         return counter
 
     @staticmethod

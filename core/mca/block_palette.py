@@ -1,6 +1,7 @@
 """Section palette + bit-packed block state access with lazy section parse."""
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.mca.heightmaps import (
@@ -23,6 +24,8 @@ _AIR_NAMES = frozenset({
     "minecraft:air", "minecraft:cave_air", "minecraft:void_air",
     "air", "cave_air", "void_air",
 })
+_AIR_BLOCK_ID = "minecraft:air"
+_SECTION_BLOCK_COUNT = 16 * 16 * 16
 
 
 def is_air_name(name: Optional[str]) -> bool:
@@ -123,6 +126,141 @@ class _SectionData:
         self.legacy_blocks = legacy_blocks
 
 
+def _count_legacy_blocks(legacy_blocks: List[int]) -> Counter[str]:
+    """Count one legacy section, padding a short Blocks array with air."""
+    counter: Counter[str] = Counter()
+    try:
+        valid_count = min(len(legacy_blocks), _SECTION_BLOCK_COUNT)
+    except Exception:
+        valid_count = 0
+    for index in range(valid_count):
+        try:
+            block_id = f"legacy:{legacy_blocks[index]}"
+        except Exception:
+            block_id = _AIR_BLOCK_ID
+        counter[block_id] += 1
+    missing_count = _SECTION_BLOCK_COUNT - valid_count
+    if missing_count:
+        counter[_AIR_BLOCK_ID] += missing_count
+    return counter
+
+
+def _count_compact_palette_indices(
+    words: List[int],
+    bits: int,
+    palette_len: int,
+) -> Tuple[List[int], int]:
+    counts = [0] * palette_len
+    invalid = 0
+    decoded = 0
+    mask = (1 << bits) - 1
+    values_per_long = 64 // bits
+    if values_per_long <= 0:
+        counts[0] = _SECTION_BLOCK_COUNT
+        return counts, invalid
+    for word in words:
+        take = min(values_per_long, _SECTION_BLOCK_COUNT - decoded)
+        for _ in range(take):
+            palette_index = word & mask
+            if palette_index < palette_len:
+                counts[palette_index] += 1
+            else:
+                invalid += 1
+            word >>= bits
+        decoded += take
+        if decoded >= _SECTION_BLOCK_COUNT:
+            break
+    counts[0] += _SECTION_BLOCK_COUNT - decoded
+    return counts, invalid
+
+
+def _count_stretched_palette_indices(
+    words: List[int],
+    bits: int,
+    palette_len: int,
+) -> Tuple[List[int], int]:
+    counts = [0] * palette_len
+    invalid = 0
+    decoded = 0
+    mask = (1 << bits) - 1
+    buffer = 0
+    available = 0
+    for word in words:
+        buffer |= word << available
+        available += 64
+        while available >= bits and decoded < _SECTION_BLOCK_COUNT:
+            palette_index = buffer & mask
+            if palette_index < palette_len:
+                counts[palette_index] += 1
+            else:
+                invalid += 1
+            buffer >>= bits
+            available -= bits
+            decoded += 1
+        if decoded >= _SECTION_BLOCK_COUNT:
+            break
+    # The point reader preserves low bits when a stretched value crosses past
+    # a truncated final long, treating only the missing high bits as zero.
+    if decoded < _SECTION_BLOCK_COUNT and available > 0:
+        palette_index = buffer & mask
+        if palette_index < palette_len:
+            counts[palette_index] += 1
+        else:
+            invalid += 1
+        decoded += 1
+    counts[0] += _SECTION_BLOCK_COUNT - decoded
+    return counts, invalid
+
+
+def _count_packed_blocks(section: _SectionData) -> Counter[str]:
+    """Count packed entries while retaining point-read fallback behavior."""
+    data = section.data
+    assert data is not None
+    palette = section.palette
+    palette_len = len(palette)
+    try:
+        words = [int(word) & ((1 << 64) - 1) for word in data]
+    except Exception:
+        words = []
+
+    if not words or section.bits <= 0:
+        counts = [_SECTION_BLOCK_COUNT] + [0] * (palette_len - 1)
+        invalid = 0
+    elif section.stretch:
+        counts, invalid = _count_stretched_palette_indices(
+            words,
+            section.bits,
+            palette_len,
+        )
+    else:
+        counts, invalid = _count_compact_palette_indices(
+            words,
+            section.bits,
+            palette_len,
+        )
+
+    counter: Counter[str] = Counter()
+    for palette_index, count in enumerate(counts):
+        if count:
+            counter[palette[palette_index]] += count
+    if invalid:
+        counter[_AIR_BLOCK_ID] += invalid
+    return counter
+
+
+def _count_section_block_ids(section: _SectionData) -> Counter[str]:
+    """Count one parsed section using ``block_id_at``'s established rules."""
+    if section.legacy_blocks is not None:
+        return _count_legacy_blocks(section.legacy_blocks)
+
+    palette = section.palette
+    if not palette:
+        return Counter({_AIR_BLOCK_ID: _SECTION_BLOCK_COUNT})
+    if len(palette) == 1 or section.data is None:
+        return Counter({palette[0]: _SECTION_BLOCK_COUNT})
+    return _count_packed_blocks(section)
+
+
 class ChunkBlocks:
     """Parsed chunk view with lazy section decoding for topview speed."""
 
@@ -208,7 +346,25 @@ class ChunkBlocks:
             return sec.palette[0]
         if 0 <= pi < len(sec.palette):
             return sec.palette[pi]
-        return "minecraft:air"
+        return _AIR_BLOCK_ID
+
+    def count_block_ids(self) -> Counter[str]:
+        """Count block IDs in every stored section.
+
+        The result intentionally includes air entries.  Callers that report
+        placed blocks can filter them afterwards, while this method remains
+        equivalent to querying ``block_id_at`` for all 4096 positions in each
+        section.  Packed data is decoded through the same helper as point
+        reads so truncated or out-of-range values retain their established
+        fallback behavior.
+        """
+        counter: Counter[str] = Counter()
+        for section_y in self.section_ys_desc:
+            sec = self._ensure_section(section_y)
+            if sec is None:
+                continue
+            counter.update(_count_section_block_ids(sec))
+        return counter
 
     def get_palette_names(self, section_y: int) -> Optional[List[str]]:
         sec = self._ensure_section(int(section_y))

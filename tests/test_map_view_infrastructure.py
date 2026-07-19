@@ -37,3 +37,39 @@ def test_rebuild_scheduler_requests_immediately_only_while_active() -> None:
     scheduler.cancel()
 
     assert calls == ["rebuild"]
+
+
+def test_tile_source_cache_evicts_by_bytes_without_changing_generation() -> None:
+    cache = TileSourceCache()
+    cache.MAX_BYTES = 12
+
+    cache.get((0, 0), generation=1, load_tile=lambda _: b"123456789")
+    cache.get((1, 0), generation=1, load_tile=lambda _: b"abcdefgh")
+
+    assert (0, 0) not in cache._sources
+    assert (1, 0) in cache._sources
+    assert cache._generation == 1
+
+
+def test_tile_source_cache_refreshes_one_coord_when_revision_changes() -> None:
+    cache = TileSourceCache()
+    payload = b"preview"
+
+    first = cache.get(
+        (1, 2),
+        generation=4,
+        version=1,
+        load_tile=lambda _coord: payload,
+    )
+    payload = b"detail"
+    detail = cache.get(
+        (1, 2),
+        generation=4,
+        version=2,
+        load_tile=lambda _coord: payload,
+    )
+
+    assert first == base64.b64encode(b"preview").decode("ascii")
+    assert detail == base64.b64encode(b"detail").decode("ascii")
+    assert detail is not None
+    assert cache._bytes == len(detail)

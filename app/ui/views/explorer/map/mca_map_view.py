@@ -253,6 +253,7 @@ class McaMapView(ft.Container):
         return self._tile_sources.get(
             coord,
             generation=self._service.get_topview_generation(),
+            version=self._service.get_topview_tile_revision(coord),
             load_tile=self._service.get_topview_tile,
         )
 

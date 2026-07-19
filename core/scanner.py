@@ -1,10 +1,13 @@
 from pathlib import Path
-from typing import List
+from typing import Iterable, List, Optional
 
 from core.region_utils import iter_region_dirs, scan_region_dir
 
 
-def scan_all_regions(world_path: Path) -> List[Path]:
+def scan_all_regions(
+    world_path: Path,
+    region_dirs: Optional[Iterable[Path]] = None,
+) -> List[Path]:
     """扫描所有区域文件
 
     直接枚举已知的 region/ 目录，而非递归搜索整个存档树。
@@ -22,7 +25,12 @@ def scan_all_regions(world_path: Path) -> List[Path]:
     with tracker.track("区域文件扫描", {"world": str(world_path)}):
         files: List[Path] = []
         total_bytes = 0
-        for region_dir in iter_region_dirs(world_path):
+        directories = (
+            iter_region_dirs(world_path)
+            if region_dirs is None
+            else region_dirs
+        )
+        for region_dir in directories:
             for f in scan_region_dir(region_dir):
                 files.append(f)
                 try:

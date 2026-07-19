@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
 from core.mca.block_palette import ChunkBlocks, get_chunk_blocks
 from core.mca.errors import ChunkMissing
@@ -114,6 +114,19 @@ class NativeRegion:
 
     def get_chunk(self, local_cx: int, local_cz: int) -> Optional[ChunkView]:
         return get_chunk(self._rf, local_cx, local_cz, self._rx, self._rz)
+
+    def iter_present_chunks(self) -> Iterable[Tuple[int, int]]:
+        """Yield coordinates whose location-table slot is populated.
+
+        This avoids probing all 1024 slots (and allocating/catching a missing
+        exception for each one) when scanning sparse modded regions.
+        """
+        return self._rf.iter_present_chunks()
+
+    def iter_chunks(self) -> Iterator[Tuple[int, int, Optional[ChunkView]]]:
+        """Yield present coordinates and their native chunk views lazily."""
+        for local_cx, local_cz in self._rf.iter_present_chunks():
+            yield local_cx, local_cz, self.get_chunk(local_cx, local_cz)
 
     def close(self) -> None:
         self._rf.close()

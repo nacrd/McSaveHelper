@@ -103,7 +103,7 @@ class McProgressBar(ft.Container):
         """
         self.set_value(new_value)
 
-    def set_value(self, value: float) -> None:
+    def set_value(self, value: float, *, refresh: bool = True) -> None:
         """Set progress value with animation
 
         Args:
@@ -113,10 +113,11 @@ class McProgressBar(ft.Container):
         self._progress_bar.value = self._value
         if self._show_percentage:
             self._percentage_text.value = self._format_percentage(self._value)
-        try:
-            self.update()
-        except Exception:
-            pass
+        if refresh:
+            try:
+                self.update()
+            except Exception:
+                pass
 
     def set_color(self, color: str) -> None:
         """Set progress bar color
