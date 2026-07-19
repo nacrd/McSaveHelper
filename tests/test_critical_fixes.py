@@ -520,7 +520,6 @@ class TestOmniNbtEditing:
     def test_world_session_serializes_chunk_record_with_length_and_zlib_type(
             self, tmp_path: Path):
         import zlib
-        from nbt import nbt
         from nbtlib import Compound, File, Int
         from core.omni.world_session import WorldSession
 
@@ -534,9 +533,7 @@ class TestOmniNbtEditing:
             Compound({"Data": Compound({"Version": Compound({"Id": Int(1)})})}))
         level.save(world / "level.dat")
 
-        chunk = nbt.NBTFile()
-        chunk.name = ""
-        chunk.tags.append(nbt.TAG_Int(name="DataVersion", value=1))
+        chunk = File({"DataVersion": Int(1)}, gzipped=False)
 
         session = WorldSession(world, log=lambda msg, level="INFO": None)
         session._executor._write_chunk(region_path, 0, 0, chunk)
