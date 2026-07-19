@@ -12,6 +12,7 @@ def test_build_commands_cover_both_distribution_modes(tmp_path: Path) -> None:
     assert "--onefile" in onefile
     assert "--standalone" in portable
     assert "--zig" in onefile
+    assert "--lto=no" in onefile
     assert "--windows-console-mode=disable" in onefile
     assert "--enable-plugins=tk-inter" in onefile
     assert any(arg.startswith("--include-data-dir=") for arg in onefile)

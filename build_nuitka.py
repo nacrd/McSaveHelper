@@ -37,6 +37,7 @@ def build_command(mode: BuildMode, output_dir: Path) -> list[str]:
         mode_option,
         "--assume-yes-for-downloads",
         "--zig",
+        "--lto=no",
         "--windows-console-mode=disable",
         f"--windows-icon-from-ico={ICON_PATH}",
         "--enable-plugins=tk-inter",

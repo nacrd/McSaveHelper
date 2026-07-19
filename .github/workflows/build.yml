@@ -161,9 +161,8 @@ jobs:
       with:
         path: ~\AppData\Local\Nuitka
         key: >-
-          ${{ runner.os }}-nuitka-${{ matrix.mode }}-${{ hashFiles('requirements.txt') }}
+          ${{ runner.os }}-nuitka-${{ hashFiles('requirements.txt', 'build_nuitka.py') }}
         restore-keys: |
-          ${{ runner.os }}-nuitka-${{ matrix.mode }}-
           ${{ runner.os }}-nuitka-
 
     - name: Install build dependencies
