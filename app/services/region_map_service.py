@@ -734,7 +734,6 @@ class RegionMapService:
         """
         png: Optional[bytes] = None
         render_complete = True
-        source_signature = ""
         source_file_size = 0
         try:
             # Skip work for superseded generations as early as possible.
@@ -768,103 +767,148 @@ class RegionMapService:
             # Topview worker boundary: keep the map session alive on render faults.
             png = None
         finally:
-            callback = None
-            upgrade_size: Optional[int] = None
-            with self._data_lock:
-                result_is_current = (
-                    generation == self._topview_generation
-                    and not cancel_event.is_set()
-                    and not self._closed
-                )
-            if result_is_current and (png is None or not render_complete):
-                source_signature = self._topview_source_signature(
-                    path,
+            self._finalize_topview_job(
+                coord=coord,
+                path=path,
+                tile_size=tile_size,
+                generation=generation,
+                cancel_event=cancel_event,
+                png=png,
+                render_complete=render_complete,
+                source_mtime_ns=source_mtime_ns,
+                source_file_size=source_file_size,
+            )
+
+    def _finalize_topview_job(
+        self,
+        *,
+        coord: Tuple[int, int],
+        path: str,
+        tile_size: int,
+        generation: int,
+        cancel_event: threading.Event,
+        png: Optional[bytes],
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+    ) -> None:
+        """Publish worker output, notify UI, and refill the queue."""
+        source_signature = ""
+        callback = None
+        upgrade_size: Optional[int] = None
+        with self._data_lock:
+            result_is_current = (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+            )
+        if result_is_current and (png is None or not render_complete):
+            source_signature = self._topview_source_signature(
+                path,
+                coord,
+                source_mtime_ns,
+                source_file_size,
+                cancel_check=cancel_event.is_set,
+            )
+        with self._data_lock:
+            if self._topview_pending.get(coord) == generation:
+                self._topview_pending.pop(coord, None)
+                self._topview_pending_sizes.pop(coord, None)
+                upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
+            self._topview_active = max(0, self._topview_active - 1)
+            if (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+                and png is not None
+            ):
+                self._store_topview_tile_locked(
                     coord,
+                    png,
+                    tile_size,
+                    render_complete,
                     source_mtime_ns,
                     source_file_size,
-                    cancel_check=cancel_event.is_set,
+                    source_signature,
                 )
-            with self._data_lock:
-                if self._topview_pending.get(coord) == generation:
-                    self._topview_pending.pop(coord, None)
-                    self._topview_pending_sizes.pop(coord, None)
-                    upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
-                self._topview_active = max(0, self._topview_active - 1)
-                if (
-                    generation == self._topview_generation
-                    and not cancel_event.is_set()
-                    and not self._closed
-                    and png is not None
-                ):
-                    if render_complete:
-                        self._clear_topview_failure_locked(coord)
-                    else:
-                        self._record_topview_failure_locked(
-                            coord,
-                            tile_size,
-                            source_mtime_ns,
-                            source_file_size,
-                            source_signature,
-                        )
-                    previous = self._topview_tiles.pop(coord, None)
-                    if previous is not None:
-                        self._topview_memory_bytes -= len(previous)
-                    self._topview_tiles[coord] = png
-                    self._topview_memory_bytes += len(png)
-                    self._topview_tile_sizes[coord] = int(tile_size)
-                    self._topview_tile_complete[coord] = render_complete
-                    self._topview_revision_counter += 1
-                    self._topview_tile_revisions[coord] = (
-                        self._topview_revision_counter
-                    )
-                    while (
-                        self._topview_memory_bytes > self.TOPVIEW_MEMORY_LIMIT
-                        and self._topview_tiles
-                    ):
-                        old_coord, old_png = self._topview_tiles.popitem(last=False)
-                        self._topview_memory_bytes -= len(old_png)
-                        self._topview_tile_sizes.pop(old_coord, None)
-                        self._topview_tile_complete.pop(old_coord, None)
-                        self._topview_tile_revisions.pop(old_coord, None)
-                    callback = self._tile_ready_callback
-                elif (
-                    generation == self._topview_generation
-                    and not cancel_event.is_set()
-                    and not self._closed
-                    and png is None
-                ):
-                    self._record_topview_failure_locked(
-                        coord,
-                        tile_size,
-                        source_mtime_ns,
-                        source_file_size,
-                        source_signature,
-                    )
-                    callback = self._tile_ready_callback
-            if callback is not None:
-                try:
-                    callback(coord)
-                except Exception:
-                    # UI callback may fail after dispose; keep worker alive.
-                    pass
-            # Fill freed worker slots.
-            try:
-                self._pump_topview_queue()
-            except (RuntimeError, ValueError, OSError):
-                pass
-            except Exception:
-                pass
-            if (
-                upgrade_size is not None
-                and upgrade_size > tile_size
-                and generation == self.get_topview_generation()
+                callback = self._tile_ready_callback
+            elif (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+                and png is None
             ):
-                self.request_topview_tiles(
-                    [coord],
-                    tile_size=upgrade_size,
-                    force=True,
-                    priority=True,
+                self._record_topview_failure_locked(
+                    coord,
+                    tile_size,
+                    source_mtime_ns,
+                    source_file_size,
+                    source_signature,
                 )
+                callback = self._tile_ready_callback
+        if callback is not None:
+            try:
+                callback(coord)
+            except Exception:
+                # UI callback may fail after dispose; keep worker alive.
+                pass
+        try:
+            self._pump_topview_queue()
+        except (RuntimeError, ValueError, OSError):
+            pass
+        except Exception:
+            pass
+        if (
+            upgrade_size is not None
+            and upgrade_size > tile_size
+            and generation == self.get_topview_generation()
+        ):
+            self.request_topview_tiles(
+                [coord],
+                tile_size=upgrade_size,
+                force=True,
+                priority=True,
+            )
+
+    def _store_topview_tile_locked(
+        self,
+        coord: Tuple[int, int],
+        png: bytes,
+        tile_size: int,
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+        source_signature: str,
+    ) -> None:
+        """Store a rendered tile and trim the in-memory cache (lock held)."""
+        if render_complete:
+            self._clear_topview_failure_locked(coord)
+        else:
+            self._record_topview_failure_locked(
+                coord,
+                tile_size,
+                source_mtime_ns,
+                source_file_size,
+                source_signature,
+            )
+        previous = self._topview_tiles.pop(coord, None)
+        if previous is not None:
+            self._topview_memory_bytes -= len(previous)
+        self._topview_tiles[coord] = png
+        self._topview_memory_bytes += len(png)
+        self._topview_tile_sizes[coord] = int(tile_size)
+        self._topview_tile_complete[coord] = render_complete
+        self._topview_revision_counter += 1
+        self._topview_tile_revisions[coord] = self._topview_revision_counter
+        while (
+            self._topview_memory_bytes > self.TOPVIEW_MEMORY_LIMIT
+            and self._topview_tiles
+        ):
+            old_coord, old_png = self._topview_tiles.popitem(last=False)
+            self._topview_memory_bytes -= len(old_png)
+            self._topview_tile_sizes.pop(old_coord, None)
+            self._topview_tile_complete.pop(old_coord, None)
+            self._topview_tile_revisions.pop(old_coord, None)
 
     def _mark_data_dirty(self) -> None:
         """标记数据变更，下次 get_statistics/get_all_data 时重算。"""

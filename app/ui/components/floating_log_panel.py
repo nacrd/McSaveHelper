@@ -5,7 +5,7 @@ import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.icons import IconSet
-from app.ui.utils import run_on_ui
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.components.floating_position import (
     DragTracker,
     FloatingBounds,
@@ -282,10 +282,10 @@ class FloatingLogPanel(ft.Container):
             self.visible = True
             self._expanded = True
             self._flush_pending_ui(refresh=False)
-            self.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def _collapse(self) -> None:
         """收起面板"""
@@ -316,10 +316,10 @@ class FloatingLogPanel(ft.Container):
                 self._pending_logs.clear()
             self._log_col.controls.clear()
             self._status_text.value = ""
-            self.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def log(self, message: str, level: str = "info") -> None:
         """添加日志消息（批量刷新，避免每行触发 UI 更新）"""
@@ -567,10 +567,10 @@ class FloatingLogButton(ft.Container):
         """设置可见性"""
         try:
             self.visible = visible
-            self.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def update_icon(self, expanded: bool) -> None:
         """更新图标"""
@@ -581,7 +581,7 @@ class FloatingLogButton(ft.Container):
             else:
                 self._button.content = ft.Icon(
                     IconSet.DOCUMENT, size=22, color=THEME.mc_gold)
-            self._button.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._button)

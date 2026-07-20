@@ -9,6 +9,8 @@ from typing import Callable, List, Dict, Any, Optional
 
 import flet as ft
 
+from app.ui.utils import safe_update
+
 from app.ui.theme import THEME, mc_border
 from app.ui.sidebar_tabs import (
     apply_style_collapsed,
@@ -206,19 +208,19 @@ class Sidebar(ft.Container):
 
     def _handle_hover(self, e: ft.Event[ft.Container], tab_id: str) -> None:
         """Hover handler for expanded tab buttons."""
+        if tab_id not in self._buttons:
+            return
+        container = self._buttons[tab_id]
         try:
-            if tab_id not in self._buttons:
-                return
-            container = self._buttons[tab_id]
             handle_hover_expanded(
                 container,
                 selected=tab_id == self._selected_id,
                 hovering=e.data == "true",
             )
-            container.update()
         except Exception:
-            # UI best-effort: control may already be unmounted.
+            # UI best-effort: style helpers may fail after dispose.
             pass
+        safe_update(container)
 
     def _handle_hover_collapsed(
         self,
@@ -226,19 +228,19 @@ class Sidebar(ft.Container):
         tab_id: str,
     ) -> None:
         """Hover handler for collapsed tab buttons."""
+        if tab_id not in self._buttons:
+            return
+        container = self._buttons[tab_id]
         try:
-            if tab_id not in self._buttons:
-                return
-            container = self._buttons[tab_id]
             handle_hover_collapsed(
                 container,
                 selected=tab_id == self._selected_id,
                 hovering=e.data == "true",
             )
-            container.update()
         except Exception:
-            # UI best-effort: control may already be unmounted.
+            # UI best-effort: style helpers may fail after dispose.
             pass
+        safe_update(container)
 
     def _safe_select(self, tab_id: str) -> None:
         """Safe tab selection with exception guard."""
@@ -258,11 +260,7 @@ class Sidebar(ft.Container):
         self._selected_id = tab_id
         if tab_id in self._buttons:
             self._apply_style(self._buttons[tab_id], True)
-        try:
-            self.update()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+        safe_update(self)
         self._on_tab_select(tab_id)
 
     def _apply_style(self, container: ft.Container, selected: bool) -> None:
@@ -307,11 +305,7 @@ class Sidebar(ft.Container):
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
-        try:
-            self.update()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+        safe_update(self)
 
     @property
     def is_collapsed(self) -> bool:
@@ -382,12 +376,8 @@ class Sidebar(ft.Container):
         self._recent_expanded = not self._recent_expanded
         self._recent_body.visible = self._recent_expanded
         self._recent_arrow.value = "▼" if self._recent_expanded else "▶"
-        try:
-            self._recent_body.update()
-            self._recent_arrow.update()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+        safe_update(self._recent_body)
+        safe_update(self._recent_arrow)
 
     def _expand_recent(self) -> None:
         """Expand the recent saves section if currently collapsed."""
@@ -396,12 +386,8 @@ class Sidebar(ft.Container):
         self._recent_expanded = True
         self._recent_body.visible = True
         self._recent_arrow.value = "▼"
-        try:
-            self._recent_body.update()
-            self._recent_arrow.update()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+        safe_update(self._recent_body)
+        safe_update(self._recent_arrow)
 
     def _safe_select_recent_save(self, save_id: str) -> None:
         """Safe callback for recent save click."""
@@ -442,11 +428,7 @@ class Sidebar(ft.Container):
         """Update the recent saves list."""
         self._recent_saves = list(saves or [])
         self._rebuild_recent_saves()
-        try:
-            self._recent_save_col.update()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+        safe_update(self._recent_save_col)
 
     def set_current_save_name(
         self, name: Optional[str], path: Optional[str] = None,
@@ -462,10 +444,10 @@ class Sidebar(ft.Container):
                 self._current_save_name.value = "未设置当前存档"
                 self._current_save_name.color = THEME.text_muted
                 self._current_save_name.tooltip = None
-            self._current_save_name.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._current_save_name)
 
     @property
     def selected_id(self) -> Optional[str]:
@@ -485,11 +467,7 @@ class Sidebar(ft.Container):
                 new_tabs.append(t)
         self._tabs = new_tabs
         self._rebuild_tab_buttons()
-        try:
-            self._tab_col.update()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+        safe_update(self._tab_col)
         if self._on_tabs_reorder:
             try:
                 self._on_tabs_reorder(self._tabs)

@@ -4,6 +4,8 @@ from typing import Optional, Callable, Any, cast
 
 import flet as ft
 
+from app.ui.utils import safe_update
+
 from app.ui.theme import THEME
 
 
@@ -100,10 +102,10 @@ class McButton(ft.Container):
                 self.bgcolor = self._bgcolor
                 if not self._is_pressed:
                     self.shadow = None
-            self.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def _handle_click(self, e: Any = None) -> None:
         """Handle click event with pressed animation"""
@@ -121,11 +123,7 @@ class McButton(ft.Container):
                 right=ft.BorderSide(2, THEME.border_light),
                 bottom=ft.BorderSide(2, THEME.border_light),
             )
-            try:
-                self.update()
-            except Exception:
-                # UI best-effort: control may already be unmounted.
-                pass
+            safe_update(self)
 
             # Execute click handler even if the visual update failed because the
             # button is not mounted yet (common in unit tests and rebuilds).
