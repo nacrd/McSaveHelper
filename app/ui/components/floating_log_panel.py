@@ -57,7 +57,6 @@ class FloatingLogPanel(ft.Container):
         self._log_flush_scheduled = False
         self._flush_generation = 0
 
-        # 创建日志列表（使用ListView以获得更好的滚动体验）
         self._log_col = ft.ListView(
             spacing=2,
             padding=0,
@@ -65,97 +64,18 @@ class FloatingLogPanel(ft.Container):
             auto_scroll=True,
             on_scroll=self._on_scroll,
         )
-
-        # 状态文本
         self._status_text = ft.Text(
             "",
             size=10,
             color=THEME.text_secondary,
         )
-
-        # 自动滚动开关
-        self._auto_scroll_btn = ft.Container(
-            content=ft.Icon(
-                ft.Icons.VERTICAL_ALIGN_BOTTOM,
-                size=14,
-                color=THEME.terminal_green if self._auto_scroll else THEME.text_secondary,
-            ),
-            on_click=self._toggle_auto_scroll,
-            padding=4,
-            border_radius=4,
-            tooltip="自动滚动" if self._auto_scroll else "已暂停自动滚动",
-        )
-
-        # 清除按钮
-        self._clear_btn = ft.Container(
-            content=ft.Icon(
-                ft.Icons.DELETE_OUTLINE,
-                size=14,
-                color=THEME.text_secondary),
-            on_click=self._clear,
-            padding=4,
-            border_radius=4,
-            tooltip="清除日志",
-        )
-
-        # 关闭按钮 — Material Icon 代替 "×" 文字
-        self._close_btn = ft.Container(
-            content=ft.Icon(IconSet.CLOSE, size=16, color=THEME.text_secondary),
-            on_click=self._collapse,
-            padding=4,
-            border_radius=4,
-            tooltip="收起",
-        )
-
-        # 标题栏（可拖拽）- Modernized
-        header_content = ft.Row(
-            [
-                ft.Icon(
-                    ft.Icons.ARTICLE_OUTLINED,
-                    size=16,
-                    color=THEME.mc_gold,
-                ),
-                ft.Text(
-                    title,
-                    size=12,
-                    color=THEME.mc_gold,
-                    weight=ft.FontWeight.BOLD,
-                ),
-                self._status_text,
-                ft.Container(
-                    expand=True),
-                self._auto_scroll_btn,
-                self._clear_btn,
-                self._close_btn,
-            ],
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        header = ft.Container(
-            content=header_content,
-            height=38,
-            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
-            bgcolor=THEME.mc_coal,
-            border_radius=ft.BorderRadius(top_left=8, top_right=8, bottom_left=0, bottom_right=0),
-        )
-
-        # 用手势检测器包装标题栏
-        self._header_detector = ft.GestureDetector(
-            content=header,
-            on_pan_start=self._on_pan_start,
-            on_pan_update=self._on_pan_update,
-            on_pan_end=self._on_pan_end,
-        )
-
-        # 日志容器（带内边距）- Modernized
+        self._build_header_controls(title)
         log_container = ft.Container(
             content=self._log_col,
             padding=ft.Padding(left=12, right=12, top=8, bottom=12),
             bgcolor=THEME.bg_primary,
             expand=True,
         )
-
-        # 整体面板 - Modernized with border_radius
         super().__init__(
             content=ft.Column(
                 [
@@ -176,6 +96,82 @@ class FloatingLogPanel(ft.Container):
             top=self._offset_top,
         )
         self._load_position()
+
+    def _build_header_controls(self, title: str) -> None:
+        """Build title-bar buttons and drag detector."""
+        self._auto_scroll_btn = ft.Container(
+            content=ft.Icon(
+                ft.Icons.VERTICAL_ALIGN_BOTTOM,
+                size=14,
+                color=(
+                    THEME.terminal_green
+                    if self._auto_scroll
+                    else THEME.text_secondary
+                ),
+            ),
+            on_click=self._toggle_auto_scroll,
+            padding=4,
+            border_radius=4,
+            tooltip="自动滚动" if self._auto_scroll else "已暂停自动滚动",
+        )
+        self._clear_btn = ft.Container(
+            content=ft.Icon(
+                ft.Icons.DELETE_OUTLINE,
+                size=14,
+                color=THEME.text_secondary,
+            ),
+            on_click=self._clear,
+            padding=4,
+            border_radius=4,
+            tooltip="清除日志",
+        )
+        self._close_btn = ft.Container(
+            content=ft.Icon(IconSet.CLOSE, size=16, color=THEME.text_secondary),
+            on_click=self._collapse,
+            padding=4,
+            border_radius=4,
+            tooltip="收起",
+        )
+        header_content = ft.Row(
+            [
+                ft.Icon(
+                    ft.Icons.ARTICLE_OUTLINED,
+                    size=16,
+                    color=THEME.mc_gold,
+                ),
+                ft.Text(
+                    title,
+                    size=12,
+                    color=THEME.mc_gold,
+                    weight=ft.FontWeight.BOLD,
+                ),
+                self._status_text,
+                ft.Container(expand=True),
+                self._auto_scroll_btn,
+                self._clear_btn,
+                self._close_btn,
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        header = ft.Container(
+            content=header_content,
+            height=38,
+            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
+            bgcolor=THEME.mc_coal,
+            border_radius=ft.BorderRadius(
+                top_left=8,
+                top_right=8,
+                bottom_left=0,
+                bottom_right=0,
+            ),
+        )
+        self._header_detector = ft.GestureDetector(
+            content=header,
+            on_pan_start=self._on_pan_start,
+            on_pan_update=self._on_pan_update,
+            on_pan_end=self._on_pan_end,
+        )
 
     def _load_position(self) -> None:
         """从共享偏好加载保存的位置。"""

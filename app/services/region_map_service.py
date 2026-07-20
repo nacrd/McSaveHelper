@@ -820,8 +820,6 @@ class RegionMapService:
     ) -> None:
         """Publish worker output, notify UI, and refill the queue."""
         source_signature = ""
-        callback = None
-        upgrade_size: Optional[int] = None
         with self._data_lock:
             result_is_current = (
                 generation == self._topview_generation
@@ -836,42 +834,17 @@ class RegionMapService:
                 source_file_size,
                 cancel_check=cancel_event.is_set,
             )
-        with self._data_lock:
-            if self._topview_pending.get(coord) == generation:
-                self._topview_pending.pop(coord, None)
-                self._topview_pending_sizes.pop(coord, None)
-                upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
-            self._topview_active = max(0, self._topview_active - 1)
-            if (
-                generation == self._topview_generation
-                and not cancel_event.is_set()
-                and not self._closed
-                and png is not None
-            ):
-                self._store_topview_tile_locked(
-                    coord,
-                    png,
-                    tile_size,
-                    render_complete,
-                    source_mtime_ns,
-                    source_file_size,
-                    source_signature,
-                )
-                callback = self._tile_ready_callback
-            elif (
-                generation == self._topview_generation
-                and not cancel_event.is_set()
-                and not self._closed
-                and png is None
-            ):
-                self._record_topview_failure_locked(
-                    coord,
-                    tile_size,
-                    source_mtime_ns,
-                    source_file_size,
-                    source_signature,
-                )
-                callback = self._tile_ready_callback
+        callback, upgrade_size = self._publish_topview_result_locked(
+            coord=coord,
+            tile_size=tile_size,
+            generation=generation,
+            cancel_event=cancel_event,
+            png=png,
+            render_complete=render_complete,
+            source_mtime_ns=source_mtime_ns,
+            source_file_size=source_file_size,
+            source_signature=source_signature,
+        )
         if callback is not None:
             try:
                 callback(coord)
@@ -895,6 +868,59 @@ class RegionMapService:
                 force=True,
                 priority=True,
             )
+
+    def _publish_topview_result_locked(
+        self,
+        *,
+        coord: Tuple[int, int],
+        tile_size: int,
+        generation: int,
+        cancel_event: threading.Event,
+        png: Optional[bytes],
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+        source_signature: str,
+    ) -> tuple[Optional[Any], Optional[int]]:
+        """Apply success/failure bookkeeping under the data lock.
+
+        Returns:
+            tuple: ``(callback, upgrade_size)``.
+        """
+        callback = None
+        upgrade_size: Optional[int] = None
+        with self._data_lock:
+            if self._topview_pending.get(coord) == generation:
+                self._topview_pending.pop(coord, None)
+                self._topview_pending_sizes.pop(coord, None)
+                upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
+            self._topview_active = max(0, self._topview_active - 1)
+            current = (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+            )
+            if current and png is not None:
+                self._store_topview_tile_locked(
+                    coord,
+                    png,
+                    tile_size,
+                    render_complete,
+                    source_mtime_ns,
+                    source_file_size,
+                    source_signature,
+                )
+                callback = self._tile_ready_callback
+            elif current and png is None:
+                self._record_topview_failure_locked(
+                    coord,
+                    tile_size,
+                    source_mtime_ns,
+                    source_file_size,
+                    source_signature,
+                )
+                callback = self._tile_ready_callback
+        return callback, upgrade_size
 
     def _store_topview_tile_locked(
         self,
