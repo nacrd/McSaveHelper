@@ -9,6 +9,7 @@ import tempfile
 import threading
 import traceback
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -36,15 +37,37 @@ __all__ = [
     "PIL_AVAILABLE",
 ]
 
+LogFn = Callable[[str, str], None]
+ProgressFn = Callable[[float, str], None]
+BlockBounds = Tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class _RenderJob:
+    """渲染并写盘所需的不可变参数包。"""
+
+    region_files: tuple[Path, ...]
+    bounds: Mapping[str, int]
+    style: str
+    scale: int
+    output_path: Path
+    selection_bounds: Optional[BlockBounds]
+    cancel_event: Optional[threading.Event]
+
 
 class MapExportService:
-    """地图导出服务。"""
+    """地图导出服务。
+
+    负责解析维度/选择范围，调用渲染器，并以同目录临时文件原子写出 PNG。
+    """
 
     def __init__(self) -> None:
+        """初始化渲染器；缺少 Pillow 时立即失败。"""
         self._renderer = MapExportRenderer()
         if not PIL_AVAILABLE:
             raise ImportError(
-                "需要安装 Pillow 库才能使用地图导出功能\n请运行: pip install Pillow"
+                "需要安装 Pillow 库才能使用地图导出功能\n"
+                "请运行: pip install Pillow"
             )
 
     def export_map(
@@ -123,13 +146,15 @@ class MapExportService:
                 results["selection_bounds"] = selection_bounds
                 results["region_bounds"] = bounds
                 image_size, chunks_processed = self._render_and_save(
-                    region_files,
-                    bounds,
-                    style,
-                    effective_scale,
-                    output_path,
-                    selection_bounds,
-                    cancel_event,
+                    _RenderJob(
+                        region_files=tuple(region_files),
+                        bounds=bounds,
+                        style=style,
+                        scale=effective_scale,
+                        output_path=output_path,
+                        selection_bounds=selection_bounds,
+                        cancel_event=cancel_event,
+                    ),
                     log,
                     progress,
                 )
@@ -189,12 +214,12 @@ class MapExportService:
         region_dir: Optional[Path],
         spec: Optional[MapExportSpec],
         cancel_event: Optional[threading.Event],
-        log: Callable[[str, str], None],
-        progress: Callable[[float, str], None],
+        log: LogFn,
+        progress: ProgressFn,
     ) -> Tuple[
         list[Path],
         Dict[str, int],
-        Optional[Tuple[int, int, int, int]],
+        Optional[BlockBounds],
     ]:
         """解析目录并仅保留与选择范围相交的区域文件。"""
         self._check_cancelled(cancel_event)
@@ -213,10 +238,14 @@ class MapExportService:
 
         selection_bounds = self._selection_bounds(spec)
         if selection_bounds is not None:
-            region_files = self._filter_region_files(region_files, selection_bounds)
+            region_files = self._filter_region_files(
+                region_files,
+                selection_bounds,
+            )
             if not region_files:
                 raise ValueError(
-                    f"选择范围 {selection_bounds} 与维度 {dimension_id} 的区块文件不相交"
+                    f"选择范围 {selection_bounds} 与维度 {dimension_id} "
+                    "的区块文件不相交"
                 )
         self._check_cancelled(cancel_event)
         bounds = analyze_region_bounds(region_files)
@@ -226,17 +255,21 @@ class MapExportService:
 
     def _render_and_save(
         self,
-        region_files: list[Path],
-        bounds: Dict[str, int],
-        style: str,
-        scale: int,
-        output_path: Path,
-        selection_bounds: Optional[Tuple[int, int, int, int]],
-        cancel_event: Optional[threading.Event],
-        log: Callable[[str, str], None],
-        progress: Callable[[float, str], None],
+        job: _RenderJob,
+        log: LogFn,
+        progress: ProgressFn,
     ) -> Tuple[Tuple[int, int], int]:
-        """渲染并通过同目录临时文件原子替换输出。"""
+        """渲染并通过同目录临时文件原子替换输出。
+
+        Args:
+            job: 渲染参数包。
+            log: 日志回调。
+            progress: 进度回调。
+
+        Returns:
+            tuple: ``((width, height), chunks_processed)``。
+        """
+        output_path = job.output_path
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fd, temporary_name = tempfile.mkstemp(
             prefix=f".{output_path.stem}.",
@@ -249,26 +282,26 @@ class MapExportService:
         try:
             progress(0.25, "创建地图图像...")
             renderer_kwargs: Dict[str, Any] = {}
-            if selection_bounds is not None:
-                renderer_kwargs["block_bounds"] = selection_bounds
-            if cancel_event is not None:
-                renderer_kwargs["cancel_event"] = cancel_event
+            if job.selection_bounds is not None:
+                renderer_kwargs["block_bounds"] = job.selection_bounds
+            if job.cancel_event is not None:
+                renderer_kwargs["cancel_event"] = job.cancel_event
             image = self._renderer.create_map_image(
-                region_files,
-                bounds,
-                style,
-                scale,
+                list(job.region_files),
+                dict(job.bounds),
+                job.style,
+                job.scale,
                 log,
                 progress,
                 **renderer_kwargs,
             )
-            self._check_cancelled(cancel_event)
+            self._check_cancelled(job.cancel_event)
             image_size = (int(image.size[0]), int(image.size[1]))
             progress(0.95, "保存图像...")
             image.save(temporary_path, "PNG")
             image.close()
             image = None
-            self._check_cancelled(cancel_event)
+            self._check_cancelled(job.cancel_event)
             assert temporary_path is not None
             temporary_path.replace(output_path)
             temporary_path = None
@@ -279,6 +312,7 @@ class MapExportService:
                 try:
                     image.close()
                 except Exception:
+                    # best-effort：关闭失败不应掩盖主异常。
                     pass
             if temporary_path is not None:
                 try:
