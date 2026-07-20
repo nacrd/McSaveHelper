@@ -101,6 +101,27 @@ class FloatingLogPanel(ft.Container):
 
     def _build_header_controls(self, title: str) -> None:
         """Build title-bar buttons and drag detector."""
+        self._build_header_buttons()
+        header = ft.Container(
+            content=self._build_header_row(title),
+            height=38,
+            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
+            bgcolor=THEME.mc_coal,
+            border_radius=ft.BorderRadius(
+                top_left=8,
+                top_right=8,
+                bottom_left=0,
+                bottom_right=0,
+            ),
+        )
+        self._header_detector = ft.GestureDetector(
+            content=header,
+            on_pan_start=self._on_pan_start,
+            on_pan_update=self._on_pan_update,
+            on_pan_end=self._on_pan_end,
+        )
+
+    def _build_header_buttons(self) -> None:
         self._auto_scroll_btn = self._header_icon_button(
             icon=ft.Icons.VERTICAL_ALIGN_BOTTOM,
             color=(
@@ -124,7 +145,9 @@ class FloatingLogPanel(ft.Container):
             tooltip="收起",
             size=16,
         )
-        header_content = ft.Row(
+
+    def _build_header_row(self, title: str) -> ft.Row:
+        return ft.Row(
             [
                 ft.Icon(
                     ft.Icons.ARTICLE_OUTLINED,
@@ -145,24 +168,6 @@ class FloatingLogPanel(ft.Container):
             ],
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        header = ft.Container(
-            content=header_content,
-            height=38,
-            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
-            bgcolor=THEME.mc_coal,
-            border_radius=ft.BorderRadius(
-                top_left=8,
-                top_right=8,
-                bottom_left=0,
-                bottom_right=0,
-            ),
-        )
-        self._header_detector = ft.GestureDetector(
-            content=header,
-            on_pan_start=self._on_pan_start,
-            on_pan_update=self._on_pan_update,
-            on_pan_end=self._on_pan_end,
         )
 
     @staticmethod

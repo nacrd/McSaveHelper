@@ -481,9 +481,9 @@ def build_region_tab_chrome(
         on_add_marker=on_add_marker,
         on_delete_marker=on_delete_marker,
     )
-    sync_map_size = _make_map_size_sync(map_content)
-    controls = _build_region_map_controls(
+    map_parts = _build_region_map_parts(
         t=t,
+        map_content=map_content,
         on_dimension_changed=on_dimension_changed,
         on_display_mode_changed=on_display_mode_changed,
         on_refresh=on_refresh,
@@ -496,15 +496,6 @@ def build_region_tab_chrome(
         search_callback=callbacks["search_callback"],
         marker_callback=callbacks["marker_callback"],
     )
-    help_text, bottom_bar = _build_map_help_bar(t)
-    map_host, map_card = _build_map_host_stack(
-        map_content,
-        controls["top_bar"],
-        controls["left_toolbar"],
-        controls["right_toolbar"],
-        bottom_bar,
-        sync_map_size,
-    )
     side = _build_region_side_panel(
         t=t,
         translate=translate,
@@ -514,12 +505,60 @@ def build_region_tab_chrome(
         on_delete_region=on_delete_region,
     )
     return _assemble_region_tab_chrome(
-        controls=controls,
+        controls=map_parts["controls"],
         side=side,
-        help_text=help_text,
-        map_host=map_host,
-        map_card=map_card,
+        help_text=map_parts["help_text"],
+        map_host=map_parts["map_host"],
+        map_card=map_parts["map_card"],
     )
+
+
+def _build_region_map_parts(
+    *,
+    t: Translate,
+    map_content: ft.Control,
+    on_dimension_changed: EventCallback,
+    on_display_mode_changed: SimpleCallback,
+    on_refresh: SimpleCallback,
+    on_zoom_in: SimpleCallback,
+    on_zoom_out: SimpleCallback,
+    on_reset: SimpleCallback,
+    on_toggle_coordinates: SimpleCallback,
+    on_toggle_empty: SimpleCallback,
+    on_toggle_fullscreen: SimpleCallback,
+    search_callback: EventCallback,
+    marker_callback: SimpleCallback,
+) -> dict[str, Any]:
+    sync_map_size = _make_map_size_sync(map_content)
+    controls = _build_region_map_controls(
+        t=t,
+        on_dimension_changed=on_dimension_changed,
+        on_display_mode_changed=on_display_mode_changed,
+        on_refresh=on_refresh,
+        on_zoom_in=on_zoom_in,
+        on_zoom_out=on_zoom_out,
+        on_reset=on_reset,
+        on_toggle_coordinates=on_toggle_coordinates,
+        on_toggle_empty=on_toggle_empty,
+        on_toggle_fullscreen=on_toggle_fullscreen,
+        search_callback=search_callback,
+        marker_callback=marker_callback,
+    )
+    help_text, bottom_bar = _build_map_help_bar(t)
+    map_host, map_card = _build_map_host_stack(
+        map_content,
+        controls["top_bar"],
+        controls["left_toolbar"],
+        controls["right_toolbar"],
+        bottom_bar,
+        sync_map_size,
+    )
+    return {
+        "controls": controls,
+        "help_text": help_text,
+        "map_host": map_host,
+        "map_card": map_card,
+    }
 
 
 def _assemble_region_tab_chrome(

@@ -775,45 +775,22 @@ class RegionMapService:
         cancel_event: threading.Event,
         source_mtime_ns: int = 0,
     ) -> None:
-        """Render one region topview tile and publish it if still current.
-
-        Args:
-            coord: Region coordinate.
-            path: Absolute MCA path.
-            tile_size: Target tile size in pixels.
-            generation: Generation token captured at enqueue time.
-            cancel_event: Cancellation event for this generation.
-            source_mtime_ns: Optional pre-read source mtime for failure keys.
-        """
+        """Render one region topview tile and publish it if still current."""
         png: Optional[bytes] = None
         render_complete = True
         source_file_size = 0
         try:
-            # Skip work for superseded generations as early as possible.
-            with self._data_lock:
-                if (
-                    generation != self._topview_generation
-                    or cancel_event.is_set()
-                    or self._closed
-                ):
-                    return
-            try:
-                source_stat = Path(path).stat()
-                if source_mtime_ns <= 0:
-                    source_mtime_ns = int(source_stat.st_mtime_ns)
-                source_file_size = int(source_stat.st_size)
-            except OSError:
-                source_mtime_ns = 0
-            render_status: list[bool] = []
-            png = render_region_topview(
+            if self._topview_generation_stale(generation, cancel_event):
+                return
+            source_mtime_ns, source_file_size = self._read_topview_source_stat(
                 path,
-                tile_size=tile_size,
-                cancel_check=cancel_event.is_set,
-                decode_workers=2 if tile_size >= LEAF_TILE_SIZE else 1,
-                status_out=render_status,
+                source_mtime_ns,
             )
-            if render_status:
-                render_complete = render_status[-1]
+            png, render_complete = self._render_topview_png(
+                path,
+                tile_size,
+                cancel_event,
+            )
         except (OSError, ValueError, TypeError, RuntimeError):
             png = None
         except Exception:
@@ -831,6 +808,48 @@ class RegionMapService:
                 source_mtime_ns=source_mtime_ns,
                 source_file_size=source_file_size,
             )
+
+    def _topview_generation_stale(
+        self,
+        generation: int,
+        cancel_event: threading.Event,
+    ) -> bool:
+        with self._data_lock:
+            return (
+                generation != self._topview_generation
+                or cancel_event.is_set()
+                or self._closed
+            )
+
+    @staticmethod
+    def _read_topview_source_stat(
+        path: str,
+        source_mtime_ns: int,
+    ) -> tuple[int, int]:
+        try:
+            source_stat = Path(path).stat()
+            if source_mtime_ns <= 0:
+                source_mtime_ns = int(source_stat.st_mtime_ns)
+            return source_mtime_ns, int(source_stat.st_size)
+        except OSError:
+            return 0, 0
+
+    @staticmethod
+    def _render_topview_png(
+        path: str,
+        tile_size: int,
+        cancel_event: threading.Event,
+    ) -> tuple[Optional[bytes], bool]:
+        render_status: list[bool] = []
+        png = render_region_topview(
+            path,
+            tile_size=tile_size,
+            cancel_check=cancel_event.is_set,
+            decode_workers=2 if tile_size >= LEAF_TILE_SIZE else 1,
+            status_out=render_status,
+        )
+        render_complete = render_status[-1] if render_status else True
+        return png, render_complete
 
     def _finalize_topview_job(
         self,

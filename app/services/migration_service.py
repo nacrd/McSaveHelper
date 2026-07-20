@@ -370,59 +370,66 @@ class MigrationService:
         progress_cb: ProgressCallback,
         cancel_event: Optional[threading.Event] = None,
     ) -> Path:
-        """在暂存目录完成迁移并原子发布到目标世界。
-
-        Args:
-            src_path: 已校验的源世界路径。
-            dest_path: 输出父目录。
-            output_path: 最终世界目录。
-            world_name: 世界名（用于暂存子目录与 server.properties）。
-            options: 迁移选项快照。
-            log_cb: 日志回调。
-            progress_cb: 进度回调（完整模式使用）。
-            cancel_event: 可选取消事件；置位后在安全检查点抛出取消。
-
-        Returns:
-            Path: 发布后的世界路径。
-
-        Raises:
-            BatchCancelledError: 批量任务在发布前被取消。
-            RuntimeError: 产物无效或平台/版本转换被拒绝。
-            OSError: 备份、暂存或发布过程中的 I/O 失败。
-        """
+        """在暂存目录完成迁移并原子发布到目标世界。"""
         manual = list(options.manual_names)
         with self._backup_service.exclusive_operation(output_path):
             self._raise_if_batch_cancelled(cancel_event)
             self._backup_existing_destination_if_needed(output_path, log_cb)
-
             staging_root = Path(tempfile.mkdtemp(
                 prefix=f".mcsavehelper_migrate_{world_name}_",
                 dir=dest_path,
             ))
             try:
-                self._raise_if_batch_cancelled(cancel_event)
-                self._run_migration_modes(
+                return self._migrate_in_staging(
                     src_path=src_path,
-                    staging_root=staging_root,
-                    world_name=world_name,
-                    options=options,
-                    manual=manual,
-                    log_cb=log_cb,
-                    progress_cb=progress_cb,
-                )
-                prepared_world = staging_root / world_name
-                self._publish_prepared_world(
-                    prepared_world=prepared_world,
                     dest_path=dest_path,
                     output_path=output_path,
                     world_name=world_name,
                     options=options,
+                    manual=manual,
+                    staging_root=staging_root,
                     log_cb=log_cb,
+                    progress_cb=progress_cb,
                     cancel_event=cancel_event,
                 )
-                return output_path
             finally:
                 shutil.rmtree(staging_root, ignore_errors=True)
+
+    def _migrate_in_staging(
+        self,
+        *,
+        src_path: Path,
+        dest_path: Path,
+        output_path: Path,
+        world_name: str,
+        options: MigrationOptions,
+        manual: List[str],
+        staging_root: Path,
+        log_cb: LogCallback,
+        progress_cb: ProgressCallback,
+        cancel_event: Optional[threading.Event],
+    ) -> Path:
+        self._raise_if_batch_cancelled(cancel_event)
+        self._run_migration_modes(
+            src_path=src_path,
+            staging_root=staging_root,
+            world_name=world_name,
+            options=options,
+            manual=manual,
+            log_cb=log_cb,
+            progress_cb=progress_cb,
+        )
+        prepared_world = staging_root / world_name
+        self._publish_prepared_world(
+            prepared_world=prepared_world,
+            dest_path=dest_path,
+            output_path=output_path,
+            world_name=world_name,
+            options=options,
+            log_cb=log_cb,
+            cancel_event=cancel_event,
+        )
+        return output_path
 
     def _publish_prepared_world(
         self,

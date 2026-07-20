@@ -202,37 +202,68 @@ class MapExportService:
                 "dimension": dimension_id,
             },
         ):
-            log(f"开始导出地图: {world_path}", "INFO")
-            region_files, bounds, selection_bounds = self._prepare_regions(
-                world_path,
-                dimension_id,
-                region_dir,
-                spec,
-                cancel_event,
-                log,
-                progress,
+            self._export_tracked(
+                results=results,
+                world_path=world_path,
+                output_path=output_path,
+                dimension_id=dimension_id,
+                style=style,
+                effective_scale=effective_scale,
+                region_dir=region_dir,
+                spec=spec,
+                cancel_event=cancel_event,
+                log=log,
+                progress=progress,
+                tracker=tracker,
             )
-            results["selection_bounds"] = selection_bounds
-            results["region_bounds"] = bounds
-            image_size, chunks_processed = self._render_and_save(
-                _RenderJob(
-                    region_files=tuple(region_files),
-                    bounds=bounds,
-                    style=style,
-                    scale=effective_scale,
-                    output_path=output_path,
-                    selection_bounds=selection_bounds,
-                    cancel_event=cancel_event,
-                ),
-                log,
-                progress,
-            )
-            results["success"] = True
-            results["output_path"] = str(output_path)
-            results["dimensions"] = image_size
-            results["chunks_processed"] = chunks_processed
-            tracker.increment_files(chunks_processed)
-            progress(1.0, "导出完成")
+
+    def _export_tracked(
+        self,
+        *,
+        results: Dict[str, Any],
+        world_path: Path,
+        output_path: Path,
+        dimension_id: str,
+        style: str,
+        effective_scale: int,
+        region_dir: Optional[Path],
+        spec: Optional[MapExportSpec],
+        cancel_event: Optional[threading.Event],
+        log: LogFn,
+        progress: ProgressFn,
+        tracker: Any,
+    ) -> None:
+        log(f"开始导出地图: {world_path}", "INFO")
+        region_files, bounds, selection_bounds = self._prepare_regions(
+            world_path,
+            dimension_id,
+            region_dir,
+            spec,
+            cancel_event,
+            log,
+            progress,
+        )
+        results["selection_bounds"] = selection_bounds
+        results["region_bounds"] = bounds
+        image_size, chunks_processed = self._render_and_save(
+            _RenderJob(
+                region_files=tuple(region_files),
+                bounds=bounds,
+                style=style,
+                scale=effective_scale,
+                output_path=output_path,
+                selection_bounds=selection_bounds,
+                cancel_event=cancel_event,
+            ),
+            log,
+            progress,
+        )
+        results["success"] = True
+        results["output_path"] = str(output_path)
+        results["dimensions"] = image_size
+        results["chunks_processed"] = chunks_processed
+        tracker.increment_files(chunks_processed)
+        progress(1.0, "导出完成")
 
     @staticmethod
     def _emit_log(
