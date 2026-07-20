@@ -47,6 +47,18 @@ class StatsTabMixin(ExplorerMixinHost):
 
     def _build_stats_tab(self) -> None:
         """构建统计页签 UI"""
+        self._init_stats_state()
+        left_stats = self._build_stats_left_column()
+        right_stats = self._build_stats_right_column()
+        stats_layout = ft.ResponsiveRow([left_stats, right_stats], spacing=12)
+        self._tab_stats.content = ft.Column(
+            [stats_layout],
+            spacing=12,
+            scroll=ft.ScrollMode.AUTO,
+        )
+
+    def _init_stats_state(self) -> None:
+        """Create shared stats controls and analysis state."""
         self._stats_generation = 0
         self._stats_busy = False
         self._player_stats_cache: List[PlayerPlaytimeStats] = []
@@ -89,143 +101,133 @@ class StatsTabMixin(ExplorerMixinHost):
         self._block_pie_canvas = cv.Canvas(
             width=260,
             height=220,
-            shapes=self._build_block_pie_shapes([])
+            shapes=self._build_block_pie_shapes([]),
         )
         self._block_pie_legend = ft.Column(spacing=6)
 
-        left_stats = ft.Container(
-            content=ft.Column([
-                card(
-                    ft.Column([
-                        self._stats_status,
-                        self._stats_progress_label,
-                        self._stats_progress_bar,
-                    ], spacing=8),
-                    padding=12,
-                ),
-                card(
-                    ft.Column([
-                        ft.Text(
-                            self._t("stats.section_summary", "汇总"),
-                            size=14,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
-                        ),
-                        self._stats_summary,
-                    ], spacing=8),
-                    padding=12,
-                ),
-                card(
-                    ft.Column([
-                        ft.Text(
-                            self._t("stats.section_dimensions", "维度大小"),
-                            size=14,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
-                        ),
-                        self._dimension_stats_col,
-                    ], spacing=8),
-                    padding=12,
-                ),
-                card(
-                    ft.Column([
-                        ft.Row(
+    def _stats_section_card(
+        self,
+        title: str,
+        body_controls: list[ft.Control],
+    ) -> ft.Control:
+        return card(
+            ft.Column(
+                [
+                    ft.Text(
+                        title,
+                        size=14,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary,
+                    ),
+                    *body_controls,
+                ],
+                spacing=8,
+            ),
+            padding=12,
+        )
+
+    def _build_stats_left_column(self) -> ft.Container:
+        """Progress/status + summary lists."""
+        return ft.Container(
+            content=ft.Column(
+                [
+                    card(
+                        ft.Column(
                             [
-                                ft.Text(
-                                    self._t(
-                                        "stats.section_playtime",
-                                        "玩家统计",
-                                    ),
-                                    size=14,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=THEME.text_primary,
-                                    expand=True,
-                                ),
-                                ft.Text(
-                                    self._t("stats.sort_by", "排序"),
-                                    size=11,
-                                    color=THEME.text_muted,
-                                ),
-                                self._build_player_sort_dropdown(),
+                                self._stats_status,
+                                self._stats_progress_label,
+                                self._stats_progress_bar,
                             ],
                             spacing=8,
-                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
-                        self._player_stats_col,
-                    ], spacing=8),
-                    padding=12,
-                ),
-                card(
-                    ft.Column([
-                        ft.Text(
-                            self._t("stats.section_blocks", "方块分布 Top 10"),
-                            size=14,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
+                        padding=12,
+                    ),
+                    self._stats_section_card(
+                        self._t("stats.section_summary", "汇总"),
+                        [self._stats_summary],
+                    ),
+                    self._stats_section_card(
+                        self._t("stats.section_dimensions", "维度大小"),
+                        [self._dimension_stats_col],
+                    ),
+                    card(
+                        ft.Column(
+                            [
+                                ft.Row(
+                                    [
+                                        ft.Text(
+                                            self._t(
+                                                "stats.section_playtime",
+                                                "玩家统计",
+                                            ),
+                                            size=14,
+                                            weight=ft.FontWeight.BOLD,
+                                            color=THEME.text_primary,
+                                            expand=True,
+                                        ),
+                                        ft.Text(
+                                            self._t("stats.sort_by", "排序"),
+                                            size=11,
+                                            color=THEME.text_muted,
+                                        ),
+                                        self._build_player_sort_dropdown(),
+                                    ],
+                                    spacing=8,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ),
+                                self._player_stats_col,
+                            ],
+                            spacing=8,
                         ),
-                        self._block_stats_col,
-                    ], spacing=8),
-                    padding=12,
-                ),
-                card(
-                    ft.Column([
-                        ft.Text(
-                            self._t("stats.section_entities", "实体数量 Top 10"),
-                            size=14,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
+                        padding=12,
+                    ),
+                    self._stats_section_card(
+                        self._t("stats.section_blocks", "方块分布 Top 10"),
+                        [self._block_stats_col],
+                    ),
+                    self._stats_section_card(
+                        self._t("stats.section_entities", "实体数量 Top 10"),
+                        [self._entity_stats_col],
+                    ),
+                    self._stats_section_card(
+                        self._t(
+                            "stats.section_region_sizes",
+                            "区域文件大小分布",
                         ),
-                        self._entity_stats_col,
-                    ], spacing=8),
-                    padding=12,
-                ),
-                card(
-                    ft.Column([
+                        [self._size_stats_col],
+                    ),
+                ],
+                spacing=12,
+            ),
+            col={"xs": 12, "sm": 12, "md": 7, "lg": 8},
+        )
+
+    def _build_stats_right_column(self) -> ft.Container:
+        """Block pie chart column."""
+        return ft.Container(
+            content=card(
+                ft.Column(
+                    [
                         ft.Text(
                             self._t(
-                                "stats.section_region_sizes",
-                                "区域文件大小分布",
+                                "stats.section_block_pie",
+                                "方块占比分析（已排除空气）",
                             ),
                             size=14,
                             weight=ft.FontWeight.BOLD,
                             color=THEME.text_primary,
                         ),
-                        self._size_stats_col,
-                    ], spacing=8),
-                    padding=12,
-                ),
-            ], spacing=12),
-            col={"xs": 12, "sm": 12, "md": 7, "lg": 8},
-        )
-
-        right_stats = ft.Container(
-            content=card(
-                ft.Column([
-                    ft.Text(
-                        self._t(
-                            "stats.section_block_pie",
-                            "方块占比分析（已排除空气）",
+                        ft.Container(
+                            content=self._block_pie_canvas,
+                            alignment=ft.Alignment(0, 0),
                         ),
-                        size=14,
-                        weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary,
-                    ),
-                    ft.Container(
-                        content=self._block_pie_canvas,
-                        alignment=ft.Alignment(0, 0),
-                    ),
-                    self._block_pie_legend,
-                ], spacing=10),
+                        self._block_pie_legend,
+                    ],
+                    spacing=10,
+                ),
                 padding=12,
             ),
             col={"xs": 12, "sm": 12, "md": 5, "lg": 4},
-        )
-
-        stats_layout = ft.ResponsiveRow([left_stats, right_stats], spacing=12)
-        self._tab_stats.content = ft.Column(
-            [stats_layout],
-            spacing=12,
-            scroll=ft.ScrollMode.AUTO,
         )
 
     def _build_block_pie_shapes(

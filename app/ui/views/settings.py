@@ -3,7 +3,7 @@
 每个设置分区支持点击标题栏展开/收起，减少纵向占用。
 """
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import flet as ft
 
@@ -113,7 +113,34 @@ class SettingsView(ft.Column):
     def _build_ui_card(self) -> None:
         cfg = self._settings()
         body = ft.Column(spacing=0)
+        body.controls.append(self._build_theme_row(cfg))
+        body.controls.append(self._build_language_row(cfg))
+        body.controls.append(self._build_sidebar_mode_row(cfg))
+        body.controls.append(self._build_minecraft_dir_row(cfg))
+        body.controls.append(self._build_auto_import_lang_row(cfg))
+        body.controls.append(self._build_auto_clear_log_row(cfg))
+        body.controls.append(self._build_show_log_panel_row(cfg))
+        body.controls.append(self._build_perf_monitor_row(cfg))
+        body.controls.append(self._build_perf_interval_row(cfg))
+        self.controls.append(_collapsible_section(
+            self._t("settings.ui.title", "界面设置"),
+            body,
+            expanded=True,
+        ))
 
+    def _settings_field_pad(
+        self,
+        content: ft.Control,
+        *,
+        top: int = 0,
+        bottom: int = 8,
+    ) -> ft.Container:
+        return ft.Container(
+            content=content,
+            padding=ft.Padding(left=16, right=16, bottom=bottom, top=top),
+        )
+
+    def _build_theme_row(self, cfg: Any) -> ft.Container:
         self._theme_dropdown = dropdown(
             options=[
                 ft.dropdown.Option("dark", "暗色"),
@@ -125,14 +152,15 @@ class SettingsView(ft.Column):
                 self._theme_dropdown.value or "dark"
             ),
         )
-        body.controls.append(ft.Container(
-            content=ft.Column([
+        return self._settings_field_pad(
+            ft.Column([
                 label(self._t("settings.ui.theme", "主题")),
                 self._theme_dropdown,
             ], spacing=4),
-            padding=ft.Padding(left=16, right=16, bottom=8, top=10),
-        ))
+            top=10,
+        )
 
+    def _build_language_row(self, cfg: Any) -> ft.Container:
         self._lang_dropdown = dropdown(
             options=[
                 ft.dropdown.Option("zh_CN", "简体中文"),
@@ -144,14 +172,14 @@ class SettingsView(ft.Column):
                 self._lang_dropdown.value or "zh_CN"
             ),
         )
-        body.controls.append(ft.Container(
-            content=ft.Column([
+        return self._settings_field_pad(
+            ft.Column([
                 label(self._t("settings.ui.language", "语言")),
                 self._lang_dropdown,
             ], spacing=4),
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        )
 
+    def _build_sidebar_mode_row(self, cfg: Any) -> ft.Container:
         self._sidebar_mode_dropdown = dropdown(
             options=[
                 ft.dropdown.Option("expanded", "展开"),
@@ -164,14 +192,14 @@ class SettingsView(ft.Column):
                 self._sidebar_mode_dropdown.value or "auto"
             ),
         )
-        body.controls.append(ft.Container(
-            content=ft.Column([
+        return self._settings_field_pad(
+            ft.Column([
                 label(self._t("settings.ui.sidebar_mode", "侧边栏模式")),
                 self._sidebar_mode_dropdown,
             ], spacing=4),
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        )
 
+    def _build_minecraft_dir_row(self, cfg: Any) -> ft.Container:
         self._minecraft_dir_field = text_field(
             value=cfg.minecraft_dir,
             hint_text=self._t(
@@ -181,8 +209,8 @@ class SettingsView(ft.Column):
             expand=True,
             on_change=lambda _: self._on_minecraft_dir_change(),
         )
-        body.controls.append(ft.Container(
-            content=ft.Column([
+        return self._settings_field_pad(
+            ft.Column([
                 label(self._t("settings.ui.minecraft_dir", "Minecraft 目录")),
                 ft.Row(
                     [
@@ -205,9 +233,9 @@ class SettingsView(ft.Column):
                     color=THEME.text_muted,
                 ),
             ], spacing=4),
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        )
 
+    def _build_auto_import_lang_row(self, cfg: Any) -> ft.Container:
         self._auto_import_mc_lang_var = checkbox(
             self._t(
                 "settings.ui.auto_import_mc_lang",
@@ -218,8 +246,8 @@ class SettingsView(ft.Column):
                 bool(self._auto_import_mc_lang_var.value)
             ),
         )
-        body.controls.append(ft.Container(
-            content=ft.Column([
+        return self._settings_field_pad(
+            ft.Column([
                 self._auto_import_mc_lang_var,
                 ft.Text(
                     self._t(
@@ -230,9 +258,9 @@ class SettingsView(ft.Column):
                     color=THEME.text_muted,
                 ),
             ], spacing=2),
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        )
 
+    def _build_auto_clear_log_row(self, cfg: Any) -> ft.Container:
         self._auto_clear_var = checkbox(
             self._t("settings.ui.auto_clear_log", "自动清除旧日志"),
             value=cfg.auto_clear_log,
@@ -240,11 +268,9 @@ class SettingsView(ft.Column):
                 bool(self._auto_clear_var.value)
             ),
         )
-        body.controls.append(ft.Container(
-            content=self._auto_clear_var,
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        return self._settings_field_pad(self._auto_clear_var)
 
+    def _build_show_log_panel_row(self, cfg: Any) -> ft.Container:
         self._show_log_panel_var = checkbox(
             self._t("settings.ui.show_log_panel", "显示悬浮日志面板"),
             value=cfg.show_log_panel,
@@ -252,11 +278,9 @@ class SettingsView(ft.Column):
                 bool(self._show_log_panel_var.value)
             ),
         )
-        body.controls.append(ft.Container(
-            content=self._show_log_panel_var,
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        return self._settings_field_pad(self._show_log_panel_var)
 
+    def _build_perf_monitor_row(self, cfg: Any) -> ft.Container:
         self._perf_monitor_var = checkbox(
             self._t("settings.ui.enable_performance_monitor", "启用性能监控"),
             value=cfg.enable_performance_monitor,
@@ -264,29 +288,25 @@ class SettingsView(ft.Column):
                 bool(self._perf_monitor_var.value)
             ),
         )
-        body.controls.append(ft.Container(
-            content=self._perf_monitor_var,
-            padding=ft.Padding(left=16, right=16, bottom=8),
-        ))
+        return self._settings_field_pad(self._perf_monitor_var)
 
+    def _build_perf_interval_row(self, cfg: Any) -> ft.Container:
         self._perf_print_interval_field = text_field(
             value=str(cfg.performance_print_interval),
-            width=100, expand=False,
+            width=100,
+            expand=False,
             on_change=lambda _: self._on_perf_interval_change(),
         )
-        body.controls.append(ft.Container(
-            content=ft.Column([
-                label(self._t("settings.ui.performance_print_interval", "性能日志打印间隔 (秒)")),
+        return self._settings_field_pad(
+            ft.Column([
+                label(self._t(
+                    "settings.ui.performance_print_interval",
+                    "性能日志打印间隔 (秒)",
+                )),
                 self._perf_print_interval_field,
             ], spacing=4),
-            padding=ft.Padding(left=16, right=16, bottom=16, top=0),
-        ))
-
-        self.controls.append(_collapsible_section(
-            self._t("settings.ui.title", "界面设置"),
-            body,
-            expanded=True,
-        ))
+            bottom=16,
+        )
 
     # ─── 地图缓存 ───────────────────────────────
 
