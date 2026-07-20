@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Set
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.constants import MinecraftConstants
 from core.scanner import scan_all_regions

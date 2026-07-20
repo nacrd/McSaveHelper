@@ -50,7 +50,7 @@ class ChunkView:
         """从区块 NBT 构建视图。
 
         Args:
-            nbt: 区块 NBT 根（nbtlib compound / File）。
+            nbt: 区块 NBT 根（compound / File）。
             world_cx: 回退用的世界 chunk X。
             world_cz: 回退用的世界 chunk Z。
             blocks: 可选预解析的 ``ChunkBlocks``，避免重复解码。

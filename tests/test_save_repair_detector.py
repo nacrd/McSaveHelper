@@ -4,7 +4,7 @@ import threading
 from types import SimpleNamespace
 from typing import cast
 
-import nbtlib
+import core.nbt as nbtlib
 
 from app.services.save_repair.detector import (
     WorldDetector,

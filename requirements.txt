@@ -1,6 +1,5 @@
 flet
 flet-desktop
-nbtlib
 requests
 send2trash
 typing_extensions

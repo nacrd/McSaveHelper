@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
-from nbtlib import Compound
+from core.nbt import Compound
 
 from core.uuid_utils import format_uuid_with_hyphens, normalize_uuid
 
@@ -953,7 +953,7 @@ def _as_bool(value: Any) -> Optional[bool]:
     if isinstance(value, bool):
         return value
     try:
-        # nbtlib Byte tags often act as 0/1
+        # Byte tags often act as 0/1
         return bool(int(value))
     except (TypeError, ValueError):
         return None

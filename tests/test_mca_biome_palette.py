@@ -1,7 +1,7 @@
 """Pure tests for modern 4x4x4 section biome decoding."""
 from __future__ import annotations
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.mca.biome_palette import (
     ChunkBiomes,

@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import nbtlib  # noqa: E402
+import core.nbt as nbtlib  # noqa: E402
 
 from core.mca import RegionFile  # noqa: E402
 from core.mca.format import COMPRESSION_ZLIB, HEADER_SIZE, SECTOR_SIZE  # noqa: E402

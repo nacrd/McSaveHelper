@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.mca.chunk_codec import compress_chunk
 from core.mca.errors import ChunkMissing, McaError
@@ -32,10 +32,10 @@ PathLike = Union[str, Path]
 
 
 def nbt_to_bytes(nbt: Any) -> bytes:
-    """将 nbtlib compound/File 序列化为未压缩 NBT 字节。
+    """将 NBT compound/File 序列化为未压缩 NBT 字节。
 
     Args:
-        nbt: nbtlib.File 或可转为 File 的 compound。
+        nbt: File 或可转为 File 的 compound。
 
     Returns:
         bytes: 未压缩 NBT 二进制。
@@ -51,13 +51,13 @@ def nbt_to_bytes(nbt: Any) -> bytes:
 
 
 def bytes_to_nbt(raw: bytes) -> nbtlib.File:
-    """将未压缩 NBT 字节解析为 nbtlib.File。
+    """将未压缩 NBT 字节解析为 File。
 
     Args:
         raw: 未压缩 NBT。
 
     Returns:
-        nbtlib.File: 解析结果。
+        File: 解析结果。
     """
     return nbtlib.File.parse(io.BytesIO(raw))
 
@@ -77,7 +77,7 @@ class WritableRegion:
             path: 可选磁盘路径。
         """
         self.path: Optional[Path] = Path(path) if path is not None else None
-        # (local_cx, local_cz) -> nbtlib.File (mutable)
+        # (local_cx, local_cz) -> File (mutable)
         self._chunks: Dict[Tuple[int, int], nbtlib.File] = {}
         self._deleted: set[Tuple[int, int]] = set()
         self._loaded = False
@@ -178,7 +178,7 @@ class WritableRegion:
             local_cz: 局部 Z。
 
         Returns:
-            Optional[nbtlib.File]: 可变 File，或 None。
+            Optional[File]: 可变 File，或 None。
         """
         self._ensure_loaded()
         key = (local_cx, local_cz)

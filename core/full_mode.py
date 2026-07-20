@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import nbtlib
+import core.nbt as nbtlib
 
 from .cleaner import clean_world
 from .pure_cleaner import purge_mod_blocks_and_entities
@@ -199,7 +199,7 @@ def process_nbt_file(
         tag = nbtlib.load(path)
         _, c = patch_nbt(tag, mappings)
         if c > 0:
-            nbtlib.save(tag, path)  # type: ignore[attr-defined]
+            nbtlib.save(tag, path)
         return c
     except Exception as e:
         log(f"处理失败 {path.name}: {e}", "ERROR")

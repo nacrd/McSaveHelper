@@ -1,4 +1,4 @@
-import nbtlib
+import core.nbt as nbtlib
 from typing import List, Optional, Tuple, Any
 
 from .types import UUIDMapping

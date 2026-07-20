@@ -1,4 +1,4 @@
-import nbtlib
+import core.nbt as nbtlib
 from pathlib import Path
 
 from core.pure_cleaner import _purge_mod_data_in_chunk

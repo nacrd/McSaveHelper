@@ -1,7 +1,7 @@
 import threading
 from pathlib import Path
 
-from nbtlib import Compound, File, Int
+from core.nbt import Compound, File, Int
 import pytest
 
 from app.services.world_write_coordinator import WorldWriteCoordinator

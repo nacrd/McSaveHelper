@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.omni.nbt_loader import NbtLoader
 

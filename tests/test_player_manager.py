@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from nbtlib import Byte, Compound, Double, Float, Int, List as NbtList, String
+from core.nbt import Byte, Compound, Double, Float, Int, List as NbtList, String
 
 from core.omni.player_manager import PlayerManager
 from core.uuid_utils import format_uuid_with_hyphens, normalize_uuid

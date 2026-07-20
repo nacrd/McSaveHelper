@@ -45,7 +45,6 @@ def build_command(mode: BuildMode, output_dir: Path) -> list[str]:
         "--include-package=core",
         "--include-package=flet",
         "--include-package=flet_desktop",
-        "--include-package=nbtlib",
         "--include-package-data=flet",
         "--include-package-data=flet_desktop",
         "--include-distribution-metadata=flet",

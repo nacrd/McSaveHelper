@@ -1,21 +1,21 @@
-"""Small nbtlib tree helpers shared by heightmaps / block palette."""
+"""Small NBT tree helpers shared by heightmaps / block palette."""
 from __future__ import annotations
 
 from typing import Any, List, Optional, Tuple
 
 
 def tag_value(node: Any) -> Any:
-    """Unwrap nbtlib tags to plain Python values when possible.
+    """Unwrap NBT tags to plain Python values when possible.
 
     Args:
-        node: An nbtlib tag or already-plain Python value.
+        node: An NBT tag or already-plain Python value.
 
     Returns:
         Any: Unpacked value when available, otherwise ``node`` itself.
     """
     if node is None:
         return None
-    # nbtlib numeric/string tags expose .unpack() or behave like their type
+    # Numeric/string tags expose .unpack() or behave like their type
     unpack = getattr(node, "unpack", None)
     if callable(unpack):
         try:

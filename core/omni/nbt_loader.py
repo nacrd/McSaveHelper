@@ -7,8 +7,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
-import nbtlib
-from nbtlib import Compound, File
+import core.nbt as nbtlib
+from core.nbt import Compound, File
 
 from .mod_metadata import detect_mod_metadata
 from .models import WorldInfo
@@ -65,7 +65,7 @@ def build_world_info_from_level_root(root: Any) -> WorldInfo:
     """从已加载的 level.dat 根节点构造 :class:`WorldInfo`。
 
     Args:
-        root: ``nbtlib.load`` 返回的文件/根标签。
+        root: ``load`` 返回的文件/根标签。
 
     Returns:
         WorldInfo: 世界展示用快照。

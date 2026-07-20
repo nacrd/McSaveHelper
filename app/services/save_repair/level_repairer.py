@@ -11,7 +11,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import nbtlib
+import core.nbt as nbtlib
 
 from .models import RepairReport
 
@@ -69,7 +69,7 @@ def add_missing_level_fields(
         try:
             data[field_name] = default_factory()
         except (TypeError, ValueError, KeyError):
-            # nbtlib 标签类型不兼容时跳过该字段。
+            # NBT 标签类型不兼容时跳过该字段。
             continue
         repaired.append(field_name)
         if log is not None:
@@ -244,7 +244,7 @@ class LevelRepairer:
             self._restore_from_backup(level_dat, level_dat_old, report, log)
             return None
         except Exception as exc:
-            # nbtlib 可能抛出库专属错误。
+            # NBT 解析可能抛出库专属错误。
             log(f"level.dat 无法解析: {exc}", "ERROR")
             self._restore_from_backup(level_dat, level_dat_old, report, log)
             return None

@@ -4,8 +4,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-import nbtlib
-from nbtlib import Compound, Float, Int
+import core.nbt as nbtlib
+from core.nbt import Compound, Float, Int
 
 from app.services.save_repair.models import IssueLevel, RepairReport
 from app.services.save_repair.player_repairer import (

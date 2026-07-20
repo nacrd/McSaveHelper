@@ -348,7 +348,7 @@ class BlockDataService:
     def _create_palette_entry(self, block_name: str,
                               properties: Dict[str, str]) -> Any:
         try:
-            from nbtlib import Compound, String
+            from core.nbt import Compound, String
             entry = Compound({"Name": String(block_name)})
             if properties:
                 props = Compound({k: String(v) for k, v in properties.items()})
@@ -422,7 +422,7 @@ class BlockDataService:
         if current_data is not None and self._update_existing_data(
                 current_data, longs):
             return
-        if self._set_nbtlib_long_array(block_states, longs):
+        if self._set_core_long_array(block_states, longs):
             return
         if self._set_legacy_long_array(block_states, longs):
             return
@@ -449,9 +449,9 @@ class BlockDataService:
         return False
 
     @staticmethod
-    def _set_nbtlib_long_array(block_states: Any, longs: List[int]) -> bool:
+    def _set_core_long_array(block_states: Any, longs: List[int]) -> bool:
         try:
-            from nbtlib.tag import LongArray
+            from core.nbt.tag import LongArray
 
             block_states["data"] = LongArray(longs)
             return True

@@ -7,7 +7,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import List, Union, Any, Optional, Callable
-import nbtlib
+import core.nbt as nbtlib
 from .models import Action, ChunkTarget
 from ..utils import (
     find_advancements_dirs,
@@ -378,7 +378,7 @@ class ActionExecutor:
         chunk_z: int,
         chunk_data: Any,
     ) -> None:
-        """Serialize legacy or nbtlib chunk data and write it atomically."""
+        """Serialize chunk NBT data and write it atomically."""
         import io
         import zlib
 

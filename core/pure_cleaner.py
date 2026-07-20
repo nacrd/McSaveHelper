@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Tuple
 
-import nbtlib
+import core.nbt as nbtlib
 from .scanner import scan_all_entity_regions, scan_all_regions
 from .types import LogCallback
 

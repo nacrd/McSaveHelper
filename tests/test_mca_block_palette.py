@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.mca.block_palette import (
     ChunkBlocks,
@@ -78,7 +78,7 @@ def _pack_indices(indices, bits, stretch):
         if bit_offset + bits > 64:
             words[long_index + 1] |= value >> (64 - bit_offset)
 
-    # nbtlib LongArray stores signed 64-bit values; the reader normalizes
+    # LongArray stores signed 64-bit values; the reader normalizes
     # negative entries back to their unsigned representation.
     return [word if word < (1 << 63) else word - (1 << 64) for word in words]
 

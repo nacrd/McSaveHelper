@@ -1,6 +1,6 @@
 """只读 Anvil 区域文件（.mca）访问。
 
-阶段 1：打开、枚举已存在区块、将区块 NBT 解析为 nbtlib compound。
+阶段 1：打开、枚举已存在区块、将区块 NBT 解析为 compound。
 不依赖 anvil-parser；支持 mmap 与外置 ``.mcc`` 流。
 """
 from __future__ import annotations
@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, BinaryIO, Callable, Dict, Iterable, Optional, Tuple, Union
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.mca.chunk_codec import MAX_COMPRESSED_CHUNK_BYTES, decompress_chunk
 from core.mca.errors import ChunkMissing, CorruptChunk, McaError
@@ -472,21 +472,21 @@ class RegionFile:
         return self._path.parent / f"c.{chunk_x}.{chunk_z}.mcc"
 
     def read_chunk(self, local_cx: int, local_cz: int) -> nbtlib.Compound:
-        """加载区块 NBT 为 nbtlib compound 根。
+        """加载区块 NBT 为 compound 根。
 
         Args:
             local_cx: 局部 chunk X。
             local_cz: 局部 chunk Z。
 
         Returns:
-            nbtlib.Compound: 解析后的根（通常为 File）。
+            Compound: 解析后的根（通常为 File）。
 
         Raises:
             ChunkMissing / CorruptChunk: 缺失或 NBT 解析失败。
         """
         raw = self.read_chunk_raw(local_cx, local_cz)
         try:
-            # nbtlib 2.x: File.parse(fileobj) for in-memory bytes
+            # File.parse(fileobj) for in-memory bytes
             nbt_file = nbtlib.File.parse(io.BytesIO(raw))
         except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
             raise CorruptChunk(
@@ -510,7 +510,7 @@ class RegionFile:
             local_cz: 局部 chunk Z。
 
         Returns:
-            Optional[nbtlib.Compound]: 存在时的根 compound。
+            Optional[Compound]: 存在时的根 compound。
         """
         try:
             return self.read_chunk(local_cx, local_cz)

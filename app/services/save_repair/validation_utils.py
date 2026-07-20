@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterator, List, Mapping, Optional, Tuple, cast
 
-import nbtlib
+import core.nbt as nbtlib
 
 
 def validate_chunk(chunk: Any) -> bool:

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock
 
-from nbtlib import Byte, Compound, Double, Float, Int, List as NbtList, String
+from core.nbt import Byte, Compound, Double, Float, Int, List as NbtList, String
 
 from app.services.player_service import PlayerService
 from app.presenters.player_presenter import format_player_summary_text

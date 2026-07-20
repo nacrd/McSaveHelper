@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flet as ft
-import nbtlib
+import core.nbt as nbtlib
 
 from app.models.nbt_edit import (
     ChunkNbtTarget,

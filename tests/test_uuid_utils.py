@@ -1,7 +1,7 @@
 import uuid
 from pathlib import Path
 
-import nbtlib
+import core.nbt as nbtlib
 import pytest
 
 from core.nbt_utils import patch_nbt

@@ -171,7 +171,7 @@ class WorldCompareService:
             except (OSError, ValueError, TypeError, KeyError):
                 summary["error"] = "读取失败"
             except Exception:
-                # nbtlib / session load edge cases
+                # NBT / session load edge cases
                 summary["error"] = "读取失败"
             result[uuid] = summary
         return result

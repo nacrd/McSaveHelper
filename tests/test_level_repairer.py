@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-import nbtlib
+import core.nbt as nbtlib
 
 from app.services.save_repair.level_repairer import (
     LEVEL_DAT_REQUIRED_FIELDS,

@@ -3,7 +3,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-import nbtlib
+import core.nbt as nbtlib
 
 from app.services.save_repair.level_repairer import LevelRepairer
 from app.services.save_repair.models import RepairReport
@@ -25,10 +25,10 @@ def test_player_defaults_are_flat_typed_lists_after_reload(tmp_path: Path) -> No
     PlayerRepairer(threading.Event()).repair_players(world, report, _log)
 
     repaired = nbtlib.load(player_path)
-    assert isinstance(repaired["Pos"], nbtlib.List[nbtlib.Double])
+    assert type(repaired["Pos"]) is nbtlib.List[nbtlib.Double]
     assert [float(value) for value in repaired["Pos"]] == [0.0, 64.0, 0.0]
     assert all(isinstance(value, nbtlib.Double) for value in repaired["Pos"])
-    assert isinstance(repaired["Rotation"], nbtlib.List[nbtlib.Float])
+    assert type(repaired["Rotation"]) is nbtlib.List[nbtlib.Float]
     assert [float(value) for value in repaired["Rotation"]] == [0.0, 0.0]
     assert all(isinstance(value, nbtlib.Float) for value in repaired["Rotation"])
 

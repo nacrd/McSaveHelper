@@ -538,7 +538,7 @@ class ConfigService:
             return None
 
         try:
-            import nbtlib
+            import core.nbt as nbtlib
             level_dat = world_path / "level.dat"
             if not level_dat.exists():
                 return None

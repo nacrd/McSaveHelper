@@ -9,7 +9,7 @@ from core.region_utils import scan_region_dir
 
 
 def tag_value(value: Any) -> Any:
-    """Unwrap nbtlib-like tags to plain Python values when possible."""
+    """Unwrap NBT-like tags to plain Python values when possible."""
     return getattr(value, "value", value)
 
 

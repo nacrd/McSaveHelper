@@ -18,7 +18,7 @@ def raw_text(value: Any, type_name: str) -> str:
     """将 NBT 值转为可编辑/导出的原始文本。
 
     Args:
-        value: 节点值（可能是 nbtlib tag）。
+        value: 节点值（可能是 NBT tag）。
         type_name: :func:`get_type_name` 结果。
     """
     try:
@@ -138,7 +138,7 @@ def coerce_value(raw: str, original: Any, type_name: str) -> Any:
 
     Args:
         raw: 用户输入。
-        original: 原节点值（用于保留 nbtlib 类型构造器）。
+        original: 原节点值（用于保留 NBT 类型构造器）。
         type_name: 类型名。
 
     Returns:
@@ -212,9 +212,9 @@ def create_default_value(type_name: str, raw_value: str) -> Any:
         raw_value: 用户填写的初始值文本。
 
     Returns:
-        对应的 nbtlib 标签或 Python 值。
+        对应的 NBT 标签或 Python 值。
     """
-    import nbtlib
+    import core.nbt as nbtlib
     factories = {
         "String": lambda: nbtlib.String(raw_value),
         "Compound": lambda: nbtlib.Compound({}),

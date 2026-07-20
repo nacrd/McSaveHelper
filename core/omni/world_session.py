@@ -17,7 +17,7 @@ from .action_queue import ActionQueue
 from .action_executor import ActionExecutor
 from ..region_utils import DimensionInfo
 from ..types import LogCallback
-from nbtlib import Compound
+from core.nbt import Compound
 
 
 class WorldSession:

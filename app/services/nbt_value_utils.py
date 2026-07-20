@@ -3,14 +3,14 @@ from __future__ import annotations
 
 from typing import Any
 
-import nbtlib
+import core.nbt as nbtlib
 
 
 def tag_display_value(value: Any) -> str:
     """Return a form-friendly string for an NBT tag or plain Python value.
 
     Args:
-        value: nbtlib tag or scalar.
+        value: NBT tag or scalar.
 
     Returns:
         str: Unpacked display text.
@@ -23,7 +23,7 @@ def tag_display_value(value: Any) -> str:
 
 
 def coerce_like_tag(raw: str, original: Any) -> Any:
-    """Coerce a form string into the same nbtlib tag type as ``original``.
+    """Coerce a form string into the same NBT tag type as ``original``.
 
     Args:
         raw: User-entered text from a form field.
@@ -35,7 +35,7 @@ def coerce_like_tag(raw: str, original: Any) -> Any:
 
     Raises:
         ValueError / TypeError: Propagated for numeric parse failures when the
-        original tag is a numeric nbtlib type.
+        original tag is a numeric NBT type.
     """
     tag_type = type(original)
     text = raw.strip()

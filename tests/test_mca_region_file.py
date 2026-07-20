@@ -7,7 +7,7 @@ import struct
 import zlib
 from pathlib import Path
 
-import nbtlib
+import core.nbt as nbtlib
 import pytest
 
 from core.mca import ChunkMissing, CorruptChunk, NativeRegion, RegionFile

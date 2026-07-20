@@ -14,8 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List as TList, Optional, Tuple
 
-import nbtlib
-from nbtlib import Compound, File, List, String
+import core.nbt as nbtlib
+from core.nbt import Compound, File, List, String
 
 from .utils import replace_directory_tree
 
@@ -102,7 +102,7 @@ def _parse_byteorders(data: bytes) -> TList[str]:
         except (OSError, ValueError, TypeError, struct.error):
             continue
         except Exception:
-            # nbtlib may raise library-specific parse errors.
+            # NBT parse may raise library-specific errors.
             continue
         parsed.append(byteorder)
     return parsed
@@ -154,7 +154,7 @@ def save_nbt(file_path: Path, nbt_data: File, byteorder: str = "big") -> None:
             dir=str(file_path.parent),
         )
         tmp_path = Path(tmp_name)
-        # 立即关闭文件描述符，允许 nbtlib 打开文件进行写入
+        # 立即关闭文件描述符，允许后续打开文件进行写入
         os.close(fd)
         fd = None
         nbt_data.save(tmp_path, byteorder=byteorder)

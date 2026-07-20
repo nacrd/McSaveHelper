@@ -284,7 +284,7 @@ def first_key(data: Any, *keys: str) -> Any:
 
 
 def is_mapping(value: Any) -> bool:
-    """判断值是否像键值映射（含 nbtlib Compound）。"""
+    """判断值是否像键值映射（含 Compound）。"""
     raw = tag_value(value)
     return (
         isinstance(raw, dict)
@@ -345,5 +345,5 @@ def tag_text(value: Any) -> str:
 
 
 def tag_value(value: Any) -> Any:
-    """解包 nbtlib 标签的 .value，已是纯 Python 则原样返回。"""
+    """解包 NBT 标签的 .value，已是纯 Python 则原样返回。"""
     return getattr(value, "value", value)

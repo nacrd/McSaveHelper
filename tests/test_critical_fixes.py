@@ -318,8 +318,8 @@ class TestMigrationControllerPublicMethods:
 class TestOmniNbtEditing:
     def test_nbt_tree_parses_paths_and_coerces_values(self):
         from app.ui.views.explorer.nbt_tree.parser import parse_path, coerce_value
-        from nbtlib import Int, String
-        from nbtlib.tag import IntArray
+        from core.nbt import Int, String
+        from core.nbt.tag import IntArray
 
         assert parse_path("Inventory[0].Count") == [
             "Inventory", 0, "Count"]
@@ -334,9 +334,9 @@ class TestOmniNbtEditing:
 
     def test_world_session_commits_staged_player_nbt_list_path(
             self, tmp_path: Path):
-        import nbtlib
-        from nbtlib import Compound, File, Int, String
-        from nbtlib.tag import List
+        import core.nbt as nbtlib
+        from core.nbt import Compound, File, Int, String
+        from core.nbt.tag import List
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -366,8 +366,8 @@ class TestOmniNbtEditing:
 
     def test_world_session_commits_level_dat_relative_path(
             self, tmp_path: Path):
-        import nbtlib
-        from nbtlib import Compound, File, Int, String
+        import core.nbt as nbtlib
+        from core.nbt import Compound, File, Int, String
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -388,8 +388,8 @@ class TestOmniNbtEditing:
         assert updated["Data"]["LevelName"] == String("new")
 
     def test_world_session_commits_data_dat_string_path(self, tmp_path: Path):
-        import nbtlib
-        from nbtlib import Compound, File, Int, String
+        import core.nbt as nbtlib
+        from core.nbt import Compound, File, Int, String
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -413,7 +413,7 @@ class TestOmniNbtEditing:
 
     def test_world_session_rejects_nbt_target_outside_world(
             self, tmp_path: Path):
-        from nbtlib import Compound, File, Int, String
+        from core.nbt import Compound, File, Int, String
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -433,7 +433,7 @@ class TestOmniNbtEditing:
 
     def test_world_session_commits_json_relative_path(self, tmp_path: Path):
         import json
-        from nbtlib import Compound, File, Int
+        from core.nbt import Compound, File, Int
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -458,9 +458,9 @@ class TestOmniNbtEditing:
 
     def test_world_session_commits_nbt_add_and_delete_operations(
             self, tmp_path: Path):
-        import nbtlib
-        from nbtlib import Compound, File, Int, String
-        from nbtlib.tag import List
+        import core.nbt as nbtlib
+        from core.nbt import Compound, File, Int, String
+        from core.nbt.tag import List
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -492,7 +492,7 @@ class TestOmniNbtEditing:
     def test_world_session_commits_json_add_and_delete_operations(
             self, tmp_path: Path):
         import json
-        from nbtlib import Compound, File, Int
+        from core.nbt import Compound, File, Int
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -520,7 +520,7 @@ class TestOmniNbtEditing:
     def test_world_session_serializes_chunk_record_with_length_and_zlib_type(
             self, tmp_path: Path):
         import zlib
-        from nbtlib import Compound, File, Int
+        from core.nbt import Compound, File, Int
         from core.omni.world_session import WorldSession
 
         world = tmp_path / "world"
@@ -694,7 +694,7 @@ class TestOmniNbtEditing:
 
     def test_explorer_coerces_player_edit_values_like_nbt_tags(self):
         from app.ui.views.explorer.explorer_view import ExplorerView
-        from nbtlib import Float, Int
+        from core.nbt import Float, Int
 
         assert ExplorerView._coerce_like_tag("20", Float(1.0)) == Float(20.0)
         assert ExplorerView._coerce_like_tag(

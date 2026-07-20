@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import nbtlib
+import core.nbt as nbtlib
 import pytest
 
 from core.mca import (

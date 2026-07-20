@@ -89,9 +89,8 @@ class MigrationOptions:
         )
 
 
-# run_fast / run_full 延迟导入：它们经 core.full_mode 顶层 `import nbtlib`
-# 触发重型 NBT 库加载，启动期不需要。在实际调用 migrate 时才导入。
-# （参照项目内 anvil/Pillow 已有的函数内延迟导入先例。）
+# run_fast / run_full 延迟导入：它们经 core.full_mode 顶层导入 NBT 实现，
+# 启动期不需要。在实际调用 migrate 时才导入。
 
 
 class MigrationService:

@@ -141,7 +141,8 @@ git diff --check
 
 ## NBT 规则
 
-- 使用 `nbtlib` 和 `core/nbt_utils.py`/`core/omni/`，不要用 JSON 值替换 NBT tag 类型。
+- 使用项目自有 `core/nbt`（以及 `core/nbt_utils.py`/`core/omni/`），不要用 JSON 值替换 NBT tag 类型。
+- 禁止添加、恢复或导入 `nbtlib` 作为运行时依赖；序列化/标签树以 `core.nbt` 为准。
 - 修改前识别 Java 版本差异、根节点形状和大小写兼容字段；未知结构应保守跳过并记录。
 - 所有文件句柄、memory map 和临时文件必须在异常路径释放。
 - 多文件 NBT 操作沿用暂存世界事务，不允许一半文件已提交、一半失败。

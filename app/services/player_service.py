@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
-from nbtlib import Compound
+from core.nbt import Compound
 
 from app.models.nbt_edit import NbtChange
 from app.services.player.models import (
@@ -271,7 +271,7 @@ class PlayerService:
         except (TypeError, ValueError) as exc:
             return f"{spec.field_id}:coerce:{exc}"
         except Exception as exc:
-            # nbtlib 可能抛出库专属类型错误。
+            # NBT 解析可能抛出库专属类型错误。
             return f"{spec.field_id}:coerce:{exc}"
 
         if tag_display_value(old_value) == tag_display_value(new_value):

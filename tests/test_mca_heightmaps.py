@@ -1,7 +1,7 @@
 """Tests for heightmap unpacking."""
 from __future__ import annotations
 
-import nbtlib
+import core.nbt as nbtlib
 
 from core.mca.heightmaps import (
     WORLD_SURFACE_HEIGHTMAP_NAMES,

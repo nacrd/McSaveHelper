@@ -8,8 +8,8 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, MutableMapping
 
-import nbtlib
-from nbtlib import Compound, Double, Float, Int, List as NbtList, String
+import core.nbt as nbtlib
+from core.nbt import Compound, Double, Float, Int, List as NbtList, String
 
 from core.utils import list_player_dat_files
 
@@ -39,7 +39,7 @@ def get_player_defaults() -> Dict[str, Any]:
     每次调用返回新的 NBT 标签实例，避免跨文件共享可变对象。
 
     Returns:
-        Dict[str, Any]: 字段名到 nbtlib 默认标签的映射。
+        Dict[str, Any]: 字段名到 NBT 默认标签的映射。
     """
     return {
         "Pos": NbtList[Double]([0.0, 64.0, 0.0]),
@@ -96,7 +96,7 @@ def apply_player_field_defaults(
         try:
             nbt_data[field_name] = default
         except (TypeError, ValueError, KeyError):
-            # nbtlib 标签类型不兼容时跳过该字段，继续修复其余项。
+            # NBT 标签类型不兼容时跳过该字段，继续修复其余项。
             continue
         repaired.append(field_name)
     return repaired
@@ -193,7 +193,7 @@ class PlayerRepairer:
         except (OSError, ValueError, TypeError, KeyError) as exc:
             self._quarantine_player(player_file, report, log, exc)
         except Exception as exc:
-            # nbtlib 可能抛出库专属错误；隔离后继续处理其余玩家。
+            # NBT 解析可能抛出库专属错误；隔离后继续处理其余玩家。
             self._quarantine_player(player_file, report, log, exc)
 
     def _quarantine_player(
