@@ -9,7 +9,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
@@ -289,6 +289,38 @@ class MigrationService:
         world_names = [
             f"world_{i + 1}" for i in range(len(self._batch_worlds))
         ]
+        migrate_task = self._make_batch_task_handler(options)
+        self._batch_processor = BatchProcessor(
+            max_concurrent,
+            version_detector=self._config.detect_minecraft_version,
+            custom_mappings=(
+                self._config.custom_uuid_mappings
+                if self._config.use_custom_mapping
+                else None
+            ),
+            task_handler=migrate_task,
+        )
+        return self._batch_processor.process_batch(
+            self._batch_worlds,
+            dest_path,
+            world_names,
+            options.mode,
+            options.offline,
+            options.clean,
+            options.pure_clean,
+            list(options.manual_names),
+            log_cb,
+            progress_cb,
+        )
+
+    def _make_batch_task_handler(
+        self,
+        options: MigrationOptions,
+    ) -> Callable[
+        [Path, Path, str, LogCallback, threading.Event],
+        Dict[str, Any],
+    ]:
+        """Build the per-world task callback used by :class:`BatchProcessor`."""
 
         def migrate_task(
             source: Path,
@@ -315,29 +347,7 @@ class MigrationService:
             )
             return {"success": True, "output_path": str(published)}
 
-        self._batch_processor = BatchProcessor(
-            max_concurrent,
-            version_detector=self._config.detect_minecraft_version,
-            custom_mappings=(
-                self._config.custom_uuid_mappings
-                if self._config.use_custom_mapping
-                else None
-            ),
-            task_handler=migrate_task,
-        )
-        results = self._batch_processor.process_batch(
-            self._batch_worlds,
-            dest_path,
-            world_names,
-            options.mode,
-            options.offline,
-            options.clean,
-            options.pure_clean,
-            list(options.manual_names),
-            log_cb,
-            progress_cb,
-        )
-        return results
+        return migrate_task
 
     def cancel_batch(self) -> bool:
         """请求取消进行中的批量迁移。
@@ -409,22 +419,12 @@ class MigrationService:
             RuntimeError: 产物无效或平台/版本转换被拒绝。
             OSError: 备份、暂存或发布过程中的 I/O 失败。
         """
-        from core.fast_mode import run_fast
-        from core.full_mode import run_full
         from core.utils import publish_directory_tree, update_server_properties
 
         manual = list(options.manual_names)
         with self._backup_service.exclusive_operation(output_path):
             self._raise_if_batch_cancelled(cancel_event)
-            if (output_path / "level.dat").is_file():
-                backup_record = self._backup_service.create_backup(
-                    output_path,
-                    label="迁移覆盖前自动备份",
-                )
-                log_cb(
-                    f"已备份现有目标: {backup_record.backup_path}",
-                    "BACKUP",
-                )
+            self._backup_existing_destination_if_needed(output_path, log_cb)
 
             staging_root = Path(tempfile.mkdtemp(
                 prefix=f".mcsavehelper_migrate_{world_name}_",
@@ -432,36 +432,15 @@ class MigrationService:
             ))
             try:
                 self._raise_if_batch_cancelled(cancel_event)
-                if options.mode == "fast":
-                    run_fast(
-                        src_path,
-                        staging_root,
-                        world_name,
-                        options.offline,
-                        options.clean,
-                        options.pure_clean,
-                        manual,
-                        log_cb,
-                    )
-                else:
-                    custom_mappings = (
-                        self._config.custom_uuid_mappings
-                        if self._config.use_custom_mapping
-                        else None
-                    )
-                    run_full(
-                        src_path,
-                        staging_root,
-                        world_name,
-                        options.offline,
-                        options.clean,
-                        options.pure_clean,
-                        manual,
-                        log_cb,
-                        progress_cb,
-                        custom_mappings,
-                    )
-
+                self._run_migration_modes(
+                    src_path=src_path,
+                    staging_root=staging_root,
+                    world_name=world_name,
+                    options=options,
+                    manual=manual,
+                    log_cb=log_cb,
+                    progress_cb=progress_cb,
+                )
                 prepared_world = staging_root / world_name
                 if not (prepared_world / "level.dat").is_file():
                     raise RuntimeError("迁移产物无效：缺少 level.dat")
@@ -480,6 +459,66 @@ class MigrationService:
                 return output_path
             finally:
                 shutil.rmtree(staging_root, ignore_errors=True)
+
+    def _backup_existing_destination_if_needed(
+        self,
+        output_path: Path,
+        log_cb: LogCallback,
+    ) -> None:
+        if not (output_path / "level.dat").is_file():
+            return
+        backup_record = self._backup_service.create_backup(
+            output_path,
+            label="迁移覆盖前自动备份",
+        )
+        log_cb(
+            f"已备份现有目标: {backup_record.backup_path}",
+            "BACKUP",
+        )
+
+    def _run_migration_modes(
+        self,
+        *,
+        src_path: Path,
+        staging_root: Path,
+        world_name: str,
+        options: MigrationOptions,
+        manual: List[str],
+        log_cb: LogCallback,
+        progress_cb: ProgressCallback,
+    ) -> None:
+        from core.fast_mode import run_fast
+        from core.full_mode import run_full
+
+        if options.mode == "fast":
+            run_fast(
+                src_path,
+                staging_root,
+                world_name,
+                options.offline,
+                options.clean,
+                options.pure_clean,
+                manual,
+                log_cb,
+            )
+            return
+        custom_mappings = (
+            self._config.custom_uuid_mappings
+            if self._config.use_custom_mapping
+            else None
+        )
+        run_full(
+            src_path,
+            staging_root,
+            world_name,
+            options.offline,
+            options.clean,
+            options.pure_clean,
+            manual,
+            log_cb,
+            progress_cb,
+            custom_mappings,
+        )
 
     @staticmethod
     def _raise_if_batch_cancelled(

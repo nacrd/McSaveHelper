@@ -11,7 +11,7 @@ from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, checkbox, current_save_field, dropdown
 from app.ui.components.cards import placeholder
 from app.ui.components.layout import page_header
-from app.ui.utils import run_on_ui
+from app.ui.utils import run_on_ui, safe_update
 from app.services.entity_block_search_service import (
     EntityBlockSearchService,
     SearchResult,
@@ -301,7 +301,7 @@ class EntityBlockSearchView(ft.Column):
     def _fill_target(self, preset_id: str) -> None:
         """点击预设标签后填入目标 ID"""
         self._target_field.value = preset_id
-        self._target_field.update()
+        safe_update(self._target_field)
 
     def _start_search(self, e: Any = None) -> None:
         """开始搜索"""
@@ -309,15 +309,28 @@ class EntityBlockSearchView(ft.Column):
             self.app.warn_dialog("搜索中", "当前正在搜索，请等待完成")
             return
 
+        condition = self._build_search_condition()
+        if condition is None:
+            return
+
+        self._set_searching_ui(True)
+        threading.Thread(
+            target=self._run_search_worker,
+            args=(condition,),
+            daemon=True,
+        ).start()
+
+    def _build_search_condition(self) -> SearchCondition | None:
+        """Validate form inputs and return a search condition."""
         world_path = self._world_path_field.value
         if not world_path:
             self.app.warn_dialog("提示", "请先设置当前存档")
-            return
+            return None
 
         target = (self._target_field.value or "").strip()
         if not target:
             self.app.warn_dialog("提示", "请输入目标 ID")
-            return
+            return None
 
         dim_checks = (
             (self._dim_overworld, "overworld"),
@@ -325,7 +338,6 @@ class EntityBlockSearchView(ft.Column):
             (self._dim_end, "end"),
         )
         dimensions = [dim for control, dim in dim_checks if control.value]
-
         condition = SearchCondition(
             search_type=self._search_type_dropdown.value or "entity",
             target=target,
@@ -335,70 +347,77 @@ class EntityBlockSearchView(ft.Column):
         errors = condition.validate()
         if errors:
             self.app.warn_dialog("提示", errors[0])
-            return
+            return None
+        return condition
 
-        # 开始搜索
-        self._searching = True
-        self._search_btn.disabled = True
-        self._search_btn.update()
+    def _set_searching_ui(self, searching: bool) -> None:
+        """Toggle busy state widgets for a search run."""
+        self._searching = searching
+        self._search_btn.disabled = searching
+        if searching:
+            self._status_title_text.value = "🔄 搜索中..."
+            self._status_title_text.color = THEME.mc_gold
+            self._status_progress.visible = True
+        safe_update(self._search_btn)
+        safe_update(self._status_title_text)
+        safe_update(self._status_progress)
 
-        self._status_title_text.value = "🔄 搜索中..."
-        self._status_title_text.color = THEME.mc_gold
-        self._status_progress.visible = True
-        self._status_title_text.update()
-        self._status_progress.update()
+    def _run_search_worker(self, condition: SearchCondition) -> None:
+        """Background search + UI update dispatch."""
+        try:
+            results = self.service.search(
+                world_path=condition.world_path,
+                search_type=condition.search_type,
+                target=condition.target,
+                dimensions=condition.dimensions,
+            )
+            result_controls = self._build_result_controls(results)
+            run_on_ui(
+                self.app.page,
+                self._apply_search_success,
+                results,
+                result_controls,
+                condition,
+            )
+        except Exception as ex:
+            run_on_ui(self.app.page, self._apply_search_failure, ex)
 
-        def _search():
-            try:
-                results = self.service.search(
-                    world_path=condition.world_path,
-                    search_type=condition.search_type,
-                    target=condition.target,
-                    dimensions=condition.dimensions,
-                )
-                result_controls = self._build_result_controls(results)
+    def _apply_search_success(
+        self,
+        results: List[SearchResult],
+        result_controls: List[ft.Control],
+        condition: SearchCondition,
+    ) -> None:
+        self._search_results = results
+        self._last_search_meta = {
+            "type": condition.search_type,
+            "target": condition.target,
+            "dimensions": condition.dimensions,
+        }
+        self._render_results(result_controls)
+        self._status_title_text.value = "✅ 搜索完成"
+        self._status_title_text.color = THEME.mc_grass
+        self._status_summary_text.value = f"找到 {len(results)} 个结果"
+        self._status_progress.visible = False
+        self._searching = False
+        self._search_btn.disabled = False
+        safe_update(self._status_title_text)
+        safe_update(self._status_summary_text)
+        safe_update(self._status_progress)
+        safe_update(self._search_btn)
 
-                def _update_ui():
-                    self._search_results = results
-                    self._last_search_meta = {
-                        "type": condition.search_type,
-                        "target": condition.target,
-                        "dimensions": condition.dimensions,
-                    }
-                    self._render_results(result_controls)
-                    self._status_title_text.value = "✅ 搜索完成"
-                    self._status_title_text.color = THEME.mc_grass
-                    self._status_summary_text.value = f"找到 {len(results)} 个结果"
-                    self._status_progress.visible = False
-                    self._searching = False
-                    self._search_btn.disabled = False
-                    self._status_title_text.update()
-                    self._status_summary_text.update()
-                    self._status_progress.update()
-                    self._search_btn.update()
-
-                run_on_ui(self.app.page, _update_ui)
-
-            except Exception as ex:
-                error_msg = str(ex)
-                exception = ex
-
-                def _show_error():
-                    self._status_title_text.value = "❌ 搜索失败"
-                    self._status_title_text.color = THEME.error
-                    self._status_summary_text.value = error_msg
-                    self._status_progress.visible = False
-                    self._searching = False
-                    self._search_btn.disabled = False
-                    self._status_title_text.update()
-                    self._status_summary_text.update()
-                    self._status_progress.update()
-                    self._search_btn.update()
-                    self.app.handle_exception(exception, title="搜索失败")
-
-                run_on_ui(self.app.page, _show_error)
-
-        threading.Thread(target=_search, daemon=True).start()
+    def _apply_search_failure(self, exception: Exception) -> None:
+        self._status_title_text.value = "❌ 搜索失败"
+        self._status_title_text.color = THEME.error
+        self._status_summary_text.value = str(exception)
+        self._status_progress.visible = False
+        self._searching = False
+        self._search_btn.disabled = False
+        safe_update(self._status_title_text)
+        safe_update(self._status_summary_text)
+        safe_update(self._status_progress)
+        safe_update(self._search_btn)
+        self.app.handle_exception(exception, title="搜索失败")
 
     def _build_result_controls(
         self,
