@@ -296,6 +296,7 @@ class McaMapView(ft.Container):
                 return
             self._rebuild_scheduler.schedule()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _tile_src(self, coord: Tuple[int, int]) -> Optional[str]:
@@ -346,6 +347,7 @@ class McaMapView(ft.Container):
         try:
             self._rebuild_canvas()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         finally:
             with self._rebuild_state_lock:
@@ -999,6 +1001,7 @@ class McaMapView(ft.Container):
         except asyncio.CancelledError:
             raise
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         finally:
             for coord in coords:
@@ -1160,6 +1163,7 @@ class McaMapView(ft.Container):
                 try:
                     self._on_selection_changed(None, None, None)
                 except Exception:
+                    # UI best-effort: control may already be unmounted.
                     pass
 
     def did_mount(self) -> None:
@@ -1185,6 +1189,7 @@ class McaMapView(ft.Container):
             ):
                 self._service.set_tile_ready_callback(None)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         super_did_unmount = getattr(super(), "did_unmount", None)
         if super_did_unmount:
@@ -1272,7 +1277,7 @@ class McaMapView(ft.Container):
         try:
             w = int(getattr(e, "width", 0) or 0)
             h = int(getattr(e, "height", 0) or 0)
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             return
         if w < 80 or h < 80:
             return
@@ -1423,6 +1428,7 @@ class McaMapView(ft.Container):
         try:
             self._sync_view_level_from_scale(notify=False)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         self._rebuild_scheduler.schedule()
 
@@ -1430,6 +1436,7 @@ class McaMapView(ft.Container):
         try:
             self._sync_view_level_from_scale(notify=True)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         self._request_rebuild()
 

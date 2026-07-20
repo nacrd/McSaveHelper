@@ -146,7 +146,8 @@ class Application:
             manager = get_theme_manager()
             manager.set_mode(saved_theme)
         except Exception:
-            pass  # 默认暗色主题
+            # Default dark theme when config/theme bootstrap fails.
+            pass
 
     def _init_managers(self) -> None:
         """初始化所有管理器"""
@@ -569,6 +570,7 @@ class Application:
                     f"发生意外错误: {error_msg}",
                 )
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     # ════════════════════════════════════════════
@@ -593,6 +595,7 @@ class Application:
         try:
             return self.i18n.translate(key, default, **kwargs)
         except Exception:
+            # Translation failures must never crash UI text rendering.
             return default
 
     # ─── 日志方法 ───────────────────────────────

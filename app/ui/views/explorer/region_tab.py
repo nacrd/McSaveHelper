@@ -40,6 +40,7 @@ class RegionTabMixin(ExplorerMixinHost):
             )
             map_view = self._map_view
         except Exception:
+            # Map canvas may fail to construct without optional deps; fall back.
             self._map_view = None
             map_view = build_map_fallback(self.app.translate)
 
@@ -341,6 +342,7 @@ class RegionTabMixin(ExplorerMixinHost):
             try:
                 markers = controller.markers()
             except Exception:
+                # Marker store failures should not break the map UI.
                 markers = []
         marker_ids = {marker.id for marker in markers}
         if self._selected_marker_id not in marker_ids:
