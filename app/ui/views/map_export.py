@@ -310,21 +310,36 @@ class MapExportView(ft.Column):
                     "将存档地图导出为 PNG 图片（俯视图/地形图）",
                 ),
                 size=12,
-                color=THEME.text_muted),
+                color=THEME.text_muted,
+            ),
             icon=IconSet.EXPORT,
         )
+        self.controls = [
+            header,
+            ft.Container(height=8),
+            self._build_export_config_card(),
+            self._build_export_result_card(),
+        ]
+        self._expand_export_fields()
 
-        # 配置卡片
-        config_card = card(
+    def _build_export_config_card(self) -> ft.Control:
+        """World/output/options card."""
+        return card(
             ft.Column(
                 [
                     section_title(
-                        self.app.translate("map_export.current_save_section", "当前存档")
+                        self.app.translate(
+                            "map_export.current_save_section",
+                            "当前存档",
+                        )
                     ),
                     self._world_path_field,
                     ft.Container(height=12),
                     section_title(
-                        self.app.translate("map_export.output_section", "输出设置")
+                        self.app.translate(
+                            "map_export.output_section",
+                            "输出设置",
+                        )
                     ),
                     ft.Row(
                         [self._output_path_field, self._select_output_btn],
@@ -333,7 +348,10 @@ class MapExportView(ft.Column):
                     ),
                     ft.Container(height=12),
                     section_title(
-                        self.app.translate("map_export.options_section", "导出选项")
+                        self.app.translate(
+                            "map_export.options_section",
+                            "导出选项",
+                        )
                     ),
                     ft.Row(
                         [
@@ -355,12 +373,16 @@ class MapExportView(ft.Column):
             )
         )
 
-        # 结果卡片
-        result_card = card(
+    def _build_export_result_card(self) -> ft.Control:
+        """Result summary card."""
+        return card(
             ft.Column(
                 [
                     section_title(
-                        self.app.translate("map_export.result_section", "导出结果")
+                        self.app.translate(
+                            "map_export.result_section",
+                            "导出结果",
+                        )
                     ),
                     ft.Container(
                         content=self._result_text,
@@ -373,13 +395,8 @@ class MapExportView(ft.Column):
             )
         )
 
-        self.controls = [
-            header,
-            ft.Container(height=8),
-            config_card,
-            result_card,
-        ]
-
+    def _expand_export_fields(self) -> None:
+        """Let path/option fields fill horizontal space."""
         self._world_path_field.expand = True
         self._output_path_field.expand = True
         self._map_type_dropdown.expand = True
