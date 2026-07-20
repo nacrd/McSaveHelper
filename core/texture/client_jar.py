@@ -34,7 +34,7 @@ class ClientJarInfo:
 
 def find_local_minecraft_jar() -> Optional[Path]:
     """Locate the newest installed client jar under the local Minecraft dir."""
-    versions_dir = _minecraft_directory() / "versions"
+    versions_dir = minecraft_directory() / "versions"
     if not versions_dir.exists():
         return None
     jars = _find_version_jars(versions_dir)
@@ -42,6 +42,11 @@ def find_local_minecraft_jar() -> Optional[Path]:
         return None
     jars.sort(key=lambda item: item[0], reverse=True)
     return jars[0][1]
+
+
+def minecraft_directory() -> Path:
+    """Return the platform Minecraft data directory (public helper)."""
+    return _minecraft_directory()
 
 
 def _minecraft_directory() -> Path:

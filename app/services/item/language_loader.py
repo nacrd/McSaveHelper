@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 @dataclass(frozen=True)
 class LanguageImportResult:
-    """Outcome of loading language entries from a file or jar."""
+    """Outcome of loading language entries from a file or jar/assets."""
 
     count: int
     sources: Tuple[str, ...] = ()
@@ -89,9 +89,8 @@ def save_custom_mapping(
 def normalize_locale(locale: str) -> str:
     """Normalize locale codes to Minecraft lang file form (e.g. zh_cn).
 
-    App UI codes such as ``zh_CN`` / ``en_US`` map to jar lang stems
-    ``zh_cn`` / ``en_us``. Bare ``zh`` is expanded to ``zh_cn`` because
-    vanilla client jars do not ship a ``zh.json`` language file.
+    App UI codes such as ``zh_CN`` / ``en_US`` map to jar/assets stems
+    ``zh_cn`` / ``en_us``. Bare ``zh`` expands to ``zh_cn``.
     """
     text = (locale or "").strip().replace("-", "_").lower()
     if not text:
@@ -104,10 +103,9 @@ def normalize_locale(locale: str) -> str:
 
 
 def locale_fallbacks(locale: str) -> Tuple[str, ...]:
-    """Return locale preference chain for jar language extraction.
+    """Return locale preference chain for language extraction.
 
-    Always tries the UI/app-preferred locale first, then ``en_us`` as the
-    only automatic fallback (never a bare language tag like ``zh``).
+    Always tries the UI/app-preferred locale first, then ``en_us``.
     """
     primary = normalize_locale(locale)
     chain: List[str] = [primary]
@@ -144,12 +142,16 @@ def extract_language_from_jar(
     *,
     include_mods: bool = True,
 ) -> LanguageImportResult:
-    """Extract and load language files from a Minecraft client or mod jar.
+    """Extract language files from a jar.
 
-    Preference order for each locale in the fallback chain:
-    1. ``assets/minecraft/lang/<locale>.json`` (vanilla client)
-    2. ``assets/minecraft/lang/<locale>.lang`` (legacy)
-    3. other ``assets/*/lang/<locale>.json|.lang`` when ``include_mods`` is True
+    For modern clients (1.8+), vanilla lang JSON is usually *not* inside the
+    client jar. Prefer :func:`extract_language_from_local_minecraft` which also
+    resolves ``.minecraft/assets/indexes`` + ``objects``.
+
+    This function still handles:
+    - legacy ``assets/minecraft/lang/*.lang`` inside old jars
+    - mod jars that still package ``assets/*/lang/*.json``
+    - rare client jars that still embed lang files
     """
     locales = locale_fallbacks(locale)
     total = 0
@@ -171,7 +173,6 @@ def extract_language_from_jar(
                     if loaded > 0:
                         total += loaded
                         sources.append(entry)
-                # Stop at the first locale that contributed any entries.
                 if total > 0:
                     break
     except (OSError, zipfile.BadZipFile, RuntimeError):
@@ -196,22 +197,196 @@ def extract_language_from_local_minecraft(
     locale: str = "zh_cn",
     *,
     jar_path: Optional[Path] = None,
+    minecraft_dir: Optional[Path] = None,
 ) -> LanguageImportResult:
-    """Load language from a discovered or provided Minecraft client jar."""
-    resolved = jar_path
-    if resolved is None:
-        from core.texture.client_jar import find_local_minecraft_jar
+    """Load language from a local Minecraft install.
 
-        resolved = find_local_minecraft_jar()
-    if resolved is None or not Path(resolved).is_file():
-        return LanguageImportResult(count=0, locale=normalize_locale(locale))
-    return extract_language_from_jar(
-        Path(resolved),
+    Resolution order:
+    1. Modern assets: ``assets/indexes/*.json`` → ``assets/objects/<hh>/<hash>``
+       for ``minecraft/lang/<locale>.json``
+    2. Client jar embedded lang (legacy 1.7.10-style ``.lang``, or rare embeds)
+    3. If a specific ``jar_path`` is given, also try that jar (mods / old packs)
+    """
+    from core.texture.client_jar import find_local_minecraft_jar, minecraft_directory
+
+    mc_dir = Path(minecraft_dir) if minecraft_dir is not None else minecraft_directory()
+    locales = locale_fallbacks(locale)
+    used_locale = locales[0]
+
+    # 1) Modern asset index / objects store.
+    assets_result = extract_language_from_minecraft_assets(
         name_map,
         enchantment_names,
         locale=locale,
-        include_mods=True,
+        minecraft_dir=mc_dir,
     )
+    if assets_result.count > 0:
+        return assets_result
+
+    # 2) Client jar (legacy .lang or embedded JSON).
+    resolved = jar_path
+    if resolved is None:
+        resolved = find_local_minecraft_jar()
+    jar_result = LanguageImportResult(count=0, locale=used_locale)
+    if resolved is not None and Path(resolved).is_file():
+        jar_result = extract_language_from_jar(
+            Path(resolved),
+            name_map,
+            enchantment_names,
+            locale=locale,
+            include_mods=True,
+        )
+        if jar_result.count > 0:
+            return jar_result
+
+    # Prefer reporting assets locale/source info when both failed.
+    if assets_result.sources or assets_result.locale:
+        return assets_result
+    return jar_result
+
+
+def extract_language_from_minecraft_assets(
+    name_map: Dict[str, str],
+    enchantment_names: Dict[str, str],
+    locale: str = "zh_cn",
+    *,
+    minecraft_dir: Path,
+) -> LanguageImportResult:
+    """Load vanilla lang from ``.minecraft/assets`` index + objects.
+
+    Modern clients (1.8+) store language files hashed under
+    ``assets/objects/<first two hash chars>/<full hash>``, referenced by
+    ``assets/indexes/<version>.json`` as ``minecraft/lang/zh_cn.json``.
+    """
+    locales = locale_fallbacks(locale)
+    indexes_dir = minecraft_dir / "assets" / "indexes"
+    objects_dir = minecraft_dir / "assets" / "objects"
+    if not indexes_dir.is_dir() or not objects_dir.is_dir():
+        return LanguageImportResult(
+            count=0,
+            locale=locales[0] if locales else normalize_locale(locale),
+        )
+
+    index_paths = _list_asset_index_files(indexes_dir)
+    if not index_paths:
+        return LanguageImportResult(
+            count=0,
+            locale=locales[0] if locales else normalize_locale(locale),
+        )
+
+    for index_path in index_paths:
+        objects_map = _load_asset_index_objects(index_path)
+        if not objects_map:
+            continue
+        for loc in locales:
+            for asset_key in (
+                f"minecraft/lang/{loc}.json",
+                f"minecraft/lang/{loc}.lang",
+            ):
+                entry = objects_map.get(asset_key)
+                if not isinstance(entry, dict):
+                    continue
+                digest = str(entry.get("hash", "") or "").strip().lower()
+                if len(digest) < 3:
+                    continue
+                object_path = objects_dir / digest[:2] / digest
+                if not object_path.is_file():
+                    continue
+                loaded = _load_language_object_file(
+                    object_path,
+                    name_map,
+                    enchantment_names,
+                    namespace="minecraft",
+                    as_lang=asset_key.endswith(".lang"),
+                )
+                if loaded > 0:
+                    return LanguageImportResult(
+                        count=loaded,
+                        sources=(f"assets/objects/{digest[:2]}/{digest}",),
+                        locale=loc,
+                        jar_path=str(index_path),
+                    )
+    return LanguageImportResult(
+        count=0,
+        locale=locales[0] if locales else normalize_locale(locale),
+    )
+
+
+def resolve_lang_object_path(
+    minecraft_dir: Path,
+    locale: str = "zh_cn",
+) -> Optional[Path]:
+    """Resolve the on-disk assets object path for a vanilla lang file."""
+    locales = locale_fallbacks(locale)
+    indexes_dir = minecraft_dir / "assets" / "indexes"
+    objects_dir = minecraft_dir / "assets" / "objects"
+    if not indexes_dir.is_dir() or not objects_dir.is_dir():
+        return None
+    for index_path in _list_asset_index_files(indexes_dir):
+        objects_map = _load_asset_index_objects(index_path)
+        if not objects_map:
+            continue
+        for loc in locales:
+            for asset_key in (
+                f"minecraft/lang/{loc}.json",
+                f"minecraft/lang/{loc}.lang",
+            ):
+                entry = objects_map.get(asset_key)
+                if not isinstance(entry, dict):
+                    continue
+                digest = str(entry.get("hash", "") or "").strip().lower()
+                if len(digest) < 3:
+                    continue
+                object_path = objects_dir / digest[:2] / digest
+                if object_path.is_file():
+                    return object_path
+    return None
+
+
+def _list_asset_index_files(indexes_dir: Path) -> List[Path]:
+    try:
+        files = [path for path in indexes_dir.glob("*.json") if path.is_file()]
+    except OSError:
+        return []
+    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return files
+
+
+def _load_asset_index_objects(index_path: Path) -> Dict[str, Any]:
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    objects = payload.get("objects")
+    if not isinstance(objects, dict):
+        return {}
+    return objects
+
+
+def _load_language_object_file(
+    path: Path,
+    name_map: Dict[str, str],
+    enchantment_names: Dict[str, str],
+    *,
+    namespace: str,
+    as_lang: bool,
+) -> int:
+    try:
+        raw = path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
+        return 0
+    try:
+        if as_lang:
+            data = _parse_lang_file(raw)
+        else:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return 0
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return 0
+    return _load_language_dict(data, name_map, enchantment_names, namespace)
 
 
 def _select_lang_paths(
@@ -221,29 +396,42 @@ def _select_lang_paths(
     include_mods: bool,
 ) -> List[str]:
     loc = normalize_locale(locale)
-    vanilla_json = f"assets/minecraft/lang/{loc}.json"
-    vanilla_lang = f"assets/minecraft/lang/{loc}.lang"
+    stems = {
+        loc,
+        loc.lower(),
+        loc.upper(),
+        f"{loc[:2]}_{loc[3:].upper()}" if "_" in loc else loc,
+    }
     selected: List[str] = []
+    lower_map = {name.lower().replace("\\", "/"): name for name in names}
 
-    # Case-insensitive lookup while preserving original zip member names.
-    lower_map = {name.lower(): name for name in names}
-    for candidate in (vanilla_json, vanilla_lang):
+    vanilla_candidates: List[str] = []
+    for stem in stems:
+        vanilla_candidates.extend(
+            (
+                f"assets/minecraft/lang/{stem}.json",
+                f"assets/minecraft/lang/{stem}.lang",
+            )
+        )
+    for candidate in vanilla_candidates:
         original = lower_map.get(candidate.lower())
-        if original is not None:
+        if original is not None and original not in selected:
             selected.append(original)
 
     if include_mods:
-        for name in names:
-            lower = name.lower()
-            if name in selected:
+        for lower, original in lower_map.items():
+            if original in selected:
                 continue
-            if lower.endswith(f"/lang/{loc}.json") or lower.endswith(
-                f"/lang/{loc}.lang"
+            if "/lang/" not in lower:
+                continue
+            if not (lower.endswith(".json") or lower.endswith(".lang")):
+                continue
+            if any(
+                lower.endswith(f"/lang/{stem}.json")
+                or lower.endswith(f"/lang/{stem}.lang")
+                for stem in stems
             ):
-                # Skip already-added vanilla paths.
-                if lower in {vanilla_json, vanilla_lang}:
-                    continue
-                selected.append(name)
+                selected.append(original)
     return selected
 
 
@@ -278,7 +466,6 @@ def _load_jar_lang_entry(
 
 
 def _namespace_from_lang_path(entry: str) -> str:
-    # assets/<namespace>/lang/xx_xx.json
     parts = entry.replace("\\", "/").split("/")
     if len(parts) >= 4 and parts[0].lower() == "assets":
         return parts[1] or "minecraft"
@@ -306,6 +493,7 @@ def _load_language_dict(
     for key, value in data.items():
         if not isinstance(key, str) or not isinstance(value, str):
             continue
+        # json.loads already unescapes \\uXXXX sequences.
         if key.startswith(("item.", "block.")):
             parts = key.split(".")
             if len(parts) >= 3:
@@ -319,8 +507,7 @@ def _load_language_dict(
         elif ":" in key:
             name_map[key] = value
             count += 1
-        elif key.startswith("item.") is False and key.count(".") == 0:
-            # Rare flat keys without namespace — map under default namespace.
+        elif key.count(".") == 0:
             name_map[f"{namespace}:{key}"] = value
             count += 1
     return count

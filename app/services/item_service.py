@@ -77,7 +77,11 @@ class ItemService:
         *,
         jar_path: Optional[Path] = None,
     ) -> LanguageImportResult:
-        """Load language from the installed Minecraft client jar if present."""
+        """Load language from a local Minecraft install.
+
+        Modern clients (1.8+) resolve ``assets/indexes`` + ``assets/objects``
+        first; legacy jars still provide ``.lang`` embeds as a fallback.
+        """
         return _extract_local_mc(
             self._name_map,
             self._enchantment_names,
