@@ -102,13 +102,26 @@ class ExplorerView(
 
     def _build(self) -> None:
         self.controls.clear()
-
         self._world_label = ft.Text(
             "未设置当前存档", size=12, color=THEME.text_muted,
         )
         toolbar = page_header("存档浏览器", self._world_label, icon=IconSet.EXPLORE)
+        self._init_tab_containers()
+        self._build_tab_bar()
+        self._content_box = panel(
+            content=self._tabs_content[0],
+            padding=10,
+        )
+        self._content_box.expand = True
+        self.controls.append(toolbar)
+        col_tabs = ft.Column([self._tab_bar, self._content_box], spacing=8)
+        col_tabs.expand = True
+        self.controls.append(col_tabs)
+        # 只构建第一个标签页
+        self._build_world_info_tab()
+        self._tabs_built[0] = True
 
-        # 标签页容器 - 优化：使用懒加载
+    def _init_tab_containers(self) -> None:
         self._tab_world_info = ft.Container()
         self._tab_world_info.expand = True
         self._tab_player = ft.Container()
@@ -122,20 +135,18 @@ class ExplorerView(
         self._tab_nbt = ft.Container()
         self._tab_nbt.expand = True
         self._region_display_mode = "activity"
-
         self._tabs_content = [
             self._tab_world_info,
             self._tab_player,
             self._tab_region,
             self._tab_stats,
             self._tab_search,
-            self._tab_nbt
+            self._tab_nbt,
         ]
         self._tab_index = 0
-
-        # 追踪哪些标签页已构建
         self._tabs_built = [False] * 6
 
+    def _build_tab_bar(self) -> None:
         (
             self._tab_bar,
             self._tab_labels_row,
@@ -153,20 +164,6 @@ class ExplorerView(
             selected_index=0,
             on_select=self._switch_tab,
         )
-        self._content_box = panel(
-            content=self._tabs_content[0],
-            padding=10,
-        )
-        self._content_box.expand = True
-
-        self.controls.append(toolbar)
-        col_tabs = ft.Column([self._tab_bar, self._content_box], spacing=8)
-        col_tabs.expand = True
-        self.controls.append(col_tabs)
-
-        # 只构建第一个标签页
-        self._build_world_info_tab()
-        self._tabs_built[0] = True
 
     def _switch_tab(self, index: int) -> None:
         try:

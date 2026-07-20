@@ -92,15 +92,7 @@ class BatchProcessor:
             RuntimeError: 已有批量任务在运行。
         """
         tasks = self._build_tasks(world_paths, world_names, mode)
-        with self._lock:
-            if self.is_running:
-                raise RuntimeError("批量处理已在运行")
-            self.is_running = True
-            self.results = {}
-            self._total_tasks = len(tasks)
-            self._futures = set()
-            self._cancel_event.clear()
-
+        self._begin_batch(tasks)
         try:
             if not tasks:
                 self._report_empty(log_callback, progress_callback)
@@ -124,6 +116,16 @@ class BatchProcessor:
             with self._lock:
                 self.is_running = False
                 self._futures.clear()
+
+    def _begin_batch(self, tasks: list[_BatchTask]) -> None:
+        with self._lock:
+            if self.is_running:
+                raise RuntimeError("批量处理已在运行")
+            self.is_running = True
+            self.results = {}
+            self._total_tasks = len(tasks)
+            self._futures = set()
+            self._cancel_event.clear()
 
     def _build_tasks(
         self,
