@@ -30,6 +30,29 @@ class RegionTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer region / map tab."""
 
     def _build_region_tab(self) -> None:
+        map_view = self._create_region_map_view()
+        chrome = self._create_region_tab_chrome(map_view)
+        self._bind_region_tab_chrome(chrome)
+        self._map_fullscreen_controller = (
+            MapFullscreenController(
+                page=self.app.page,
+                map_view=self._map_view,
+                inline_host=self._map_host,
+                side_panel=self._region_side_panel,
+                set_toggle_state=self._set_map_fullscreen_state,
+                refresh=self._refresh_map,
+                zoom_in=self._map_zoom_in,
+                zoom_out=self._map_zoom_out,
+                reset=self._map_reset_view,
+                translate=self.app.translate,
+            )
+            if self._map_view is not None
+            else None
+        )
+        self._selected_marker_id: Optional[str] = None
+        self._refresh_map_markers()
+
+    def _create_region_map_view(self) -> ft.Control:
         try:
             self._map_view = McaMapView(
                 map_service=self._map_service,
@@ -38,13 +61,14 @@ class RegionTabMixin(ExplorerMixinHost):
                 width=900,
                 height=560,
             )
-            map_view = self._map_view
+            return self._map_view
         except Exception:
             # Map canvas may fail to construct without optional deps; fall back.
             self._map_view = None
-            map_view = build_map_fallback(self.app.translate)
+            return build_map_fallback(self.app.translate)
 
-        chrome = build_region_tab_chrome(
+    def _create_region_tab_chrome(self, map_view: ft.Control) -> Any:
+        return build_region_tab_chrome(
             map_content=map_view,
             on_dimension_changed=self._on_dimension_changed,
             on_display_mode_changed=self._change_region_display_mode,
@@ -63,6 +87,8 @@ class RegionTabMixin(ExplorerMixinHost):
             on_delete_marker=self._delete_selected_marker,
             translate=self.app.translate,
         )
+
+    def _bind_region_tab_chrome(self, chrome: Any) -> None:
         self._region_display_mode = "topview"
         self._dimension_dropdown = chrome.dimension_dropdown
         self._region_display_mode_dropdown = chrome.display_mode_dropdown
@@ -87,24 +113,6 @@ class RegionTabMixin(ExplorerMixinHost):
         self._region_layout = chrome.layout
         self._tab_region.content = self._region_layout
         self._tab_region.expand = True
-        self._map_fullscreen_controller = (
-            MapFullscreenController(
-                page=self.app.page,
-                map_view=self._map_view,
-                inline_host=self._map_host,
-                side_panel=self._region_side_panel,
-                set_toggle_state=self._set_map_fullscreen_state,
-                refresh=self._refresh_map,
-                zoom_in=self._map_zoom_in,
-                zoom_out=self._map_zoom_out,
-                reset=self._map_reset_view,
-                translate=self.app.translate,
-            )
-            if self._map_view is not None
-            else None
-        )
-        self._selected_marker_id: Optional[str] = None
-        self._refresh_map_markers()
 
     def _toggle_map_fullscreen(self) -> None:
         if self._map_fullscreen_controller is not None:

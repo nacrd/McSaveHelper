@@ -127,21 +127,26 @@ class MapExportService:
             FileNotFoundError,
             RuntimeError,
         ) as exc:
-            if cancel_event is not None and cancel_event.is_set():
-                results["cancelled"] = True
-            results["error"] = str(exc)
-            log(f"导出失败: {exc}", "ERROR")
-            logger.error(traceback.format_exc(), module="MapExport")
+            self._record_export_failure(results, log, cancel_event, exc)
         except Exception as exc:
             # 渲染/Pillow 边界：保留失败语义并写日志。
-            if cancel_event is not None and cancel_event.is_set():
-                results["cancelled"] = True
-            results["error"] = str(exc)
-            log(f"导出失败: {exc}", "ERROR")
-            logger.error(traceback.format_exc(), module="MapExport")
+            self._record_export_failure(results, log, cancel_event, exc)
         if results["cancelled"]:
             results["output_path"] = None
         return results
+
+    @staticmethod
+    def _record_export_failure(
+        results: Dict[str, Any],
+        log: Callable[[str, str], None],
+        cancel_event: Optional[threading.Event],
+        exc: Exception,
+    ) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            results["cancelled"] = True
+        results["error"] = str(exc)
+        log(f"导出失败: {exc}", "ERROR")
+        logger.error(traceback.format_exc(), module="MapExport")
 
     @staticmethod
     def _empty_export_result(spec: Optional[MapExportSpec]) -> Dict[str, Any]:

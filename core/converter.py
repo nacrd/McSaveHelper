@@ -495,14 +495,7 @@ def convert_world(
     Raises:
         ConversionError: 不支持的平台/版本组合。
     """
-    if target_platform != "java":
-        raise ConversionError(
-            "尚未接入可靠的 Java/Bedrock 转换引擎，已拒绝转换"
-        )
-    if target_version is not None:
-        raise ConversionError(
-            "尚未实现可靠的跨版本数据迁移，已拒绝版本降级"
-        )
+    _reject_unsupported_conversion(target_platform, target_version)
     if src_path.resolve() == dst_path.resolve():
         return ConversionResult()
 
@@ -529,23 +522,55 @@ def convert_world(
             tracker,
             _logger.warning,
         )
-
-        if target_platform != "java" or target_version is not None:
-            try:
-                _convert_region_files(
-                    work_path,
-                    target_platform,
-                    target_version,
-                    result,
-                    tracker,
-                    _logger.warning,
-                )
-            except ImportError:
-                message = "区域文件转换模块不可用，跳过区域文件转换"
-                result.warnings.append(message)
-                _logger.warning(message, module="Converter")
+        _convert_regions_if_needed(
+            work_path,
+            target_platform,
+            target_version,
+            result,
+            tracker,
+            _logger.warning,
+        )
 
     return result
+
+
+def _reject_unsupported_conversion(
+    target_platform: str,
+    target_version: Optional[int],
+) -> None:
+    if target_platform != "java":
+        raise ConversionError(
+            "尚未接入可靠的 Java/Bedrock 转换引擎，已拒绝转换"
+        )
+    if target_version is not None:
+        raise ConversionError(
+            "尚未实现可靠的跨版本数据迁移，已拒绝版本降级"
+        )
+
+
+def _convert_regions_if_needed(
+    work_path: Path,
+    target_platform: str,
+    target_version: Optional[int],
+    result: ConversionResult,
+    tracker: Any,
+    warn: Any,
+) -> None:
+    if target_platform == "java" and target_version is None:
+        return
+    try:
+        _convert_region_files(
+            work_path,
+            target_platform,
+            target_version,
+            result,
+            tracker,
+            warn,
+        )
+    except ImportError:
+        message = "区域文件转换模块不可用，跳过区域文件转换"
+        result.warnings.append(message)
+        warn(message, module="Converter")
 
 
 if __name__ == "__main__":

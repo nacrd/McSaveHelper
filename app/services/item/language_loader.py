@@ -319,10 +319,7 @@ def extract_language_from_local_minecraft(
     Returns:
         LanguageImportResult: First successful source wins; empty result if none.
     """
-    from core.texture.client_jar import (
-        discover_minecraft_directory,
-        find_local_minecraft_jar,
-    )
+    from core.texture.client_jar import discover_minecraft_directory
 
     mc_dir = discover_minecraft_directory(
         configured=(
@@ -332,38 +329,76 @@ def extract_language_from_local_minecraft(
         jar_path=jar_path,
     )
     used_locale = locale_fallbacks(locale)[0]
+    assets_result = _try_import_from_assets(
+        name_map,
+        enchantment_names,
+        locale=locale,
+        used_locale=used_locale,
+        mc_dir=mc_dir,
+    )
+    if assets_result is not None:
+        return assets_result
+    jar_result = _try_import_from_client_jar(
+        name_map,
+        enchantment_names,
+        locale=locale,
+        used_locale=used_locale,
+        jar_path=jar_path,
+        mc_dir=mc_dir,
+    )
+    if jar_result.count > 0:
+        return jar_result
+    return jar_result
 
-    assets_result = LanguageImportResult(count=0, locale=used_locale)
-    if mc_dir is not None:
-        assets_result = extract_language_from_minecraft_assets(
-            name_map,
-            enchantment_names,
-            locale=locale,
-            minecraft_dir=mc_dir,
-        )
-        if assets_result.count > 0:
-            return assets_result
+
+def _try_import_from_assets(
+    name_map: NameMap,
+    enchantment_names: EnchantMap,
+    *,
+    locale: str,
+    used_locale: str,
+    mc_dir: Optional[Path],
+) -> Optional[LanguageImportResult]:
+    if mc_dir is None:
+        return None
+    assets_result = extract_language_from_minecraft_assets(
+        name_map,
+        enchantment_names,
+        locale=locale,
+        minecraft_dir=mc_dir,
+    )
+    if assets_result.count > 0:
+        return assets_result
+    if assets_result.sources or assets_result.locale:
+        return assets_result
+    return LanguageImportResult(count=0, locale=used_locale)
+
+
+def _try_import_from_client_jar(
+    name_map: NameMap,
+    enchantment_names: EnchantMap,
+    *,
+    locale: str,
+    used_locale: str,
+    jar_path: Optional[Path],
+    mc_dir: Optional[Path],
+) -> LanguageImportResult:
+    from core.texture.client_jar import find_local_minecraft_jar
 
     resolved = jar_path
     if resolved is None and mc_dir is not None:
         resolved = find_local_minecraft_jar(mc_dir)
     if resolved is None:
         resolved = find_local_minecraft_jar()
-    jar_result = LanguageImportResult(count=0, locale=used_locale)
-    if resolved is not None and Path(resolved).is_file():
-        jar_result = extract_language_from_jar(
-            Path(resolved),
-            name_map,
-            enchantment_names,
-            locale=locale,
-            include_mods=True,
-        )
-        if jar_result.count > 0:
-            return jar_result
-
-    if assets_result.sources or assets_result.locale:
-        return assets_result
-    return jar_result
+    if resolved is None or not Path(resolved).is_file():
+        return LanguageImportResult(count=0, locale=used_locale)
+    return extract_language_from_jar(
+        Path(resolved),
+        name_map,
+        enchantment_names,
+        locale=locale,
+        include_mods=True,
+    )
 
 
 def extract_language_from_minecraft_assets(
