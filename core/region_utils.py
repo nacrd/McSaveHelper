@@ -1,8 +1,14 @@
-from pathlib import Path
-from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple, TypedDict, Union
-import re
+"""Region / dimension path helpers for Minecraft Java worlds.
 
+Discovers active dimension region directories (modern and legacy layouts),
+parses ``r.x.z.mca`` names, and scans MCA files without loading chunk data.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, List, Optional, Tuple, TypedDict, Union
 
 REGION_FILE_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.mca$")
 
@@ -19,7 +25,14 @@ _LEGACY_DIMENSION_IDS = {
 
 @dataclass(frozen=True)
 class DimensionRegionDirectory:
-    """One logical Minecraft dimension and its active region directory."""
+    """One logical Minecraft dimension and its active region directory.
+
+    Attributes:
+        id: Dimension id such as ``overworld`` or ``minecraft:the_nether``.
+        name: UI display name.
+        region_dir: Directory containing ``r.*.*.mca`` files.
+        coordinate_scale: Vanilla portal scale relative to overworld.
+    """
 
     id: str
     name: str
@@ -44,10 +57,21 @@ def _coordinate_scale(dimension_id: str) -> float:
 
 
 def parse_region_coords(
-        path_or_name: Union[Path, str]) -> Optional[Tuple[int, int]]:
-    """解析 MCA 区域文件坐标。"""
-    name = path_or_name.name if isinstance(
-        path_or_name, Path) else str(path_or_name)
+    path_or_name: Union[Path, str],
+) -> Optional[Tuple[int, int]]:
+    """解析 MCA 区域文件名中的区域坐标。
+
+    Args:
+        path_or_name: 文件路径或文件名 ``r.X.Z.mca``。
+
+    Returns:
+        tuple[int, int] | None: ``(region_x, region_z)``；名不合法时为 None。
+    """
+    name = (
+        path_or_name.name
+        if isinstance(path_or_name, Path)
+        else str(path_or_name)
+    )
     match = REGION_FILE_RE.match(name)
     if not match:
         return None
@@ -55,7 +79,14 @@ def parse_region_coords(
 
 
 def scan_region_dir(region_dir: Path) -> List[Path]:
-    """扫描单个 region 目录中的有效 MCA 文件。"""
+    """扫描单个 region 目录中的有效 MCA 文件。
+
+    Args:
+        region_dir: 区域目录路径。
+
+    Returns:
+        list[Path]: 按路径排序的 MCA 文件列表。
+    """
     if not region_dir.is_dir():
         return []
     files: List[Path] = []
@@ -69,10 +100,15 @@ def scan_region_dir(region_dir: Path) -> List[Path]:
 
 
 def has_region_file(region_dir: Path) -> bool:
-    """Return whether a directory contains at least one valid MCA file.
+    """判断目录是否至少包含一个有效 MCA 文件。
 
-    Dimension discovery only needs an existence check; avoid materializing and
-    sorting every region path before the caller performs the actual scan.
+    维度发现只需存在性检查，避免在调用方真正扫描前物化并排序全部路径。
+
+    Args:
+        region_dir: 区域目录。
+
+    Returns:
+        bool: 存在有效区域文件时为 True。
     """
     if not region_dir.is_dir():
         return False
@@ -86,6 +122,7 @@ def has_region_file(region_dir: Path) -> bool:
 
 
 def _iter_directories(parent: Path) -> List[Path]:
+    """列出子目录（按名称排序）；不可读时返回空列表。"""
     if not parent.is_dir():
         return []
     try:
@@ -97,17 +134,18 @@ def _iter_directories(parent: Path) -> List[Path]:
         return []
 
 
-def discover_dimension_region_dirs(
-    world_path: Path,
-) -> List[DimensionRegionDirectory]:
-    """Discover active dimension directories with modern paths taking priority."""
-    dimensions: List[DimensionRegionDirectory] = []
-    seen: set[str] = set()
+class _DimensionCollector:
+    """Collect unique dimensions that currently have region files."""
 
-    def add(dim_id: str, name: str, region_dir: Path) -> None:
-        if dim_id in seen or not has_region_file(region_dir):
+    def __init__(self) -> None:
+        self.dimensions: List[DimensionRegionDirectory] = []
+        self._seen: set[str] = set()
+
+    def add(self, dim_id: str, name: str, region_dir: Path) -> None:
+        """Register a dimension if not seen and region files exist."""
+        if dim_id in self._seen or not has_region_file(region_dir):
             return
-        dimensions.append(
+        self.dimensions.append(
             DimensionRegionDirectory(
                 dim_id,
                 name,
@@ -115,7 +153,24 @@ def discover_dimension_region_dirs(
                 coordinate_scale=_coordinate_scale(dim_id),
             )
         )
-        seen.add(dim_id)
+        self._seen.add(dim_id)
+
+
+def discover_dimension_region_dirs(
+    world_path: Path,
+) -> List[DimensionRegionDirectory]:
+    """发现当前有区域文件的维度目录。
+
+    优先级：现代 ``dimensions/minecraft/*`` → 根 ``region`` / 旧版
+    ``DIM*`` → 其他命名空间自定义维度。已见 ID 不会被低优先级布局覆盖。
+
+    Args:
+        world_path: 世界根目录。
+
+    Returns:
+        list[DimensionRegionDirectory]: 有序维度列表。
+    """
+    collector = _DimensionCollector()
 
     modern_root = world_path / "dimensions" / "minecraft"
     for dimension_dir in _iter_directories(modern_root):
@@ -125,7 +180,7 @@ def discover_dimension_region_dirs(
             if dimension_name == "overworld"
             else f"minecraft:{dimension_name}"
         )
-        add(
+        collector.add(
             dim_id,
             _VANILLA_DIMENSION_NAMES.get(
                 dimension_name,
@@ -134,7 +189,11 @@ def discover_dimension_region_dirs(
             dimension_dir / "region",
         )
 
-    add("overworld", _VANILLA_DIMENSION_NAMES["overworld"], world_path / "region")
+    collector.add(
+        "overworld",
+        _VANILLA_DIMENSION_NAMES["overworld"],
+        world_path / "region",
+    )
 
     for dimension_dir in _iter_directories(world_path):
         if not dimension_dir.name.startswith("DIM"):
@@ -147,7 +206,7 @@ def discover_dimension_region_dirs(
             "DIM-1": _VANILLA_DIMENSION_NAMES["the_nether"],
             "DIM1": _VANILLA_DIMENSION_NAMES["the_end"],
         }.get(dimension_dir.name, f"📦 {dimension_dir.name}")
-        add(dim_id, display_name, dimension_dir / "region")
+        collector.add(dim_id, display_name, dimension_dir / "region")
 
     dimensions_root = world_path / "dimensions"
     for namespace_dir in _iter_directories(dimensions_root):
@@ -155,30 +214,54 @@ def discover_dimension_region_dirs(
             continue
         for dimension_dir in _iter_directories(namespace_dir):
             dim_id = f"{namespace_dir.name}:{dimension_dir.name}"
-            add(dim_id, f"📦 {dim_id}", dimension_dir / "region")
+            collector.add(
+                dim_id,
+                f"📦 {dim_id}",
+                dimension_dir / "region",
+            )
 
-    return dimensions
+    return collector.dimensions
 
 
 def iter_region_dirs(
     world_path: Path,
     include_dimensions: bool = True,
 ) -> Iterable[Path]:
-    """枚举包含有效 MCA 文件的 region 目录。"""
+    """枚举包含有效 MCA 文件的 region 目录。
+
+    Args:
+        world_path: 世界根目录。
+        include_dimensions: False 时仅主世界 ``region``。
+
+    Yields:
+        Path: 区域目录路径。
+    """
     if not include_dimensions:
-        if scan_region_dir(world_path / "region"):
-            yield world_path / "region"
+        region_dir = world_path / "region"
+        if has_region_file(region_dir):
+            yield region_dir
         return
     for dimension in discover_dimension_region_dirs(world_path):
         yield dimension.region_dir
 
 
 def scan_regions(
-        world_path: Path,
-        include_dimensions: bool = True) -> List[Path]:
-    """扫描世界存档中的有效 MCA 文件。"""
+    world_path: Path,
+    include_dimensions: bool = True,
+) -> List[Path]:
+    """扫描世界存档中的有效 MCA 文件。
+
+    Args:
+        world_path: 世界根目录。
+        include_dimensions: 是否包含其他维度。
+
+    Returns:
+        list[Path]: 按路径字符串排序的 MCA 文件列表。
+    """
     files: List[Path] = []
     for region_dir in iter_region_dirs(
-            world_path, include_dimensions=include_dimensions):
+        world_path,
+        include_dimensions=include_dimensions,
+    ):
         files.extend(scan_region_dir(region_dir))
-    return sorted(files, key=lambda p: str(p))
+    return sorted(files, key=lambda path: str(path))
