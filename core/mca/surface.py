@@ -269,13 +269,18 @@ def _select_surface_strata(
 
 
 def _sample_column(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
+    """Sample one column, preferring strata to avoid a second column walk."""
+    strata_sample = _sample_column_from_strata(blocks, local_x, local_z)
+    if strata_sample is not None:
+        return strata_sample
+
     raw_sample = _read_surface_sample(blocks, local_x, local_z)
-    name, height, _unused_depth, biome, overlay, alpha = _surface_parts(raw_sample)
-    name, height, overlay, alpha, has_overlay_metadata = _apply_surface_strata(
-        blocks, local_x, local_z, name, height, overlay, alpha, raw_sample
+    name, height, unused_depth, biome, overlay, alpha = _surface_parts(raw_sample)
+    has_overlay = isinstance(raw_sample, tuple) and len(raw_sample) >= 5
+    biome, include_biome = _sample_biome(
+        blocks, local_x, local_z, height, biome, raw_sample
     )
-    biome, include_biome = _sample_biome(blocks, local_x, local_z, height, biome, raw_sample)
-    water_depth = _water_depth(blocks, local_x, local_z, name, height, _unused_depth)
+    water_depth = _water_depth(blocks, local_x, local_z, name, height, unused_depth)
     return _surface_value(
         name,
         height,
@@ -284,7 +289,41 @@ def _sample_column(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
         overlay,
         alpha,
         include_biome=include_biome,
-        include_overlay=has_overlay_metadata,
+        include_overlay=has_overlay,
+    )
+
+
+def _sample_column_from_strata(
+    blocks: Any,
+    local_x: int,
+    local_z: int,
+) -> Optional[SurfaceValue]:
+    strata_getter = getattr(blocks, "surface_strata", None)
+    if not callable(strata_getter):
+        return None
+    try:
+        strata = cast(Sequence[Tuple[str, int]], strata_getter(local_x, local_z))
+    except (TypeError, ValueError):
+        return None
+    if not strata:
+        # Empty strata (air/void) or fixtures that only implement surface_sample.
+        return None
+
+    name, height, overlay, alpha = _select_surface_strata(strata)
+    # Seed as a 2-tuple so biome packing is only enabled when biome_at works.
+    biome, include_biome = _sample_biome(
+        blocks, local_x, local_z, height, None, (name, height)
+    )
+    water_depth = _water_depth(blocks, local_x, local_z, name, height, 0)
+    return _surface_value(
+        name,
+        height,
+        water_depth,
+        biome,
+        overlay,
+        alpha,
+        include_biome=include_biome,
+        include_overlay=overlay is not None,
     )
 
 
@@ -293,29 +332,6 @@ def _read_surface_sample(blocks: Any, local_x: int, local_z: int) -> SurfaceValu
     if callable(sample):
         return cast(SurfaceValue, sample(local_x, local_z))
     return cast(SurfaceValue, blocks.surface_block_id(local_x, local_z))
-
-
-def _apply_surface_strata(
-    blocks: Any, local_x: int, local_z: int, name: Optional[str], height: Optional[int],
-    overlay: Optional[str], alpha: float, raw_sample: SurfaceValue,
-) -> Tuple[Optional[str], Optional[int], Optional[str], float, bool]:
-    has_overlay = isinstance(raw_sample, tuple) and len(raw_sample) >= 5
-    strata_getter = getattr(blocks, "surface_strata", None)
-    if not callable(strata_getter):
-        return name, height, overlay, alpha, has_overlay
-    try:
-        base_name, base_height, strata_overlay, strata_alpha = _select_surface_strata(
-            cast(Sequence[Tuple[str, int]], strata_getter(local_x, local_z))
-        )
-    except (TypeError, ValueError):
-        return name, height, overlay, alpha, has_overlay
-    return (
-        base_name if base_name is not None else name,
-        base_height if base_name is not None else height,
-        strata_overlay if strata_overlay is not None else overlay,
-        strata_alpha if strata_overlay is not None else alpha,
-        has_overlay or strata_overlay is not None,
-    )
 
 
 def _sample_biome(
@@ -757,30 +773,6 @@ def sample_region_surface_samples(
         return _resize_nearest(coarse, tile_size)
     finally:
         rf.close()
-
-
-def sample_region_surface_ids(
-    region_file: PathLike,
-    tile_size: int = 64,
-    *,
-    cancel_check: Optional[Callable[[], bool]] = None,
-    decode_workers: Optional[int] = None,
-    failed_chunks: Optional[Set[Tuple[int, int]]] = None,
-) -> Optional[List[List[Optional[str]]]]:
-    """Return the compatibility grid of surface block IDs only."""
-    samples = sample_region_surface_samples(
-        region_file,
-        tile_size=tile_size,
-        cancel_check=cancel_check,
-        decode_workers=decode_workers,
-        failed_chunks=failed_chunks,
-    )
-    if samples is None:
-        return None
-    return [
-        [_surface_parts(value)[0] for value in row]
-        for row in samples
-    ]
 
 
 def _coerce_surface_sample(value: SurfaceValue) -> SurfaceValue:

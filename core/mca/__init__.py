@@ -68,7 +68,6 @@ from core.mca.region_file import RegionFile
 from core.mca.region_selection import format_region_selection
 from core.mca.surface import (
     sample_region_surface_colors,
-    sample_region_surface_ids,
     sample_region_surface_samples,
 )
 from core.mca.topview_renderer import (
@@ -149,7 +148,6 @@ __all__ = [
     "format_region_coordinate_label",
     "format_region_selection",
     "sample_region_surface_colors",
-    "sample_region_surface_ids",
     "sample_region_surface_samples",
     "render_region_topview",
     "render_region_topview_base64",

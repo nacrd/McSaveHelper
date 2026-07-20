@@ -107,10 +107,8 @@ def is_transparent_surface_name(name: Optional[str]) -> bool:
         return True
     return path in {
         "cave_vines",
-        "cave_vines_plant",
         "twisting_vines",
         "weeping_vines",
-        "sweet_berry_bush",
         "nether_sprouts",
         "warped_roots",
         "crimson_roots",
@@ -512,22 +510,17 @@ class ChunkBlocks:
         x: int,
         z: int,
     ) -> Tuple[Optional[str], Optional[int]]:
-        """Return the visible surface block and its world height together.
+        """Return the top non-air surface block and its world height.
 
-        Keeping the height beside the already decoded palette lookup lets the
-        top-view renderer add terrain relief without scanning the same column
-        a second time.
+        Reuses :meth:`surface_strata` for the non-air walk.  All-air columns
+        still report the heightmap top (matching the previous scan fallback).
         """
+        strata = self.surface_strata(x, z)
+        if strata:
+            return strata[0]
         y = self.surface_y(x, z)
         if y is None:
             return None, None
-        # Transparent foliage/plants often form several layers above the
-        # terrain.  Walking a little deeper mirrors the map mods' strata
-        # fallback and prevents a single leaf from hiding an entire hill.
-        for dy in range(0, 9):
-            name = self.block_id_at(x, y - dy, z)
-            if not is_air_name(name):
-                return name, y - dy
         return self.block_id_at(x, y, z), y
 
 

@@ -1418,18 +1418,17 @@ class McaMapView(ft.Container):
         return self._view_level
 
     def zoom_in(self) -> None:
-        cx = (self.width or 800) / 2
-        cy = (self.height or 600) / 2
-        self._zoom_pivot_x = cx
-        self._zoom_pivot_y = cy
-        self._camera.animate_zoom_about(1.22, cx, cy)
+        self._zoom_about_center(1.22)
 
     def zoom_out(self) -> None:
+        self._zoom_about_center(0.82)
+
+    def _zoom_about_center(self, factor: float) -> None:
         cx = (self.width or 800) / 2
         cy = (self.height or 600) / 2
         self._zoom_pivot_x = cx
         self._zoom_pivot_y = cy
-        self._camera.animate_zoom_about(0.82, cx, cy)
+        self._camera.animate_zoom_about(factor, cx, cy)
 
     def _on_camera_frame(self) -> None:
         try:
