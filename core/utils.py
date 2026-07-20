@@ -276,7 +276,7 @@ def publish_directory_tree(prepared_path: Path, dst_path: Path) -> None:
 
     try:
         os.replace(prepared, destination)
-    except Exception:
+    except OSError:
         if rollback is not None and rollback.exists() and not destination.exists():
             os.replace(rollback, destination)
         raise
@@ -308,7 +308,7 @@ def update_server_properties(
         return
 
     try:
-        original = props_file.read_text(encoding='utf-8')
+        original = props_file.read_text(encoding="utf-8")
         newline = "\r\n" if "\r\n" in original else "\n"
         had_trailing_newline = original.endswith(("\n", "\r"))
         lines: list[str] = original.splitlines()
@@ -328,8 +328,7 @@ def update_server_properties(
         content = newline.join(new_lines)
         if had_trailing_newline:
             content += newline
-        props_file.write_text(content, encoding='utf-8')
+        props_file.write_text(content, encoding="utf-8")
         log(f"已更新 server.properties: level-name={world_name}", "CONFIG")
-
-    except Exception as e:
-        log(f"更新 server.properties 失败: {e}", "ERROR")
+    except OSError as exc:
+        log(f"更新 server.properties 失败: {exc}", "ERROR")

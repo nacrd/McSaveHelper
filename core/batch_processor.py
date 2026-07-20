@@ -71,7 +71,26 @@ class BatchProcessor:
         log_callback: Optional[LogCallback] = None,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> BatchResult:
-        """Process each input exactly once and return task-keyed results."""
+        """处理每个输入世界一次，并返回按任务键汇总的结果。
+
+        Args:
+            world_paths: 源世界路径列表。
+            dest_dir: 批量输出目录。
+            world_names: 可选目标世界名列表。
+            mode: ``fast`` 或 ``full``。
+            offline_mode: 离线 UUID 模式。
+            clean_mode: 常规清理。
+            pure_clean_mode: 纯净清理。
+            manual_names: 手动玩家名。
+            log_callback: 日志回调。
+            progress_callback: 进度回调。
+
+        Returns:
+            BatchResult: 任务键到结果字典的映射。
+
+        Raises:
+            RuntimeError: 已有批量任务在运行。
+        """
         tasks = self._build_tasks(world_paths, world_names, mode)
         with self._lock:
             if self.is_running:
@@ -242,7 +261,10 @@ class BatchProcessor:
             return {**base, "version": version, **result}
         except BatchCancelledError as exc:
             return {**base, "success": False, "cancelled": True, "error": str(exc)}
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            return {**base, "success": False, "error": str(exc)}
         except Exception as exc:
+            # 任务入口边界：单任务失败不影响其余任务聚合。
             return {**base, "success": False, "error": str(exc)}
 
     def _run_default_handler(
@@ -299,6 +321,14 @@ class BatchProcessor:
                 "success": False,
                 "cancelled": True,
                 "error": "批量任务已取消",
+                "world_name": task.world_name,
+                "source_path": str(task.source),
+                "task_index": task.index,
+            }
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            return {
+                "success": False,
+                "error": str(exc),
                 "world_name": task.world_name,
                 "source_path": str(task.source),
                 "task_index": task.index,
