@@ -119,11 +119,17 @@ class McaMapView(ft.Container):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-
         self._service = map_service
         self._on_selection_changed = on_selection_changed
         self._on_marker_selected = on_marker_selected
+        self._init_viewport_state()
+        self._init_interaction_state()
+        self._init_layers_and_content(width, height)
+        # Progressive topview: service notifies when a tile finishes rendering.
+        self._service.set_tile_ready_callback(self._tile_ready_callback)
 
+    def _init_viewport_state(self) -> None:
+        """Viewport, selection, and static map display flags."""
         self._viewport = McaViewport(
             cell_size=float(self.CELL_SIZE),
             cell_gap=float(self.CELL_GAP),
@@ -140,9 +146,15 @@ class McaMapView(ft.Container):
         self._selection = McaMapSelection()
         self._navigator = McaMapNavigator(self._selection)
         self._current_data: Dict[Tuple[int, int], int] = {}
-        self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
-        self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
-        self._block_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
+        self._cell_bounds: Dict[
+            Tuple[int, int], Tuple[float, float, float, float]
+        ] = {}
+        self._chunk_bounds: Dict[
+            Tuple[int, int], Tuple[float, float, float, float]
+        ] = {}
+        self._block_bounds: Dict[
+            Tuple[int, int], Tuple[float, float, float, float]
+        ] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         self._tile_sources = TileSourceCache()
         self._metadata_pending: set[Tuple[int, int]] = set()
@@ -150,6 +162,8 @@ class McaMapView(ft.Container):
         self._tile_ready_callback = self._on_tile_ready
         self._tile_requests = TopviewTileRequestCoordinator(self._service)
 
+    def _init_interaction_state(self) -> None:
+        """Pointer tracking, camera, and rebuild scheduling."""
         self._last_x = 0.0
         self._last_y = 0.0
         self._needs_initial_draw = True
@@ -179,6 +193,8 @@ class McaMapView(ft.Container):
             min_interval=1.0 / 30.0,
         )
 
+    def _init_layers_and_content(self, width: int, height: int) -> None:
+        """Surface/canvas/gesture stack and host geometry."""
         self.width = width
         self.height = height
         self.bgcolor = self.BACKGROUND_COLOR
@@ -223,9 +239,6 @@ class McaMapView(ft.Container):
             expand=True,
             fit=ft.StackFit.EXPAND,
         )
-
-        # Progressive topview: service notifies when a tile finishes rendering.
-        self._service.set_tile_ready_callback(self._tile_ready_callback)
 
     @property
     def _scale(self) -> float:

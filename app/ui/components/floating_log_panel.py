@@ -252,10 +252,10 @@ class FloatingLogPanel(ft.Container):
                     color=THEME.text_muted,
                 )
                 self._auto_scroll_btn.tooltip = "已暂停自动滚动"
-                self._auto_scroll_btn.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._auto_scroll_btn)
 
     def _toggle_auto_scroll(self) -> None:
         """切换自动滚动"""
@@ -264,17 +264,22 @@ class FloatingLogPanel(ft.Container):
             self._auto_scroll_btn.content = ft.Icon(
                 ft.Icons.VERTICAL_ALIGN_BOTTOM,
                 size=14,
-                color=THEME.terminal_green if self._auto_scroll else THEME.text_muted,
+                color=(
+                    THEME.terminal_green
+                    if self._auto_scroll
+                    else THEME.text_muted
+                ),
             )
-            self._auto_scroll_btn.tooltip = "自动滚动" if self._auto_scroll else "已暂停自动滚动"
-            self._auto_scroll_btn.update()
-
+            self._auto_scroll_btn.tooltip = (
+                "自动滚动" if self._auto_scroll else "已暂停自动滚动"
+            )
             if self._auto_scroll and self._log_col.controls:
                 self._scroll_to_end()
-                self.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._auto_scroll_btn)
+        safe_update(self)
 
     def _expand(self) -> None:
         """展开面板"""
