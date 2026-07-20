@@ -8,6 +8,7 @@ import flet as ft
 from app.ui.components.layout import page_header
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
+from app.ui.utils import safe_update
 from app.ui.view_actions import ViewAction
 from app.ui.views.migrator_cards import (
     build_batch_card,
@@ -238,7 +239,7 @@ class MigratorView(ft.Column):
     def _toggle_batch(self, enabled: bool) -> None:
         self.app.config.migration.batch_mode = enabled
         self._batch_detail_col.visible = enabled
-        self._batch_detail_col.update()
+        safe_update(self._batch_detail_col)
 
     def _sync_field_to_config(self) -> None:
         mc = self.app.config.migration
@@ -275,7 +276,7 @@ class MigratorView(ft.Column):
                 ),
                 "WARN",
             )
-        self._batch_result.update()
+        safe_update(self._batch_result)
 
     def _query_uuid(self) -> None:
         name = (self._query_field.value or "").strip()
@@ -291,12 +292,13 @@ class MigratorView(ft.Column):
             online_uuid,
             official_name,
         )
-        self._query_result.update()
+        safe_update(self._query_result)
 
     def on_save_selected(self, path: str) -> None:
         try:
             self._src_field.value = path
             self._sync_field_to_config()
-            self._src_field.update()
         except Exception:
+            # UI best-effort: field/config sync may fail during teardown.
             pass
+        safe_update(self._src_field)

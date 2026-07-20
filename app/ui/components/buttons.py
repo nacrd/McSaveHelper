@@ -155,35 +155,31 @@ class McButton(ft.Container):
         """Reset button to normal state after pressed animation"""
         try:
             await asyncio.sleep(0.15)
-            self._is_pressed = False
-            self.bgcolor = self._bgcolor
-            self.border = ft.Border(
-                left=ft.BorderSide(2, THEME.border_light),
-                top=ft.BorderSide(2, THEME.border_light),
-                right=ft.BorderSide(2, THEME.border_dark),
-                bottom=ft.BorderSide(2, THEME.border_dark),
-            )
-            self.shadow = None  # Ensure shadow is removed when resetting
-            if self.page:
-                self.update()
+            self._apply_normal_visual_state()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def _reset_pressed_state_sync(self) -> None:
         try:
-            self._is_pressed = False
-            self.bgcolor = self._bgcolor
-            self.border = ft.Border(
-                left=ft.BorderSide(2, THEME.border_light),
-                top=ft.BorderSide(2, THEME.border_light),
-                right=ft.BorderSide(2, THEME.border_dark),
-                bottom=ft.BorderSide(2, THEME.border_dark),
-            )
-            self.shadow = None
+            self._apply_normal_visual_state()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
+
+    def _apply_normal_visual_state(self) -> None:
+        """Restore default colors/borders after press animation."""
+        self._is_pressed = False
+        self.bgcolor = self._bgcolor
+        self.border = ft.Border(
+            left=ft.BorderSide(2, THEME.border_light),
+            top=ft.BorderSide(2, THEME.border_light),
+            right=ft.BorderSide(2, THEME.border_dark),
+            bottom=ft.BorderSide(2, THEME.border_dark),
+        )
+        self.shadow = None
 
     def _build_content(self) -> ft.Row:
         icon_color = THEME.text_muted if self._disabled else self._text_color
