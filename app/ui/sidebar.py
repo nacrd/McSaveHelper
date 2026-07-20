@@ -217,6 +217,7 @@ class Sidebar(ft.Container):
             )
             container.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _handle_hover_collapsed(
@@ -236,6 +237,7 @@ class Sidebar(ft.Container):
             )
             container.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _safe_select(self, tab_id: str) -> None:
@@ -243,6 +245,7 @@ class Sidebar(ft.Container):
         try:
             self._select(tab_id)
         except Exception:
+            # Keep selection state even if a view switch callback fails.
             traceback.print_exc()
             self._selected_id = tab_id
 
@@ -258,6 +261,7 @@ class Sidebar(ft.Container):
         try:
             self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         self._on_tab_select(tab_id)
 
@@ -301,10 +305,12 @@ class Sidebar(ft.Container):
                     top=10, bottom=8,
                 )
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         try:
             self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     @property
@@ -380,6 +386,7 @@ class Sidebar(ft.Container):
             self._recent_body.update()
             self._recent_arrow.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _expand_recent(self) -> None:
@@ -393,6 +400,7 @@ class Sidebar(ft.Container):
             self._recent_body.update()
             self._recent_arrow.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _safe_select_recent_save(self, save_id: str) -> None:
@@ -404,6 +412,7 @@ class Sidebar(ft.Container):
             if self._on_recent_save_select:
                 self._on_recent_save_select(save_id)
         except Exception:
+            # Caller callback failures should not break the sidebar.
             traceback.print_exc()
 
     # ════════════════════════════════════════════
@@ -418,6 +427,7 @@ class Sidebar(ft.Container):
             elif self._on_import_save:
                 self._on_import_save()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _handle_import_save(self) -> None:
@@ -435,6 +445,7 @@ class Sidebar(ft.Container):
         try:
             self._recent_save_col.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def set_current_save_name(
@@ -453,6 +464,7 @@ class Sidebar(ft.Container):
                 self._current_save_name.tooltip = None
             self._current_save_name.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     @property
@@ -476,11 +488,13 @@ class Sidebar(ft.Container):
         try:
             self._tab_col.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         if self._on_tabs_reorder:
             try:
                 self._on_tabs_reorder(self._tabs)
             except Exception:
+                # Reorder callback failures should not corrupt local order.
                 traceback.print_exc()
 
     def get_tab_order(self) -> List[str]:
@@ -499,6 +513,7 @@ class Sidebar(ft.Container):
                 self.width = self._sidebar_width
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     @property

@@ -566,6 +566,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         try:
             button.padding = ft.Padding(8, 0, 8, 0)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         return ft.Container(
             content=button,
@@ -842,6 +843,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             try:
                 page = getattr(self.app, "page", None)
             except Exception:
+                # UI best-effort: app shell may already be tearing down.
                 page = None
             run_on_ui(page, apply)
 
@@ -1056,6 +1058,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             try:
                 page = getattr(self.app, "page", None)
             except Exception:
+                # UI best-effort: app shell may already be tearing down.
                 page = None
             run_on_ui(page, apply)
 
@@ -1563,6 +1566,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             if code:
                 return normalize_locale(code)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         return "zh_cn"
 

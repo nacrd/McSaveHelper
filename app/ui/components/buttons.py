@@ -67,7 +67,7 @@ class McButton(ft.Container):
         """
         try:
             # Remove # prefix
-            hex_color = color.lstrip('#')
+            hex_color = color.lstrip("#")
             # Parse RGB values
             r = int(hex_color[0:2], 16)
             g = int(hex_color[2:4], 16)
@@ -77,7 +77,7 @@ class McButton(ft.Container):
             g = min(255, max(0, int(g * factor)))
             b = min(255, max(0, int(b * factor)))
             return f"#{r:02X}{g:02X}{b:02X}"
-        except Exception:
+        except (ValueError, TypeError, IndexError):
             return color
 
     def _handle_hover(self, e: ft.ControlEvent) -> None:
@@ -102,6 +102,7 @@ class McButton(ft.Container):
                     self.shadow = None
             self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _handle_click(self, e: Any = None) -> None:
@@ -123,6 +124,7 @@ class McButton(ft.Container):
             try:
                 self.update()
             except Exception:
+                # UI best-effort: control may already be unmounted.
                 pass
 
             # Execute click handler even if the visual update failed because the
@@ -135,6 +137,7 @@ class McButton(ft.Container):
             # loop.
             self._schedule_reset_pressed_state()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _schedule_reset_pressed_state(self) -> None:
@@ -147,6 +150,7 @@ class McButton(ft.Container):
         except RuntimeError:
             self._reset_pressed_state_sync()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     async def _reset_pressed_state(self) -> None:
@@ -165,6 +169,7 @@ class McButton(ft.Container):
             if self.page:
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _reset_pressed_state_sync(self) -> None:
@@ -179,6 +184,7 @@ class McButton(ft.Container):
             )
             self.shadow = None
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _build_content(self) -> ft.Row:

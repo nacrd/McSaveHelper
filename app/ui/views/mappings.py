@@ -418,7 +418,10 @@ class MappingsView(ft.Column):
                     code = str(getattr(settings(), "language", "") or "")
             if code:
                 return normalize_locale(code)
+        except (AttributeError, TypeError, ValueError):
+            pass
         except Exception:
+            # UI best-effort: locale lookup must not block mapping import.
             pass
         return "zh_cn"
 
@@ -434,6 +437,8 @@ class MappingsView(ft.Column):
                     raw = str(getattr(settings(), "minecraft_dir", "") or "")
             text = raw.strip()
             return Path(text) if text else None
+        except (AttributeError, TypeError, ValueError, OSError):
+            return None
         except Exception:
             return None
 
@@ -447,6 +452,8 @@ class MappingsView(ft.Column):
                     pass
             text = str(value or "").strip()
             return Path(text) if text else None
+        except (AttributeError, TypeError, ValueError, OSError):
+            return None
         except Exception:
             return None
 
