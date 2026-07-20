@@ -9,8 +9,15 @@ from pathlib import Path
 from typing import List, Union, Any, Optional, Callable
 import nbtlib
 from .models import Action, ChunkTarget
-from ..utils import publish_directory_tree
+from ..utils import (
+    find_advancements_dirs,
+    find_player_data_dirs,
+    find_stats_dirs,
+    get_write_player_data_dir,
+    publish_directory_tree,
+)
 from ..perf_timing import PerfTimer
+from core.uuid_utils import normalize_uuid
 
 
 class ActionExecutor:
@@ -115,8 +122,8 @@ class ActionExecutor:
         target_path = action.target
 
         if isinstance(target_path, str):
-            # 玩家 UUID，需要转换为实际路径
-            target_path = target_world / "playerdata" / f"{target_path}.dat"
+            # Bare UUID fallback: resolve under 26.1 or legacy playerdata.
+            target_path = self._resolve_player_dat_path(target_world, target_path)
         elif isinstance(target_path, Path):
             # 确保路径相对于目标世界
             if not target_path.is_absolute():
@@ -138,7 +145,9 @@ class ActionExecutor:
 
         # 加载 NBT
         data = nbtlib.load(target_path)
-        self._apply_path_operation(data, key_path, value, operation, f"NBT 文件 {target_path}")
+        self._apply_path_operation(
+            data, key_path, value, operation, f"NBT 文件 {target_path}"
+        )
         # 保存
         data.save()
 
@@ -192,25 +201,66 @@ class ActionExecutor:
         region_file.unlink()
 
     def _execute_rename_player(self, action: Action, target_world: Path) -> None:
-        """重命名玩家文件"""
+        """重命名玩家文件（兼容 26.1 players/* 与 legacy 路径）"""
         old_uuid, new_uuid = action.target
+        old_norm = normalize_uuid(str(old_uuid))
+        new_norm = normalize_uuid(str(new_uuid))
+        if not old_norm or not new_norm:
+            self._log(f"无效的玩家 UUID 重命名: {old_uuid} -> {new_uuid}", "ERROR")
+            return
 
-        for folder in ["playerdata", "stats", "advancements"]:
-            folder_path = target_world / folder
-            if not folder_path.exists():
-                continue
+        folders: list[Path] = []
+        for finder in (
+            find_player_data_dirs,
+            find_stats_dirs,
+            find_advancements_dirs,
+        ):
+            for folder_path in finder(target_world):
+                if folder_path.is_dir() and folder_path not in folders:
+                    folders.append(folder_path)
 
-            for old_file in folder_path.glob(f"{old_uuid}*"):
-                # 使用精确匹配替换，避免误替换
-                suffix = old_file.name[len(old_uuid):]
-                new_name = f"{new_uuid}{suffix}"
+        for folder_path in folders:
+            for old_file in folder_path.glob(f"{old_norm}*"):
+                # Prefer exact stem match (uuid.dat / uuid.json)
+                stem = old_file.stem
+                if normalize_uuid(stem) != old_norm and not stem.startswith(
+                    old_norm
+                ):
+                    continue
+                suffix = old_file.name[len(old_norm):]
+                if not suffix.startswith("."):
+                    # Defensive: only rename files whose name is uuid + extension
+                    if not old_file.name.startswith(old_norm):
+                        continue
+                    suffix = old_file.name[len(old_norm):]
+                new_name = f"{new_norm}{suffix}"
                 new_path = folder_path / new_name
 
                 if new_path.exists():
-                    self._log(f"跳过玩家文件重命名冲突: {old_file.name} -> {new_name}", "WARN")
+                    self._log(
+                        f"跳过玩家文件重命名冲突: {old_file.name} -> {new_name}",
+                        "WARN",
+                    )
                     continue
 
                 old_file.rename(new_path)
+
+    @staticmethod
+    def _resolve_player_dat_path(target_world: Path, uuid_value: str) -> Path:
+        """Locate or default a player ``.dat`` path for a bare UUID string."""
+        norm = normalize_uuid(uuid_value)
+        for player_dir in find_player_data_dirs(target_world):
+            if not player_dir.is_dir():
+                continue
+            candidate = player_dir / f"{norm}.dat"
+            if candidate.is_file():
+                return candidate
+            # Also accept original casing/hyphen file names
+            for path in player_dir.glob("*.dat"):
+                if normalize_uuid(path.stem) == norm:
+                    return path
+        # Default write location when creating/missing
+        return get_write_player_data_dir(target_world) / f"{norm}.dat"
 
     def _resolve_world_file(self, target: Any, target_world: Path) -> Path:
         """解析世界文件路径（确保在存档目录内）"""

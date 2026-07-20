@@ -1,49 +1,152 @@
 """Player tab mixin for ExplorerView."""
+from __future__ import annotations
+
+import json
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional
 
 import flet as ft
 
-from app.models.nbt_edit import NbtChange
-from app.ui.theme import THEME
-from app.ui.components.buttons import btn_ghost
-from app.ui.components.fields import text_field
+from app.presenters.player_presenter import format_export_bundle_text
+from app.services.player.models import PLAYER_EDIT_SPECS, PlayerEditSpec
+from app.services.player_avatar_service import PlayerAvatarService
+from app.services.player_service import PlayerService
+from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card
-from app.ui.views.explorer.utils import safe_update
-from app.ui.views.explorer.player_hud import PlayerHUDCard
+from app.ui.components.fields import text_field
+from app.ui.theme import THEME
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.equipment_preview import EquipmentPreview
 from app.ui.views.explorer.inventory_grid import InventoryGrid
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
+from app.ui.views.explorer.player_hud import PlayerHUDCard
+from app.ui.views.explorer.utils import safe_update
+
+# Fields shown in the compact form (full registry still available via service).
+_FORM_FIELD_IDS = (
+    "Health",
+    "foodLevel",
+    "foodSaturationLevel",
+    "XpLevel",
+    "XpTotal",
+    "XpP",
+    "Air",
+    "Pos.0",
+    "Pos.1",
+    "Pos.2",
+    "Dimension",
+    "playerGameType",
+    "SelectedItemSlot",
+    "SpawnX",
+    "SpawnY",
+    "SpawnZ",
+    "SpawnDimension",
+    "SpawnForced",
+    "abilities.flying",
+    "abilities.mayfly",
+    "abilities.instabuild",
+    "abilities.invulnerable",
+    "abilities.mayBuild",
+)
 
 
 class PlayerTabMixin(ExplorerMixinHost):
     """Build and handle Explorer player tab interactions."""
 
+    def _player_service(self) -> PlayerService:
+        service = getattr(self, "_player_service_instance", None)
+        if service is None:
+            service = PlayerService(log=self.app.log)
+            self._player_service_instance = service
+        return service
+
+    def _player_avatar_service(self) -> PlayerAvatarService:
+        service = getattr(self, "_player_avatar_service_instance", None)
+        if service is None:
+            service = PlayerAvatarService(enabled=True)
+            self._player_avatar_service_instance = service
+        return service
+
     def _build_player_tab(self) -> None:
+        t = self._t
+        self._player_avatar_generation = 0
         left = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
+
         left.controls.append(
             ft.Text(
-                "选择玩家",
+                t("explorer.select_player", "选择玩家"),
                 size=14,
                 weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary))
+                color=THEME.text_primary,
+            )
+        )
+
+        self._player_filter = text_field(
+            label=t("player.filter", "搜索玩家"),
+            width=300,
+            expand=False,
+            on_change=self._on_player_filter_changed,
+        )
+        left.controls.append(self._player_filter)
+
         self._player_dropdown = ft.Dropdown(
-            options=[], on_select=self._on_player_selected,
-            border_color=THEME.border_standard, text_size=13,
+            options=[],
+            on_select=self._on_player_selected,
+            border_color=THEME.border_standard,
+            text_size=13,
         )
         left.controls.append(self._player_dropdown)
 
-        btn_row = ft.Row([
-            btn_ghost("导入 usercache", height=30, on_click=self._import_usercache),
-            btn_ghost("导入语言文件", height=30, on_click=self._import_language_file),
-        ], spacing=8)
+        self._player_summary_line = ft.Text(
+            t("player.summary_placeholder", "选择玩家后显示摘要"),
+            size=11,
+            color=THEME.text_muted,
+        )
+        left.controls.append(self._player_summary_line)
+
+        btn_row = ft.Row(
+            [
+                btn_ghost(
+                    t("explorer.import_usercache", "导入 usercache"),
+                    height=30,
+                    on_click=self._import_usercache,
+                ),
+                btn_ghost(
+                    t("player.import_language", "导入语言文件"),
+                    height=30,
+                    on_click=self._import_language_file,
+                ),
+            ],
+            spacing=8,
+        )
         left.controls.append(btn_row)
 
-        self._player_hud = PlayerHUDCard()
+        action_row = ft.Row(
+            [
+                btn_ghost(
+                    t("player.export_action", "导出摘要"),
+                    height=30,
+                    on_click=self._export_player_summary,
+                ),
+                btn_ghost(
+                    t("player.teleport_death", "传送到死亡点"),
+                    height=30,
+                    on_click=self._stage_teleport_to_death,
+                ),
+            ],
+            spacing=8,
+        )
+        left.controls.append(action_row)
+
+        self._player_hud = PlayerHUDCard(t_cb=self._t)
         self._hud_card = card(self._player_hud, padding=15)
         left.controls.append(self._hud_card)
 
-        self._equipment = EquipmentPreview(self.app.item, self.app.texture)
+        self._equipment = EquipmentPreview(
+            self.app.item,
+            self.app.texture,
+            t_cb=self._t,
+        )
         self._equip_card = card(self._equipment, padding=15)
         left.controls.append(self._equip_card)
 
@@ -51,10 +154,55 @@ class PlayerTabMixin(ExplorerMixinHost):
 
         right = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
         right.expand = True
-        self._inventory = InventoryGrid(self.app.item, self.app.texture)
-        right.controls.append(self._inventory)
 
-        self._player_left_panel = ft.Container(content=left, width=340)
+        self._inventory = InventoryGrid(
+            self.app.item,
+            self.app.texture,
+            layout="main",
+            t_cb=self._t,
+        )
+        self._ender_inventory = InventoryGrid(
+            self.app.item,
+            self.app.texture,
+            layout="ender",
+            t_cb=self._t,
+        )
+
+        # Flet 0.86 Tabs no longer accept Tab(content=...); use simple toggles.
+        self._player_container_index = 0
+        self._inventory_panel = ft.Container(
+            content=self._inventory,
+            padding=ft.Padding(0, 8, 0, 0),
+            visible=True,
+        )
+        self._ender_panel = ft.Container(
+            content=self._ender_inventory,
+            padding=ft.Padding(0, 8, 0, 0),
+            visible=False,
+        )
+        self._container_tab_inventory_btn = btn_ghost(
+            t("player.tab.inventory", "主背包"),
+            height=30,
+            on_click=lambda e: self._switch_player_container_tab(0),
+        )
+        self._container_tab_ender_btn = btn_ghost(
+            t("player.tab.ender", "末影箱"),
+            height=30,
+            on_click=lambda e: self._switch_player_container_tab(1),
+        )
+        right.controls.append(
+            ft.Row(
+                [
+                    self._container_tab_inventory_btn,
+                    self._container_tab_ender_btn,
+                ],
+                spacing=8,
+            )
+        )
+        right.controls.append(self._inventory_panel)
+        right.controls.append(self._ender_panel)
+
+        self._player_left_panel = ft.Container(content=left, width=380)
         self._player_right_panel = ft.Container(content=right, expand=True)
         self._player_layout = ft.Row(
             [self._player_left_panel, self._player_right_panel],
@@ -62,124 +210,164 @@ class PlayerTabMixin(ExplorerMixinHost):
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
         self._tab_player.content = self._player_layout
+        self._player_refs_cache: List[Any] = []
 
     def _build_player_edit_panel(self, parent: ft.Column) -> None:
-        self._player_edit_fields: Dict[str, ft.TextField] = {
-            "Health": text_field(label="生命值", width=90, expand=False),
-            "foodLevel": text_field(label="饥饿值", width=90, expand=False),
-            "XpLevel": text_field(label="经验等级", width=90, expand=False),
-            "XpTotal": text_field(label="总经验", width=90, expand=False),
-            "Air": text_field(label="氧气", width=90, expand=False),
-            "Pos.0": text_field(label="X", width=90, expand=False),
-            "Pos.1": text_field(label="Y", width=90, expand=False),
-            "Pos.2": text_field(label="Z", width=90, expand=False),
+        t = self._t
+        label_defaults = {
+            "Health": ("player.edit.health", "生命值"),
+            "foodLevel": ("player.edit.food", "饥饿值"),
+            "foodSaturationLevel": ("player.edit.saturation", "饱和度"),
+            "XpLevel": ("player.edit.xp_level", "经验等级"),
+            "XpTotal": ("player.edit.xp_total", "总经验"),
+            "XpP": ("player.edit.xp_p", "经验进度"),
+            "Air": ("player.edit.air", "氧气"),
+            "Pos.0": ("player.edit.pos_x", "X"),
+            "Pos.1": ("player.edit.pos_y", "Y"),
+            "Pos.2": ("player.edit.pos_z", "Z"),
+            "Dimension": ("player.edit.dimension", "维度"),
+            "playerGameType": ("player.edit.game_type", "游戏模式"),
+            "SelectedItemSlot": ("player.edit.selected_slot", "选中槽"),
+            "SpawnX": ("player.edit.spawn_x", "出生 X"),
+            "SpawnY": ("player.edit.spawn_y", "出生 Y"),
+            "SpawnZ": ("player.edit.spawn_z", "出生 Z"),
+            "SpawnDimension": ("player.edit.spawn_dimension", "出生维度"),
+            "SpawnForced": ("player.edit.spawn_forced", "强制出生"),
+            "abilities.flying": ("player.edit.flying", "飞行中"),
+            "abilities.mayfly": ("player.edit.mayfly", "可飞行"),
+            "abilities.instabuild": ("player.edit.instabuild", "瞬间建造"),
+            "abilities.invulnerable": ("player.edit.invulnerable", "无敌"),
+            "abilities.mayBuild": ("player.edit.may_build", "可建造"),
         }
-        form = ft.Column([
-            ft.Text("玩家数据编辑", size=16, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            ft.Row([
-                self._player_edit_fields["Health"],
-                self._player_edit_fields["foodLevel"],
-            ], spacing=8),
-            ft.Row([
-                self._player_edit_fields["XpLevel"],
-                self._player_edit_fields["XpTotal"],
-                self._player_edit_fields["Air"],
-            ], spacing=8),
-            ft.Text("坐标", size=12, color=THEME.text_secondary),
-            ft.Row([
-                self._player_edit_fields["Pos.0"],
-                self._player_edit_fields["Pos.1"],
-                self._player_edit_fields["Pos.2"],
-            ], spacing=8),
-            ft.Row([
-                btn_ghost("刷新表单", height=30, on_click=self._refresh_player_edit_form),
-            ], spacing=8),
-        ], spacing=8)
+
+        self._player_edit_fields: Dict[str, ft.TextField] = {}
+        for field_id in _FORM_FIELD_IDS:
+            key, default = label_defaults.get(
+                field_id, (f"player.edit.{field_id}", field_id)
+            )
+            self._player_edit_fields[field_id] = text_field(
+                label=t(key, default),
+                width=110,
+                expand=False,
+            )
+
+        def row(*field_ids: str) -> ft.Row:
+            # Flet 0.86: Row.wrap causes WrapParentData/FlexParentData cast crashes.
+            return ft.Row(
+                [self._player_edit_fields[fid] for fid in field_ids],
+                spacing=8,
+            )
+
+        form = ft.Column(
+            [
+                ft.Text(
+                    t("player.edit.title", "玩家数据编辑"),
+                    size=16,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                row("Health", "foodLevel", "foodSaturationLevel"),
+                row("XpLevel", "XpTotal"),
+                row("XpP", "Air"),
+                ft.Text(
+                    t("player.edit.section_pos", "坐标与维度"),
+                    size=12,
+                    color=THEME.text_secondary,
+                ),
+                row("Pos.0", "Pos.1", "Pos.2"),
+                row("Dimension", "playerGameType"),
+                row("SelectedItemSlot"),
+                ft.Text(
+                    t("player.edit.section_spawn", "出生点"),
+                    size=12,
+                    color=THEME.text_secondary,
+                ),
+                row("SpawnX", "SpawnY", "SpawnZ"),
+                row("SpawnDimension", "SpawnForced"),
+                ft.Text(
+                    t("player.edit.section_abilities", "能力"),
+                    size=12,
+                    color=THEME.text_secondary,
+                ),
+                row(
+                    "abilities.flying",
+                    "abilities.mayfly",
+                ),
+                row(
+                    "abilities.instabuild",
+                    "abilities.invulnerable",
+                ),
+                row("abilities.mayBuild"),
+                ft.Row(
+                    [
+                        btn_ghost(
+                            t("player.edit.refresh", "刷新表单"),
+                            height=30,
+                            on_click=self._refresh_player_edit_form,
+                        ),
+                        btn_primary(
+                            t("player.edit.stage", "暂存修改"),
+                            height=30,
+                            on_click=self._stage_player_edit_form,
+                        ),
+                    ],
+                    spacing=8,
+                ),
+            ],
+            spacing=8,
+        )
         parent.controls.append(card(form, padding=15))
 
-    def _get_tag_at_path(self, data: Any, path: List[Union[str, int]]) -> Any:
-        node = data
-        for part in path:
-            node = node[part]
-        return node
+    def _switch_player_container_tab(self, index: int) -> None:
+        """Toggle between main inventory and ender chest panels."""
+        self._player_container_index = index
+        if hasattr(self, "_inventory_panel"):
+            self._inventory_panel.visible = index == 0
+            safe_update(self._inventory_panel)
+        if hasattr(self, "_ender_panel"):
+            self._ender_panel.visible = index == 1
+            safe_update(self._ender_panel)
 
-    def _refresh_player_edit_form(self, e: Any = None) -> None:
+    def _on_player_filter_changed(self, e: Any = None) -> None:
         try:
-            if not self._current_player_data:
-                return
-            mapping = self._player_edit_mapping()
-            for key, path in mapping.items():
-                field = self._player_edit_fields.get(key)
-                if not field:
-                    continue
-                try:
-                    value = self._get_tag_at_path(
-                        self._current_player_data, path)
-                    field.value = self._tag_display_value(value)
-                except Exception:
-                    field.value = ""
-                safe_update(field)
+            self._apply_player_dropdown_options()
         except Exception as ex:
-            self.app.handle_exception(ex, title="刷新玩家编辑表单失败")
-
-    def _stage_player_edit_form(self, e: Any = None) -> None:
-        try:
-            if not self.current_uuid or not self._current_player_data:
-                self.app.warn_dialog("提示", "请先选择玩家。")
-                return
-            staged = 0
-            for key, path in self._player_edit_mapping().items():
-                field = self._player_edit_fields.get(key)
-                if not field or field.value is None or str(
-                        field.value).strip() == "":
-                    continue
-                old_value = self._get_tag_at_path(
-                    self._current_player_data, path)
-                new_value = self._coerce_like_tag(str(field.value), old_value)
-                if self._tag_display_value(
-                        old_value) == self._tag_display_value(new_value):
-                    continue
-                self._nbt_stage_store.add(NbtChange(
-                    target=self.current_uuid,
-                    target_label=f"玩家 NBT: {self.current_uuid}",
-                    format="nbt",
-                    operation="set",
-                    path=tuple(path),
-                    display_path=".".join(str(part) for part in path),
-                    old_value=old_value,
-                    new_value=new_value,
-                ))
-                staged += 1
-            self._update_nbt_stage_status()
-            if staged:
-                self.app.info_dialog(
-                    "已暂存", f"已暂存 {staged} 个玩家数据修改，可到 NBT 页查看并提交。")
-                self._switch_tab(5)
-            else:
-                self.app.info_dialog("提示", "没有检测到需要暂存的玩家数据修改。")
-        except Exception as ex:
-            self.app.handle_exception(ex, title="暂存玩家数据失败")
+            self.app.handle_exception(ex, title=self._t(
+                "player.error.filter", "过滤玩家失败"
+            ))
 
     def _refresh_player_list(self) -> None:
         if not self.world_session or not hasattr(self, "_player_dropdown"):
             return
-        player_names = self.world_session.get_player_names()
-        players = []
-        for uuid, name in player_names.items():
-            display = name or self.world_session._format_uuid_with_hyphens(
-                uuid)
-            formatted = self.world_session._format_uuid_with_hyphens(uuid)
-            players.append((formatted, display))
-        self._player_dropdown.options = [
-            ft.dropdown.Option(v[0], v[1]) for v in players
-        ]
-        safe_update(self._player_dropdown)
+        service = self._player_service()
+        self._player_refs_cache = service.list_players(self.world_session)
+        self._apply_player_dropdown_options()
 
-        if players and not self.current_uuid:
-            first_player_uuid = players[0][0]
-            self._player_dropdown.value = first_player_uuid
+        if self._player_refs_cache and not self.current_uuid:
+            first = self._player_refs_cache[0]
+            self._player_dropdown.value = first.uuid_hyphen
             safe_update(self._player_dropdown)
-            self._load_player_data(first_player_uuid)
+            self._load_player_data(first.uuid_hyphen)
+
+    def _apply_player_dropdown_options(self) -> None:
+        if not hasattr(self, "_player_dropdown"):
+            return
+        query = ""
+        if hasattr(self, "_player_filter") and self._player_filter.value:
+            query = str(self._player_filter.value).strip().lower()
+
+        options = []
+        for ref in getattr(self, "_player_refs_cache", []):
+            label = ref.display_name
+            if ref.name and ref.uuid_hyphen:
+                label = f"{ref.name} ({ref.uuid_hyphen[:8]}…)"
+            haystack = f"{ref.display_name} {ref.uuid_norm} {ref.uuid_hyphen}".lower()
+            if query and query not in haystack:
+                continue
+            options.append(ft.dropdown.Option(ref.uuid_hyphen, label))
+
+        self._player_dropdown.options = options
+        safe_update(self._player_dropdown)
 
     def _on_player_selected(self, e: Any) -> None:
         try:
@@ -187,7 +375,10 @@ class PlayerTabMixin(ExplorerMixinHost):
                 return
             self._load_player_data(e.control.value)
         except Exception as ex:
-            self.app.handle_exception(ex, title="选择玩家失败")
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.select", "选择玩家失败"),
+            )
 
     def _load_player_data(self, uuid: str) -> None:
         try:
@@ -195,75 +386,415 @@ class PlayerTabMixin(ExplorerMixinHost):
                 return
             self.current_uuid = uuid
             self._current_chunk_target = None
+
+            service = self._player_service()
             player_data = self.world_session.load_player_data(uuid)
             self._current_player_data = player_data
-            if hasattr(self, "_player_hud"):
-                self._player_hud.update_from_nbt(player_data)
-            if hasattr(self, "_player_edit_fields"):
-                self._refresh_player_edit_form()
-            inv = self.world_session.get_player_inventory(uuid)
+
+            summary = service.load_summary(self.world_session, uuid)
+            containers = service.load_containers(self.world_session, uuid)
+            self._apply_player_summary_ui(summary, player_data)
+            self._apply_player_containers_ui(uuid, containers)
+            self._apply_player_nbt_target(uuid)
+        except Exception as exc:
+            self.app.handle_exception(
+                exc,
+                title=self._t("player.error.load", "加载玩家数据失败"),
+            )
+
+    def _apply_player_summary_ui(
+        self,
+        summary: Any,
+        player_data: Any,
+    ) -> None:
+        if hasattr(self, "_player_hud") and summary is not None:
+            self._player_hud.update_from_summary(summary)
+            self._load_player_avatar(summary.ref.uuid_norm, summary.ref.name)
+        elif hasattr(self, "_player_hud"):
+            self._player_hud.update_from_nbt(player_data)
+
+        if summary is not None and hasattr(self, "_player_summary_line"):
+            pose = summary.pose
+            state = summary.state
+            self._player_summary_line.value = (
+                f"{state.dimension or '--'} · "
+                f"{_coord(pose.x)}, {_coord(pose.y)}, {_coord(pose.z)} · "
+                f"♥ {_coord(state.health)} · "
+                f"🎒 {summary.inventory_count}"
+            )
+            safe_update(self._player_summary_line)
+
+        if hasattr(self, "_player_edit_fields"):
+            self._refresh_player_edit_form()
+
+    def _apply_player_containers_ui(
+        self,
+        uuid: str,
+        containers: Any,
+    ) -> None:
+        if containers is not None:
+            inv_items = list(containers.inventory) + list(containers.equipment)
             if hasattr(self, "_inventory"):
-                self._inventory.set_inventory(inv)
+                self._inventory.set_inventory(
+                    list(containers.inventory),
+                    selected_slot=containers.selected_slot,
+                )
             if hasattr(self, "_equipment"):
-                self._equipment.set_equipment(inv)
-            nbt = self.world_session.load_player_nbt(uuid)
-            self._current_nbt_target = uuid
-            self._current_nbt_label = f"玩家 NBT: {uuid}"
-            if hasattr(self, "_nbt_target_label"):
-                self._nbt_target_label.value = self._current_nbt_label
-                safe_update(self._nbt_target_label)
-            if hasattr(self, "_nbt_tree"):
-                self._nbt_tree.load_nbt(nbt)
-        except Exception as e:
-            self.app.handle_exception(e, title="加载玩家数据失败")
+                self._equipment.set_equipment(
+                    list(containers.equipment) or inv_items
+                )
+            if hasattr(self, "_ender_inventory"):
+                self._ender_inventory.set_inventory(list(containers.ender_items))
+            return
+
+        if not self.world_session:
+            return
+        inv = self.world_session.get_player_inventory(uuid)
+        if hasattr(self, "_inventory"):
+            self._inventory.set_inventory(inv)
+        if hasattr(self, "_equipment"):
+            self._equipment.set_equipment(inv)
+        if hasattr(self, "_ender_inventory"):
+            ender = self.world_session.get_player_ender_items(uuid)
+            self._ender_inventory.set_inventory(ender)
+
+    def _apply_player_nbt_target(self, uuid: str) -> None:
+        if not self.world_session:
+            return
+        nbt = self.world_session.load_player_nbt(uuid)
+        self._current_nbt_target = uuid
+        self._current_nbt_label = (
+            f"{self._t('player.nbt_label', '玩家 NBT')}: {uuid}"
+        )
+        if hasattr(self, "_nbt_target_label"):
+            self._nbt_target_label.value = self._current_nbt_label
+            safe_update(self._nbt_target_label)
+        if hasattr(self, "_nbt_tree"):
+            self._nbt_tree.load_nbt(nbt)
+
+    def _load_player_avatar(
+        self,
+        uuid_norm: str,
+        name: Optional[str],
+    ) -> None:
+        """Async load skin face; discard stale results via generation."""
+        if not hasattr(self, "_player_hud"):
+            return
+        self._player_avatar_generation = getattr(
+            self, "_player_avatar_generation", 0
+        ) + 1
+        generation = self._player_avatar_generation
+        service = self._player_avatar_service()
+
+        cached = service.get_cached_path(uuid_norm)
+        if cached is not None:
+            self._player_hud.set_avatar_src(
+                str(cached),
+                initial=(name or uuid_norm or "?")[:1],
+            )
+            return
+
+        def on_loaded(path: Optional[str]) -> None:
+            def apply() -> None:
+                if generation != getattr(self, "_player_avatar_generation", 0):
+                    return
+                if not hasattr(self, "_player_hud"):
+                    return
+                if path:
+                    self._player_hud.set_avatar_src(
+                        path,
+                        initial=(name or uuid_norm or "?")[:1],
+                    )
+            try:
+                page = getattr(self.app, "page", None)
+            except Exception:
+                page = None
+            run_on_ui(page, apply)
+
+        service.load_avatar_async(uuid_norm, on_loaded)
+
+    def _refresh_player_edit_form(self, e: Any = None) -> None:
+        try:
+            if not self._current_player_data:
+                return
+            values = self._player_service().form_values_from_data(
+                self._current_player_data,
+                specs=self._active_edit_specs(),
+            )
+            for field_id, field in self._player_edit_fields.items():
+                field.value = values.get(field_id, "")
+                safe_update(field)
+        except Exception as ex:
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.refresh_form", "刷新玩家编辑表单失败"),
+            )
+
+    def _stage_player_edit_form(self, e: Any = None) -> None:
+        try:
+            if not self.current_uuid or not self._current_player_data:
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t("player.need_select", "请先选择玩家。"),
+                )
+                return
+
+            field_values: Dict[str, str] = {}
+            for field_id, field in self._player_edit_fields.items():
+                if field.value is None:
+                    continue
+                text = str(field.value).strip()
+                if text == "":
+                    continue
+                field_values[field_id] = text
+
+            result = self._player_service().build_edit_changes(
+                self.current_uuid,
+                self._current_player_data,
+                field_values,
+                specs=self._active_edit_specs(),
+                target_label=(
+                    f"{self._t('player.nbt_label', '玩家 NBT')}: "
+                    f"{self.current_uuid}"
+                ),
+            )
+
+            if result.errors:
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t(
+                        "player.edit.validation_errors",
+                        "部分字段未暂存：{errors}",
+                        errors=", ".join(result.errors),
+                    ),
+                )
+
+            for change in result.changes:
+                self._nbt_stage_store.add(change)
+
+            self._update_nbt_stage_status()
+            if result.staged_count:
+                self.app.info_dialog(
+                    self._t("player.edit.staged_title", "已暂存"),
+                    self._t(
+                        "player.edit.staged_body",
+                        "已暂存 {count} 个玩家数据修改，可到 NBT 页查看并提交。",
+                        count=result.staged_count,
+                    ),
+                )
+                self._switch_tab(5)
+            elif not result.errors:
+                self.app.info_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t(
+                        "player.edit.no_changes",
+                        "没有检测到需要暂存的玩家数据修改。",
+                    ),
+                )
+        except Exception as ex:
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.stage", "暂存玩家数据失败"),
+            )
+
+    def _stage_teleport_to_death(self, e: Any = None) -> None:
+        try:
+            if not self.current_uuid or not self._current_player_data:
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t("player.need_select", "请先选择玩家。"),
+                )
+                return
+            result = self._player_service().build_teleport_to_death_changes(
+                self.current_uuid,
+                self._current_player_data,
+                target_label=(
+                    f"{self._t('player.nbt_label', '玩家 NBT')}: "
+                    f"{self.current_uuid}"
+                ),
+            )
+            if result.errors:
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t(
+                        "player.no_death_location",
+                        "当前玩家没有可用的死亡位置。",
+                    ),
+                )
+                return
+            for change in result.changes:
+                self._nbt_stage_store.add(change)
+            self._update_nbt_stage_status()
+            self.app.info_dialog(
+                self._t("player.edit.staged_title", "已暂存"),
+                self._t(
+                    "player.teleport_death_staged",
+                    "已暂存传送到死亡点的坐标修改。",
+                ),
+            )
+            self._switch_tab(5)
+        except Exception as ex:
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.teleport", "暂存传送失败"),
+            )
+
+    def _export_player_summary(self, e: Any = None) -> None:
+        try:
+            if not self.world_session or not self.current_uuid:
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t("player.need_select", "请先选择玩家。"),
+                )
+                return
+            bundle = self._player_service().build_export(
+                self.world_session,
+                self.current_uuid,
+                include_items=True,
+            )
+            if bundle is None:
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t("player.export_failed", "无法导出玩家摘要。"),
+                )
+                return
+
+            path = self.app.save_file(
+                title=self._t("player.export_dialog", "导出玩家摘要"),
+                default_ext=".json",
+                file_types=[
+                    ("JSON", "*.json"),
+                    ("Text", "*.txt"),
+                ],
+            )
+            if not path:
+                return
+            out = Path(path)
+            if out.suffix.lower() == ".txt":
+                text = format_export_bundle_text(bundle, translate=self._t)
+                out.write_text(text, encoding="utf-8")
+            else:
+                out.write_text(
+                    json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            self.app.info_dialog(
+                self._t("player.export_ok_title", "导出成功"),
+                self._t(
+                    "player.export_ok_body",
+                    "已导出玩家摘要到：\n{path}",
+                    path=str(out),
+                ),
+            )
+        except Exception as ex:
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.export", "导出玩家摘要失败"),
+            )
 
     def _import_usercache(self, e: Any = None) -> None:
         try:
             path = self.app.pick_file(
-                title="选择 usercache.json",
-                file_types=[("JSON 文件 (*.json)", "*.json")],
+                title=self._t(
+                    "player.import_usercache_title",
+                    "选择 usercache.json",
+                ),
+                file_types=[("JSON (*.json)", "*.json")],
             )
             if path and self.world_session:
                 imported = self.world_session.import_usercache(Path(path))
                 if imported > 0:
                     self._refresh_player_list()
-                    self.app.info_dialog("成功", f"成功导入 {imported} 个玩家名称。")
+                    self.app.info_dialog(
+                        self._t("dialogs.success", "成功"),
+                        self._t(
+                            "explorer.imported_cache",
+                            "成功导入 {count} 个玩家名称。",
+                            count=imported,
+                        ),
+                    )
                 else:
-                    self.app.info_dialog("提示", "未能导入任何玩家名称。")
+                    self.app.info_dialog(
+                        self._t("dialogs.hint", "提示"),
+                        self._t(
+                            "player.import_empty",
+                            "未能导入任何玩家名称。",
+                        ),
+                    )
         except Exception as ex:
-            self.app.handle_exception(ex, title="导入 usercache 失败")
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.import_usercache", "导入 usercache 失败"),
+            )
 
     def _import_language_file(self, e: Any = None) -> None:
         try:
             path = self.app.pick_file(
-                title="选择语言文件 (zh_cn.json 等)",
-                file_types=[("JSON 文件 (*.json)", "*.json")],
+                title=self._t(
+                    "player.import_language_title",
+                    "选择语言文件 (zh_cn.json 等)",
+                ),
+                file_types=[("JSON (*.json)", "*.json")],
             )
             if path:
                 count = self.app.item.load_language_file(Path(path))
                 if count > 0:
                     self.app.info_dialog(
-                        "成功", f"成功导入 {count} 个物品/附魔名称。\n物品栏和装备预览将使用新名称。")
+                        self._t("dialogs.success", "成功"),
+                        self._t(
+                            "player.import_language_ok",
+                            "成功导入 {count} 个物品/附魔名称。\n"
+                            "物品栏和装备预览将使用新名称。",
+                            count=count,
+                        ),
+                    )
                     if self.current_uuid:
                         self._load_player_data(self.current_uuid)
                 else:
                     self.app.info_dialog(
-                        "提示",
-                        "未能从文件中解析出有效的物品名称。\n\n"
-                        "支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n"
-                        "- 直接 ID 映射 (minecraft:xxx)",
+                        self._t("dialogs.hint", "提示"),
+                        self._t(
+                            "player.import_language_empty",
+                            "未能从文件中解析出有效的物品名称。\n\n"
+                            "支持的格式：\n"
+                            "- Minecraft 语言文件 (item.minecraft.xxx)\n"
+                            "- 直接 ID 映射 (minecraft:xxx)",
+                        ),
                     )
         except Exception as ex:
-            self.app.handle_exception(ex, title="导入语言文件失败")
+            self.app.handle_exception(
+                ex,
+                title=self._t(
+                    "player.error.import_language",
+                    "导入语言文件失败",
+                ),
+            )
 
-    def _player_edit_mapping(self) -> Dict[str, List[Union[str, int]]]:
+    def _active_edit_specs(self) -> List[PlayerEditSpec]:
+        wanted = set(_FORM_FIELD_IDS)
+        return [spec for spec in PLAYER_EDIT_SPECS if spec.field_id in wanted]
+
+    # Keep legacy mapping helper for any external callers / tests.
+    def _player_edit_mapping(self) -> Dict[str, List[Any]]:
         return {
-            "Health": ["Health"],
-            "foodLevel": ["foodLevel"],
-            "XpLevel": ["XpLevel"],
-            "XpTotal": ["XpTotal"],
-            "Air": ["Air"],
-            "Pos.0": ["Pos", 0],
-            "Pos.1": ["Pos", 1],
-            "Pos.2": ["Pos", 2],
+            spec.field_id: list(spec.nbt_path)
+            for spec in self._active_edit_specs()
         }
+
+    def _get_tag_at_path(self, data: Any, path: List[Any]) -> Any:
+        node = data
+        for part in path:
+            node = node[part]
+        return node
+
+
+def _coord(value: Any) -> str:
+    if value is None:
+        return "--"
+    try:
+        number = float(value)
+        if number.is_integer():
+            return str(int(number))
+        return f"{number:.1f}"
+    except (TypeError, ValueError):
+        return str(value)

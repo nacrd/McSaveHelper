@@ -155,6 +155,28 @@ class WorldSession:
         data = self.get_player_data(uuid)
         return self._player_manager.get_player_inventory(data)
 
+    def get_player_ender_items(self, uuid: str) -> List[Dict[str, Any]]:
+        """提取指定玩家的末影箱物品列表"""
+        data = self.get_player_data(uuid)
+        return self._player_manager.get_player_ender_items(data)
+
+    def get_player_file_path(self, uuid: str) -> Optional[Path]:
+        """Return the absolute ``.dat`` path for a player UUID, if scanned."""
+        norm = self._normalize_uuid(uuid)
+        return self._player_files.get(norm)
+
+    def seed_player_names(self, names: Dict[str, Optional[str]]) -> None:
+        """Merge external UUID -> name mappings into the session name cache."""
+        self._player_manager.seed_names(names)
+
+    def get_known_player_name(self, uuid: str) -> Optional[str]:
+        """Return a cached display name without loading player NBT."""
+        return self._player_manager.get_known_name(uuid)
+
+    def format_uuid_with_hyphens(self, uuid: str) -> str:
+        """Public UUID formatting helper for UI layers."""
+        return PlayerManager.format_uuid_with_hyphens(uuid)
+
     def load_player_data(self, uuid: str) -> Optional[Compound]:
         """加载指定玩家的完整 NBT 数据（供 ExplorerView 使用）"""
         return self.get_player_data(uuid)

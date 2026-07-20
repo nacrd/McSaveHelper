@@ -24,6 +24,33 @@ def _ensure_requests():
     return requests
 
 
+def normalize_uuid(uuid_str: str) -> str:
+    """Normalize a UUID to 32 lowercase hex chars without hyphens.
+
+    Non-string or empty values return ``""`` so callers can guard once.
+    """
+    if not uuid_str or not isinstance(uuid_str, str):
+        return ""
+    return uuid_str.replace("-", "").lower()
+
+
+def format_uuid_with_hyphens(uuid_str: str) -> str:
+    """Format a UUID as 8-4-4-4-12 lowercase hex.
+
+    Returns the normalized 32-char form when length is not 32, or ``""`` when
+    empty after normalization.
+    """
+    normalized = normalize_uuid(uuid_str)
+    if not normalized:
+        return ""
+    if len(normalized) != 32:
+        return normalized
+    return (
+        f"{normalized[:8]}-{normalized[8:12]}-{normalized[12:16]}-"
+        f"{normalized[16:20]}-{normalized[20:]}"
+    )
+
+
 def get_offline_uuid_str(name: str) -> str:
     """生成离线 UUID 字符串
 

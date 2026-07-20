@@ -7,37 +7,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-import nbtlib
-
 from app.models.nbt_edit import NbtChange
+from app.services.nbt_value_utils import coerce_like_tag, tag_display_value
 
-
-def tag_display_value(value: Any) -> str:
-    if hasattr(value, "unpack"):
-        value = value.unpack()
-    elif hasattr(value, "value"):
-        value = value.value
-    return str(value)
-
-
-def coerce_like_tag(raw: str, original: Any) -> Any:
-    tag_type = type(original)
-    text = raw.strip()
-    if "(" in text and text.endswith(")"):
-        text = text[text.find("(") + 1:-1]
-    if isinstance(original, (nbtlib.Float, nbtlib.Double)):
-        return tag_type(float(text))
-    if isinstance(
-        original,
-        (nbtlib.Byte,
-         nbtlib.Short,
-         nbtlib.Int,
-         nbtlib.Long)):
-        return tag_type(int(float(text)))
-    try:
-        return tag_type(text)
-    except Exception:
-        return text
+# Re-export for existing Explorer imports.
+__all__ = [
+    "tag_display_value",
+    "coerce_like_tag",
+    "world_coords_to_region_chunk",
+    "format_stage_value",
+    "format_diff_value",
+    "format_change_summary",
+    "extract_chunk_objects",
+]
 
 
 def world_coords_to_region_chunk(
