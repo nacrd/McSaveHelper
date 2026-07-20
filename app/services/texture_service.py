@@ -200,13 +200,12 @@ class TextureService:
 
     def _try_fetch_from_api(self, texture_res: str) -> Optional[bytes]:
         try:
-            if not self._asset_index_loaded:
-                self._load_asset_index()
-            if self._asset_index is None:
+            asset_index = self._get_asset_index_keys()
+            if asset_index is None:
                 return None
 
             mc_res_path = f"minecraft/{texture_res}"
-            file_hash = self._asset_index.get(mc_res_path)
+            file_hash = asset_index.get(mc_res_path)
             if not file_hash:
                 return None
 
@@ -359,14 +358,13 @@ class TextureService:
         response = requests.get(url, timeout=_REQUEST_TIMEOUT)
         if response.status_code != 200:
             return None
-        payload: object = response.json()
-        return TextureService._as_json_object(payload)
+        return TextureService._as_json_object(response.json())
 
     @staticmethod
     def _as_json_object(value: object) -> Optional[Dict[str, object]]:
-        if not isinstance(value, dict):
-            return None
-        return {str(key): item for key, item in value.items()}
+        if isinstance(value, dict):
+            return {str(key): item for key, item in value.items()}
+        return None
 
     def clear_cache(self, clear_textures: bool = True,
                     clear_jars: bool = False) -> None:

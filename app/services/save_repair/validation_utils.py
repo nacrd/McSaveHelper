@@ -2,7 +2,9 @@
 
 提供区块、玩家数据、level.dat 的验证功能。
 """
-from typing import Any, List, Mapping, Optional, Tuple
+import time
+from pathlib import Path
+from typing import Any, Callable, List, Mapping, Optional, Tuple
 
 import nbtlib
 
@@ -134,3 +136,22 @@ def validate_level_dat_data(
         *(f"缺失字段: {field_name}" for field_name in missing_fields),
         *_level_range_issues(data),
     ]
+
+
+def quarantine_file(
+    file_path: Path,
+    log: Callable[[str, str], None],
+) -> None:
+    """Rename a damaged file to a ``.corrupted`` sibling for later inspection."""
+    try:
+        new_path = file_path.with_suffix(file_path.suffix + ".corrupted")
+        if new_path.exists():
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            new_path = file_path.with_suffix(
+                f"{file_path.suffix}.corrupted_{timestamp}"
+            )
+            log(f"已有隔离文件存在，使用新名称: {new_path.name}", "WARNING")
+        file_path.rename(new_path)
+        log(f"已隔离损坏文件: {file_path.name} -> {new_path.name}", "WARNING")
+    except Exception as exc:
+        log(f"无法隔离文件 {file_path.name}: {exc}", "ERROR")

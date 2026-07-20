@@ -703,7 +703,7 @@ class McaMapView(ft.Container):
             self._visible_regions.clear()
             self._tile_requests.reset()
             self._surface_layer.clear()
-            shapes.extend(self._build_empty_state(view_w, view_h))
+            shapes.extend(map_shapes.empty_state(view_w, view_h))
             shapes.extend(self._build_info_overlay())
             self._apply_shapes(shapes)
             return
@@ -857,9 +857,6 @@ class McaMapView(ft.Container):
                 )
         return shapes
 
-    def _build_empty_state(self, view_w: float, view_h: float) -> List[cv.Shape]:
-        return map_shapes.empty_state(view_w, view_h)
-
     def _prepare_visible_bounds(
         self,
         coords: List[Tuple[int, int]],
@@ -942,7 +939,9 @@ class McaMapView(ft.Container):
                     ):
                         missing.append(coord)
                 elif self._show_empty_regions:
-                    shapes.append(self._build_empty_region(rect))
+                    shapes.append(
+                        map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
+                    )
         self._request_visible_metadata(metadata_missing)
         return shapes, missing
 
@@ -964,16 +963,7 @@ class McaMapView(ft.Container):
     ) -> List[cv.Shape]:
         x, y, size, _ = rect
         file_size = self._current_data[coord]
-        meta = self._service.get_region_meta(coord)
-        if self._display_mode == "biome":
-            color = get_biome_color(str(meta.get("dominant_biome", "unknown")))
-        elif self._display_mode == "structure":
-            color = get_structure_color(
-                int(meta.get("structure_count", 0) or 0),
-                str(meta.get("dominant_structure", "none")),
-            )
-        else:
-            color = get_region_color(file_size, self._cached_stats or {})
+        color = self._region_fill_color(coord, file_size)
         shapes = self._build_region_cell(x, y, size, color, coord, file_size)
         if show_chunk_grid:
             shapes.extend(self._build_chunk_grid(
@@ -1021,12 +1011,6 @@ class McaMapView(ft.Container):
             self._surface_layer.mark_dirty()
             self._schedule_rebuild()
 
-    def _build_empty_region(
-        self,
-        rect: Tuple[float, float, float, float],
-    ) -> cv.Rect:
-        return map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
-
     def _request_visible_tiles(self, missing: List[Tuple[int, int]]) -> None:
         if not self._mounted:
             self._tile_requests.reset()
@@ -1037,10 +1021,6 @@ class McaMapView(ft.Container):
             scale=self._scale,
             center=self._viewport_center_region(),
         )
-
-    def _visible_tile_size(self) -> int:
-        """Return the current region texture LOD for the on-screen size."""
-        return self._tile_requests.visible_tile_size(self._scale)
 
     def _viewport_center_region(self) -> Tuple[int, int]:
         """Return the region nearest the screen center, including empty space."""
@@ -1141,15 +1121,6 @@ class McaMapView(ft.Container):
         self._chunk_bounds.update(chunk_bounds)
         self._block_bounds.update(block_bounds)
         return shapes
-
-    def _build_origin_marker(self, x: float, y: float) -> List[cv.Shape]:
-        return map_shapes.origin_marker(
-            x,
-            y,
-            self.width or 800,
-            self.height or 600,
-            self.ORIGIN_COLOR,
-        )
 
     def _build_info_overlay(self) -> List[cv.Shape]:
         return map_shapes.info_overlay(

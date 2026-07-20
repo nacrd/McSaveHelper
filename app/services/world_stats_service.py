@@ -33,7 +33,6 @@ class EntityStats:
 class WorldStatistics:
     """存档完整统计数据"""
     total_regions: int = 0
-    total_chunks: int = 0
     total_blocks: int = 0
     total_entities: int = 0
     block_stats: Optional[BlockStats] = None
@@ -45,7 +44,7 @@ class WorldStatistics:
 
 @dataclass(frozen=True)
 class _RegionChunkStats:
-    total_chunks: int
+    loaded_chunks: int
     empty_chunks: int
     block_counts: Counter[str]
     entity_counts: Counter[str]
@@ -67,9 +66,6 @@ class WorldStatsService:
 
     def __init__(self, log: Optional[LogCallback] = None) -> None:
         self.log: LogCallback = log or _default_log
-
-    def _log(self, message: str, level: str = "INFO") -> None:
-        self.log(message, level)
 
     def analyze_world(
             self,
@@ -104,7 +100,7 @@ class WorldStatsService:
                     if progress_callback:
                         progress_callback(idx + 1, len(region_files))
                 except Exception as exc:
-                    self._log(
+                    self.log(
                         f"分析区域 {region_path.name} 失败: {exc}",
                         "WARNING",
                     )
@@ -146,14 +142,14 @@ class WorldStatsService:
     ) -> _RegionChunkStats:
         block_counts: Counter[str] = Counter()
         entity_counts: Counter[str] = Counter()
-        total_chunks = 0
+        loaded_chunks = 0
         empty_chunks = max(0, 1024 - len(present)) if present is not None else 0
         coordinates = present if present is not None else self._all_chunk_coordinates()
         for x, z in coordinates:
             try:
                 chunk = region.get_chunk(x, z)
                 if chunk is not None:
-                    total_chunks += 1
+                    loaded_chunks += 1
                     chunk_blocks, chunk_entities = self._analyze_chunk(chunk)
                     block_counts.update(chunk_blocks)
                     entity_counts.update(chunk_entities)
@@ -163,7 +159,7 @@ class WorldStatsService:
                 if present is None:
                     empty_chunks += 1
         return _RegionChunkStats(
-            total_chunks=total_chunks,
+            loaded_chunks=loaded_chunks,
             empty_chunks=empty_chunks,
             block_counts=block_counts,
             entity_counts=entity_counts,
@@ -180,9 +176,7 @@ class WorldStatsService:
         block_counter: Counter[str],
         entity_counter: Counter[str],
     ) -> None:
-        stats.total_chunks += region_stats.total_chunks
-        # loaded_chunks tracks the same non-empty chunks as total_chunks.
-        stats.loaded_chunks += region_stats.total_chunks
+        stats.loaded_chunks += region_stats.loaded_chunks
         stats.empty_chunks += region_stats.empty_chunks
         block_counter.update(region_stats.block_counts)
         entity_counter.update(region_stats.entity_counts)
@@ -207,9 +201,9 @@ class WorldStatsService:
         stats.total_entities = stats.entity_stats.total_count
 
     def _log_statistics(self, stats: WorldStatistics) -> None:
-        self._log(
+        self.log(
             f"存档分析完成: {stats.total_regions} 区域, "
-            f"{stats.total_chunks} 区块, {stats.total_blocks} 方块, "
+            f"{stats.loaded_chunks} 区块, {stats.total_blocks} 方块, "
             f"{stats.total_entities} 实体",
             "INFO",
         )

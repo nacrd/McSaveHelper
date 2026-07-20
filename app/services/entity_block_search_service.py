@@ -111,7 +111,6 @@ class EntityBlockSearchService:
             tracker.add_metadata("results", len(self.results))
             tracker.add_metadata("regions", self.summary.scanned_regions)
             tracker.add_metadata("chunks", self.summary.scanned_chunks)
-            self._add_entity_storage_warning(search_type, log)
 
     def _search_dimensions(
         self,
@@ -173,13 +172,6 @@ class EntityBlockSearchService:
         if not valid_dimensions:
             raise ValueError("未选择有效维度")
         return valid_dimensions
-
-    def _add_entity_storage_warning(
-        self,
-        search_type: str,
-        log: Callable[[str, str], None],
-    ) -> None:
-        del search_type, log
 
     def _make_logger(
         self,

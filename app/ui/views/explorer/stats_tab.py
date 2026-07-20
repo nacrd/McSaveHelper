@@ -13,6 +13,17 @@ from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.services.world_stats_service import WorldStatistics, WorldStatsService
 
 
+_BLOCK_PIE_COLORS = (
+    "#66BB6A",
+    "#42A5F5",
+    "#FFA726",
+    "#AB47BC",
+    "#EF5350",
+    "#26A69A",
+    "#D4E157",
+)
+
+
 class StatsTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer statistics tab."""
 
@@ -123,10 +134,7 @@ class StatsTabMixin(ExplorerMixinHost):
     def _build_block_pie_shapes(
             self, items: List[Tuple[str, int]]) -> List[cv.Shape]:
         """构建方块分布饼图的形状列表"""
-        colors = [
-            "#66BB6A", "#42A5F5", "#FFA726",
-            "#AB47BC", "#EF5350", "#26A69A", "#D4E157"
-        ]
+        colors = _BLOCK_PIE_COLORS
         shapes: List[cv.Shape] = [
             cv.Rect(0, 0, 260, 220, paint=ft.Paint(color=THEME.bg_secondary))
         ]
@@ -197,10 +205,7 @@ class StatsTabMixin(ExplorerMixinHost):
         """更新方块分布饼图和图例"""
         pie_items = items[:7]
         total = sum(value for _, value in pie_items)
-        colors = [
-            "#66BB6A", "#42A5F5", "#FFA726",
-            "#AB47BC", "#EF5350", "#26A69A", "#D4E157"
-        ]
+        colors = _BLOCK_PIE_COLORS
         self._block_pie_canvas.shapes = self._build_block_pie_shapes(pie_items)
         self._block_pie_legend.controls.clear()
         if total <= 0:

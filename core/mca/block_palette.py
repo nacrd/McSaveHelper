@@ -611,10 +611,6 @@ def block_id_at(chunk_nbt: Any, x: int, y: int, z: int) -> Optional[str]:
     return get_chunk_blocks(chunk_nbt).block_id_at(x, y, z)
 
 
-def scan_surface_y(chunk_nbt: Any, x: int, z: int) -> Optional[int]:
-    return get_chunk_blocks(chunk_nbt).scan_surface_y(x, z)
-
-
 def surface_block_id(chunk_nbt: Any, x: int, z: int) -> Optional[str]:
     return get_chunk_blocks(chunk_nbt).surface_block_id(x, z)
 

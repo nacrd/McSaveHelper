@@ -173,14 +173,14 @@ class RegionFile:
     def has_external_chunks(self) -> bool:
         """Return whether any present chunk uses an external ``.mcc`` stream."""
         self._ensure_open()
-        for local_cx, local_cz in self.iter_present_chunks():
-            off, sectors = self.chunk_location(local_cx, local_cz)
+        data = self._data
+        for off, sectors in self._location_table():
             if off == 0 or sectors == 0:
                 continue
             marker_offset = off * SECTOR_SIZE + LENGTH_HEADER_SIZE
-            if marker_offset >= len(self._data):
-                continue
-            if self._data[marker_offset] & EXTERNAL_CHUNK_STREAM_FLAG:
+            if marker_offset < len(data) and (
+                data[marker_offset] & EXTERNAL_CHUNK_STREAM_FLAG
+            ):
                 return True
         return False
 

@@ -265,10 +265,7 @@ def delete_chunk_entries(
     path = Path(region_path)
     if not path.is_file():
         return 0
-    if backup:
-        bak = path.with_suffix(path.suffix + ".bak")
-        if not bak.exists():
-            shutil.copy2(path, bak)
+    _create_backup(path, backup)
 
     cleared = 0
     with open(path, "r+b") as f:

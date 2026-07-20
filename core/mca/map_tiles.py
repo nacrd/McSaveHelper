@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import hypot
 from typing import Iterable, Sequence, Tuple
 
 RegionCoord = Tuple[int, int]
@@ -80,8 +79,3 @@ def plan_visible_requests(
         MapTileRequest(coord=coord, tile_size=tile_size, priority=index)
         for index, coord in enumerate(ordered)
     ]
-
-
-def region_distance(coord: RegionCoord, center: RegionCoord) -> float:
-    """Return Euclidean distance in region units for UI hints/tests."""
-    return hypot(coord[0] - center[0], coord[1] - center[1])

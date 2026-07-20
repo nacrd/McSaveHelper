@@ -4,16 +4,10 @@
 提供独立的 UI 卡死和线程阻塞检测，输出到日志系统。
 """
 
+import sys
 import threading
 import time
 from typing import Optional, Dict, Any
-from dataclasses import dataclass
-
-try:
-    import sys
-    _FRAME_AVAILABLE = True
-except ImportError:
-    _FRAME_AVAILABLE = False
 
 
 _SKIPPED_THREAD_TOKENS = (
@@ -45,20 +39,6 @@ _GENERIC_WAIT_FUNCTIONS = frozenset(
 )
 
 
-@dataclass
-class HangReport:
-    """卡死报告"""
-    type: str  # "ui_hang" 或 "thread_block"
-    duration: float  # 持续时间（秒）
-    thread_name: Optional[str] = None
-    stack_trace: Optional[str] = None
-    timestamp: float = 0.0
-
-    def __post_init__(self):
-        if self.timestamp == 0.0:
-            self.timestamp = time.time()
-
-
 class HangDetector:
     """独立的卡死检测器
 
@@ -78,7 +58,6 @@ class HangDetector:
         # 线程监控
         self._thread_snapshots: Dict[int, Dict[str, Any]] = {}
         self._thread_block_threshold: float = 30.0  # 线程阻塞阈值（秒）
-        self._blocked_threads: set = set()
 
         self._lock = threading.Lock()
 
@@ -145,9 +124,6 @@ class HangDetector:
 
     def _check_thread_blocking(self, now: float) -> None:
         """检测线程阻塞"""
-        if not _FRAME_AVAILABLE:
-            return
-
         try:
             frames = sys._current_frames()
             current_threads = set(frames)
@@ -178,7 +154,7 @@ class HangDetector:
             }
             return
         if snapshot["location"] != location:
-            self._reset_thread_snapshot(snapshot, location, thread_id, now)
+            self._reset_thread_snapshot(snapshot, location, now)
             return
         self._check_thread_timeout(thread_id, frame, snapshot, now)
 
@@ -195,7 +171,6 @@ class HangDetector:
             return
         stack_trace = self._stack_trace(frame)
         snapshot["alerted"] = True
-        self._blocked_threads.add(thread_id)
         self._log_warning(
             f"线程 [{snapshot['name']}] 可能阻塞：{elapsed:.0f}s 无进展"
             f"（阈值 {threshold:.0f}s）| 堆栈: {stack_trace}"
@@ -203,19 +178,16 @@ class HangDetector:
 
     def _clear_thread_snapshot(self, thread_id: int) -> None:
         self._thread_snapshots.pop(thread_id, None)
-        self._blocked_threads.discard(thread_id)
 
     def _reset_thread_snapshot(
         self,
         snapshot: Dict[str, Any],
         location: str,
-        thread_id: int,
         now: float,
     ) -> None:
         snapshot["location"] = location
         snapshot["timestamp"] = now
         snapshot["alerted"] = False
-        self._blocked_threads.discard(thread_id)
 
     @staticmethod
     def _frame_location(frame: Any) -> str:

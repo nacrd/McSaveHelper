@@ -25,9 +25,6 @@ DEFAULT_HEIGHTMAP_NAMES: Tuple[str, ...] = (
     "WORLD_SURFACE",
     "WORLD_SURFACE_WG",
 )
-# Keep the old private name available for integrations that imported it while
-# the decoder still had a single implicit preference list.
-_HEIGHTMAP_NAMES = DEFAULT_HEIGHTMAP_NAMES
 
 # WORLD_SURFACE follows the highest non-air column, which is the height a
 # top-down map needs for foliage, water and terrain silhouettes.  Keep motion
@@ -151,15 +148,3 @@ def surface_y_from_heightmap(
     except Exception:
         return None
     return heightmap_value_to_block_y(value, version)
-
-
-def has_heightmap(
-    chunk_nbt: Any,
-    *,
-    heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
-) -> bool:
-    values, _ = decode_heightmap_raw(
-        chunk_nbt,
-        heightmap_names=heightmap_names,
-    )
-    return values is not None

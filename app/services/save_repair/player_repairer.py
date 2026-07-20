@@ -3,7 +3,6 @@
 修复玩家数据文件，补充缺失字段，隔离无法修复的文件。
 """
 import threading
-import time
 from pathlib import Path
 from typing import Callable, List, Dict, Any
 
@@ -11,6 +10,7 @@ import nbtlib
 from nbtlib import Compound, String, Float, Int, List as NbtList, Double
 
 from .models import RepairReport, IssueLevel, RepairIssue
+from .validation_utils import quarantine_file
 from core.utils import find_player_data_dirs
 
 
@@ -144,15 +144,4 @@ class PlayerRepairer:
         file_path: Path,
         log: Callable[[str, str], None],
     ) -> None:
-        """隔离损坏的文件"""
-        try:
-            new_path = file_path.with_suffix(file_path.suffix + ".corrupted")
-            if new_path.exists():
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                new_path = file_path.with_suffix(f"{file_path.suffix}.corrupted_{timestamp}")
-                log(f"已有隔离文件存在，使用新名称: {new_path.name}", "WARNING")
-
-            file_path.rename(new_path)
-            log(f"已隔离损坏文件: {file_path.name} -> {new_path.name}", "WARNING")
-        except Exception as e:
-            log(f"无法隔离文件 {file_path.name}: {e}", "ERROR")
+        quarantine_file(file_path, log)

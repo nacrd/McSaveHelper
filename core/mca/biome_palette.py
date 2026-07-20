@@ -203,11 +203,6 @@ def decode_biome_section(section_or_container: Any) -> Optional[BiomeSection]:
     )
 
 
-# Descriptive alias used by callers that think in terms of parsing rather
-# than decoding; keeping both names also makes the pure API easy to discover.
-parse_biome_section = decode_biome_section
-
-
 class ChunkBiomes:
     """Lazy section lookup for a chunk's modern biome containers."""
 
@@ -292,5 +287,4 @@ __all__ = [
     "biome_at",
     "decode_biome_section",
     "get_chunk_biomes",
-    "parse_biome_section",
 ]

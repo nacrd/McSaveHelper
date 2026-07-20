@@ -104,12 +104,7 @@ class SaveRepairService:
             getattr(logger, level.lower(), logger.info)(msg, module="SaveDetect")
             if log_callback:
                 log_callback(msg, level)
-            issue_level = {
-                "INFO": IssueLevel.INFO,
-                "WARNING": IssueLevel.WARNING,
-                "ERROR": IssueLevel.ERROR,
-                "SUCCESS": IssueLevel.FIXED,
-            }.get(level.upper(), IssueLevel.INFO)
+            issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
             report.issues.append(RepairIssue(
                 level=issue_level,
                 category="detect",

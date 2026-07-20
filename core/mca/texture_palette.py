@@ -223,7 +223,13 @@ def texture_palette_signature() -> str:
     with _lock:
         if _palette_signature is not None:
             return _palette_signature
-        path = texture_jar_path()
+    # Discover/open the JAR outside the signature lock so open I/O and nested
+    # archive locking are not held while we only need the resolved path.
+    _get_archive()
+    with _lock:
+        if _palette_signature is not None:
+            return _palette_signature
+        path = _archive_path
         if path is None:
             _palette_signature = "fallback"
             return _palette_signature

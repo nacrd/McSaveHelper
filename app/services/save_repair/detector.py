@@ -82,8 +82,6 @@ def _estimate_region_chunks(region_files: List[Path]) -> int:
 class WorldDetector:
     """存档检测器（只读）"""
 
-    CHUNKS_PER_REGION = 1024
-
     def __init__(self, cancel_event: threading.Event) -> None:
         self._cancel_event = cancel_event
 
@@ -101,11 +99,11 @@ class WorldDetector:
         """检测存档状态（只读，不修改任何文件）"""
         # 1. 基本信息
         progress(0.05, "读取世界信息...")
-        self._detect_world_info(world_path, report, log)
+        region_files = self._detect_world_info(world_path, report, log)
 
         # 2. 区块检测
         progress(0.15, "扫描区块文件...")
-        self._detect_chunks(world_path, report, log, progress)
+        self._detect_chunks(world_path, report, log, progress, region_files)
 
         # 3. 玩家检测
         progress(0.80, "检测玩家数据...")
@@ -120,7 +118,7 @@ class WorldDetector:
         world_path: Path,
         report: DetectReport,
         log: Callable[[str, str], None],
-    ) -> None:
+    ) -> List[Path]:
         """读取世界基本信息"""
         info = report.world_info
         info.world_name = world_path.name
@@ -148,7 +146,7 @@ class WorldDetector:
             self._read_level_dat_info(world_path, info, log)
 
         # 维度和区域文件
-        self._detect_dimensions(world_path, info)
+        region_files = self._detect_dimensions(world_path, info)
 
         # 玩家数量（兼容 26.1 新旧路径）
         info.player_count = 0
@@ -161,6 +159,7 @@ class WorldDetector:
             f"大小: {info.world_size_mb:.1f}MB, 区域: {info.region_count}, 玩家: {info.player_count}",
             "INFO",
         )
+        return region_files
 
     def _read_level_dat_info(
         self,
@@ -191,9 +190,15 @@ class WorldDetector:
         except Exception as e:
             log(f"无法读取 level.dat 基本信息: {e}", "WARNING")
 
-    def _detect_dimensions(self, world_path: Path, info: WorldInfo) -> None:
+    def _detect_dimensions(
+        self,
+        world_path: Path,
+        info: WorldInfo,
+        region_files: Optional[List[Path]] = None,
+    ) -> List[Path]:
         """检测维度和区域文件（兼容 Minecraft 26.1 新旧路径）"""
-        region_files = scan_all_regions(world_path)
+        if region_files is None:
+            region_files = scan_all_regions(world_path)
         info.region_count = len(region_files)
         dimensions: Set[str] = set()
 
@@ -205,6 +210,7 @@ class WorldDetector:
 
         info.dimensions = sorted(dimensions)
         info.total_chunks = _estimate_region_chunks(region_files)
+        return region_files
 
     def _detect_chunks(
         self,
@@ -212,9 +218,11 @@ class WorldDetector:
         report: DetectReport,
         log: Callable[[str, str], None],
         progress: Callable[[float, str], None],
+        region_files: Optional[List[Path]] = None,
     ) -> None:
         """检测区块文件"""
-        region_files = scan_all_regions(world_path)
+        if region_files is None:
+            region_files = scan_all_regions(world_path)
         total = len(region_files)
 
         if total == 0:
@@ -222,7 +230,7 @@ class WorldDetector:
             return
 
         log(f"找到 {total} 个区域文件，开始逐块检测...", "INFO")
-        report.chunks_checked = total * self.CHUNKS_PER_REGION
+        report.chunks_checked = total * 1024
 
         max_workers = min(max(1, (total + 3) // 4), 8)
 

@@ -3,7 +3,6 @@
 修复损坏的区块，隔离无法读取的区域文件。
 """
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +13,7 @@ from core.mca import NativeRegion as Region
 from core.scanner import scan_all_regions
 
 from .models import RepairReport
-from .validation_utils import validate_chunk
+from .validation_utils import quarantine_file, validate_chunk
 
 
 @dataclass(frozen=True)
@@ -26,8 +25,6 @@ class ChunkRepairResult:
 
 class ChunkRepairer:
     """区块修复器"""
-
-    CHUNKS_PER_REGION = 1024
 
     def __init__(self, cancel_event: threading.Event) -> None:
         self._cancel_event = cancel_event
@@ -128,15 +125,4 @@ class ChunkRepairer:
         file_path: Path,
         log: Callable[[str, str], None],
     ) -> None:
-        """隔离损坏的文件"""
-        try:
-            new_path = file_path.with_suffix(file_path.suffix + ".corrupted")
-            if new_path.exists():
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                new_path = file_path.with_suffix(f"{file_path.suffix}.corrupted_{timestamp}")
-                log(f"已有隔离文件存在，使用新名称: {new_path.name}", "WARNING")
-
-            file_path.rename(new_path)
-            log(f"已隔离损坏文件: {file_path.name} -> {new_path.name}", "WARNING")
-        except Exception as e:
-            log(f"无法隔离文件 {file_path.name}: {e}", "ERROR")
+        quarantine_file(file_path, log)

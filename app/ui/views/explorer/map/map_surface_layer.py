@@ -17,6 +17,7 @@ from app.ui.views.explorer.map.surface_renderer import (
     MapSurfaceFrame,
     MapSurfaceRenderer,
     MapSurfaceSpec,
+    _rgb,
 )
 from core.mca.map_tiles import HIGH_DETAIL_TILE_LADDER, choose_tile_size
 from core.mca.topview_renderer import ULTRA_TILE_SIZE
@@ -438,7 +439,7 @@ class MapSurfaceLayer:
     ) -> Tuple[Dict[RegionCoord, int], Dict[RegionCoord, RgbColor]]:
         surface_data = self._surface_data(data, spec)
         colors = {
-            coord: self._hex_to_rgb(color_for_region(coord, size))
+            coord: _rgb(color_for_region(coord, size))
             for coord, size in surface_data.items()
         }
         return surface_data, colors
@@ -474,20 +475,6 @@ class MapSurfaceLayer:
                 min_size=required_size,
             )
         ]
-
-    @staticmethod
-    def _hex_to_rgb(value: str) -> RgbColor:
-        text = value.strip().lstrip("#")
-        if len(text) in {6, 8}:
-            try:
-                return (
-                    int(text[0:2], 16),
-                    int(text[2:4], 16),
-                    int(text[4:6], 16),
-                )
-            except ValueError:
-                pass
-        return (42, 58, 46)
 
     def _queue(
         self,

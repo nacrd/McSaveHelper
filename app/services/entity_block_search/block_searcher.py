@@ -28,10 +28,9 @@ class BlockSearcher(BaseSearcher):
             pass
 
     def _matching_sections(self, chunk: Any, target: str) -> List[int]:
-        target_block = self._target_block(target)
         matches = []
         for section_y in get_section_range(chunk):
-            if self._section_palette_matches(chunk, section_y, target, target_block):
+            if self._section_palette_matches(chunk, section_y, target):
                 matches.append(section_y)
         return matches
 
@@ -40,14 +39,13 @@ class BlockSearcher(BaseSearcher):
         chunk: Any,
         section_y: int,
         target: str,
-        target_block: Any,
     ) -> bool:
         try:
             palette = chunk.get_palette(section_y)
             if palette is None:
                 return False
             return any(
-                self._block_matches(block, target, target_block)
+                self._block_matches(block, target)
                 for block in palette
                 if block is not None
             )
@@ -55,7 +53,6 @@ class BlockSearcher(BaseSearcher):
             return False
 
     def _scan_section(self, chunk: Any, target: str, dimension: str, section_y: int) -> None:
-        target_block = self._target_block(target)
         for x in range(16):
             for z in range(16):
                 for y in range(section_y * 16, section_y * 16 + 16):
@@ -63,7 +60,7 @@ class BlockSearcher(BaseSearcher):
                         return
                     try:
                         block = chunk.get_block(x, y, z)
-                        if block is None or not self._block_matches(block, target, target_block):
+                        if block is None or not self._block_matches(block, target):
                             continue
                         world_x, world_z = chunk.x * 16 + x, chunk.z * 16 + z
                         self.results.append(SearchResult(
@@ -77,44 +74,8 @@ class BlockSearcher(BaseSearcher):
                     except Exception:
                         continue
 
-    def _check_block_at(
-        self,
-        chunk: Any,
-        target: str,
-        dimension: str,
-        x: int,
-        y: int,
-        z: int,
-    ) -> None:
-        # 保留向后兼容：内部已内联到 _scan_section，减少一次函数调用开销
-        try:
-            block = chunk.get_block(x, y, z)
-            if block is None or not self._block_matches(block, target, None):
-                return
-            world_x, world_z = chunk.x * 16 + x, chunk.z * 16 + z
-            container_info = self.container_helper.get_container_info_at(
-                chunk,
-                world_x,
-                y,
-                world_z,
-            )
-            self.results.append(SearchResult(
-                "block",
-                get_block_name(block),
-                (world_x, y, world_z),
-                dimension,
-                container_info,
-            ))
-        except Exception:
-            pass
-
     @staticmethod
-    def _target_block(target: str) -> Any:
-        # Native path matches by name string only (no anvil Block objects).
-        return None
-
-    @staticmethod
-    def _block_matches(block: Any, target: str, target_block: Any) -> bool:
+    def _block_matches(block: Any, target: str) -> bool:
         block_name = get_block_name(block)
         block_id = tag_to_str(getattr(block, "id", ""))
         return matches_target(block_name, target) or matches_target(block_id, target)

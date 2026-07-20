@@ -116,25 +116,25 @@ class LevelRepairer:
             log(f"level.dat_old 无法恢复: {exc}", "ERROR")
 
     @staticmethod
-    def _save_atomically(nbt_data: Any, target: Path) -> None:
+    def _temp_path(target: Path) -> Path:
         fd, temp_name = tempfile.mkstemp(
             prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
         )
-        temp_path = Path(temp_name)
         os.close(fd)
+        return Path(temp_name)
+
+    @classmethod
+    def _save_atomically(cls, nbt_data: Any, target: Path) -> None:
+        temp_path = cls._temp_path(target)
         try:
             nbt_data.save(temp_path)
             os.replace(temp_path, target)
         finally:
             temp_path.unlink(missing_ok=True)
 
-    @staticmethod
-    def _copy_atomically(source: Path, target: Path) -> None:
-        fd, temp_name = tempfile.mkstemp(
-            prefix=f".{target.name}.", suffix=".tmp", dir=target.parent
-        )
-        temp_path = Path(temp_name)
-        os.close(fd)
+    @classmethod
+    def _copy_atomically(cls, source: Path, target: Path) -> None:
+        temp_path = cls._temp_path(target)
         try:
             shutil.copy2(source, temp_path)
             os.replace(temp_path, target)

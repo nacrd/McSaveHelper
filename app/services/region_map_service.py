@@ -275,12 +275,6 @@ class RegionMapService:
             self._region_meta[coord] = dict(meta or {})
             return dict(self._region_meta[coord])
 
-    def get_data_snapshot(self) -> Dict[Tuple[int, int], int]:
-        """
-        获取数据快照（get_all_data 的别名，保持兼容性）
-        """
-        return self.get_all_data()
-
     def clear_data(self) -> None:
         """清空所有缓存数据"""
         meta_tasks: list[asyncio.Task]
@@ -296,9 +290,6 @@ class RegionMapService:
             self._topview_tiles.clear()
             self._topview_memory_bytes = 0
             self._topview_tile_sizes.clear()
-            self._cached_stats = None
-            self._cached_data_snapshot = None
-            self._cached_snapshot_count = -1
             self._topview_tile_complete.clear()
             self._topview_tile_revisions.clear()
             self._topview_revision_counter = 0

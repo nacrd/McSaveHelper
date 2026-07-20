@@ -42,10 +42,6 @@ class BlockDataService:
         """清空索引缓存（chunk 替换/重载时调用）。"""
         self._indices_cache.clear()
 
-    def flush_dirty_caches(self) -> None:
-        """把所有 dirty 的缓存写回（当前 set_block_at 已即时回写，此方法预留）。"""
-        self._indices_cache.clear()
-
     def _get_cached_indices(
             self, data: Any, palette_size: int, block_states: Any) -> List[int]:
         """取/建 decoded indices 缓存。"""

@@ -612,9 +612,9 @@ class MapExportView(ft.Column):
         if results["success"]:
             self._show_export_success(results)
         elif results.get("cancelled"):
-            self._result_text.value = self.app.translate("map_export.cancelled", "导出已取消")
-            self._result_text.update()
-            self.app.hide_progress()
+            self._publish_export_result(
+                self.app.translate("map_export.cancelled", "导出已取消")
+            )
         else:
             self._show_export_failure(
                 results.get("error")
@@ -625,15 +625,18 @@ class MapExportView(ft.Column):
 
     def _show_export_success(self, results: Mapping[str, Any]) -> None:
         dimensions = results["dimensions"]
-        self._result_text.value = self.app.translate(
-            "map_export.completed_report",
-            "导出完成！\n\n✓ 维度: {dimension}\n✓ 输出文件: {output}\n"
-            "✓ 图像尺寸: {width} x {height}\n✓ 处理区块: {chunks}",
-            dimension=results["dimension_id"], output=results["output_path"],
-            width=dimensions[0], height=dimensions[1], chunks=results["chunks_processed"],
+        self._publish_export_result(
+            self.app.translate(
+                "map_export.completed_report",
+                "导出完成！\n\n✓ 维度: {dimension}\n✓ 输出文件: {output}\n"
+                "✓ 图像尺寸: {width} x {height}\n✓ 处理区块: {chunks}",
+                dimension=results["dimension_id"],
+                output=results["output_path"],
+                width=dimensions[0],
+                height=dimensions[1],
+                chunks=results["chunks_processed"],
+            )
         )
-        self._result_text.update()
-        self.app.hide_progress()
         self.app.info_dialog(
             self.app.translate("map_export.completed", "完成"),
             self.app.translate("map_export.completed_message", "地图导出完成！"),
@@ -644,15 +647,20 @@ class MapExportView(ft.Column):
         self._reset_export_state()
 
     def _show_export_failure(self, error: object, message_key: str) -> None:
-        self._result_text.value = self.app.translate(
-            "map_export.failed", "导出失败: {error}", error=error
+        self._publish_export_result(
+            self.app.translate(
+                "map_export.failed", "导出失败: {error}", error=error
+            )
         )
-        self._result_text.update()
-        self.app.hide_progress()
         self.app.error_dialog(
             self.app.translate("map_export.error", "错误"),
             self.app.translate(message_key, "地图导出失败", error=error),
         )
+
+    def _publish_export_result(self, message: str) -> None:
+        self._result_text.value = message
+        self._result_text.update()
+        self.app.hide_progress()
 
     def _reset_export_state(self) -> None:
         self._exporting = False

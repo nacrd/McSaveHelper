@@ -251,10 +251,12 @@ def _select_surface_strata(
     base_name: Optional[str] = None
     base_height: Optional[int] = None
     overlay_name: Optional[str] = None
+    overlay_alpha = 0.0
     for name, height in strata:
         alpha = _overlay_alpha(name)
         if alpha > 0.0 and overlay_name is None:
             overlay_name = name
+            overlay_alpha = alpha
             continue
         base_name = name
         base_height = height
@@ -263,7 +265,7 @@ def _select_surface_strata(
         # A column containing only transparent decorations should remain
         # visible instead of becoming an empty pixel.
         return top_name, top_height, None, 0.0
-    return base_name, base_height, overlay_name, _overlay_alpha(overlay_name)
+    return base_name, base_height, overlay_name, overlay_alpha
 
 
 def _sample_column(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
@@ -782,33 +784,19 @@ def sample_region_surface_ids(
 
 
 def _coerce_surface_sample(value: SurfaceValue) -> SurfaceValue:
-    if isinstance(value, tuple):
-        name = value[0] if value else None
-        try:
-            height = int(value[1]) if len(value) > 1 and value[1] is not None else None
-        except (TypeError, ValueError):
-            height = None
-        try:
-            water_depth = max(0, int(value[2])) if len(value) > 2 else 0
-        except (TypeError, ValueError):
-            water_depth = 0
-        biome = value[3] if len(value) > 3 else None
-        overlay = value[4] if len(value) > 4 else None
-        try:
-            alpha = max(0.0, min(1.0, float(value[5]))) if len(value) > 5 else 0.0
-        except (TypeError, ValueError):
-            alpha = 0.0
-        return _surface_value(
-            name,
-            height,
-            water_depth,
-            biome,
-            overlay,
-            alpha,
-            include_biome=len(value) >= 4,
-            include_overlay=len(value) >= 5,
-        )
-    return value, None, 0
+    if not isinstance(value, tuple):
+        return value, None, 0
+    name, height, water_depth, biome, overlay, alpha = _surface_parts(value)
+    return _surface_value(
+        name,
+        height,
+        water_depth,
+        biome,
+        overlay,
+        alpha,
+        include_biome=len(value) >= 4,
+        include_overlay=len(value) >= 5,
+    )
 
 
 def _relief_factor_from_neighbors(
@@ -969,29 +957,6 @@ def sample_region_surface_colors(
         colors.append(color_row)
         previous_heights = current_heights
     return colors
-
-
-def sample_region_surface_colors_with_status(
-    region_file: PathLike,
-    tile_size: int = 64,
-    color_for_block: Optional[ColorFunc] = None,
-    *,
-    color_for_surface: Optional[SurfaceColorFunc] = None,
-    cancel_check: Optional[Callable[[], bool]] = None,
-    decode_workers: Optional[int] = None,
-) -> Tuple[Optional[List[List[Color]]], bool]:
-    """Return colors plus whether every sampled chunk decoded successfully."""
-    failed_chunks: Set[Tuple[int, int]] = set()
-    colors = sample_region_surface_colors(
-        region_file,
-        tile_size=tile_size,
-        color_for_block=color_for_block,
-        color_for_surface=color_for_surface,
-        cancel_check=cancel_check,
-        decode_workers=decode_workers,
-        failed_chunks=failed_chunks,
-    )
-    return colors, colors is not None and not failed_chunks
 
 
 def clear_chunk_decode_cache() -> None:
