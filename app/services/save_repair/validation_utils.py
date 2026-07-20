@@ -4,7 +4,7 @@
 """
 import time
 from pathlib import Path
-from typing import Any, Callable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Iterator, List, Mapping, Optional, Tuple, cast
 
 import nbtlib
 
@@ -165,14 +165,14 @@ def quarantine_file(
         log(f"无法隔离文件 {file_path.name}: {exc}", "ERROR")
 
 
-def iter_region_chunk_coordinates(region: Any):
+def iter_region_chunk_coordinates(region: Any) -> Iterator[Tuple[int, int]]:
     """Yield local chunk coords present in ``region`` (or a full 32x32 grid).
 
     Prefers ``region.iter_present_chunks()`` when available so empty slots are
     not scanned.
     """
     try:
-        return region.iter_present_chunks()
+        return cast(Iterator[Tuple[int, int]], region.iter_present_chunks())
     except AttributeError:
         return (
             (chunk_x, chunk_z)

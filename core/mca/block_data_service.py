@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 @dataclass
 class BlockStateInfo:
+    """单一方块查询结果：世界/局部坐标、调色板索引与属性。"""
+
     x: int
     y: int
     z: int
@@ -18,6 +20,8 @@ class BlockStateInfo:
 
 @dataclass
 class SetBlockResult:
+    """set_block 操作结果：是否成功、新旧名与是否重打包。"""
+
     success: bool
     old_name: str
     new_name: str
@@ -35,6 +39,7 @@ class BlockDataService:
     """
 
     def __init__(self) -> None:
+        """初始化空的 section 索引缓存。"""
         # key: id(block_states) → (indices, palette_size, dirty)
         self._indices_cache: Dict[int, Tuple[List[int], int, bool]] = {}
 
@@ -68,6 +73,15 @@ class BlockDataService:
             world_x: int,
             world_y: int,
             world_z: int) -> Optional[BlockStateInfo]:
+        """读取世界坐标处的方块状态。
+
+        Args:
+            chunk_data: 区块 NBT 根。
+            world_x / world_y / world_z: 世界方块坐标。
+
+        Returns:
+            BlockStateInfo；无 section 数据时可能为空气占位或 None。
+        """
         local_x = world_x & 15
         local_y = world_y & 15
         local_z = world_z & 15

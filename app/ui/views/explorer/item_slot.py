@@ -32,6 +32,7 @@ class ItemSlotControl:
 
 
 def make_slot_border() -> ft.Border:
+    """Minecraft 风格斜切槽位边框（亮上/暗下）。"""
     return ft.Border(
         left=ft.BorderSide(2, SLOT_BORDER_LIGHT),
         top=ft.BorderSide(2, SLOT_BORDER_LIGHT),
@@ -41,6 +42,12 @@ def make_slot_border() -> ft.Border:
 
 
 def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
+    """创建空物品槽控件束（贴图/emoji/数量/耐久/附魔层）。
+
+    Args:
+        slot_size: 槽位边长像素。
+        count_size: 数量文字字号。
+    """
     image, icon, count_text, durability_text, enchantment_text = (
         _create_slot_layers(slot_size, count_size)
     )
@@ -141,6 +148,7 @@ def _overlay_layer(
 
 
 def reset_item_slot(slot: ItemSlotControl) -> None:
+    """清空槽位显示，恢复空背景与 emoji 占位。"""
     slot.container.bgcolor = SLOT_BG_EMPTY
     slot.container.tooltip = None
     slot.image.visible = False
@@ -156,6 +164,13 @@ def apply_item_to_slot(
         slot: ItemSlotControl,
         item_info: ItemInfo,
         tooltip: str) -> None:
+    """用物品信息填充槽位（emoji、数量、耐久条、附魔标记）。
+
+    Args:
+        slot: 目标槽控件束。
+        item_info: 解析后的物品信息。
+        tooltip: 悬停提示全文。
+    """
     slot.container.bgcolor = SLOT_BG_FILLED
     slot.container.tooltip = tooltip
     slot.icon.value = get_item_emoji(item_info.id)
@@ -182,6 +197,12 @@ def apply_item_to_slot(
 
 
 def apply_texture_to_slot(slot: ItemSlotControl, uri: str) -> None:
+    """异步贴图就绪后覆盖 emoji，显示真实纹理 URI。
+
+    Args:
+        slot: 目标槽。
+        uri: 图片源（本地 path 或 data URI）。
+    """
     slot.image.src = uri
     slot.image.visible = True
     slot.icon.visible = False

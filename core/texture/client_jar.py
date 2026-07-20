@@ -26,6 +26,7 @@ JsonGetter = Callable[[str, str], Optional[Dict[str, Any]]]
 
 @dataclass(frozen=True)
 class ClientJarInfo:
+    """本机 Minecraft 客户端 jar 解析结果。"""
     version_id: str
     url: str
     sha1: Optional[str]

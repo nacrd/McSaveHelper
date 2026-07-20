@@ -24,6 +24,15 @@ __all__ = [
 
 def world_coords_to_region_chunk(
         world_x: int, world_z: int) -> Tuple[int, int, int, int]:
+    """世界方块坐标 → 区域坐标与局部区块坐标。
+
+    Args:
+        world_x: 方块 X。
+        world_z: 方块 Z。
+
+    Returns:
+        ``(region_x, region_z, local_chunk_x, local_chunk_z)``。
+    """
     chunk_x = world_x // 16
     chunk_z = world_z // 16
     region_x = chunk_x // 32
@@ -34,16 +43,24 @@ def world_coords_to_region_chunk(
 
 
 def format_stage_value(value: Any) -> str:
+    """暂存列表中的短值展示（截断到约 48 字符）。"""
     text = str(getattr(value, "value", value))
     return text if len(text) <= 48 else text[:45] + "…"
 
 
 def format_diff_value(value: Any) -> str:
+    """变更 diff 中的值展示（截断到约 160 字符）。"""
     text = str(getattr(value, "value", value))
     return text if len(text) <= 160 else text[:157] + "…"
 
 
 def format_change_summary(index: int, change: NbtChange) -> str:
+    """将单条 NbtChange 格式化为多行摘要文本。
+
+    Args:
+        index: 列表序号（0 起，展示为 #index+1）。
+        change: 暂存变更。
+    """
     old_text = format_diff_value(change.old_value)
     new_text = format_diff_value(change.new_value)
     kind = {
@@ -118,6 +135,14 @@ def _format_pos(data: Any) -> str:
 
 
 def extract_chunk_objects(chunk_data: Any) -> List[Dict[str, Any]]:
+    """从区块 NBT 提取实体/方块实体摘要列表（NBT 页左侧对象列表）。
+
+    Args:
+        chunk_data: 区块根 compound 或兼容映射。
+
+    Returns:
+        每项含类型、id、位置与索引的字典列表。
+    """
     objects: List[Dict[str, Any]] = []
 
     entities = _get_first_mapping(chunk_data, ["Entities", "entities"])

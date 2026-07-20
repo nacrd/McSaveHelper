@@ -20,6 +20,7 @@ class WorldInfoPanel(ft.Column):
         on_backup_click: Optional[Callable] = None,
         on_restore_click: Optional[Callable] = None,
     ) -> None:
+        """构建世界信息展示面板。"""
         super().__init__(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._t = t_cb or (lambda k, d="", **kw: d)

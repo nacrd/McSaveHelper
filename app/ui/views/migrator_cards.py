@@ -23,6 +23,8 @@ ValueCallback = Callable[[Any], None]
 
 @dataclass
 class DirectoryCardControls:
+    """迁移路径卡片控件束：源/目标目录与输出世界名。"""
+
     container: ft.Container
     src_field: ft.TextField
     dest_field: ft.TextField
@@ -31,6 +33,8 @@ class DirectoryCardControls:
 
 @dataclass
 class VersionCardControls:
+    """目标平台/版本与剥离/替换选项卡片控件束。"""
+
     container: ft.Container
     platform_dd: ft.Dropdown
     version_dd: ft.Dropdown
@@ -41,6 +45,8 @@ class VersionCardControls:
 
 @dataclass
 class PlayerCardControls:
+    """玩家名手动填写与查询结果展示控件束。"""
+
     container: ft.Container
     manual_field: ft.TextField
     query_field: ft.TextField
@@ -49,6 +55,8 @@ class PlayerCardControls:
 
 @dataclass
 class ModeCardControls:
+    """快速/完整迁移模式单选与说明文本。"""
+
     container: ft.Container
     mode_group: ft.RadioGroup
     mode_desc: ft.Text
@@ -56,6 +64,8 @@ class ModeCardControls:
 
 @dataclass
 class OptionsCardControls:
+    """离线 UUID、清理临时文件等迁移开关卡片。"""
+
     container: ft.Container
     offline_cb: ft.Checkbox
     clean_cb: ft.Checkbox
@@ -64,6 +74,8 @@ class OptionsCardControls:
 
 @dataclass
 class BatchCardControls:
+    """批量迁移目录扫描与结果列表控件束。"""
+
     container: ft.Container
     batch_mode_cb: ft.Checkbox
     batch_dir_field: ft.TextField

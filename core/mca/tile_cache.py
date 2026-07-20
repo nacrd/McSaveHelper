@@ -23,6 +23,7 @@ _LADDER: Sequence[int] = (16, 32, 64, 128, 256, 512)
 
 
 def cache_dir() -> Path:
+    """俯视瓦片磁盘缓存根目录（惰性创建）。"""
     global _CACHE_DIR
     if _CACHE_DIR is None:
         root = Path.home() / ".mc_save_helper" / "topview_tiles"
@@ -55,11 +56,18 @@ def _cache_key(region_path: Path, tile_size: int) -> str:
 
 
 def cache_path_for(region_path: PathLike, tile_size: int) -> Path:
+    """区域路径 + 瓦片边长对应的缓存 PNG 路径。
+
+    Args:
+        region_path: ``r.x.z.mca`` 路径。
+        tile_size: 输出边长（像素）。
+    """
     key = _cache_key(Path(region_path), int(tile_size))
     return cache_dir() / f"{key}.png"
 
 
 def load_tile(region_path: PathLike, tile_size: int) -> Optional[bytes]:
+    """读取已缓存的俯视 PNG 字节；缺失或过小则 None。"""
     path = cache_path_for(region_path, tile_size)
     try:
         if path.stat().st_size > 32:
@@ -70,6 +78,13 @@ def load_tile(region_path: PathLike, tile_size: int) -> Optional[bytes]:
 
 
 def store_tile(region_path: PathLike, tile_size: int, png: bytes) -> None:
+    """原子写入瓦片缓存，并在超限时淘汰旧文件。
+
+    Args:
+        region_path: 区域文件路径。
+        tile_size: 瓦片边长。
+        png: PNG 字节；空内容忽略。
+    """
     if not png:
         return
     path = cache_path_for(region_path, tile_size)

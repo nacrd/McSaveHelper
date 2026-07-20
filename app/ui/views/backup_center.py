@@ -34,6 +34,12 @@ class BackupCenterView(ft.Column):
         app: "Application",
         service: Optional[BackupService] = None,
     ) -> None:
+        """初始化备份中心视图。
+
+        Args:
+            app: 应用组合根。
+            service: 可选备份服务；缺省使用 ``app.services.backup``。
+        """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO, expand=True)
         self.app = app
         self.service = service or app.services.backup
@@ -45,6 +51,11 @@ class BackupCenterView(ft.Column):
         return self.app.translate(f"backup_center.{key}", default)
 
     def get_top_actions(self) -> list[ViewAction]:
+        """返回应用壳层顶栏可消费的视图命令。
+
+        Returns:
+            list[ViewAction]: 创建备份等动作。
+        """
         return [
             ViewAction(
                 self.app.translate("top_bar.create_backup", "创建备份"),
@@ -559,6 +570,11 @@ class BackupCenterView(ft.Column):
         safe_update(self._cancel_button)
 
     def on_save_selected(self, path: str) -> None:
+        """响应侧边栏「当前存档」变更并刷新备份列表。
+
+        Args:
+            path: 新选中的世界目录路径。
+        """
         self._generation += 1
         self._world_path_field.value = path
         self._refresh()

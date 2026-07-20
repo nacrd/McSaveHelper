@@ -10,6 +10,11 @@ from core.mca.viewport import ChunkCoord, MapViewLevel, RegionCoord
 
 @dataclass(frozen=True)
 class MapGestureResult:
+    """手势决策结果：选择通知、相机聚焦与是否重绘。
+
+    视图层只消费此结构，避免手势分支与 Flet 事件混在一起。
+    """
+
     notification: Optional[SelectionNotification] = None
     focus_region: Optional[RegionCoord] = None
     focus_chunk: Optional[ChunkCoord] = None
@@ -31,6 +36,11 @@ def decide_tap(
     hit_chunk: Optional[ChunkCoord],
     hit_region: Optional[RegionCoord],
 ) -> Optional[MapGestureResult]:
+    """单击：在区块层选区块，否则选区域并建议聚焦。
+
+    Returns:
+        决策结果；未命中有效区域时为 None。
+    """
     if hit_chunk is not None and view_level in {"chunk", "block"}:
         level: MapViewLevel = "block" if view_level == "block" else "chunk"
         notification = navigator.select_chunk(hit_chunk, region_sizes, level)
@@ -68,6 +78,7 @@ def decide_double_tap(
     hit_region: Optional[RegionCoord],
     selected_region: Optional[RegionCoord],
 ) -> Optional[MapGestureResult]:
+    """双击：深入一层（区块→方块，或区域→区块）。"""
     if hit_chunk is not None and view_level in {"chunk", "block"}:
         notification = navigator.select_chunk(hit_chunk, region_sizes, "block")
         return MapGestureResult(
@@ -98,6 +109,7 @@ def decide_secondary_tap(
     previous_level: MapViewLevel,
     selected_region: Optional[RegionCoord],
 ) -> MapGestureResult:
+    """右键/次要点击：语义层级后退一级并调整相机。"""
     notification = navigator.step_back(region_sizes)
     if previous_level == "block":
         return MapGestureResult(

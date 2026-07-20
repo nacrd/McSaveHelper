@@ -24,6 +24,11 @@ class MapMarkerService:
     WORLD_KEY_LENGTH = 16
 
     def __init__(self, root: Path | str | None = None) -> None:
+        """指定标记仓库根目录。
+
+        Args:
+            root: 自定义根；缺省 ``~/.mcsavehelper/map_markers``。
+        """
         default_root = Path.home() / ".mcsavehelper" / "map_markers"
         self._root = Path(root or default_root).expanduser().resolve()
         self._lock = threading.RLock()

@@ -64,6 +64,7 @@ class FeedbackCollector:
     """
 
     def __init__(self) -> None:
+        """初始化本地反馈目录与 JSONL 文件路径。"""
         self.enabled: bool = True
         self.feedback_dir: Path = Path.home() / ".mcsavehelper" / "feedback"
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
@@ -199,6 +200,12 @@ class FeedbackDialog:
     """
 
     def __init__(self, page: ft.Page, on_submit: Optional[Callable] = None):
+        """构建反馈表单对话框。
+
+        Args:
+            page: 用于展示对话框的页面。
+            on_submit: 用户提交时的可选回调。
+        """
         self.page = page
         self.on_submit_callback = on_submit
         self.feedback_type = ft.Dropdown(
@@ -313,6 +320,13 @@ class ErrorReportDialog:
         error: Exception,
         context: Optional[str] = None
     ):
+        """根据异常构造错误报告对话框。
+
+        Args:
+            page: 用于展示对话框的页面。
+            error: 捕获到的异常实例。
+            context: 可选的业务上下文说明。
+        """
         self.page = page
         self.error = error
         self.context = context

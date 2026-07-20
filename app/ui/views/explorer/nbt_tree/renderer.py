@@ -23,6 +23,11 @@ class NbtTreeRenderer:
     """Builds Flet controls for NBT-like data."""
 
     def __init__(self, callbacks: Dict[str, Callable[..., Any]]) -> None:
+        """注入树节点操作回调（编辑/删除/展开等）。
+
+        Args:
+            callbacks: 由 NBT 树视图提供的 UI 动作表。
+        """
         self.callbacks = callbacks
 
     def build_nodes(
@@ -32,6 +37,17 @@ class NbtTreeRenderer:
         depth: int,
         state: Dict[str, Any],
     ) -> List[ft.Control]:
+        """按根类型递归构建一层子节点控件列表。
+
+        Args:
+            data: 当前 NBT 节点（映射或列表）。
+            path_prefix: 点分路径前缀。
+            depth: 当前深度（用于裁剪与缩进）。
+            state: 展开/搜索/show_all 等渲染状态。
+
+        Returns:
+            Flet 控件列表；越界或异常时为空或提示文本。
+        """
         if not state["show_all"] and depth > MAX_DEPTH:
             return [ft.Text("  " * depth + "…（深度已达上限）", size=12, color=THEME.text_muted)]
         try:
@@ -51,6 +67,15 @@ class NbtTreeRenderer:
         depth: int,
         state: Dict[str, Any],
     ) -> ft.Control:
+        """构建单个键值节点（容器、列表或原始值）。
+
+        Args:
+            key: 显示键名。
+            value: 节点值。
+            path: 完整点分路径（搜索高亮用）。
+            depth: 缩进深度。
+            state: 渲染状态字典。
+        """
         type_name = get_type_name(value)
         icon, label, val_color = TYPE_INFO.get(type_name, ("❓", type_name, THEME.text_muted))
         is_highlighted = path.lower() in state["matches"]
@@ -70,6 +95,12 @@ class NbtTreeRenderer:
         )
 
     def build_summary(self, stats: Dict[str, int], state: Dict[str, Any]) -> ft.Control:
+        """构建树顶栏统计条（字段/容器/值数量与展开模式）。
+
+        Args:
+            stats: 含 ``fields`` / ``containers`` / ``values`` 计数。
+            state: 当前展开/裁剪状态。
+        """
         mode = "完整显示" if state["show_all"] else f"每层最多 {MAX_CHILDREN} 项"
         expand_state = "全部展开" if state["expand_all"] else "默认展开"
         if state["collapse_all"]:
@@ -89,6 +120,12 @@ class NbtTreeRenderer:
         )
 
     def build_omitted_notice(self, omitted_count: int, depth: int) -> ft.Control:
+        """子项被裁剪时的提示行，引导用户点「展开全部」。
+
+        Args:
+            omitted_count: 未显示项数量。
+            depth: 缩进深度。
+        """
         return ft.Container(
             content=ft.Text(
                 f"还有 {omitted_count} 项未显示，"

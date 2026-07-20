@@ -48,6 +48,7 @@ class JarTextureImportResult:
 
     @property
     def ok(self) -> bool:
+        """是否至少成功提取了一张贴图。"""
         return self.extracted > 0
 
 

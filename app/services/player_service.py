@@ -30,12 +30,31 @@ LogCallback = Callable[[str, str], None]
 
 
 class PlayerService:
-    """Application service for Explorer player features."""
+    """Explorer 玩家列表/摘要/容器/编辑提案/导出应用服务。
+
+    无会话级缓存；每次调用通过 ``WorldSession`` 读 NBT，不直接写盘。
+    """
 
     def __init__(self, log: Optional[LogCallback] = None) -> None:
-        self._log = log or (lambda msg, lvl="INFO": None)
+        """注入可选日志回调。
+
+        Args:
+            log: ``(message, level)`` 日志；缺省为 no-op。
+        """
+        def _default_log(msg: str, lvl: str = "INFO") -> None:
+            return None
+
+        self._log: LogCallback = log or _default_log
 
     def list_players(self, session: WorldSession) -> List[PlayerRef]:
+        """列出世界内全部玩家引用并按显示名排序。
+
+        Args:
+            session: 当前世界会话。
+
+        Returns:
+            按显示名与 UUID 排序的 ``PlayerRef`` 列表。
+        """
         refs: List[PlayerRef] = []
         names = session.get_player_names()
         for uuid in session.get_player_uuids():
@@ -56,6 +75,15 @@ class PlayerService:
         session: WorldSession,
         uuid: str,
     ) -> Optional[PlayerSummary]:
+        """加载玩家摘要（状态、姿态、出生/死亡点、能力与问题标记）。
+
+        Args:
+            session: 当前世界会话。
+            uuid: 玩家 UUID（任意连字符形式）。
+
+        Returns:
+            摘要；玩家数据与 ``.dat`` 路径均不存在时为 None。
+        """
         data = session.get_player_data(uuid)
         if data is None and session.get_player_file_path(uuid) is None:
             return None
@@ -93,6 +121,15 @@ class PlayerService:
         session: WorldSession,
         uuid: str,
     ) -> Optional[PlayerContainersView]:
+        """加载背包、装备与末影箱视图。
+
+        Args:
+            session: 当前世界会话。
+            uuid: 玩家 UUID。
+
+        Returns:
+            容器视图；玩家不存在时为 None。
+        """
         data = session.get_player_data(uuid)
         if data is None and session.get_player_file_path(uuid) is None:
             return None
@@ -109,6 +146,15 @@ class PlayerService:
         session: WorldSession,
         uuid: str,
     ) -> tuple[PlayerAttribute, ...]:
+        """提取玩家属性列表。
+
+        Args:
+            session: 当前世界会话。
+            uuid: 玩家 UUID。
+
+        Returns:
+            属性元组；无数据时可能为空。
+        """
         data = session.get_player_data(uuid)
         return PlayerManager(log_callback=self._log).extract_attributes(data)
 
@@ -117,6 +163,15 @@ class PlayerService:
         session: WorldSession,
         uuid: str,
     ) -> tuple[PlayerEffect, ...]:
+        """提取玩家状态效果列表。
+
+        Args:
+            session: 当前世界会话。
+            uuid: 玩家 UUID。
+
+        Returns:
+            效果元组；无数据时可能为空。
+        """
         data = session.get_player_data(uuid)
         return PlayerManager(log_callback=self._log).extract_effects(data)
 
@@ -345,10 +400,23 @@ class PlayerService:
 
     @staticmethod
     def edit_specs() -> Sequence[PlayerEditSpec]:
+        """返回全部可编辑字段规格。
+
+        Returns:
+            ``PLAYER_EDIT_SPECS`` 序列。
+        """
         return PLAYER_EDIT_SPECS
 
     @staticmethod
     def get_spec(field_id: str) -> Optional[PlayerEditSpec]:
+        """按字段 id 查找编辑规格。
+
+        Args:
+            field_id: 表单字段标识。
+
+        Returns:
+            规格；未知 id 时为 None。
+        """
         return get_edit_spec(field_id)
 
     def _collect_issues(

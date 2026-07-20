@@ -88,6 +88,7 @@ class KeyboardShortcutManager:
     """
 
     def __init__(self) -> None:
+        """初始化快捷键注册表。"""
         self.bindings: Dict[str, KeyBinding] = {}
         self.enabled: bool = True
 
@@ -291,6 +292,7 @@ class ShortcutHint(ft.Container):
     """
 
     def __init__(self, shortcut: str, **kwargs):
+        """构建快捷键提示控件。"""
         super().__init__(
             content=ft.Text(
                 shortcut,

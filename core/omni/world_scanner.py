@@ -19,6 +19,7 @@ class WorldScanner:
     """存档文件扫描器"""
 
     def __init__(self, world_path: Path, log_callback: Optional[Callable] = None):
+        """绑定世界路径的扫描器。"""
         self.world_path = world_path
         self._log = log_callback or (lambda msg, lvl="INFO": None)
         self._dimensions: Optional[List[DimensionRegionDirectory]] = None

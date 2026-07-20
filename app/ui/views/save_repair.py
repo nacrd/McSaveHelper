@@ -34,6 +34,12 @@ class SaveRepairView(ft.Column):
         app: "Application",
         service: SaveRepairService | None = None,
     ) -> None:
+        """初始化存档修复视图。
+
+        Args:
+            app: 应用组合根。
+            service: 可选修复服务；缺省使用 ``app.services.save_repair``。
+        """
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
         self.service = service or app.services.save_repair
@@ -42,6 +48,11 @@ class SaveRepairView(ft.Column):
         self._build_ui()
 
     def get_top_actions(self) -> list[ViewAction]:
+        """返回应用壳层顶栏可消费的视图命令。
+
+        Returns:
+            list[ViewAction]: 检测存档等动作。
+        """
         return [
             ViewAction(
                 self.app.translate("top_bar.detect_save", "检测存档"),

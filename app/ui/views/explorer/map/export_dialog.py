@@ -37,6 +37,11 @@ class MapExportDialog:
     """Modal export UI that reuses the map's current world/dimension/selection."""
 
     def __init__(self, app: "Application") -> None:
+        """绑定应用壳并尝试初始化导出服务。
+
+        Args:
+            app: 应用组合根（对话框、翻译、文件选择）。
+        """
         self.app = app
         self._exporting = False
         self._auto_output_path = ""

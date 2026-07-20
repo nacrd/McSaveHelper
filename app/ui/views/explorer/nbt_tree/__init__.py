@@ -1,4 +1,4 @@
-"""NBT Tree View component."""
+"""NBT 树状视图组件。"""
 
 import logging
 from typing import Any, Callable, Dict, List, Optional, Set, Union
@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class NBTTreeView(ft.Column):
-    """NBT 树状视图 - 可展开/折叠的 NBT 数据浏览器"""
+    """NBT 树状视图：可展开/折叠的 NBT 数据浏览器。
+
+    编辑通过回调进入暂存区，不直接写盘；只读模式关闭编辑入口。
+    """
 
     MAX_DEPTH = MAX_DEPTH
     MAX_CHILDREN = MAX_CHILDREN
@@ -32,6 +35,12 @@ class NBTTreeView(ft.Column):
             Callable[[List[Union[str, int]], Any, Any, str], None]
         ] = None,
     ) -> None:
+        """创建空树并挂接编辑器/渲染器。
+
+        Args:
+            on_stage_change: 字段变更暂存回调
+                ``(path_parts, old, new, display_path)``；None 表示不暂存。
+        """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._root_data: Any = None
@@ -80,6 +89,12 @@ class NBTTreeView(ft.Column):
         self._rebuild_tree()
 
     def load_nbt(self, nbt_data: Any, editable: bool = True) -> None:
+        """加载根 NBT 并重置搜索/展开状态后重建树。
+
+        Args:
+            nbt_data: 根节点（映射/列表/标量或 nbtlib 标签）。
+            editable: 是否允许就地编辑；只读目标应传 False。
+        """
         self._root_data = nbt_data
         self._editable = editable
         self._search_query = ""
@@ -90,6 +105,11 @@ class NBTTreeView(ft.Column):
         self._rebuild_tree()
 
     def search(self, query: str) -> None:
+        """按键名/路径子串过滤并高亮匹配节点。
+
+        Args:
+            query: 搜索关键字；空串清除匹配集。
+        """
         self._search_query = query.strip().lower()
         self._matched_keys = (
             collect_matches(self._root_data, self._search_query)
@@ -99,10 +119,22 @@ class NBTTreeView(ft.Column):
         self._rebuild_tree()
 
     def get_modified_data(self) -> Any:
+        """返回当前内存中的根数据（含已应用的编辑）。
+
+        Returns:
+            与 ``load_nbt`` 相同对象引用；未加载时为 None。
+        """
         return self._root_data
 
     def export_json(self, path: str) -> bool:
-        """导出 NBT 数据为 JSON 文件。"""
+        """导出当前 NBT 数据为 JSON 文件。
+
+        Args:
+            path: 目标文件路径。
+
+        Returns:
+            是否成功写出。
+        """
         return export_nbt_json(self._root_data, path)
 
     def _rebuild_tree(self) -> None:

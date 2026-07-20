@@ -130,9 +130,10 @@ def _merge_legacy_fields(
     if not needs_legacy:
         return display_name, custom_name, lore, damage, enchantments
     legacy = _safe_parse_legacy_tag(tag, get_enchantment_name)
-    if custom_name is None and legacy["custom_name"]:
-        custom_name = legacy["custom_name"]
-        display_name = custom_name
+    legacy_name = legacy.get("custom_name")
+    if custom_name is None and isinstance(legacy_name, str) and legacy_name:
+        custom_name = legacy_name
+        display_name = legacy_name
     if not lore and legacy["lore"]:
         lore = legacy["lore"]
     if damage is None and legacy["damage"] is not None:
@@ -158,7 +159,7 @@ def _safe_parse_legacy_tag(
     get_enchantment_name: Callable[[str], str],
 ) -> Dict[str, Any]:
     """Parse legacy tag; return empty defaults on structural errors."""
-    empty = {
+    empty: Dict[str, Any] = {
         "custom_name": None,
         "lore": [],
         "damage": None,
@@ -228,7 +229,7 @@ def _parse_components(
         try:
             if hasattr(components, "get"):
                 return components.get(key)
-            return components[key]  # type: ignore[index]
+            return components[key]
         except (KeyError, TypeError):
             return None
 
@@ -329,8 +330,9 @@ def _parse_component_enchantments(
                 return result
 
     levels: Any = value
-    if hasattr(value, "get"):
-        nested = value.get("levels")
+    getter = getattr(value, "get", None)
+    if callable(getter) and not isinstance(value, (str, bytes)):
+        nested = getter("levels")
         if nested is not None:
             levels = nested
 

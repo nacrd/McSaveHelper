@@ -28,6 +28,11 @@ class MappingsView(ft.Column):
     """映射管理视图 — UUID映射 + 物品映射"""
 
     def __init__(self, app: "Application") -> None:
+        """初始化映射管理视图。
+
+        Args:
+            app: 应用组合根，提供配置、物品服务与对话框能力。
+        """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app: "Application" = app
@@ -39,6 +44,11 @@ class MappingsView(ft.Column):
         return self.app.translate
 
     def get_top_actions(self) -> list[ViewAction]:
+        """返回应用壳层顶栏可消费的视图命令。
+
+        Returns:
+            list[ViewAction]: 导入语言文件等动作。
+        """
         return [
             ViewAction(
                 self._t("top_bar.import_lang", "导入语言文件"),
@@ -442,6 +452,7 @@ class MappingsView(ft.Column):
             self.app.handle_exception(ex, title="导出映射失败")
 
     def refresh_mappings(self) -> None:
+        """从应用配置重新加载 UUID 映射表并刷新表格。"""
         self._table.set_mappings(self.app.config.custom_uuid_mappings)
 
     def _on_uuid_import(self) -> Optional[str]:

@@ -27,6 +27,16 @@ class McProgressBar(ft.Container):
         show_percentage: bool = False,
         animated: bool = True,
     ) -> None:
+        """构造 Minecraft 风格进度条。
+
+        Args:
+            value: 0.0–1.0 进度。
+            width: 可选固定宽度。
+            height: 含边框的总高度。
+            color / bgcolor: 前景与轨道颜色。
+            show_percentage: 是否显示百分比文字。
+            animated: 是否启用数值动画。
+        """
         self._value = value
         self._color = color
         self._bgcolor = bgcolor

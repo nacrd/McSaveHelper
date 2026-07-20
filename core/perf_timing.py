@@ -80,15 +80,28 @@ def runtime_log(message: str) -> None:
 
 
 class PerfTimer:
-    """计时上下文管理器；关闭时 __enter__/__exit__ 直接返回，零开销。"""
+    """计时上下文管理器；关闭时 ``__enter__``/``__exit__`` 直接返回，零开销。
+
+    启用 ``MCSH_PERF=1`` 后，退出时将耗时（毫秒）写入 ``perf_runtime.log``。
+    """
 
     __slots__ = ("label", "_start")
 
     def __init__(self, label: str) -> None:
+        """创建计时器。
+
+        Args:
+            label: 写入日志时的标识名。
+        """
         self.label = label
         self._start = 0.0
 
     def __enter__(self) -> "PerfTimer":
+        """进入上下文；仅在性能埋点启用时记录起点。
+
+        Returns:
+            self，便于 ``as`` 绑定。
+        """
         if PERF_ENABLED:
             self._start = time.perf_counter()
         return self
@@ -99,6 +112,7 @@ class PerfTimer:
         exc: Optional[BaseException],
         tb: Optional[TracebackType],
     ) -> None:
+        """退出上下文并输出耗时；不抑制异常。"""
         if not PERF_ENABLED:
             return
         elapsed_ms = (time.perf_counter() - self._start) * 1000.0
@@ -106,16 +120,22 @@ class PerfTimer:
 
 
 class RateMeter:
-    """调用频率计数器，每秒汇总写入 perf_runtime.log。"""
+    """调用频率计数器，约每秒汇总一次写入 ``perf_runtime.log``。"""
 
     __slots__ = ("label", "_count", "_window_start")
 
     def __init__(self, label: str) -> None:
+        """创建频率计。
+
+        Args:
+            label: 写入日志时的标识名。
+        """
         self.label = label
         self._count = 0
         self._window_start = 0.0
 
     def hit(self) -> None:
+        """记一次调用；窗口满 1 秒则刷出并重置计数。"""
         if not PERF_ENABLED:
             return
         now = time.perf_counter()
@@ -131,17 +151,28 @@ class RateMeter:
 
 
 class FrameTimer:
-    """累积帧耗时与附加指标，每秒输出 p50/p95/max。"""
+    """累积帧耗时与可选附加指标，约每秒输出 p50/p95/max。"""
 
     __slots__ = ("label", "_times", "_metrics", "_window_start")
 
     def __init__(self, label: str) -> None:
+        """创建帧计时器。
+
+        Args:
+            label: 写入日志时的标识名。
+        """
         self.label = label
         self._times: List[float] = []
         self._metrics: List[float] = []
         self._window_start = 0.0
 
     def record(self, elapsed_ms: float, metric: Optional[float] = None) -> None:
+        """记录一帧耗时；窗口满 1 秒则输出分位数摘要。
+
+        Args:
+            elapsed_ms: 本帧耗时（毫秒）。
+            metric: 可选附加指标（如 shape 数量），窗口内取 max。
+        """
         if not PERF_ENABLED:
             return
         now = time.perf_counter()

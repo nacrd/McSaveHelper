@@ -12,6 +12,7 @@ class ActionQueue:
 
     def __init__(self, world_path: Path, player_files: Dict[str, Path],
                  region_files: Dict[object, Path], log_callback: Optional[Callable] = None):
+        """创建空的操作队列。"""
         self.world_path = world_path
         self._player_files = player_files
         self._region_files = region_files

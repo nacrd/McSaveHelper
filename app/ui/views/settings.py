@@ -45,6 +45,11 @@ class SettingsView(ft.Column):
     """配置设置视图（可折叠分区）"""
 
     def __init__(self, dependencies: SettingsViewDependencies) -> None:
+        """通过显式依赖端口构建设置页。
+
+        Args:
+            dependencies: 设置读写、主题/语言应用与对话框等壳层端口。
+        """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._deps = dependencies

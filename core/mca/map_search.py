@@ -26,6 +26,7 @@ class MapSearchError(ValueError):
         code: MapSearchErrorCode = "invalid_format",
         query: str = "",
     ) -> None:
+        """地图搜索错误，携带人类可读消息。"""
         super().__init__(message)
         self.code = code
         self.query = query

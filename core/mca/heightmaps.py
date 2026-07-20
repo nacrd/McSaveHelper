@@ -38,6 +38,7 @@ WORLD_SURFACE_HEIGHTMAP_NAMES: Tuple[str, ...] = (
 
 
 def world_min_y(data_version: Optional[int]) -> int:
+    """按 DataVersion 返回世界最低 Y。"""
     if data_version is not None and data_version >= DATA_VERSION_1_18:
         return -64
     return 0

@@ -109,6 +109,12 @@ class MigrationService:
         config: ConfigService,
         backup_service: Optional[BackupService] = None,
     ) -> None:
+        """注入配置与备份能力；批量处理器按需创建。
+
+        Args:
+            config: 应用配置（目标版本、清理策略等）。
+            backup_service: 可选共享备份服务；缺省新建实例。
+        """
         self._config: ConfigService = config
         self._backup_service = backup_service or BackupService()
         self._batch_processor: Optional[BatchProcessor] = None
@@ -564,7 +570,10 @@ class MigrationService:
         try:
             system = platform.system()
             if system == "Windows":
-                os.startfile(path)  # type: ignore[attr-defined]
+                # os.startfile is Windows-only; getattr keeps cross-platform mypy clean.
+                startfile = getattr(os, "startfile", None)
+                if startfile is not None:
+                    startfile(path)
             elif system == "Darwin":
                 subprocess.Popen(["open", path])
             else:

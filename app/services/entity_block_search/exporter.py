@@ -33,7 +33,7 @@ def export_results_to_text(
         logger.error(f"导出结果失败: {exc}", module="EntityBlockSearch")
 
 
-def _write_header(handle: TextIO[str], summary: SearchSummary, total: int) -> None:
+def _write_header(handle: TextIO, summary: SearchSummary, total: int) -> None:
     handle.write(f"搜索结果 - 共 {total} 个\n")
     handle.write(f"扫描区域: {summary.scanned_regions}\n")
     handle.write(f"扫描区块: {summary.scanned_chunks}\n")
@@ -41,7 +41,7 @@ def _write_header(handle: TextIO[str], summary: SearchSummary, total: int) -> No
     handle.write("=" * 80 + "\n\n")
 
 
-def _write_result(handle: TextIO[str], idx: int, result: SearchResult) -> None:
+def _write_result(handle: TextIO, idx: int, result: SearchResult) -> None:
     handle.write(f"{idx}. {result.name}\n")
     handle.write(f"   类型: {result.result_type}\n")
     handle.write(f"   位置: X={result.x}, Y={result.y}, Z={result.z}\n")

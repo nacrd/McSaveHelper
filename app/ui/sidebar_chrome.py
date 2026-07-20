@@ -13,6 +13,7 @@ _EMPTY_BORDER_SIDE = ft.BorderSide(0, ft.Colors.TRANSPARENT)
 
 
 def build_header_collapsed() -> ft.Container:
+    """折叠侧栏顶栏：仅镐子图标。"""
     return ft.Container(
         content=ft.Container(
             content=ft.Icon(IconSet.PICKAXE, size=22, color=THEME.mc_gold),
@@ -222,6 +223,7 @@ def _build_recent_saves_block(
 
 
 def build_footer(collapsed: bool) -> ft.Control:
+    """侧栏页脚版本信息；折叠态返回零高度占位。"""
     if collapsed:
         return ft.Container(height=0)
     return ft.Container(
@@ -253,6 +255,7 @@ def build_toggle_button(
     collapsed: bool,
     on_toggle: Callable[..., None],
 ) -> ft.Container:
+    """构建侧栏折叠/展开切换按钮。"""
     icon = IconSet.ARROW_RIGHT if collapsed else IconSet.ARROW_LEFT
     tooltip = "展开侧边栏" if collapsed else "收起侧边栏"
     return ft.Container(

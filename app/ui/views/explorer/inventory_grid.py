@@ -1,4 +1,4 @@
-"""Inventory Grid component - Minecraft style slots with texture support."""
+"""物品栏网格：Minecraft 风格槽位，支持贴图异步加载。"""
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, cast
@@ -27,7 +27,10 @@ SELECTED_BORDER = "#42A5F5"
 
 
 class InventoryGrid(ft.Column):
-    """Configurable inventory grid (main inventory or ender chest)."""
+    """可配置物品栏网格（主背包 / 末影箱 / 潜影盒）。
+
+    贴图异步加载用 generation 丢弃过期回调，避免切玩家后串图。
+    """
 
     def __init__(
         self,
@@ -40,6 +43,17 @@ class InventoryGrid(ft.Column):
         on_slot_click: Optional[SlotClickCallback] = None,
         title: Optional[str] = None,
     ) -> None:
+        """构建主背包/末影箱/潜影盒网格。
+
+        Args:
+            item_service: 物品解析与命名。
+            texture_service: 贴图解析。
+            slot_size: 槽像素边长。
+            layout: ``main`` / ``ender`` / ``shulker``。
+            t_cb: 翻译回调。
+            on_slot_click: 槽点击 ``(slot_index, item_dict|None)``。
+            title: 可选自定义标题。
+        """
         super().__init__(spacing=0)
         self._slot_size = slot_size
         self._slots: Dict[int, ft.Container] = {}
@@ -66,6 +80,7 @@ class InventoryGrid(ft.Column):
             self._build_main_layout()
 
     def set_on_slot_click(self, callback: Optional[SlotClickCallback]) -> None:
+        """设置或清除槽点击回调。"""
         self._on_slot_click = callback
 
     def _make_slot(self, nbt_slot: int) -> ft.Container:
@@ -165,6 +180,14 @@ class InventoryGrid(ft.Column):
         *,
         selected_slot: Optional[int] = None,
     ) -> None:
+        """用物品列表填充格子并异步加载贴图。
+
+        仅接受本布局已创建的 NBT slot 编号；未知 slot 忽略。
+
+        Args:
+            inventory: 含 ``slot`` 字段的物品字典列表。
+            selected_slot: 主背包可选高亮 slot（快捷栏选择）。
+        """
         self._texture_generation += 1
         self._selected_slot = selected_slot
         self._slot_items = {}
@@ -215,7 +238,11 @@ class InventoryGrid(ft.Column):
             self._load_textures_async(item_ids_to_load, self._texture_generation)
 
     def set_selected_slot(self, selected_slot: Optional[int]) -> None:
-        """Update hotbar selection highlight without reloading items."""
+        """仅更新主背包快捷栏高亮，不重载物品。
+
+        Args:
+            selected_slot: 要高亮的 NBT slot；None 清除高亮。
+        """
         if self._layout != "main":
             return
         previous = self._selected_slot
@@ -268,4 +295,5 @@ class InventoryGrid(ft.Column):
         )
 
     def clear(self) -> None:
+        """清空所有格子（等价于空物品栏）。"""
         self.set_inventory([])

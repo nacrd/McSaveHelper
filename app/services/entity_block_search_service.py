@@ -30,6 +30,7 @@ class EntityBlockSearchService:
     MAX_RESULTS = MAX_RESULTS
 
     def __init__(self) -> None:
+        """初始化空结果列表与扫描摘要。"""
         self.results: List[SearchResult] = []
         self.summary = SearchSummary()
 

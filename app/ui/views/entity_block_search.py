@@ -39,6 +39,12 @@ class EntityBlockSearchView(ft.Column):
     }
 
     def __init__(self, app: "Application", compact: bool = False) -> None:
+        """初始化实体/方块/容器搜索视图。
+
+        Args:
+            app: 应用组合根。
+            compact: 是否使用紧凑布局（嵌入浏览器子页时）。
+        """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.app = app
         self._compact = compact

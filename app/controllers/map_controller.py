@@ -25,13 +25,23 @@ StateCallback = Callable[[MapViewState], None]
 
 
 class MapController:
-    """管理一个存档地图会话的维度、图层、标记和搜索。"""
+    """管理一个存档地图会话的维度、图层、标记和搜索。
+
+    每个维度独立保存镜头/样式；切换维度不会互相污染。
+    未绑定世界时标记仅存内存；绑定后委托 ``MapMarkerService`` 持久化。
+    """
 
     def __init__(
         self,
         marker_service: Optional[MapMarkerService] = None,
         on_state_changed: Optional[StateCallback] = None,
     ) -> None:
+        """创建空会话。
+
+        Args:
+            marker_service: 标记持久化服务；缺省新建实例。
+            on_state_changed: 状态变更时同步回调（通常在 UI 线程）。
+        """
         self._marker_service = marker_service or MapMarkerService()
         self._on_state_changed = on_state_changed
         self._world_path: Optional[Path] = None
@@ -47,14 +57,17 @@ class MapController:
 
     @property
     def world_path(self) -> Optional[Path]:
+        """当前绑定的世界根路径；未绑定时为 None。"""
         return self._world_path
 
     @property
     def dimensions(self) -> tuple[MapDimension, ...]:
+        """已注册维度的只读元组（按 id 排序）。"""
         return tuple(self._dimensions.values())
 
     @property
     def current_dimension(self) -> Optional[MapDimension]:
+        """当前维度描述；id 未知时为 None。"""
         return self._dimensions.get(self._state.dimension_id)
 
     def bind_world(
@@ -62,7 +75,15 @@ class MapController:
         world_path: Path | str,
         dimensions: Iterable[DimensionLike],
     ) -> MapViewState:
-        """绑定存档和维度目录，开始一个新的地图会话。"""
+        """绑定存档和维度目录，开始一个新的地图会话。
+
+        Args:
+            world_path: 世界根目录。
+            dimensions: ``MapDimension`` 或含 id/name/region_dir 的映射。
+
+        Returns:
+            新会话的当前 ``MapViewState``。
+        """
         self._world_path = Path(world_path).expanduser().resolve()
         parsed: dict[str, MapDimension] = {}
         for item in dimensions:
@@ -82,7 +103,17 @@ class MapController:
         return self._state
 
     def switch_dimension(self, dimension_id: str) -> MapViewState:
-        """切换维度并按 coordinate scale 保持相同的世界锚点。"""
+        """切换维度并按 coordinate scale 保持相同的世界锚点。
+
+        Args:
+            dimension_id: 目标维度 id。
+
+        Returns:
+            切换后的视图状态。
+
+        Raises:
+            KeyError: 维度未注册。
+        """
         target = self._dimensions.get(str(dimension_id))
         if target is None:
             raise KeyError(f"未找到维度: {dimension_id}")
@@ -108,19 +139,44 @@ class MapController:
         return self._state
 
     def set_style(self, style: str) -> MapViewState:
+        """设置当前维度渲染样式。
+
+        Args:
+            style: 样式标识（由视图/渲染层解释）。
+
+        Returns:
+            更新后的状态。
+        """
         self._state.set_style(style)
         self._notify()
         return self._state
 
     def update_camera(self, center_x: float, center_z: float, scale: float) -> None:
-        """Store the current dimension camera before a view or dimension swap."""
+        """在视图或维度切换前写入当前维度镜头。
+
+        Args:
+            center_x: 世界 X 中心。
+            center_z: 世界 Z 中心。
+            scale: 缩放（钳制下限避免除零）。
+        """
         self._state.center_x = float(center_x)
         self._state.center_z = float(center_z)
         self._state.scale = max(0.0001, float(scale))
         self._states[self._state.dimension_id] = self._state
 
     def toggle_layer(self, layer: str, value: Optional[bool] = None) -> bool:
-        """切换一个可见图层并返回新值。"""
+        """切换一个可见图层并返回新值。
+
+        Args:
+            layer: 图层名或别名（如 grid/markers/show_grid）。
+            value: 显式设定；None 时取反。
+
+        Returns:
+            切换后的布尔值。
+
+        Raises:
+            KeyError: 未知图层名。
+        """
         aliases = {
             "grid": "show_grid",
             "coordinates": "show_coordinates",
@@ -142,7 +198,14 @@ class MapController:
         return new_value
 
     def markers(self, include_disabled: bool = False) -> list[MapMarker]:
-        """返回当前维度标记副本。"""
+        """返回当前维度标记副本。
+
+        Args:
+            include_disabled: 是否包含禁用标记。
+
+        Returns:
+            深拷贝后的标记列表。
+        """
         if self._world_path is None:
             values = self._markers
         else:
@@ -165,7 +228,21 @@ class MapController:
         group: str = "default",
         icon: str = "pin",
     ) -> MapMarker:
-        """在当前维度创建或替换一个用户标记。"""
+        """在当前维度创建或替换一个用户标记。
+
+        Args:
+            name: 标记名称。
+            x: 世界 X。
+            z: 世界 Z。
+            y: 世界 Y，默认 0。
+            marker_id: 已有 id 则替换；缺省生成 hex uuid。
+            color: 展示颜色。
+            group: 分组名。
+            icon: 图标标识。
+
+        Returns:
+            写入后的 ``MapMarker``。
+        """
         marker = MapMarker(
             id=marker_id or uuid.uuid4().hex,
             name=name.strip(),
@@ -186,6 +263,14 @@ class MapController:
         return marker
 
     def delete_marker(self, marker_id: str) -> bool:
+        """删除当前维度的标记。
+
+        Args:
+            marker_id: 标记 id。
+
+        Returns:
+            是否实际删除。
+        """
         marker_ids = {marker.id for marker in self.markers(include_disabled=True)}
         if marker_id not in marker_ids:
             return False
@@ -200,7 +285,14 @@ class MapController:
         return deleted
 
     def search(self, query: str) -> list[MapSearchResult]:
-        """解析并聚焦搜索结果；错误由 ``parse_map_query`` 原样抛出。"""
+        """解析并聚焦搜索结果；错误由 ``parse_map_query`` 原样抛出。
+
+        Args:
+            query: 坐标/标记名等查询字符串。
+
+        Returns:
+            匹配结果列表；有结果时镜头移到首项。
+        """
         results = parse_map_query(
             query,
             self.markers(),

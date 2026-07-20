@@ -16,7 +16,11 @@ Translate = Callable[[str, str], str]
 
 
 class MapFullscreenController:
-    """Move one map control between its inline host and a page overlay."""
+    """在内嵌宿主与页面 overlay 之间迁移同一张地图控件。
+
+    进入全屏时把 ``McaMapView`` 从 inline 容器卸下挂到 page.overlay；
+    退出时动画还原尺寸与侧栏可见性。``dispose`` 幂等，可在页面销毁时调用。
+    """
 
     def __init__(
         self,
@@ -32,6 +36,20 @@ class MapFullscreenController:
         reset: Callable[[], None],
         translate: Optional[Translate] = None,
     ) -> None:
+        """绑定页面、地图与工具栏回调。
+
+        Args:
+            page: Flet 页面；None 时仅隐藏侧栏，不建 overlay。
+            map_view: 可 resize 的地图视图。
+            inline_host: 内嵌地图宿主容器。
+            side_panel: 侧信息面板（全屏时隐藏）。
+            set_toggle_state: 同步全屏按钮 UI 状态。
+            refresh: 刷新地图。
+            zoom_in: 放大。
+            zoom_out: 缩小。
+            reset: 重置视口。
+            translate: 可选 ``(key, fallback) -> str`` 翻译函数。
+        """
         self._page = page
         self._map_view = map_view
         self._inline_host = inline_host
@@ -52,12 +70,14 @@ class MapFullscreenController:
         self.active = False
 
     def toggle(self) -> None:
+        """在进入与退出全屏之间切换。"""
         if self.active:
             self.exit()
         else:
             self.enter()
 
     def enter(self) -> None:
+        """进入全屏：卸下内嵌地图、创建 overlay 并调度进入动画。"""
         if self.active or self._overlay is not None:
             return
         self.active = True
@@ -95,6 +115,7 @@ class MapFullscreenController:
         self._schedule_enter_animation(width, height, bar_height)
 
     def exit(self) -> None:
+        """播放退出动画并延迟还原到内嵌宿主。"""
         self._cancel_timer(self._enter_timer)
         self._enter_timer = None
         overlay = self._overlay
@@ -117,6 +138,7 @@ class MapFullscreenController:
         self._exit_timer.start()
 
     def dispose(self) -> None:
+        """取消定时器并立即还原；可重复调用。"""
         self._cancel_timer(self._enter_timer)
         self._cancel_timer(self._exit_timer)
         self._enter_timer = None
@@ -125,6 +147,14 @@ class MapFullscreenController:
 
     @staticmethod
     def window_size(page: ft.Page) -> Tuple[int, int]:
+        """读取页面/窗口尺寸并施加合理下限。
+
+        Args:
+            page: Flet 页面。
+
+        Returns:
+            ``(width, height)`` 像素尺寸。
+        """
         width = int(getattr(page, "width", 0) or 0)
         height = int(getattr(page, "height", 0) or 0)
         window = getattr(page, "window", None)

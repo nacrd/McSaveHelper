@@ -38,6 +38,7 @@ class HealthMonitor(ThreadMonitoringMixin):
 
     def __init__(self) -> None:
         # ── 阈值配置 ──
+        """初始化健康检查监控。"""
         self.cpu_warning_threshold: float = 90.0
         self.cpu_critical_threshold: float = 98.0
         self.cpu_sustained_samples: int = 12

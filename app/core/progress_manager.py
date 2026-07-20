@@ -28,6 +28,12 @@ class ProgressManager:
     """
 
     def __init__(self, page: ft.Page, translate: TranslateCallback) -> None:
+        """创建进度状态持有者；控件在 ``create_progress_ui`` 时装配。
+
+        Args:
+            page: Flet 页面（后台线程通过 ``run_on_ui`` 刷新）。
+            translate: 翻译回调。
+        """
         self.page = page
         self._translate = translate
         self._progress_bar: Optional[McProgressBar] = None

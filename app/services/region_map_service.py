@@ -190,11 +190,23 @@ class RegionMapService:
             return snapshot
 
     def get_region_meta(self, coord: Tuple[int, int]) -> Dict[str, Any]:
-        """Return already-loaded metadata without doing I/O on the UI thread."""
+        """返回已缓存的区域元数据，不在 UI 线程做 I/O。
+
+        Args:
+            coord: ``(region_x, region_z)``。
+
+        Returns:
+            元数据副本；未加载时为空字典。
+        """
         with self._data_lock:
             return dict(self._region_meta.get(coord, {}))
 
     def get_all_region_meta(self) -> Dict[Tuple[int, int], Dict[str, Any]]:
+        """返回当前已加载区域元数据的深拷贝快照。
+
+        Returns:
+            坐标到元数据字典的映射副本。
+        """
         with self._data_lock:
             return {coord: dict(meta) for coord, meta in self._region_meta.items()}
 
@@ -222,12 +234,19 @@ class RegionMapService:
                 self._region_meta[coord] = dict(meta or {})
 
     async def ensure_region_meta(self, coord: Tuple[int, int]) -> Dict[str, Any]:
-        """Load one region's optional metadata without blocking the UI loop.
+        """按需加载单区域元数据，不阻塞 UI 循环。
 
-        The normal map scan only registers coordinates, sizes, and paths.  A
-        caller that actually needs biome/structure metadata can opt in here;
-        concurrent requests for the same region share one background parse.
-        Results from an obsolete scan are discarded by the generation check.
+        常规扫描只登记坐标/大小/路径；需要 biome/结构元数据时再 opt-in。
+        同坐标并发请求共享一次后台解析；过期扫描结果按 generation 丢弃。
+
+        Args:
+            coord: ``(region_x, region_z)``。
+
+        Returns:
+            元数据字典副本；无路径或已关闭时为空字典。
+
+        Raises:
+            RuntimeError: 服务已 ``close``。
         """
         with self._data_lock:
             if self._closed:
@@ -297,7 +316,8 @@ class RegionMapService:
             meta = {}
         finally:
             with self._data_lock:
-                if self._region_meta_tasks.get(coord) is task and task.done():
+                current = self._region_meta_tasks.get(coord)
+                if current is task and current is not None and current.done():
                     self._region_meta_tasks.pop(coord, None)
         return dict(meta or {})
 
@@ -371,14 +391,36 @@ class RegionMapService:
             pass
 
     def set_tile_ready_callback(self, callback: Optional[Any]) -> None:
-        """Register callback(coord) invoked from a topview worker thread."""
+        """注册俯视图瓦片就绪回调。
+
+        回调可能从 topview 工作线程触发；UI 侧需自行切回 UI 线程。
+
+        Args:
+            callback: ``callback(coord)``；传 None 清除。
+        """
         self._tile_ready_callback = callback
 
     def get_region_path(self, coord: Tuple[int, int]) -> Optional[str]:
+        """返回区域 MCA 文件路径。
+
+        Args:
+            coord: ``(region_x, region_z)``。
+
+        Returns:
+            路径字符串；未知坐标为 None。
+        """
         with self._data_lock:
             return self._region_paths.get(coord)
 
     def get_topview_tile(self, coord: Tuple[int, int]) -> Optional[bytes]:
+        """取缓存的俯视 PNG 瓦片（命中则刷新 LRU）。
+
+        Args:
+            coord: 区域坐标。
+
+        Returns:
+            PNG 字节；未缓存为 None。
+        """
         with self._data_lock:
             tile = self._topview_tiles.get(coord)
             if tile is not None:
@@ -386,6 +428,17 @@ class RegionMapService:
             return tile
 
     def has_topview_tile(self, coord: Tuple[int, int], min_size: int = 0) -> bool:
+        """判断是否已有满足最小尺寸的完整瓦片。
+
+        未完成渲染且失败尺寸小于缓存尺寸时视为不可用。
+
+        Args:
+            coord: 区域坐标。
+            min_size: 要求的最小边长像素；0 表示任意缓存即可。
+
+        Returns:
+            是否可作为当前 LOD 使用。
+        """
         with self._data_lock:
             if coord not in self._topview_tiles:
                 return False
@@ -400,10 +453,26 @@ class RegionMapService:
             return int(self._topview_tile_sizes.get(coord, 0) or 0) >= min_size
 
     def get_topview_tile_size(self, coord: Tuple[int, int]) -> int:
+        """返回已缓存瓦片边长。
+
+        Args:
+            coord: 区域坐标。
+
+        Returns:
+            像素边长；无缓存为 0。
+        """
         with self._data_lock:
             return int(self._topview_tile_sizes.get(coord, 0) or 0)
 
     def get_topview_tile_revision(self, coord: Tuple[int, int]) -> int:
+        """返回单瓦片修订号（缓存更新时递增）。
+
+        Args:
+            coord: 区域坐标。
+
+        Returns:
+            修订号；无记录为 0。
+        """
         with self._data_lock:
             return int(self._topview_tile_revisions.get(coord, 0) or 0)
 
@@ -413,12 +482,16 @@ class RegionMapService:
         *,
         min_size: int = 0,
     ) -> bool:
-        """Return whether the current generation owns a request for ``coord``.
+        """当前代数是否仍持有对该坐标且不低于 ``min_size`` 的请求。
 
-        The map view keeps only a small request ledger to avoid rebuilding the
-        same batch on every frame.  The queue is bounded and priority requests
-        may evict an older job, so that ledger must be reconciled against the
-        service instead of assuming every submitted coordinate was retained.
+        地图视图只保留小账本；有界队列可能丢弃尾部，须与服务对账。
+
+        Args:
+            coord: 区域坐标。
+            min_size: 要求的最小请求尺寸。
+
+        Returns:
+            当前 generation 是否仍 pending/upgrade。
         """
         required = max(0, int(min_size))
         with self._data_lock:
@@ -433,7 +506,14 @@ class RegionMapService:
         self,
         coords: list[Tuple[int, int]],
     ) -> tuple[int, Dict[Tuple[int, int], bytes], Dict[Tuple[int, int], int]]:
-        """Read a consistent tile/revision snapshot for one surface frame."""
+        """为单帧表面读取一致的瓦片/修订快照。
+
+        Args:
+            coords: 本帧可见区域坐标列表。
+
+        Returns:
+            ``(generation, tiles, revisions)``；generation 用于丢弃过期帧。
+        """
         tiles: Dict[Tuple[int, int], bytes] = {}
         revisions: Dict[Tuple[int, int], int] = {}
         with self._data_lock:
@@ -449,11 +529,20 @@ class RegionMapService:
         return generation, tiles, revisions
 
     def get_data_revision(self) -> int:
-        """Return a monotonic revision for scan data changes."""
+        """返回扫描数据变更的单调修订号。
+
+        Returns:
+            数据修订计数。
+        """
         with self._data_lock:
             return self._data_revision
 
     def get_topview_generation(self) -> int:
+        """返回俯视图会话代数（clear/start 时递增）。
+
+        Returns:
+            当前 topview generation。
+        """
         with self._data_lock:
             return self._topview_generation
 
@@ -573,21 +662,19 @@ class RegionMapService:
         force: bool = False,
         priority: bool = False,
     ) -> set[Tuple[int, int]]:
-        """Enqueue topview rendering for coords missing a cached tile.
+        """为缺失缓存的坐标入队俯视渲染。
 
-        Uses a bounded worker pool instead of one thread per region. Visible
-        tiles should be requested by the map view; scan itself does not flood
-        the queue.
+        使用有界线程池；可见瓦片应由地图视图请求，扫描本身不灌满队列。
 
         Args:
-            force: prioritize an incomplete/upgrade request; complete same-size
-                tiles remain cached to avoid redundant decoding.
-            priority: put jobs at the front of the queue (selected region).
+            coords: 区域坐标列表。
+            tile_size: 目标边长；缺省用内部默认，限制在 8..LEAF。
+            force: 优先不完整/升级请求；同尺寸完整瓦片仍缓存不重解。
+            priority: 插队到队列前端（选中区域）。
 
         Returns:
-            Coordinates retained by the current generation.  A bounded queue
-            can reject the tail of a visible batch, so callers must record only
-            this returned set and allow rejected coordinates to be retried.
+            当前代数实际接纳的坐标集合。有界队列可能拒绝尾部，调用方
+            只能记录返回集并允许被拒坐标重试。
         """
         size = max(
             8,
@@ -1180,7 +1267,11 @@ class RegionMapService:
         self._scan_task = None
 
     def close(self) -> None:
-        """Release callbacks, queued jobs and worker resources idempotently."""
+        """释放回调、队列与工作线程资源（幂等）。
+
+        可从 UI 线程调用；已在跑的原生解析无法中断，但会取消 asyncio 包装
+        并递增 generation 丢弃晚到结果。
+        """
         if self._closed:
             return
         self._closed = True

@@ -19,6 +19,12 @@ class ServiceInitializationError(RuntimeError):
     """Raised when an essential service cannot be constructed safely."""
 
     def __init__(self, service_name: str, cause: Exception) -> None:
+        """记录失败的服务名与原始异常。
+
+        Args:
+            service_name: 如 ``config`` / ``migration``。
+            cause: 构造过程中捕获的异常。
+        """
         self.service_name = service_name
         self.cause = cause
         super().__init__(f"服务初始化失败 [{service_name}]: {cause}")
@@ -26,6 +32,8 @@ class ServiceInitializationError(RuntimeError):
 
 @dataclass(frozen=True)
 class AppServices:
+    """应用级服务显式装配结果（组合根持有，非业务单例）。"""
+
     config: ConfigService
     i18n: I18nService
     migration: MigrationService
@@ -39,6 +47,8 @@ class AppServices:
 
 @dataclass(frozen=True)
 class ServiceFactories:
+    """可替换的服务工厂表，便于测试注入替身。"""
+
     config: Callable[[], ConfigService] = ConfigService
     i18n: Callable[[ConfigService], I18nService] = I18nService
     migration: Callable[

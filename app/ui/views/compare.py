@@ -20,7 +20,14 @@ if TYPE_CHECKING:
 
 
 class CompareView(ft.Column):
+    """双世界差异对比页：level.dat、玩家与区域文件。"""
+
     def __init__(self, app: "Application") -> None:
+        """绑定应用与对比服务。
+
+        Args:
+            app: 应用组合根。
+        """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app = app
@@ -29,6 +36,7 @@ class CompareView(ft.Column):
         self._build()
 
     def get_top_actions(self) -> list[ViewAction]:
+        """顶栏「开始对比」动作。"""
         return [
             ViewAction(
                 self.app.translate("top_bar.start_compare", "开始对比"),

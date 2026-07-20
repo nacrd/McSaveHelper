@@ -28,6 +28,14 @@ class UUIDMappingTable(ft.Column):
         on_import_click: Optional[Callable[[], Optional[str]]] = None,
         on_export_click: Optional[Callable[[Dict[str, str]], Optional[str]]] = None,
     ) -> None:
+        """构建可编辑映射表。
+
+        Args:
+            mappings: 初始 ``名字 -> UUID``。
+            on_mappings_change: 表格变更时回调。
+            on_import_click: 返回待导入文件路径的选择器。
+            on_export_click: 导出路径选择；返回写入路径。
+        """
         super().__init__(spacing=4)
         self._mappings: Dict[str, str] = dict(mappings or {})
         self.on_mappings_change = on_mappings_change
@@ -39,10 +47,12 @@ class UUIDMappingTable(ft.Column):
     # ─── 公共接口 ──────────────────────────────────
 
     def set_mappings(self, mappings: Dict[str, str]) -> None:
+        """用新映射整体替换表格内容。"""
         self._mappings = dict(mappings)
         self._rebuild()
 
     def get_mappings(self) -> Dict[str, str]:
+        """返回当前映射副本。"""
         return dict(self._mappings)
 
     def load_from_file(self, file_path: str) -> int:

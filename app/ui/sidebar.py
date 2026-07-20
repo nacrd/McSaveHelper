@@ -63,6 +63,7 @@ class Sidebar(ft.Container):
         width: int = 220,
         collapsed: bool = False,
     ) -> None:
+        """构建应用侧边栏。"""
         self._init_state(
             tabs=tabs,
             on_tab_select=on_tab_select,

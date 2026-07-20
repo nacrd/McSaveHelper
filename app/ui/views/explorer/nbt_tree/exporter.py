@@ -5,6 +5,7 @@ from typing import Any
 
 
 def to_serializable(obj: Any) -> Any:
+    """将 nbtlib 值转为可 JSON 序列化结构。"""
     if hasattr(obj, "value"):
         return to_serializable(obj.value)
     if isinstance(obj, dict):

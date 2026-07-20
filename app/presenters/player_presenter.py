@@ -61,6 +61,12 @@ def format_export_bundle_text(
     bundle: PlayerExportBundle,
     translate: Optional[Translate] = None,
 ) -> str:
+    """将玩家导出包格式化为纯文本（摘要 + 可选容器列表）。
+
+    Args:
+        bundle: 含摘要与容器的导出包。
+        translate: 可选 ``(key, default)`` 翻译。
+    """
     base = format_player_summary_text(bundle.summary, translate=translate)
     if not bundle.items_included:
         return base

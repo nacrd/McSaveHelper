@@ -15,6 +15,8 @@ except ImportError:
 
 
 class PerformanceMonitorPort(Protocol):
+    """性能指标记录与汇总端口。"""
+
     def record(
         self,
         metric_name: str,
@@ -22,32 +24,53 @@ class PerformanceMonitorPort(Protocol):
         unit: str = "",
         **metadata: Any,
     ) -> None:
+        """记录单次指标采样。
+
+        Args:
+            metric_name: 指标名。
+            value: 采样值。
+            unit: 单位（如 MB、%）。
+            **metadata: 可选附加元数据。
+        """
         ...
 
     def summary(self) -> dict:
+        """返回各指标的统计摘要字典。"""
         ...
 
     def get_memory_usage(self) -> float:
+        """返回当前内存占用（MB）。"""
         ...
 
     def get_cpu_percent(self) -> float:
+        """返回当前 CPU 使用率百分比。"""
         ...
 
 
 class HealthMonitorPort(Protocol):
+    """健康检查端口：根据资源采样触发告警逻辑。"""
+
     def check(
         self,
         cpu_percent: float,
         memory_mb: float,
         check_threads: bool = True,
     ) -> None:
+        """根据 CPU/内存采样执行健康检查。
+
+        Args:
+            cpu_percent: CPU 使用率。
+            memory_mb: 内存占用 MB。
+            check_threads: 是否检查线程数。
+        """
         ...
 
 
 class ResourceUsageMonitor:
-    """资源使用监控器
+    """资源使用监控器。
 
-    监控内存、CPU等系统资源使用情况，并可定时输出摘要到日志。
+    后台采样进程 CPU/内存，写入性能端口，并按间隔把摘要打到日志。
+    无 psutil 时 ``start`` 为空操作。
     """
 
     def __init__(
@@ -58,6 +81,14 @@ class ResourceUsageMonitor:
         performance_monitor: Optional[PerformanceMonitorPort] = None,
         health_monitor: Optional[HealthMonitorPort] = None,
     ) -> None:
+        """创建监控器。
+
+        Args:
+            sample_interval: 采样间隔秒。
+            print_interval: 摘要日志间隔秒（最小 5）。
+            performance_monitor: 可选性能端口；None 时懒加载默认实例。
+            health_monitor: 可选健康端口；None 时懒加载默认实例。
+        """
         self.sample_interval = sample_interval
         self.print_interval = print_interval
         self._performance_monitor = performance_monitor
@@ -74,7 +105,7 @@ class ResourceUsageMonitor:
         self._thread_check_interval = 10
 
     def start(self) -> None:
-        """开始监控"""
+        """启动后台采样线程；已在运行或无 psutil 时直接返回。"""
         if self._process is None:
             return
 
@@ -97,14 +128,18 @@ class ResourceUsageMonitor:
         self._thread.start()
 
     def stop(self) -> None:
-        """停止监控"""
+        """停止采样并等待线程结束（最长约 2 秒）。"""
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
         self._thread = None
 
     def set_print_interval(self, seconds: float) -> None:
-        """设置定时打印间隔（秒）"""
+        """设置摘要日志间隔（秒），下限 5。
+
+        Args:
+            seconds: 目标间隔。
+        """
         self.print_interval = max(5.0, seconds)
 
     def _monitor_loop(self) -> None:

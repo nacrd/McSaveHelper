@@ -206,6 +206,7 @@ class ChunkBiomes:
     )
 
     def __init__(self, chunk_nbt: Any) -> None:
+        """从区块 NBT 解析生物群系数据。"""
         self.root, self.version = chunk_root_and_version(chunk_nbt)
         self._section_raw: Dict[int, Any] = {}
         self._sections: Dict[int, Optional[BiomeSection]] = {}

@@ -15,6 +15,12 @@ _UNHANDLED = object()
 
 
 def raw_text(value: Any, type_name: str) -> str:
+    """将 NBT 值转为可编辑/导出的原始文本。
+
+    Args:
+        value: 节点值（可能是 nbtlib tag）。
+        type_name: :func:`get_type_name` 结果。
+    """
     try:
         if type_name in ("IntArray", "ByteArray"):
             return json.dumps([int(x) for x in list(value)], ensure_ascii=False)
@@ -26,6 +32,7 @@ def raw_text(value: Any, type_name: str) -> str:
 
 
 def is_mapping_node(value: Any) -> bool:
+    """是否为 compound 类节点（dict / NBTFile / TAG_Compound）。"""
     return isinstance(value, dict) or (
         hasattr(value, "keys")
         and hasattr(value, "__getitem__")
@@ -34,16 +41,29 @@ def is_mapping_node(value: Any) -> bool:
 
 
 def mapping_items(value: Any) -> List[tuple]:
+    """稳定列出映射节点的 ``(key, value)`` 对。"""
     if hasattr(value, "items"):
         return list(value.items())
     return [(key, value[key]) for key in value.keys()]
 
 
 def is_list_node(value: Any) -> bool:
+    """是否为列表类节点（list / TAG_List）。"""
     return isinstance(value, list) or type(value).__name__ == "TAG_List"
 
 
 def parse_path(path: str) -> List[Union[str, int]]:
+    """解析点分路径 ``a.b[0].c`` 为键/下标序列。
+
+    Args:
+        path: 点与 ``[index]`` 混合路径。
+
+    Returns:
+        字符串键与整数下标交替列表。
+
+    Raises:
+        ValueError: 空索引 ``[]``。
+    """
     parts: List[Union[str, int]] = []
     current = ""
     i = 0
@@ -78,16 +98,27 @@ def parse_path(path: str) -> List[Union[str, int]]:
 
 
 def get_type_name(value: Any) -> str:
+    """返回 ``type(value).__name__``，供类型图标与格式化分支使用。"""
     return type(value).__name__
 
 
 def detect_list_subtype(lst: list) -> str:
+    """列表首元素类型名；空列表返回空串。"""
     if not lst:
         return ""
     return type(lst[0]).__name__
 
 
 def format_primitive(value: Any, type_name: str) -> str:
+    """格式化叶子值用于树节点摘要（数组过长会截断）。
+
+    Args:
+        value: 叶子值。
+        type_name: 类型名。
+
+    Returns:
+        人类可读短字符串。
+    """
     try:
         v = value.value if hasattr(value, "value") else value
         if type_name in ("IntArray", "ByteArray"):
@@ -103,6 +134,19 @@ def format_primitive(value: Any, type_name: str) -> str:
 
 
 def coerce_value(raw: str, original: Any, type_name: str) -> Any:
+    """把编辑框文本强制转换回与原类型兼容的值。
+
+    Args:
+        raw: 用户输入。
+        original: 原节点值（用于保留 nbtlib 类型构造器）。
+        type_name: 类型名。
+
+    Returns:
+        转换后的新值。
+
+    Raises:
+        ValueError: 布尔/空值/数组等格式非法时。
+    """
     value_type = type(original)
     converter = _TAG_NUMERIC_CONVERTERS.get(type_name)
     if converter is not None:
@@ -161,6 +205,15 @@ def _coerce_array(raw: str, value_type: type) -> Any:
 
 
 def create_default_value(type_name: str, raw_value: str) -> Any:
+    """按字段类型创建新增节点的默认值。
+
+    Args:
+        type_name: UI 类型选项（String/Int/Compound 等）。
+        raw_value: 用户填写的初始值文本。
+
+    Returns:
+        对应的 nbtlib 标签或 Python 值。
+    """
     import nbtlib
     factories = {
         "String": lambda: nbtlib.String(raw_value),

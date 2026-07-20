@@ -18,16 +18,35 @@ from .type_info import FIELD_TYPE_OPTIONS
 
 
 class NbtTreeEditor:
-    """Handles mutation dialogs for NBTTreeView."""
+    """NBT 树的编辑/新增/删除对话框与路径写入。
+
+    变更通过 ``on_stage_change`` 进入暂存区，不直接落盘。
+    """
 
     def __init__(self, owner: Any, on_stage_change: Optional[Callable]) -> None:
+        """绑定树视图所有者与暂存回调。
+
+        Args:
+            owner: 持有 ``_root_data``/``page`` 的 ``NBTTreeView``。
+            on_stage_change: 变更通知
+                ``(path_parts, old, new, path_str)``。
+        """
         self.owner = owner
         self.on_stage_change = on_stage_change
 
     def open_edit_dialog(self, path: str, value: Any, type_name: str) -> None:
+        """打开叶子值编辑对话框。
+
+        Args:
+            path: 节点路径字符串。
+            value: 当前值。
+            type_name: 值类型名。
+        """
         if not self.owner.page:
             return
-        value_field, error_text, dialog = self._edit_dialog_controls(path, value, type_name)
+        value_field, error_text, dialog = self._edit_dialog_controls(
+            path, value, type_name
+        )
         dialog.actions = [
             ft.TextButton(
                 "暂存",
@@ -45,6 +64,12 @@ class NbtTreeEditor:
         self._show(dialog)
 
     def open_add_field_dialog(self, parent_path: str, is_list: bool) -> None:
+        """打开在 Compound/List 下新增字段或列表项的对话框。
+
+        Args:
+            parent_path: 父节点路径。
+            is_list: True 时按列表追加，否则按键插入。
+        """
         if not self.owner.page:
             return
         controls = self._add_dialog_controls(parent_path, is_list)
@@ -67,11 +92,20 @@ class NbtTreeEditor:
         self._show(dialog)
 
     def confirm_delete(self, path: str, key: str) -> None:
+        """确认删除节点后进入暂存。
+
+        Args:
+            path: 完整路径。
+            key: 展示用键名/索引。
+        """
         if not self.owner.page:
             return
         dialog = ft.AlertDialog(
             title=ft.Text("确认删除", color=THEME.text_primary),
-            content=ft.Text(f"确定要删除 {key} 吗？此操作将进入暂存区。", color=THEME.text_secondary),
+            content=ft.Text(
+                f"确定要删除 {key} 吗？此操作将进入暂存区。",
+                color=THEME.text_secondary,
+            ),
             actions=[],
         )
         dialog.actions = [
@@ -81,6 +115,14 @@ class NbtTreeEditor:
         self._show(dialog)
 
     def get_node_at_path(self, path_parts: List[Union[str, int]]) -> Any:
+        """按路径段从根遍历节点。
+
+        Args:
+            path_parts: ``parse_path`` 结果。
+
+        Returns:
+            目标节点；路径非法时为 None。
+        """
         if not path_parts:
             return self.owner._root_data
         node = self.owner._root_data
@@ -93,7 +135,23 @@ class NbtTreeEditor:
                 return None
         return node
 
-    def set_value_at_path(self, path_parts: List[Union[str, int]], new_value: Any) -> Any:
+    def set_value_at_path(
+        self,
+        path_parts: List[Union[str, int]],
+        new_value: Any,
+    ) -> Any:
+        """在路径末级写入新值并返回旧值。
+
+        Args:
+            path_parts: 非空路径段。
+            new_value: 新节点值。
+
+        Returns:
+            被替换的旧值。
+
+        Raises:
+            ValueError: 根数据未加载。
+        """
         if self.owner._root_data is None:
             raise ValueError("未加载 NBT 数据")
         node = self.owner._root_data

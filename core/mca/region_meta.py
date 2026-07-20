@@ -1,4 +1,7 @@
-"""Pure helpers for sampling biome/structure metadata from region files."""
+"""从区域文件采样生物群系/结构元数据的纯辅助函数。
+
+损坏 MCA 时返回尽量空的汇总，避免地图 UI 因单文件失败而整体不可用。
+"""
 from __future__ import annotations
 
 from collections import Counter
@@ -9,7 +12,14 @@ from core.perf_timing import PerfTimer
 
 
 def scan_region_meta(region_file: Path) -> Dict[str, Any]:
-    """Sample a region file and summarize dominant biomes/structures."""
+    """采样区域文件并汇总主导生物群系与结构。
+
+    Args:
+        region_file: ``r.X.Z.mca`` 路径。
+
+    Returns:
+        Dict[str, Any]: 含 chunk_count、dominant_biome、structures 等字段。
+    """
     biomes: Counter[str] = Counter()
     structures: Counter[str] = Counter()
     structure_positions: list[Dict[str, Any]] = []
@@ -92,6 +102,14 @@ def _scan_fallback_chunks(
 
 
 def collect_biomes(data: Any, counter: Counter[str]) -> None:
+    """从区块 NBT 收集生物群系名称计数。
+
+    同时兼容 1.18+ section palette 与旧版根级 Biomes 数组。
+
+    Args:
+        data: 区块 NBT 根或 Level 复合标签。
+        counter: 就地累加的名称计数器。
+    """
     root = chunk_root(data)
     sections = first_key(root, "sections", "Sections")
     if is_sequence(sections):
@@ -120,6 +138,13 @@ def collect_structures(
     counter: Counter[str],
     positions: list[Dict[str, Any]],
 ) -> None:
+    """从区块 NBT 收集结构 starts/references 与可选位置。
+
+    Args:
+        data: 区块 NBT 根。
+        counter: 结构名计数。
+        positions: 就地追加的结构位置字典列表。
+    """
     root = chunk_root(data)
     structures = first_key(root, "structures", "Structures")
     starts = (
@@ -152,6 +177,17 @@ def extract_structure_position(
     name: str,
     value: Any,
 ) -> Optional[Dict[str, Any]]:
+    """从结构 start 条目提取近似方块位置。
+
+    优先 BB 包围盒，其次 Children 的 BB，最后 ChunkX/ChunkZ。
+
+    Args:
+        name: 结构资源名。
+        value: start 复合标签。
+
+    Returns:
+        Optional[Dict[str, Any]]: 含 name/block_x/block_z 等字段，或 None。
+    """
     if not is_mapping(value):
         return None
     bb = first_key(value, "BB", "bb", "bounding_box")
@@ -187,6 +223,15 @@ def extract_structure_position(
 
 
 def position_from_bb(name: str, bb: Any) -> Optional[Dict[str, Any]]:
+    """从 6 元组包围盒取最小角作为结构标记点。
+
+    Args:
+        name: 结构名。
+        bb: BB 标签或序列。
+
+    Returns:
+        Optional[Dict[str, Any]]: 含 block_x/y/z 与 source=bb，或 None。
+    """
     raw = tag_value(bb)
     if is_sequence(raw):
         raw = list(iter_values(raw))
@@ -205,6 +250,14 @@ def position_from_bb(name: str, bb: Any) -> Optional[Dict[str, Any]]:
 
 
 def chunk_root(data: Any) -> Any:
+    """返回实际数据根：旧版 ``Level`` 或扁平根。
+
+    Args:
+        data: 区块 NBT。
+
+    Returns:
+        Any: 用于字段查找的根映射。
+    """
     level = first_key(data, "Level")
     if is_mapping(level):
         return level
@@ -212,6 +265,15 @@ def chunk_root(data: Any) -> Any:
 
 
 def first_key(data: Any, *keys: str) -> Any:
+    """在映射上按候选键名依次查找首个非 None 值。
+
+    Args:
+        data: 映射类 NBT。
+        *keys: 大小写/命名兼容的候选键。
+
+    Returns:
+        Any: 首个命中值，或 None。
+    """
     if not is_mapping(data):
         return None
     for key in keys:
@@ -222,6 +284,7 @@ def first_key(data: Any, *keys: str) -> Any:
 
 
 def is_mapping(value: Any) -> bool:
+    """判断值是否像键值映射（含 nbtlib Compound）。"""
     raw = tag_value(value)
     return (
         isinstance(raw, dict)
@@ -231,6 +294,7 @@ def is_mapping(value: Any) -> bool:
 
 
 def is_sequence(value: Any) -> bool:
+    """判断值是否像非字符串序列。"""
     raw = tag_value(value)
     if isinstance(raw, (str, bytes, dict)):
         return False
@@ -238,6 +302,7 @@ def is_sequence(value: Any) -> bool:
 
 
 def mapping_get(data: Any, key: str) -> Any:
+    """安全读取映射键；失败返回 None。"""
     raw = tag_value(data)
     try:
         if hasattr(raw, "get"):
@@ -248,6 +313,7 @@ def mapping_get(data: Any, key: str) -> Any:
 
 
 def items(data: Any) -> list[tuple[Any, Any]]:
+    """物化映射的 items 列表；不可迭代时返回空列表。"""
     raw = tag_value(data)
     try:
         if hasattr(raw, "items"):
@@ -258,6 +324,7 @@ def items(data: Any) -> list[tuple[Any, Any]]:
 
 
 def iter_values(data: Any) -> list[Any]:
+    """将序列类 NBT 物化为列表。"""
     raw = tag_value(data)
     try:
         return list(raw)
@@ -266,6 +333,7 @@ def iter_values(data: Any) -> list[Any]:
 
 
 def tag_text(value: Any) -> str:
+    """将 NBT 节点尽力转为文本（生物群系/结构名）。"""
     raw = getattr(value, "value", value)
     if isinstance(raw, bytes):
         return raw.decode("utf-8", errors="ignore")
@@ -277,4 +345,5 @@ def tag_text(value: Any) -> str:
 
 
 def tag_value(value: Any) -> Any:
+    """解包 nbtlib 标签的 .value，已是纯 Python 则原样返回。"""
     return getattr(value, "value", value)

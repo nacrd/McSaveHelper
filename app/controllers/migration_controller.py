@@ -68,10 +68,12 @@ class MigrationController:
 
     @property
     def config(self) -> ConfigService:
+        """配置服务快捷访问。"""
         return self.dependencies.config
 
     @property
     def migration(self) -> MigrationService:
+        """迁移服务快捷访问。"""
         return self.dependencies.migration
 
     def _t(self, key: str, default: str = "", **kwargs: Any) -> str:

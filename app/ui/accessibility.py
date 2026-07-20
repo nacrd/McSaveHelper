@@ -151,6 +151,7 @@ class KeyboardNavigable:
             self,
             on_enter: Optional[Callable] = None,
             on_escape: Optional[Callable] = None):
+        """包装可键盘导航的控件。"""
         self.on_enter_callback = on_enter
         self.on_escape_callback = on_escape
 
@@ -311,6 +312,7 @@ class SkipLink(ft.TextButton):
     """
 
     def __init__(self, target_id: str, text: str = "跳转到主内容"):
+        """构建跳过导航链接。"""
         super().__init__(
             content=text,
             # 默认隐藏，获得焦点时显示

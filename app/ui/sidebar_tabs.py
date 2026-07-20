@@ -10,6 +10,14 @@ from app.ui.theme import THEME, mc_border, mc_shadow_glow
 
 
 def resolve_tab_icon(tab: Dict[str, Any]) -> ft.IconData:
+    """解析侧栏 tab 定义中的图标；非法值回退到网格图标。
+
+    Args:
+        tab: 含 ``icon`` 字段的 tab 定义。
+
+    Returns:
+        Flet ``IconData``。
+    """
     icon_name = tab.get("icon", IconSet.GRID)
     if not isinstance(icon_name, ft.IconData):
         return IconSet.GRID
@@ -25,6 +33,15 @@ def build_tab_button(
     on_hover: Callable[[ft.Event[ft.Container], str], None],
     on_hover_collapsed: Callable[[ft.Event[ft.Container], str], None],
 ) -> ft.Container:
+    """按折叠态构建侧栏页签按钮。
+
+    Args:
+        tab: 含 ``id`` / ``label`` / ``icon`` 的定义。
+        selected: 是否当前选中。
+        collapsed: 侧栏是否图标折叠模式。
+        on_select: 点击回调 ``(view_id)``。
+        on_hover / on_hover_collapsed: 悬停样式回调。
+    """
     icon_name = resolve_tab_icon(tab)
     label_text = tab.get("label", tab["id"])
     if collapsed:
@@ -55,6 +72,19 @@ def build_tab_collapsed(
     on_select: Callable[[str], None],
     on_hover_collapsed: Callable[[ft.Event[ft.Container], str], None],
 ) -> ft.Container:
+    """折叠侧栏：仅图标 + tooltip 的页签按钮。
+
+    Args:
+        tab: tab 定义。
+        selected: 是否选中。
+        icon_name: 图标。
+        label_text: tooltip 文案。
+        on_select: 点击选中回调。
+        on_hover_collapsed: 悬停回调。
+
+    Returns:
+        40x40 图标按钮容器。
+    """
     icon_ctrl = ft.Icon(
         icon_name,
         size=20,
@@ -88,6 +118,19 @@ def build_tab_expanded(
     on_select: Callable[[str], None],
     on_hover: Callable[[ft.Event[ft.Container], str], None],
 ) -> ft.Container:
+    """展开侧栏：图标槽 + 标签 + 选中标记。
+
+    Args:
+        tab: tab 定义。
+        selected: 是否选中。
+        icon_name: 图标。
+        label_text: 显示文案。
+        on_select: 点击选中回调。
+        on_hover: 悬停回调。
+
+    Returns:
+        带文字的 tab 容器。
+    """
     icon_slot = ft.Container(
         content=ft.Icon(
             icon_name,
@@ -135,6 +178,12 @@ def build_tab_expanded(
 
 
 def apply_style_collapsed(container: ft.Container, selected: bool) -> None:
+    """就地更新折叠按钮的选中样式（避免整表重建）。
+
+    Args:
+        container: ``build_tab_collapsed`` 产出的容器。
+        selected: 是否选中。
+    """
     if container.content and isinstance(container.content, ft.Icon):
         container.content.color = (
             THEME.mc_obsidian if selected else THEME.text_secondary
@@ -144,6 +193,12 @@ def apply_style_collapsed(container: ft.Container, selected: bool) -> None:
 
 
 def apply_style_expanded(container: ft.Container, selected: bool) -> None:
+    """就地更新展开按钮的选中样式与标记符。
+
+    Args:
+        container: ``build_tab_expanded`` 产出的容器。
+        selected: 是否选中。
+    """
     row = container.content
     if isinstance(row, ft.Row) and len(row.controls) >= 2:
         icon_slot = row.controls[0]
@@ -176,6 +231,13 @@ def handle_hover_expanded(
     selected: bool,
     hovering: bool,
 ) -> None:
+    """展开按钮悬停高亮；已选中时忽略。
+
+    Args:
+        container: tab 容器。
+        selected: 是否选中。
+        hovering: 指针是否悬停。
+    """
     if selected:
         return
     if hovering:
@@ -202,6 +264,13 @@ def handle_hover_collapsed(
     selected: bool,
     hovering: bool,
 ) -> None:
+    """折叠按钮悬停高亮；已选中时忽略。
+
+    Args:
+        container: tab 容器。
+        selected: 是否选中。
+        hovering: 指针是否悬停。
+    """
     if selected:
         return
     if hovering:

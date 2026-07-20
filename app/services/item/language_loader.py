@@ -281,7 +281,7 @@ def extract_language_from_jar(
 def _load_locales_from_jar(
     jar: zipfile.ZipFile,
     *,
-    locales: List[str],
+    locales: Sequence[str],
     include_mods: bool,
     name_map: NameMap,
     enchantment_names: EnchantMap,

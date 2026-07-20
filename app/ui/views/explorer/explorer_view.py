@@ -44,6 +44,11 @@ class ExplorerView(
     """存档浏览器视图"""
 
     def __init__(self, app: "Application") -> None:
+        """初始化存档浏览器主视图及其子 Tab 状态。
+
+        Args:
+            app: 应用组合根，提供地图/玩家等服务工厂。
+        """
         super().__init__(spacing=0)
         self.expand = True
         self.app: "Application" = app
@@ -226,6 +231,11 @@ class ExplorerView(
     _world_coords_to_region_chunk = staticmethod(world_coords_to_region_chunk)
 
     def set_compact_mode(self, compact: bool) -> None:
+        """切换紧凑/标准布局密度并调整子面板尺寸。
+
+        Args:
+            compact: 为 True 时使用更窄的标签与侧栏。
+        """
         if self._compact_mode == compact:
             return
         self._compact_mode = compact

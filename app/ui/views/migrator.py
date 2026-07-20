@@ -33,6 +33,11 @@ class MigratorView(ft.Column):
     """存档转换视图 — 左右两栏布局（优化版）"""
 
     def __init__(self, app: "Application") -> None:
+        """初始化存档转换视图。
+
+        Args:
+            app: 应用组合根，提供迁移服务与 UI 回调。
+        """
         super().__init__(spacing=24, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app: "Application" = app
@@ -43,6 +48,11 @@ class MigratorView(ft.Column):
         return self.app.translate
 
     def get_top_actions(self) -> list[ViewAction]:
+        """返回应用壳层顶栏可消费的视图命令。
+
+        Returns:
+            list[ViewAction]: 开始转换与取消批量处理等动作。
+        """
         return [
             ViewAction(
                 self._t("top_bar.start_conversion", "开始转换"),
@@ -295,6 +305,11 @@ class MigratorView(ft.Column):
         safe_update(self._query_result)
 
     def on_save_selected(self, path: str) -> None:
+        """响应侧边栏「当前存档」变更，同步源路径字段。
+
+        Args:
+            path: 新选中的存档目录路径。
+        """
         try:
             self._src_field.value = path
             self._sync_field_to_config()

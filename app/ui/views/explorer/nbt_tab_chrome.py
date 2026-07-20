@@ -16,6 +16,8 @@ Callback = Callable[..., None]
 
 @dataclass(frozen=True)
 class NbtTabCallbacks:
+    """NBT 页左侧/工具栏动作回调集合（由 Tab 控制器注入）。"""
+
     load_target: Callback
     load_player: Callback
     load_level: Callback
@@ -36,6 +38,8 @@ class NbtTabCallbacks:
 
 @dataclass(frozen=True)
 class NbtTabChrome:
+    """NBT 三栏布局构建结果：根容器与需后续绑定的控件引用。"""
+
     root: ft.Container
     left_panel: ft.Container
     center_panel: ft.Container
@@ -58,6 +62,8 @@ class NbtTabChrome:
 
 @dataclass(frozen=True)
 class _LeftPanel:
+    """左侧目标选择与方块查询面板的内部组装结果。"""
+
     panel: ft.Container
     target_dropdown: ft.Dropdown
     region_file_field: Any
@@ -73,6 +79,8 @@ class _LeftPanel:
 
 @dataclass(frozen=True)
 class _CenterPanel:
+    """中间 NBT 树与目标标签面板。"""
+
     panel: ft.Container
     target_label: ft.Text
     nbt_tree: NBTTreeView
@@ -80,6 +88,8 @@ class _CenterPanel:
 
 @dataclass(frozen=True)
 class _RightPanel:
+    """右侧暂存变更列表与状态文本。"""
+
     panel: ft.Container
     stage_status: ft.Text
     stage_list: ft.Column

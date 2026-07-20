@@ -1,4 +1,7 @@
-"""Section palette + bit-packed block state access with lazy section parse."""
+"""Section 调色板与位打包方块状态访问（懒解析 section）。
+
+面向俯视图热路径：仅在需要时解码 section，避免一次解析全部 4096 格。
+"""
 from __future__ import annotations
 
 from collections import Counter
@@ -117,6 +120,14 @@ def is_transparent_surface_name(name: Optional[str]) -> bool:
 
 @lru_cache(maxsize=512)
 def is_air_name(name: Optional[str]) -> bool:
+    """判断资源名是否为空气类（含 cave_air / void_air）。
+
+    Args:
+        name: 方块资源 ID；空/None 视为空气。
+
+    Returns:
+        bool: 空气类则为 True。
+    """
     if not name:
         return True
     n = name.lower()
@@ -341,7 +352,7 @@ def _count_section_block_ids(section: _SectionData) -> Counter[str]:
 
 
 class ChunkBlocks:
-    """Parsed chunk view with lazy section decoding for topview speed."""
+    """已解析的区块视图：懒解码 section，服务俯视渲染热路径。"""
 
     __slots__ = (
         "root", "version", "sections", "heightmap", "section_ys_desc",
@@ -354,6 +365,12 @@ class ChunkBlocks:
         *,
         heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
     ) -> None:
+        """从区块 NBT 构建懒解析视图。
+
+        Args:
+            chunk_nbt: 区块根 NBT。
+            heightmap_names: 优先尝试的高度图名称序列。
+        """
         self.root, self.version = chunk_root_and_version(chunk_nbt)
         self.sections: Dict[int, _SectionData] = {}
         self.heightmap: Optional[List[int]] = None
@@ -406,6 +423,16 @@ class ChunkBlocks:
         return sec
 
     def block_id_at(self, x: int, y: int, z: int) -> Optional[str]:
+        """查询区块内局部列上方块 ID。
+
+        Args:
+            x: 局部 X（0–15）。
+            y: 世界 Y。
+            z: 局部 Z（0–15）。
+
+        Returns:
+            Optional[str]: 方块 ID；列坐标越界返回 None，缺失 section 视为 air。
+        """
         if not _is_local_column(x, z):
             return None
         section_y = y // 16
@@ -435,12 +462,29 @@ class ChunkBlocks:
         return counter
 
     def get_palette_names(self, section_y: int) -> Optional[List[str]]:
+        """返回指定 section 调色板中的方块名列表。
+
+        Args:
+            section_y: section Y 索引。
+
+        Returns:
+            Optional[List[str]]: 名称副本；无 section/空调色板时为 None。
+        """
         sec = self._ensure_section(int(section_y))
         if sec is None or not sec.palette:
             return None
         return list(sec.palette)
 
     def surface_y(self, x: int, z: int) -> Optional[int]:
+        """表面高度：优先高度图，失败则向下扫描。
+
+        Args:
+            x: 局部 X。
+            z: 局部 Z。
+
+        Returns:
+            Optional[int]: 表面方块 Y，或无法确定时为 None。
+        """
         if self.heightmap is not None:
             index = z * 16 + x
             try:
@@ -453,6 +497,15 @@ class ChunkBlocks:
         return self.scan_surface_y(x, z)
 
     def scan_surface_y(self, x: int, z: int) -> Optional[int]:
+        """自上而下扫描首个非空气方块 Y（无高度图时的回退）。
+
+        Args:
+            x: 局部 X。
+            z: 局部 Z。
+
+        Returns:
+            Optional[int]: 非空气表面 Y。
+        """
         for section_y in self.section_ys_desc:
             sec = self._ensure_section(section_y)
             if sec is None:
@@ -469,6 +522,15 @@ class ChunkBlocks:
         return None
 
     def surface_block_id(self, x: int, z: int) -> Optional[str]:
+        """返回表面非空气方块 ID（不关心高度）。
+
+        Args:
+            x: 局部 X。
+            z: 局部 Z。
+
+        Returns:
+            Optional[str]: 表面方块 ID。
+        """
         name, _y = self.surface_sample(x, z)
         return name
 
@@ -578,8 +640,17 @@ def get_chunk_blocks(
     *,
     heightmap_names: Sequence[str] = DEFAULT_HEIGHTMAP_NAMES,
 ) -> ChunkBlocks:
-    # NBT objects are mutable; an id-based cache can return stale block states
-    # after an editor changes palette/data in place.
+    """构建 ``ChunkBlocks`` 视图（不做 id 缓存，避免原地编辑后脏读）。
+
+    NBT 可变；基于 id 的缓存会在编辑器就地改 palette/data 后返回陈旧状态。
+
+    Args:
+        chunk_nbt: 区块根 NBT。
+        heightmap_names: 高度图名称优先级。
+
+    Returns:
+        ChunkBlocks: 新视图实例。
+    """
     return ChunkBlocks(chunk_nbt, heightmap_names=heightmap_names)
 
 
@@ -592,8 +663,29 @@ def get_world_surface_chunk_blocks(chunk_nbt: Any) -> ChunkBlocks:
 
 
 def block_id_at(chunk_nbt: Any, x: int, y: int, z: int) -> Optional[str]:
+    """便捷函数：从原始 NBT 查询单点方块 ID。
+
+    Args:
+        chunk_nbt: 区块根 NBT。
+        x: 局部 X。
+        y: 世界 Y。
+        z: 局部 Z。
+
+    Returns:
+        Optional[str]: 方块 ID。
+    """
     return get_chunk_blocks(chunk_nbt).block_id_at(x, y, z)
 
 
 def surface_block_id(chunk_nbt: Any, x: int, z: int) -> Optional[str]:
+    """便捷函数：从原始 NBT 查询表面方块 ID。
+
+    Args:
+        chunk_nbt: 区块根 NBT。
+        x: 局部 X。
+        z: 局部 Z。
+
+    Returns:
+        Optional[str]: 表面方块 ID。
+    """
     return get_chunk_blocks(chunk_nbt).surface_block_id(x, z)

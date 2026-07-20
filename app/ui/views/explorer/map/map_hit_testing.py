@@ -28,5 +28,6 @@ def rect_contains(
     tap_y: float,
     rect: ScreenRect,
 ) -> bool:
+    """判断点是否落在矩形 (x,y,w,h) 内。"""
     bx, by, bw, bh = rect
     return bx <= tap_x <= bx + bw and by <= tap_y <= by + bh

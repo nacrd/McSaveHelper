@@ -23,6 +23,12 @@ class BaseSearcher(ABC):
         results: List[SearchResult],
         summary: SearchSummary,
     ) -> None:
+        """绑定共享的结果列表与扫描摘要。
+
+        Args:
+            results: 搜索结果聚合列表（就地追加）。
+            summary: 扫描进度与命中统计摘要。
+        """
         self.results = results
         self.summary = summary
 

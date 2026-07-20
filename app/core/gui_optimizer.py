@@ -28,6 +28,8 @@ from core.performance import PerformanceMetrics, set_metrics_sink
 
 
 class ShortcutManagerPort(Protocol):
+    """键盘快捷键注册与事件分发端口。"""
+
     def register(
         self,
         binding_id: str,
@@ -36,22 +38,48 @@ class ShortcutManagerPort(Protocol):
         description: str,
         modifiers: list[Any],
     ) -> None:
+        """注册一条快捷键绑定。
+
+        Args:
+            binding_id: 稳定绑定标识。
+            key: 主键名。
+            callback: 触发时回调。
+            description: 帮助文案。
+            modifiers: 修饰键列表。
+        """
         ...
 
     def handle_event(self, e: ft.KeyboardEvent) -> bool:
+        """处理键盘事件并匹配绑定。
+
+        Args:
+            e: Flet 键盘事件。
+
+        Returns:
+            是否已消费该事件。
+        """
         ...
 
     def create_help_dialog(self) -> Any:
+        """构建快捷键帮助对话框控件。
+
+        Returns:
+            可交给 ``page.show_dialog`` 的对话框。
+        """
         ...
 
 
 class PerformanceMonitorPort(Protocol):
+    """可选性能指标记录端口。"""
+
     enabled: bool
 
     def enable(self) -> None:
+        """启用指标记录。"""
         ...
 
     def disable(self) -> None:
+        """停用指标记录。"""
         ...
 
     def record(
@@ -61,30 +89,57 @@ class PerformanceMonitorPort(Protocol):
         unit: str = "",
         **metadata: Any,
     ) -> None:
+        """记录一条指标。
+
+        Args:
+            metric_name: 指标名。
+            value: 数值。
+            unit: 单位字符串。
+            **metadata: 附加维度。
+        """
         ...
 
 
 class ResourceMonitorPort(Protocol):
+    """进程资源采样与日志打印端口。"""
+
     def start(self) -> None:
+        """启动后台采样。"""
         ...
 
     def stop(self) -> None:
+        """停止后台采样。"""
         ...
 
     def set_print_interval(self, seconds: float) -> None:
+        """设置日志打印间隔秒数。
+
+        Args:
+            seconds: 打印间隔。
+        """
         ...
 
 
 class HealthMonitorPort(Protocol):
+    """UI 健康心跳与告警端口。"""
+
     def set_alert_callback(self, callback: Callable[[Any], None]) -> None:
+        """注册健康告警回调。
+
+        Args:
+            callback: 接收告警对象的回调。
+        """
         ...
 
     def heartbeat(self) -> None:
+        """在 UI 线程上报一次心跳。"""
         ...
 
 
 @dataclass(frozen=True)
 class GUIOptimizerDependencies:
+    """GUIOptimizer 所需的页面、配置与可替换监控端口。"""
+
     page: ft.Page
     get_ui_setting: Callable[[str, Any], Any]
     save_config: Callable[[], None]
@@ -107,17 +162,18 @@ class GUIOptimizerDependencies:
 
 
 class GUIOptimizer:
-    """GUI优化管理器
+    """GUI 优化管理器。
 
-    职责：
-    - 性能监控初始化
-    - 键盘快捷键注册
-    - 卡死检测器管理
-    - 通知管理器集成
-    - 可访问性验证
+    职责：性能监控初始化、键盘快捷键、卡死检测、通知与可访问性验证。
+    持有心跳线程，应用关闭时必须调用 :meth:`stop`。
     """
 
     def __init__(self, dependencies: GUIOptimizerDependencies) -> None:
+        """绑定依赖；真正启停在 ``initialize`` / ``stop``。
+
+        Args:
+            dependencies: 页面、配置读写与监控端口。
+        """
         self._deps = dependencies
         self.page = dependencies.page
         self._shortcut_manager = dependencies.shortcut_manager

@@ -25,7 +25,10 @@ LogCallback = Callable[[str, str], None]
 
 
 class NbtStageManager:
-    """协调纯暂存状态与 Flet 暂存区控件。"""
+    """协调纯暂存状态与 Flet 暂存区控件。
+
+    不负责写盘；提交由上层事务服务读取 ``get_changes_by_target``。
+    """
 
     def __init__(
         self,
@@ -42,6 +45,21 @@ class NbtStageManager:
         handle_error: ErrorCallback,
         log: LogCallback,
     ) -> None:
+        """绑定暂存存储与 UI 控件回调。
+
+        Args:
+            store: 纯状态暂存区。
+            status_control: 显示「暂存区: N 个变更」的文本。
+            list_control: 变更列表容器。
+            get_current_target: 取当前编辑目标；未加载返回 None。
+            get_current_label: 当前目标展示标签。
+            get_current_format: 当前编辑格式（player/chunk 等）。
+            reload_current_target: 撤销后重载当前 NBT 视图。
+            warn: 警告对话框 ``(title, message)``。
+            info: 信息对话框 ``(title, message)``。
+            handle_error: 异常处理 ``(exc, context)``。
+            log: 操作日志 ``(message, category)``。
+        """
         self._store = store
         self._status_control = status_control
         self._list_control = list_control
@@ -61,7 +79,14 @@ class NbtStageManager:
         new_value: Any,
         display_path: str,
     ) -> None:
-        """暂存一个 NBT 修改。"""
+        """暂存一个 NBT 修改到当前目标。
+
+        Args:
+            path_parts: 从根到字段的路径片段。
+            old_value: 修改前的值。
+            new_value: 修改后的值。
+            display_path: UI 展示用路径字符串。
+        """
         try:
             target = self._get_current_target()
             if target is None:
@@ -83,7 +108,11 @@ class NbtStageManager:
             self._handle_error(ex, "暂存 NBT 修改失败")
 
     def unstage_change(self, index: int) -> None:
-        """撤销一个暂存的变更。"""
+        """按全局序号撤销一条暂存变更并重载当前目标。
+
+        Args:
+            index: 暂存列表中的 0-based 序号。
+        """
         try:
             if self._store.remove(index) is None:
                 return
@@ -218,12 +247,27 @@ class NbtStageManager:
         )
 
     def get_staged_count(self) -> int:
+        """返回当前暂存变更条数。
+
+        Returns:
+            暂存区长度。
+        """
         return len(self._store)
 
     def has_changes(self) -> bool:
+        """是否存在待提交变更。
+
+        Returns:
+            暂存区非空时为 True。
+        """
         return bool(self._store)
 
     def get_changes_by_target(self) -> Dict[str, List[NbtChange]]:
+        """按目标键分组返回暂存变更（去掉内部序号）。
+
+        Returns:
+            目标键 → ``NbtChange`` 列表。
+        """
         return {
             key: [change for _, change in changes]
             for key, changes in self._store.grouped_by_target().items()

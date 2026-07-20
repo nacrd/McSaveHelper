@@ -47,6 +47,13 @@ class EntitySearcher(BaseSearcher):
         self._scan_regions(region_files, dimension, target, log, progress)
 
     def search_chunk(self, chunk: Any, target: str, dimension: str) -> None:
+        """在单个区块中扫描匹配的实体。
+
+        Args:
+            chunk: MCA/NBT 区块对象。
+            target: 目标实体 ID 或匹配模式。
+            dimension: 维度标识（写入结果）。
+        """
         try:
             for entity in get_entities(chunk):
                 if self._limit_reached():

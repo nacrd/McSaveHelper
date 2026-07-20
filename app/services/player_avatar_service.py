@@ -1,4 +1,4 @@
-"""Player avatar (skin face) fetch + disk cache."""
+"""玩家头像（皮肤脸部）拉取与磁盘缓存。"""
 from __future__ import annotations
 
 import base64
@@ -8,7 +8,7 @@ import logging
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from core.io_atomic import atomic_write_bytes
 from core.uuid_utils import normalize_uuid
@@ -27,7 +27,7 @@ _MAX_MEMORY = 128
 _FACE_SIZE = 64  # output face size in pixels
 
 
-def _ensure_requests():
+def _ensure_requests() -> Any:
     global _requests
     if _requests is None:
         import requests as _req
@@ -36,7 +36,7 @@ def _ensure_requests():
     return _requests
 
 
-def _ensure_image():
+def _ensure_image() -> Any:
     global _Image
     if _Image is None:
         from PIL import Image as _pil_image
@@ -46,7 +46,14 @@ def _ensure_image():
 
 
 def parse_skin_url_from_profile(profile: dict) -> Optional[str]:
-    """Extract the skin texture URL from a Mojang session profile payload."""
+    """从 Mojang session profile 载荷中提取皮肤纹理 URL。
+
+    Args:
+        profile: ``/session/minecraft/profile/{uuid}`` 的 JSON 对象。
+
+    Returns:
+        ``http(s)`` 皮肤 URL；解析失败或缺失时为 None。
+    """
     properties = profile.get("properties") or []
     if not isinstance(properties, list):
         return None
@@ -72,7 +79,15 @@ def parse_skin_url_from_profile(profile: dict) -> Optional[str]:
 
 
 def crop_face_png(skin_bytes: bytes, size: int = _FACE_SIZE) -> bytes:
-    """Crop the classic 8×8 face from a 64×64 (or larger) skin PNG."""
+    """从 64×64（或更高分辨率）皮肤 PNG 裁切经典 8×8 脸并叠帽层。
+
+    Args:
+        skin_bytes: 完整皮肤 PNG 字节。
+        size: 输出正方形边长像素；0 表示不缩放。
+
+    Returns:
+        脸部 PNG 字节。
+    """
     Image = _ensure_image()
     with Image.open(io.BytesIO(skin_bytes)) as img:
         img = img.convert("RGBA")
@@ -99,9 +114,10 @@ def crop_face_png(skin_bytes: bytes, size: int = _FACE_SIZE) -> bytes:
 
 
 class PlayerAvatarService:
-    """Fetch and cache player face avatars from Mojang session textures.
+    """从 Mojang session 拉取并缓存玩家脸部头像。
 
-    Offline / failed lookups return ``None`` so the UI can show a placeholder.
+    离线或失败返回 ``None``，UI 可显示占位图。磁盘缓存目录默认为
+    ``~/.mc_save_helper/avatars``。
     """
 
     def __init__(
@@ -110,6 +126,12 @@ class PlayerAvatarService:
         *,
         enabled: bool = True,
     ) -> None:
+        """初始化头像缓存目录与内存索引。
+
+        Args:
+            cache_dir: 本地 PNG 缓存目录；缺省 ``~/.mc_save_helper/avatars``。
+            enabled: 是否启用远程拉取；为 False 时仅读本地缓存。
+        """
         self._enabled = enabled
         self._cache_dir = (
             cache_dir
@@ -124,20 +146,22 @@ class PlayerAvatarService:
 
     @property
     def enabled(self) -> bool:
+        """是否允许网络拉取玩家皮肤。"""
         return self._enabled
 
     @enabled.setter
     def enabled(self, value: bool) -> None:
+        """设置是否允许网络拉取玩家皮肤。"""
         self._enabled = bool(value)
 
     def get_cached_path(self, uuid: str) -> Optional[Path]:
-        """Return a cached face PNG path if present on disk/memory.
+        """若磁盘/内存已有脸部 PNG 则返回路径。
 
         Args:
-            uuid: Player UUID (any common form).
+            uuid: 玩家 UUID（常见格式均可）。
 
         Returns:
-            Path | None: Local PNG path, or None when missing.
+            本地 PNG 路径；缺失时为 None。
         """
         norm = normalize_uuid(uuid)
         if not norm:
@@ -273,5 +297,6 @@ class PlayerAvatarService:
         return existing
 
     def clear_failed(self) -> None:
+        """清空已失败 UUID 集合，允许后续重试拉取。"""
         with self._lock:
             self._failed.clear()

@@ -13,6 +13,7 @@ class FrameRateMonitor:
     """
 
     def __init__(self, window_size: int = 60):
+        """初始化帧率采样器。"""
         self.frame_times: deque = deque(maxlen=window_size)
         self.last_frame_time: float = time.time()
 

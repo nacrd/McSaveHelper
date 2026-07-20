@@ -310,9 +310,11 @@ def _sample_column_from_strata(
         return None
 
     name, height, overlay, alpha = _select_surface_strata(strata)
-    # Seed as a 2-tuple so biome packing is only enabled when biome_at works.
+    # Seed as a 3-tuple sample so biome packing is only enabled when
+    # biome_at works (include_biome requires len >= 4).
+    seed: SurfaceSample = (name, height, 0)
     biome, include_biome = _sample_biome(
-        blocks, local_x, local_z, height, None, (name, height)
+        blocks, local_x, local_z, height, None, seed
     )
     water_depth = _water_depth(blocks, local_x, local_z, name, height, 0)
     return _surface_value(

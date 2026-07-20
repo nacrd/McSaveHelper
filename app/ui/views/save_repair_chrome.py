@@ -18,6 +18,7 @@ EventCallback = Callable[[Any], None]
 
 @dataclass(frozen=True)
 class SaveRepairChrome:
+    """存档修复页控件束。"""
     controls: List[ft.Control]
     world_path_field: Any
     fix_chunks_checkbox: Any

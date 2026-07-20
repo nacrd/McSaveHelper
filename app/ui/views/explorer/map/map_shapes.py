@@ -39,10 +39,29 @@ def empty_background(
     height: float,
     color: str,
 ) -> List[cv.Shape]:
+    """构建全画布纯色背景矩形。
+
+    Args:
+        width: 画布宽度。
+        height: 画布高度。
+        color: 填充色。
+
+    Returns:
+        仅含一个 ``cv.Rect`` 的列表。
+    """
     return [cv.Rect(0, 0, width, height, paint=ft.Paint(color=color))]
 
 
 def empty_state(view_w: float, view_h: float) -> List[cv.Shape]:
+    """未设置当前存档时的居中占位文案与图标。
+
+    Args:
+        view_w: 视口宽度。
+        view_h: 视口高度。
+
+    Returns:
+        图标与提示文字形状列表。
+    """
     return [
         cv.Text(
             x=view_w / 2 - 90,
@@ -60,6 +79,15 @@ def empty_state(view_w: float, view_h: float) -> List[cv.Shape]:
 
 
 def empty_region(rect: ScreenRect, color: str = EMPTY_REGION_COLOR) -> cv.Rect:
+    """空区域描边框（无填充）。
+
+    Args:
+        rect: ``(x, y, width, height)`` 屏幕矩形。
+        color: 描边颜色。
+
+    Returns:
+        描边矩形形状。
+    """
     x, y, width, height = rect
     return cv.Rect(
         x,
@@ -81,6 +109,18 @@ def origin_marker(
     height: float,
     color: str = ORIGIN_COLOR,
 ) -> List[cv.Shape]:
+    """世界原点十字准线（贯穿视口的竖线与横线）。
+
+    Args:
+        x: 原点屏幕 X。
+        y: 原点屏幕 Y。
+        width: 画布宽度。
+        height: 画布高度。
+        color: 线条颜色。
+
+    Returns:
+        两条十字线形状。
+    """
     return [
         cv.Rect(x, 0, 2, height, paint=ft.Paint(color=color)),
         cv.Rect(0, y, width, 2, paint=ft.Paint(color=color)),
@@ -101,6 +141,24 @@ def region_cell(
     coord_label: CoordLabel,
     value_label: Optional[str] = None,
 ) -> List[cv.Shape]:
+    """构建单个区域单元格（底图/瓦片、选中框、坐标与元数据标签）。
+
+    Args:
+        x: 单元格左上角 X。
+        y: 单元格左上角 Y。
+        size: 单元格边长。
+        color: 无瓦片时的填充色。
+        coord: 区域坐标 ``(rx, rz)``。
+        selected: 是否选中高亮。
+        view_level: 当前地图层级。
+        show_coordinates: 是否绘制坐标文字。
+        tile_src: 可选俯视瓦片图片源。
+        coord_label: 坐标标签生成回调。
+        value_label: 可选底部元数据短文本。
+
+    Returns:
+        该单元格的 canvas 形状列表。
+    """
     shapes: List[cv.Shape] = []
     shapes.extend(_region_base_fill(x, y, size, color, tile_src))
     if selected:
@@ -216,6 +274,20 @@ def chunk_grid(
     show_coordinates: bool,
     selected_chunk: Optional[Coord],
 ) -> Tuple[List[cv.Shape], Dict[Coord, ScreenRect], Dict[Coord, ScreenRect]]:
+    """在区域矩形上绘制 32x32 区块网格、标签与选中框。
+
+    Args:
+        x: 区域左上角屏幕 X。
+        y: 区域左上角屏幕 Y。
+        size: 区域边长（像素）。
+        region_coord: 区域坐标。
+        show_block_grid: 是否叠加方块网格。
+        show_coordinates: 是否绘制区块坐标。
+        selected_chunk: 选中的世界区块坐标。
+
+    Returns:
+        ``(shapes, chunk_bounds, block_bounds)``；过小时返回空。
+    """
     shapes: List[cv.Shape] = []
     chunk_bounds: Dict[Coord, ScreenRect] = {}
     block_bounds: Dict[Coord, ScreenRect] = {}
@@ -338,11 +410,21 @@ def marker_overlay(
     scale: float,
     selected_id: Optional[str] = None,
 ) -> Tuple[List[cv.Shape], Dict[str, ScreenRect]]:
-    """Draw visible waypoint markers and return their hit rectangles.
+    """绘制可见路径点并返回命中矩形。
 
-    Marker geometry is deliberately independent from the base region shapes.
-    A small clamp keeps an off-screen waypoint discoverable at the edge, as in
-    Xaero's world map, while the returned hit boxes remain stable per frame.
+    标记几何与底图区域形状解耦。近屏边缘会轻微钳位，使屏外路点
+    仍可在视口边缘被发现（类似 Xaero 世界地图），命中框按帧稳定。
+
+    Args:
+        markers: 标记集合。
+        block_to_screen: 方块坐标到屏幕坐标的转换。
+        width: 画布宽度。
+        height: 画布高度。
+        scale: 当前缩放。
+        selected_id: 选中标记 id。
+
+    Returns:
+        ``(shapes, bounds)``，bounds 为 marker id -> 命中矩形。
     """
     shapes: List[cv.Shape] = []
     bounds: Dict[str, ScreenRect] = {}
@@ -484,6 +566,19 @@ def block_grid_for_region(
     show_coordinates: bool,
     selected_chunk: Optional[Coord],
 ) -> Tuple[List[cv.Shape], Dict[Coord, ScreenRect]]:
+    """在区域内选中（或中心）区块上绘制 16x16 方块网格。
+
+    Args:
+        region_x: 区域左上角屏幕 X。
+        region_y: 区域左上角屏幕 Y。
+        chunk_size: 单个区块边长（像素）。
+        region_coord: 区域坐标。
+        show_coordinates: 是否绘制方块坐标。
+        selected_chunk: 聚焦的世界区块；None 时取区域中心附近。
+
+    Returns:
+        ``(shapes, block_bounds)``。
+    """
     shapes: List[cv.Shape] = []
     block_bounds: Dict[Coord, ScreenRect] = {}
     block_px = chunk_size / 16.0
@@ -499,7 +594,9 @@ def block_grid_for_region(
             shapes, bx, by, region_coord, local_x, local_z, show_coordinates, block_px
         )
         if block_px >= 4:
-            _record_block_bounds(block_bounds, bx, by, region_coord, local_x, local_z, block_px)
+            _record_block_bounds(
+                block_bounds, bx, by, region_coord, local_x, local_z, block_px
+            )
     return shapes, block_bounds
 
 
@@ -593,6 +690,23 @@ def info_overlay(
     selected_chunk: Optional[Coord],
     show_coordinates: bool = False,
 ) -> List[cv.Shape]:
+    """构建模式标题、扫描进度与选中信息角标。
+
+    Args:
+        width: 画布宽度。
+        height: 画布高度。
+        display_mode: 显示模式 id。
+        view_level: 视口层级。
+        scale: 缩放倍数。
+        is_scanning: 是否正在扫描。
+        scan_progress: 扫描进度 0–1。
+        selected_region: 选中区域。
+        selected_chunk: 选中区块。
+        show_coordinates: 是否显示选中信息。
+
+    Returns:
+        HUD 叠加形状列表。
+    """
     shapes: List[cv.Shape] = []
     shapes.extend(_mode_title_badge(display_mode, view_level, scale))
     if is_scanning:

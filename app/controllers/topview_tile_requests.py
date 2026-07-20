@@ -30,9 +30,26 @@ class TopviewTileServicePort(Protocol):
     """瓦片协调器使用的服务最小端口。"""
 
     def has_topview_tile(self, coord: RegionCoord, min_size: int = 0) -> bool:
+        """是否已有不低于 ``min_size`` 的可用瓦片。
+
+        Args:
+            coord: 区域坐标。
+            min_size: 最小边长；0 表示任意缓存。
+
+        Returns:
+            是否可直接使用。
+        """
         ...
 
     def get_topview_tile_size(self, coord: RegionCoord) -> int:
+        """返回已缓存瓦片边长。
+
+        Args:
+            coord: 区域坐标。
+
+        Returns:
+            像素边长；无缓存为 0。
+        """
         ...
 
     def is_topview_tile_pending(
@@ -41,6 +58,15 @@ class TopviewTileServicePort(Protocol):
         *,
         min_size: int = 0,
     ) -> bool:
+        """服务当前代数是否仍持有该坐标的请求。
+
+        Args:
+            coord: 区域坐标。
+            min_size: 要求的最小请求尺寸。
+
+        Returns:
+            是否仍在队列或升级账本中。
+        """
         ...
 
     def request_topview_tiles(
@@ -51,6 +77,17 @@ class TopviewTileServicePort(Protocol):
         force: bool = False,
         priority: bool = False,
     ) -> Set[RegionCoord]:
+        """向服务提交渲染请求。
+
+        Args:
+            coords: 区域坐标列表。
+            tile_size: 目标边长。
+            force: 是否强制升级/优先不完整瓦片。
+            priority: 是否插队。
+
+        Returns:
+            服务实际接纳的坐标集合。
+        """
         ...
 
 
@@ -71,13 +108,23 @@ class TopviewTileRequestPolicy:
 
 
 class TopviewTileRequestCoordinator:
-    """协调可见瓦片、聚焦细节及队列容量重试。"""
+    """协调可见瓦片、聚焦细节及队列容量重试。
+
+    线程安全：账本由内部锁保护。不取消服务已接收任务；``reset`` 只清视图侧
+    账本。完成回调与 UI 重建之间的线程切换由视图负责。
+    """
 
     def __init__(
         self,
         service: TopviewTileServicePort,
         policy: TopviewTileRequestPolicy = TopviewTileRequestPolicy(),
     ) -> None:
+        """绑定服务端口与请求策略。
+
+        Args:
+            service: 俯视瓦片服务端口（通常为 RegionMapService）。
+            policy: LOD/批量/聚焦策略；默认使用模块常量。
+        """
         self._service = service
         self._policy = policy
         self._requested_sizes: Dict[RegionCoord, int] = {}
@@ -92,6 +139,7 @@ class TopviewTileRequestCoordinator:
 
     @property
     def has_deferred_requests(self) -> bool:
+        """是否仍有因队列满而推迟的可见请求。"""
         with self._state_lock:
             return self._has_deferred_requests
 
@@ -102,20 +150,41 @@ class TopviewTileRequestCoordinator:
             self._has_deferred_requests = False
 
     def on_tile_ready(self, coord: RegionCoord) -> bool:
-        """记录完成事件，并返回是否需要借此机会重试被拒绝的请求。"""
+        """记录完成事件，并返回是否需要借此机会重试被拒绝的请求。
+
+        Args:
+            coord: 刚就绪的区域坐标。
+
+        Returns:
+            若存在推迟请求则为 True，调用方应再次 ``request_visible``。
+        """
         with self._state_lock:
             self._requested_sizes.pop(coord, None)
             return self._has_deferred_requests
 
     def visible_tile_size(self, scale: float) -> int:
-        """返回当前显示所需 LOD；512 仅用于后续聚焦升级。"""
+        """返回当前显示所需 LOD；512 仅用于后续聚焦升级。
+
+        Args:
+            scale: 当前地图缩放。
+
+        Returns:
+            建议瓦片边长。
+        """
         return choose_tile_size(
             self._screen_tile_pixels(scale),
             self._tile_ladder(scale),
         )
 
     def visible_base_tile_size(self, scale: float) -> int:
-        """Return the ordinary frame LOD, excluding the focused 512 leaf."""
+        """返回普通帧 LOD，排除聚焦用 512 叶节点。
+
+        Args:
+            scale: 当前地图缩放。
+
+        Returns:
+            不超过 ``visible_max_size`` 的边长。
+        """
         return min(
             self.visible_tile_size(scale),
             self._policy.visible_max_size,
@@ -129,7 +198,14 @@ class TopviewTileRequestCoordinator:
         scale: float,
         center: RegionCoord,
     ) -> None:
-        """请求当前视口缺失瓦片，并记录服务队列未接收的尾部。"""
+        """请求当前视口缺失瓦片，并记录服务队列未接收的尾部。
+
+        Args:
+            missing: 视口内尚无瓦片的坐标。
+            visible_regions: 当前视口全部区域（用于账本对账）。
+            scale: 地图缩放。
+            center: 视口中心区域坐标。
+        """
         requests = plan_visible_requests(
             missing,
             screen_tile_pixels=self._screen_tile_pixels(scale),
@@ -155,7 +231,18 @@ class TopviewTileRequestCoordinator:
         available_regions: Collection[RegionCoord],
         enabled: bool,
     ) -> Set[RegionCoord]:
-        """升级选中区域；高倍率无选中项时只升级视口中心区域。"""
+        """升级选中区域；高倍率无选中项时只升级视口中心区域。
+
+        Args:
+            scale: 地图缩放。
+            selected: 用户选中区域；None 时可能用中心。
+            center: 视口中心区域。
+            available_regions: 世界内已知区域集合。
+            enabled: 是否启用聚焦升级。
+
+        Returns:
+            服务接纳的细节请求坐标集合。
+        """
         if not enabled or scale < self._policy.focus_scale:
             return set()
         visible_size = self.visible_tile_size(scale)
@@ -181,7 +268,15 @@ class TopviewTileRequestCoordinator:
         coord: RegionCoord,
         available_regions: Collection[RegionCoord],
     ) -> Set[RegionCoord]:
-        """优先请求聚焦区域及其已有的八个邻区。"""
+        """优先请求聚焦区域及其已有的八个邻区。
+
+        Args:
+            coord: 聚焦区域。
+            available_regions: 世界内已知区域。
+
+        Returns:
+            服务接纳的坐标集合。
+        """
         nearby = [
             (coord[0] + dx, coord[1] + dz)
             for dz in (-1, 0, 1)
@@ -199,7 +294,17 @@ class TopviewTileRequestCoordinator:
         force: bool = False,
         priority: bool = False,
     ) -> Set[RegionCoord]:
-        """提交显式细节请求，保留旧服务端口的参数兼容行为。"""
+        """提交显式细节请求，保留旧服务端口的参数兼容行为。
+
+        Args:
+            coords: 待升级坐标。
+            tile_size: 目标边长；缺省用策略 ``detail_size``。
+            force: 是否强制升级。
+            priority: 是否插队。
+
+        Returns:
+            服务接纳的坐标集合。
+        """
         requested = list(dict.fromkeys(coords))
         if not requested:
             return set()

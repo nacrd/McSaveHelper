@@ -15,6 +15,7 @@ class TileSourceCache:
     MAX_BYTES: int = 16 * 1024 * 1024
 
     def __init__(self) -> None:
+        """创建空的瓦片源缓存。"""
         self._generation = -1
         self._sources: OrderedDict[RegionCoord, Tuple[int, str]] = OrderedDict()
         self._bytes = 0
@@ -51,6 +52,7 @@ class TileSourceCache:
         return source
 
     def clear(self) -> None:
+        """清空全部缓存条目。"""
         self._sources.clear()
         self._bytes = 0
         self._generation = -1

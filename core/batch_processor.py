@@ -25,7 +25,7 @@ BatchTaskHandler = Callable[
 
 
 class BatchCancelledError(RuntimeError):
-    """Raised at a safe checkpoint when cancellation was requested."""
+    """在安全检查点检测到取消请求时抛出。"""
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,11 @@ class _BatchTask:
 
 
 class BatchProcessor:
-    """Schedule independent world tasks and aggregate structured results."""
+    """调度彼此独立的世界任务并汇总结构化结果。
+
+    同批任务经线程池并发；``stop`` 只请求取消，不伪造运行生命周期。
+    结果键为 ``task-N``，单任务失败不中断其余任务聚合。
+    """
 
     def __init__(
         self,
@@ -46,6 +50,15 @@ class BatchProcessor:
         custom_mappings: Optional[Dict[str, str]] = None,
         task_handler: Optional[BatchTaskHandler] = None,
     ) -> None:
+        """创建批量处理器。
+
+        Args:
+            max_workers: 线程池大小，至少为 1；默认 2。
+            version_detector: 可选源世界版本探测回调。
+            custom_mappings: 完整模式自定义 UUID 映射。
+            task_handler: 自定义单世界处理回调；None 时用内置
+                fast/full 路径。
+        """
         self.max_workers = max(1, max_workers or 2)
         self.version_detector = version_detector
         self.custom_mappings = custom_mappings
@@ -406,11 +419,20 @@ class BatchProcessor:
             future.cancel()
 
     def stop(self) -> None:
-        """Request cancellation without falsifying the running lifecycle."""
+        """请求取消进行中的批量任务，不伪造 ``is_running`` 生命周期。
+
+        设置取消事件并尝试 ``cancel`` 尚未开始的 Future；已在执行的
+        任务在检查点通过 ``BatchCancelledError`` 退出。
+        """
         self._cancel_event.set()
         self._cancel_pending()
 
     def get_progress(self) -> float:
+        """返回已完成任务占比（0.0–1.0）。
+
+        Returns:
+            完成数 / 总任务数；无任务时为 0.0。
+        """
         with self._lock:
             if self._total_tasks <= 0:
                 return 0.0
@@ -418,7 +440,14 @@ class BatchProcessor:
 
 
 def scan_worlds_directory(directory: Path) -> List[Path]:
-    """Return direct child directories containing a level.dat file."""
+    """扫描目录下含 ``level.dat`` 的直接子目录（有效世界）。
+
+    Args:
+        directory: 待扫描目录。
+
+    Returns:
+        排序后的世界路径列表；目录不存在时为空列表。
+    """
     if not directory.exists():
         return []
     worlds = [

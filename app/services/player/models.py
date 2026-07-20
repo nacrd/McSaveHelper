@@ -34,6 +34,8 @@ class PlayerEditSpec:
 
 @dataclass(frozen=True)
 class PlayerRef:
+    """列表用玩家引用：规范化 UUID、显示名与 ``.dat`` 路径。"""
+
     uuid_norm: str
     uuid_hyphen: str
     name: Optional[str]
@@ -41,11 +43,14 @@ class PlayerRef:
 
     @property
     def display_name(self) -> str:
+        """优先玩家名，否则连字符 UUID，再退回无连字符 UUID。"""
         return self.name or self.uuid_hyphen or self.uuid_norm
 
 
 @dataclass(frozen=True)
 class PlayerSummary:
+    """玩家摘要页数据：状态/姿态/出生死亡点/能力与问题标记。"""
+
     ref: PlayerRef
     state: PlayerState
     pose: PlayerPose
@@ -73,6 +78,12 @@ class PlayerContainersView:
         containers: PlayerContainers,
         selected_slot: Optional[int] = None,
     ) -> "PlayerContainersView":
+        """将 core 容器模型转为 UI 可用的 dict 元组。
+
+        Args:
+            containers: PlayerManager 提取的容器。
+            selected_slot: 当前热键栏槽位（可选高亮）。
+        """
         return cls(
             inventory=tuple(item.to_dict() for item in containers.inventory),
             equipment=tuple(item.to_dict() for item in containers.equipment),
@@ -308,4 +319,12 @@ _SPECS_BY_ID: Dict[str, PlayerEditSpec] = {
 
 
 def get_edit_spec(field_id: str) -> Optional[PlayerEditSpec]:
+    """按字段 id 查找可编辑规格。
+
+    Args:
+        field_id: 如表单 ``health`` / ``abilities.mayfly``。
+
+    Returns:
+        规格；未知 id 为 None。
+    """
     return _SPECS_BY_ID.get(field_id)

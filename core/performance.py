@@ -21,18 +21,21 @@ class PerformanceMetrics:
 
     @property
     def throughput_files_per_sec(self) -> float:
+        """文件处理吞吐量（文件/秒）；时长为 0 时返回 0。"""
         if self.duration_seconds > 0 and self.files_processed > 0:
             return self.files_processed / self.duration_seconds
         return 0.0
 
     @property
     def throughput_mb_per_sec(self) -> float:
+        """数据吞吐量（MB/秒）。"""
         if self.duration_seconds > 0 and self.bytes_processed > 0:
             return (self.bytes_processed / (1024 * 1024)) / \
                 self.duration_seconds
         return 0.0
 
     def to_dict(self) -> Dict[str, Any]:
+        """序列化为可 JSON 化的指标字典。"""
         return {
             "operation": self.operation,
             "duration_seconds": round(
@@ -110,6 +113,11 @@ class PerfTracker:
         self,
         metrics_sink: Optional[Callable[[PerformanceMetrics], None]] = None,
     ) -> None:
+        """构造追踪器。
+
+        Args:
+            metrics_sink: 每次 track 结束时可选接收完整指标的回调。
+        """
         self._metrics: Dict[str, PerformanceMetrics] = {}
         self._lock = threading.Lock()
         self._local = threading.local()

@@ -906,26 +906,32 @@ class Application:
 
     @property
     def config(self) -> ConfigService:
+        """应用配置服务（持久化 UI/路径/映射等）。"""
         return self.services.config
 
     @property
     def i18n(self) -> I18nService:
+        """国际化翻译服务。"""
         return self.services.i18n
 
     @property
     def migration(self) -> MigrationService:
+        """存档迁移业务服务。"""
         return self.services.migration
 
     @property
     def uuid(self) -> UUIDService:
+        """UUID 映射与转换服务。"""
         return self.services.uuid
 
     @property
     def item(self) -> ItemService:
+        """物品名称/语言与解析服务。"""
         return self.services.item
 
     @property
     def texture(self) -> TextureService:
+        """方块/物品贴图导入与查询服务。"""
         return self.services.texture
 
     def create_region_map_service(self) -> RegionMapService:

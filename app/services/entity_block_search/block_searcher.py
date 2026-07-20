@@ -15,10 +15,23 @@ class BlockSearcher(BaseSearcher):
     progress_label = "区块文件"
 
     def __init__(self, results: List[SearchResult], summary: Any) -> None:
+        """初始化方块搜索器并复用容器辅助扫描。
+
+        Args:
+            results: 搜索结果聚合列表。
+            summary: 扫描摘要对象。
+        """
         super().__init__(results, summary)
         self.container_helper = ContainerSearcher(results, summary)
 
     def search_chunk(self, chunk: Any, target: str, dimension: str) -> None:
+        """在单个区块中按目标 ID 扫描方块。
+
+        Args:
+            chunk: MCA/NBT 区块对象。
+            target: 目标方块 ID 或匹配模式。
+            dimension: 维度标识（写入结果）。
+        """
         try:
             matching_sections = self._matching_sections(chunk, target)
             if not matching_sections:

@@ -41,6 +41,7 @@ REGION_LEGEND_KEYS = (
 
 @dataclass(frozen=True)
 class RegionTabChrome:
+    """区域地图 Tab 控件束。"""
     layout: ft.Row
     dimension_dropdown: ft.Dropdown
     display_mode_dropdown: ft.Dropdown

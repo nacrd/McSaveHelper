@@ -43,6 +43,7 @@ class FloatingLogPanel(ft.Container):
     STORAGE_KEY = "floating_log_panel_position"
 
     def __init__(self, page: ft.Page, title: str = "日志") -> None:
+        """构建可拖拽浮动日志面板。"""
         self._page = page
         self._title = title
         self._expanded = False
@@ -462,6 +463,7 @@ class FloatingLogButton(ft.Container):
             floating_panel: FloatingLogPanel,
             page: ft.Page,
             on_click=None) -> None:
+        """构建打开浮动日志的悬浮按钮。"""
         self._floating_panel = floating_panel
         self._on_click_handler = on_click
         self._page = page

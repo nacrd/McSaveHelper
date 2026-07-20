@@ -25,7 +25,17 @@ if TYPE_CHECKING:
 
 
 class ServerPropertiesView(ft.Column):
+    """server.properties 图形编辑视图。
+
+    支持选择服务器根目录、读取默认/现有配置项并写回文件。
+    """
+
     def __init__(self, app: "Application") -> None:
+        """初始化视图并构建表单控件。
+
+        Args:
+            app: 应用组合根，用于日志、翻译与文件选择。
+        """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app = app
@@ -35,6 +45,11 @@ class ServerPropertiesView(ft.Column):
         self._build()
 
     def get_top_actions(self) -> list[ViewAction]:
+        """返回应用壳层顶栏可消费的视图命令。
+
+        Returns:
+            list[ViewAction]: 当前视图暴露的顶栏动作列表。
+        """
         return [
             ViewAction(
                 self.app.translate("top_bar.read_config", "读取配置"),

@@ -37,6 +37,7 @@ class ConversionResult:
 
     @property
     def success(self) -> bool:
+        """转换是否整体成功。"""
         return not self.errors
 
     def __bool__(self) -> bool:

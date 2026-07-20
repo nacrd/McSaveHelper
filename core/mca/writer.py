@@ -1,9 +1,9 @@
-"""Writable MCA region: load, mutate chunk NBT, atomic save.
+"""可写 MCA 区域：内存中加载/修改区块 NBT，再原子落盘。
 
-Safety model:
-- Edits happen in memory
-- save() optionally copies ``.mca.bak`` once
-- Writes to ``.mca.tmp`` then os.replace onto the target
+安全模型：
+- 编辑在内存中进行
+- save() 可选一次性复制 ``.mca.bak``
+- 先写 ``.mca.tmp`` 再 os.replace 到目标
 """
 from __future__ import annotations
 
@@ -32,7 +32,14 @@ PathLike = Union[str, Path]
 
 
 def nbt_to_bytes(nbt: Any) -> bytes:
-    """Serialize an nbtlib compound/File to uncompressed NBT bytes."""
+    """将 nbtlib compound/File 序列化为未压缩 NBT 字节。
+
+    Args:
+        nbt: nbtlib.File 或可转为 File 的 compound。
+
+    Returns:
+        bytes: 未压缩 NBT 二进制。
+    """
     if isinstance(nbt, nbtlib.File):
         root = nbt
     else:
@@ -44,15 +51,31 @@ def nbt_to_bytes(nbt: Any) -> bytes:
 
 
 def bytes_to_nbt(raw: bytes) -> nbtlib.File:
+    """将未压缩 NBT 字节解析为 nbtlib.File。
+
+    Args:
+        raw: 未压缩 NBT。
+
+    Returns:
+        nbtlib.File: 解析结果。
+    """
     return nbtlib.File.parse(io.BytesIO(raw))
 
 
 class WritableRegion:
-    """In-memory editable region file."""
+    """内存中可编辑的区域文件。
+
+    删除以 ``_deleted`` 集合记录，直到 save 才真正省略槽位。
+    """
 
     __slots__ = ("path", "_chunks", "_deleted", "_loaded")
 
     def __init__(self, path: Optional[PathLike] = None) -> None:
+        """创建空或绑定路径的可写区域（未自动 load）。
+
+        Args:
+            path: 可选磁盘路径。
+        """
         self.path: Optional[Path] = Path(path) if path is not None else None
         # (local_cx, local_cz) -> nbtlib.File (mutable)
         self._chunks: Dict[Tuple[int, int], nbtlib.File] = {}
@@ -62,17 +85,38 @@ class WritableRegion:
     # ------------------------------------------------------------------ factory
     @classmethod
     def open(cls, path: PathLike) -> "WritableRegion":
+        """打开路径并立即 load 全部可读区块。
+
+        Args:
+            path: .mca 路径。
+
+        Returns:
+            WritableRegion: 已加载实例。
+        """
         wr = cls(path)
         wr.load()
         return wr
 
     @classmethod
     def empty(cls, path: Optional[PathLike] = None) -> "WritableRegion":
+        """创建空区域（不读盘），可选绑定保存路径。
+
+        Args:
+            path: 可选默认保存路径。
+
+        Returns:
+            WritableRegion: 已标记 loaded 的空实例。
+        """
         wr = cls(path)
         wr._loaded = True
         return wr
 
     def load(self) -> None:
+        """从 path 加载全部存在区块；缺失文件视为空区域。
+
+        Raises:
+            McaError: 无 path，或某区块无法安全加载。
+        """
         if self.path is None:
             raise McaError("WritableRegion has no path to load")
         if not self.path.is_file():
@@ -111,6 +155,15 @@ class WritableRegion:
 
     # ------------------------------------------------------------------ query
     def has_chunk(self, local_cx: int, local_cz: int) -> bool:
+        """是否存在未删除的区块。
+
+        Args:
+            local_cx: 局部 X。
+            local_cz: 局部 Z。
+
+        Returns:
+            bool: 在内存表中且未标记删除。
+        """
         self._ensure_loaded()
         key = (local_cx, local_cz)
         if key in self._deleted:
@@ -118,7 +171,15 @@ class WritableRegion:
         return key in self._chunks
 
     def get_chunk(self, local_cx: int, local_cz: int) -> Optional[nbtlib.File]:
-        """Return mutable chunk NBT, or None if missing."""
+        """返回可变区块 NBT，缺失则为 None。
+
+        Args:
+            local_cx: 局部 X。
+            local_cz: 局部 Z。
+
+        Returns:
+            Optional[nbtlib.File]: 可变 File，或 None。
+        """
         self._ensure_loaded()
         key = (local_cx, local_cz)
         if key in self._deleted:
@@ -126,6 +187,16 @@ class WritableRegion:
         return self._chunks.get(key)
 
     def set_chunk(self, local_cx: int, local_cz: int, nbt: Any) -> None:
+        """写入/覆盖局部区块，并取消删除标记。
+
+        Args:
+            local_cx: 局部 X（0–31）。
+            local_cz: 局部 Z（0–31）。
+            nbt: compound 或 File。
+
+        Raises:
+            ChunkMissing: 坐标越界。
+        """
         self._ensure_loaded()
         if not (0 <= local_cx < CHUNKS_PER_SIDE and 0 <= local_cz < CHUNKS_PER_SIDE):
             raise ChunkMissing(f"Local chunk ({local_cx}, {local_cz}) out of bounds")
@@ -136,6 +207,15 @@ class WritableRegion:
         self._chunks[key] = nbt
 
     def delete_chunk(self, local_cx: int, local_cz: int) -> bool:
+        """标记删除局部区块（save 前不落盘）。
+
+        Args:
+            local_cx: 局部 X。
+            local_cz: 局部 Z。
+
+        Returns:
+            bool: 删除前是否曾存在有效数据。
+        """
         self._ensure_loaded()
         key = (local_cx, local_cz)
         existed = key in self._chunks and key not in self._deleted
@@ -144,6 +224,7 @@ class WritableRegion:
         return existed
 
     def iter_chunks(self) -> Iterable[Tuple[int, int, nbtlib.File]]:
+        """遍历未删除的 ``(cx, cz, nbt)``。"""
         self._ensure_loaded()
         for key, nbt in list(self._chunks.items()):
             if key in self._deleted:
@@ -151,6 +232,7 @@ class WritableRegion:
             yield key[0], key[1], nbt
 
     def count_chunks(self) -> int:
+        """未删除区块数量。"""
         self._ensure_loaded()
         return sum(1 for k in self._chunks if k not in self._deleted)
 
@@ -161,15 +243,14 @@ class WritableRegion:
         *,
         backup: bool = True,
     ) -> None:
-        """Write region to disk atomically.
+        """原子写回磁盘。
 
-        Parameters
-        ----------
-        path:
-            Destination; defaults to the path used at open().
-        backup:
-            If True and the destination already exists, copy to ``.mca.bak``
-            once (does not overwrite an existing bak).
+        Args:
+            path: 目标路径；默认 open 时的 path。
+            backup: 目标已存在时一次性复制 ``.mca.bak``（不覆盖已有 bak）。
+
+        Raises:
+            McaError: 无目标路径或写入失败。
         """
         self._ensure_loaded()
         dest = Path(path) if path is not None else self.path
@@ -265,10 +346,17 @@ def delete_chunk_entries(
     *,
     backup: bool = True,
 ) -> int:
-    """Clear location-table entries for coords (marks chunks empty).
+    """清除位置表项以标记区块为空（不重写整文件体）。
 
-    Prefer this for bulk 'reset chunk' when full rewrite is unnecessary.
-    Returns number of entries cleared.
+    批量「重置区块」且无需完整 rewrite 时优先使用。
+
+    Args:
+        region_path: 区域文件路径。
+        coords: 局部 ``(cx, cz)``。
+        backup: 是否备份。
+
+    Returns:
+        int: 实际清零的表项数。
     """
     path = Path(region_path)
     if not path.is_file():
@@ -304,7 +392,17 @@ def write_chunk_record(
     *,
     backup: bool = True,
 ) -> None:
-    """Write a complete compressed chunk record using atomic replacement."""
+    """将完整压缩区块记录以原子替换方式写入目标区域。
+
+    Args:
+        destination_path: 目标 .mca。
+        destination_coords: 局部 ``(cx, cz)``。
+        record: 含 length+compression+payload 的扇区记录。
+        backup: 是否备份。
+
+    Raises:
+        McaError: 记录非法或写入失败。
+    """
     destination = Path(destination_path)
     destination_cx, destination_cz = destination_coords
     destination_index = local_chunk_index(destination_cx, destination_cz)
@@ -376,7 +474,19 @@ def copy_chunk_record(
     *,
     backup: bool = True,
 ) -> None:
-    """Copy one compressed chunk record between region files atomically."""
+    """在区域文件间原子复制一条压缩区块记录（不重解析 NBT）。
+
+    Args:
+        source_path: 源 .mca。
+        source_coords: 源局部坐标。
+        destination_path: 目标 .mca。
+        destination_coords: 目标局部坐标。
+        backup: 是否备份目标。
+
+    Raises:
+        ChunkMissing: 源槽为空。
+        McaError: 记录越界或写入失败。
+    """
     source = Path(source_path)
     source_cx, source_cz = source_coords
     local_chunk_index(source_cx, source_cz)

@@ -287,6 +287,10 @@ class ThemeManager:
         return cls._instance
 
     def __init__(self) -> None:
+        """初始化单例主题表、默认模式与监听器列表。
+
+        再次调用时为幂等空操作（单例已初始化则直接返回）。
+        """
         if self._initialized:
             return
         self._themes = {

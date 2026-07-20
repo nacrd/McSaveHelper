@@ -65,10 +65,29 @@ ENUM_PROPERTIES: Dict[str, Tuple[str, ...]] = {
 
 
 class ServerPropertiesService:
+    """读取、校验并原子写入 ``server.properties``。
+
+    路径可传世界目录或文件本身；缺省键与 ``DEFAULT_SERVER_PROPERTIES`` 合并。
+    不持有路径状态，每次调用显式传入。
+    """
+
     def __init__(self, log: Optional[LogCallback] = None) -> None:
+        """注入可选日志回调。
+
+        Args:
+            log: ``(message, level)`` 日志；缺省为 no-op。
+        """
         self.log: LogCallback = log or _default_log
 
     def load(self, path: Path) -> Dict[str, str]:
+        """加载 server.properties 并与默认值合并。
+
+        Args:
+            path: 世界目录或 ``server.properties`` 文件路径。
+
+        Returns:
+            完整属性字典；文件不存在时返回默认副本。
+        """
         props_path = self._resolve_path(path)
         if not props_path.exists():
             return DEFAULT_SERVER_PROPERTIES.copy()
@@ -86,6 +105,15 @@ class ServerPropertiesService:
         return merged
 
     def save(self, path: Path, props: Dict[str, str]) -> None:
+        """校验后原子写入 server.properties。
+
+        Args:
+            path: 世界目录或目标文件路径。
+            props: 待写入的键值（字符串）。
+
+        Raises:
+            ValueError: 路径为空或校验失败。
+        """
         if not str(path).strip():
             raise ValueError("保存位置不能为空")
         props_path = self._resolve_path(path)
@@ -109,6 +137,14 @@ class ServerPropertiesService:
         return path / "server.properties"
 
     def validate(self, props: Dict[str, str]) -> List[str]:
+        """校验布尔、整数范围与枚举字段。
+
+        Args:
+            props: 待校验属性字典。
+
+        Returns:
+            人类可读错误列表；空列表表示通过。
+        """
         errors: List[str] = []
         for key in BOOLEAN_PROPERTIES:
             value = props.get(key, "").lower()
@@ -131,5 +167,12 @@ class ServerPropertiesService:
 
 def get_server_properties_service(
         log: Optional[LogCallback] = None) -> ServerPropertiesService:
-    """Return a server-properties service scoped to one editor view."""
+    """创建绑定到单个编辑视图的 server.properties 服务实例。
+
+    Args:
+        log: 可选日志回调。
+
+    Returns:
+        新的 ``ServerPropertiesService``（非单例）。
+    """
     return ServerPropertiesService(log=log)

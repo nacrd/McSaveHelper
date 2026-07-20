@@ -29,6 +29,13 @@ class ActionExecutor:
         log_callback: Optional[Callable] = None,
         backup_callback: Optional[Callable[[Path], Path]] = None,
     ) -> None:
+        """绑定目标世界与可选日志/备份钩子。
+
+        Args:
+            world_path: 源世界路径（执行前应已通过写租约/存在性校验）。
+            log_callback: ``(message, level)`` 日志回调。
+            backup_callback: 写前备份钩子，接收世界路径并返回备份路径。
+        """
         self.world_path = world_path
         self._log = log_callback or (lambda msg, lvl="INFO": None)
         self._backup_callback = backup_callback

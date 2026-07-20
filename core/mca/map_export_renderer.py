@@ -27,6 +27,7 @@ from core.region_utils import parse_region_coords
 
 @dataclass(frozen=True)
 class MapImageSpec:
+    """导出地图图像的尺寸与区域范围规格。"""
     width: int
     height: int
     estimated_mb: float
@@ -60,6 +61,7 @@ class MapExportRenderer:
     BACKGROUND = (11, 18, 11)
 
     def __init__(self) -> None:
+        """初始化地图导出渲染器。"""
         self.last_rendered_chunks = 0
 
     def create_map_image(

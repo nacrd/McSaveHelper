@@ -20,7 +20,10 @@ StageCallback = Callable[[List[NbtPathPart], Any, Any, str], None]
 
 
 class ChunkOperations:
-    """协调区块控件与可复用的方块数据服务。"""
+    """协调区块控件与可复用的方块数据服务。
+
+    方块替换只改内存区块并暂存，真正写 MCA 由上层提交流程完成。
+    """
 
     def __init__(
         self,
@@ -41,6 +44,25 @@ class ChunkOperations:
         handle_error: ErrorCallback,
         block_service: Optional[BlockDataService] = None,
     ) -> None:
+        """绑定区块对象列表、坐标字段与方块服务。
+
+        Args:
+            objects_list: 实体/方块实体列表容器。
+            nbt_tree: NBT 树视图（需提供 ``load_nbt``）。
+            target_label: 当前目标标签文本。
+            world_x_field: 世界 X 输入框。
+            world_z_field: 世界 Z 输入框。
+            block_y_field: 世界 Y 输入框。
+            block_result: 查询结果展示文本。
+            block_name_field: 替换目标方块 ID 输入框。
+            get_chunk_target: 取当前已加载区块目标。
+            set_view_state: 设置视图标签与编辑格式。
+            stage_change: 暂存回调。
+            warn: 警告对话框。
+            info: 信息对话框。
+            handle_error: 异常处理。
+            block_service: 可选方块读写服务；默认新建实例。
+        """
         self._objects_list = objects_list
         self._nbt_tree = nbt_tree
         self._target_label = target_label
@@ -68,6 +90,11 @@ class ChunkOperations:
             self._handle_error(ex, "渲染区块对象失败")
 
     def on_chunk_object_filter(self, e: Any) -> None:
+        """按标题/副标题子串过滤已提取的区块对象列表。
+
+        Args:
+            e: 输入框变更事件，读取 ``e.control.value``。
+        """
         query = (e.control.value or "").strip().lower()
         if not query:
             self.render_chunk_object_rows(self._last_objects)
@@ -79,6 +106,11 @@ class ChunkOperations:
         self.render_chunk_object_rows(filtered)
 
     def render_chunk_object_rows(self, objects: List[Dict[str, Any]]) -> None:
+        """渲染对象行；超过 120 条时截断并提示剩余数量。
+
+        Args:
+            objects: 含 title/subtitle/icon/data 的对象字典列表。
+        """
         try:
             self._objects_list.controls.clear()
             if not objects:
@@ -135,6 +167,12 @@ class ChunkOperations:
             self._handle_error(ex, "渲染区块对象失败")
 
     def show_chunk_object(self, data: Any, title: str) -> None:
+        """在 NBT 树中打开单个实体/方块实体。
+
+        Args:
+            data: 对象 NBT 子树。
+            title: 展示标题。
+        """
         editable = self._get_chunk_target() is not None
         label = f"区块对象: {title}" if editable else f"区块对象只读: {title}"
         edit_format: NbtEditFormat = "chunk" if editable else "chunk_readonly"
@@ -148,7 +186,12 @@ class ChunkOperations:
         e: Any = None,
         silent: bool = False,
     ) -> None:
-        """查询当前区块数据中指定世界坐标的方块状态。"""
+        """查询当前区块数据中指定世界坐标的方块状态。
+
+        Args:
+            e: 可选点击事件（未使用，兼容 Flet 回调签名）。
+            silent: True 时坐标非法或未加载区块不弹警告。
+        """
         try:
             target = self._get_chunk_target()
             if target is None:
@@ -180,7 +223,13 @@ class ChunkOperations:
             self._handle_error(ex, "查询方块失败")
 
     def replace_block_at_current_coords(self, e: Any = None) -> None:
-        """修改当前区块中的一个方块，并将完整区块写入加入暂存区。"""
+        """修改当前区块中的一个方块，并将变更加入暂存区。
+
+        未带命名空间的方块 ID 会自动补 ``minecraft:`` 前缀。
+
+        Args:
+            e: 可选点击事件（未使用，兼容 Flet 回调签名）。
+        """
         try:
             target = self._get_chunk_target()
             if target is None:

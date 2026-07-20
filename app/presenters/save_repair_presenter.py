@@ -9,6 +9,8 @@ from app.services.save_repair_service import DetectReport, RepairReport
 
 @dataclass(frozen=True)
 class DetectReportText:
+    """检测报告在 UI 两个文本面板中的格式化结果。"""
+
     world_info: str
     result: str
 

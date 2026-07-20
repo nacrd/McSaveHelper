@@ -16,6 +16,8 @@ TranslateCallback = Callable[[str, str], str]
 
 @dataclass(frozen=True)
 class DialogManagerDependencies:
+    """对话框管理器依赖：页面、翻译、视图切换与文件对话框端口。"""
+
     page: ft.Page
     translate: TranslateCallback
     switch_view: Callable[[str], None]
@@ -36,6 +38,11 @@ class DialogManager:
     """
 
     def __init__(self, dependencies: DialogManagerDependencies) -> None:
+        """保存依赖；不立即弹出任何对话框。
+
+        Args:
+            dependencies: 页面与平台对话框端口等。
+        """
         self._deps = dependencies
         self.page = dependencies.page
         self._translate = dependencies.translate

@@ -118,6 +118,16 @@ class McaMapView(ft.Container):
         height: int = 450,
         **kwargs: Any,
     ) -> None:
+        """构建地图控件并挂到共享的 RegionMapService。
+
+        Args:
+            map_service: 区域扫描/瓦片服务；由 Explorer 会话持有生命周期。
+            on_selection_changed: 区域/区块选择变化回调（UI 线程）。
+            on_marker_selected: 标记被点中时的回调。
+            width: 初始宽度像素。
+            height: 初始高度像素。
+            **kwargs: 透传给 ``ft.Container``。
+        """
         super().__init__(**kwargs)
         self._service = map_service
         self._on_selection_changed = on_selection_changed
@@ -1185,6 +1195,7 @@ class McaMapView(ft.Container):
                     pass
 
     def did_mount(self) -> None:
+        """控件挂到页面后启用瓦片回调与扫描进度循环。"""
         super().did_mount()
         self._mounted = True
         self._service.set_tile_ready_callback(self._tile_ready_callback)
@@ -1194,6 +1205,7 @@ class McaMapView(ft.Container):
             self._start_update_loop()
 
     def did_unmount(self) -> None:
+        """卸载时取消动画/循环，并摘掉可能指向本视图的服务回调。"""
         self._mounted = False
         self._camera.cancel()
         self._metadata_pending.clear()
@@ -1235,15 +1247,22 @@ class McaMapView(ft.Container):
 
     # ------------------------------------------------------------------ public API (region_tab)
     def start_scan(self, region_dir: str) -> None:
+        """异步启动静默区域扫描，并打开进度刷新循环。
+
+        Args:
+            region_dir: 含 ``r.x.z.mca`` 的区域目录路径。
+        """
         self._schedule_task(self._service.start_silent_scan(region_dir))
         self._start_update_loop()
 
     def refresh(self) -> None:
+        """重置相机到世界级默认视口并重绘（保留选择状态）。"""
         self._viewport.reset()
         self._view_level = "world"
         self._request_rebuild()
 
     def reset_view(self) -> None:
+        """重置相机、清空区域/区块选择并回到 world 层级。"""
         self._viewport.reset()
         self._selected_cell = None
         self._selected_chunk = None
@@ -1278,6 +1297,13 @@ class McaMapView(ft.Container):
         self._request_rebuild()
 
     def resize_map(self, width: int, height: int, *, refit: bool = False) -> None:
+        """调整画布尺寸；默认保留相机，``refit`` 时重新 fit 全图。
+
+        Args:
+            width: 新宽度（会钳制到合理下限）。
+            height: 新高度。
+            refit: 为 True 时调用 :meth:`fit_to_view` 重算相机。
+        """
         width = max(120, int(width))
         height = max(100, int(height))
         if self.width == width and self.height == height and not refit:
@@ -1302,11 +1328,21 @@ class McaMapView(ft.Container):
         self.resize_map(w, h)
 
     def toggle_coordinates(self) -> bool:
+        """切换区域坐标标签显示。
+
+        Returns:
+            切换后是否显示坐标。
+        """
         self._show_coordinates = not self._show_coordinates
         self._request_rebuild()
         return self._show_coordinates
 
     def toggle_empty_regions(self) -> bool:
+        """切换是否绘制无数据的空区域占位格。
+
+        Returns:
+            切换后是否显示空区域。
+        """
         self._show_empty_regions = not self._show_empty_regions
         self._request_rebuild()
         return self._show_empty_regions
@@ -1337,6 +1373,7 @@ class McaMapView(ft.Container):
         self._request_rebuild()
 
     def get_markers(self) -> list[MapMarker]:
+        """返回当前标记快照（副本，避免外部共享可变元数据）。"""
         return self._marker_layer.snapshot()
 
     def select_marker(self, marker_id: Optional[str]) -> None:
@@ -1373,6 +1410,15 @@ class McaMapView(ft.Container):
         )
 
     def block_at_screen(self, x: float, y: float) -> Optional[Tuple[int, int]]:
+        """将屏幕像素映射为方块坐标；落在 cell gap 时返回 None。
+
+        Args:
+            x: 相对画布的 X 像素。
+            y: 相对画布的 Y 像素。
+
+        Returns:
+            ``(block_x, block_z)``，或无法映射时为 None。
+        """
         return self._viewport.screen_to_block(x, y)
 
     def get_center_block(self) -> Tuple[int, int]:
@@ -1385,12 +1431,20 @@ class McaMapView(ft.Container):
         return self._viewport.nearest_block_at_screen(center_x, center_y)
 
     def get_camera_scale(self) -> float:
+        """当前相机缩放（世界单位到像素）。"""
         return float(self._scale)
 
     def get_selected_chunk(self) -> Optional[Tuple[int, int]]:
+        """当前选中的世界区块坐标，未选中则为 None。"""
         return self._selected_chunk
 
     def set_display_mode(self, mode: str) -> None:
+        """切换热力图/俯视/生物群系/结构等显示模式。
+
+        Args:
+            mode: ``activity`` / ``topview`` / ``biome`` / ``structure``；
+                非法值静默忽略。
+        """
         if mode not in {"activity", "topview", "biome", "structure"}:
             return
         self._display_mode = mode
@@ -1399,9 +1453,16 @@ class McaMapView(ft.Container):
         self._request_rebuild()
 
     def get_display_mode(self) -> str:
+        """当前显示模式字符串（activity/topview/biome/structure）。"""
         return self._display_mode
 
     def set_detail_level(self, level: str) -> None:
+        """手动固定语义层级，或 ``auto`` 跟随当前缩放。
+
+        Args:
+            level: ``auto`` / ``world`` / ``region`` / ``chunk`` / ``block``；
+                非法值忽略。固定到 world 会清空区块选择并 fit 全图。
+        """
         if level not in {"auto", "region", "chunk", "world", "block"}:
             return
         if level == "auto":
@@ -1427,12 +1488,15 @@ class McaMapView(ft.Container):
             self._request_rebuild()
 
     def get_detail_level(self) -> str:
+        """当前语义视口层级（可能与手动 detail 设定因缩放而不同）。"""
         return self._view_level
 
     def zoom_in(self) -> None:
+        """以视口中心为支点放大一级。"""
         self._zoom_about_center(1.22)
 
     def zoom_out(self) -> None:
+        """以视口中心为支点缩小一级。"""
         self._zoom_about_center(0.82)
 
     def _zoom_about_center(self, factor: float) -> None:
@@ -1459,4 +1523,5 @@ class McaMapView(ft.Container):
         self._request_rebuild()
 
     def get_selected_cell(self) -> Optional[Tuple[int, int]]:
+        """当前选中的区域坐标 ``(region_x, region_z)``，未选中为 None。"""
         return self._selected_cell

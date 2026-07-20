@@ -12,15 +12,29 @@ from core.logger import logger
 
 
 class ResponsiveSidebar(Protocol):
+    """侧边栏响应式协议：折叠与宽度由窗口管理器驱动。"""
+
     def set_collapsed(self, collapsed: bool) -> None:
+        """设置是否折叠为图标栏。"""
         ...
 
     def set_width(self, width: int) -> None:
+        """设置展开态侧边栏宽度（像素）。"""
         ...
 
 
 @dataclass(frozen=True)
 class ResponsiveShellHost:
+    """应用壳层中供响应式布局调整的控件句柄集合。
+
+    Attributes:
+        sidebar: 可折叠侧边栏。
+        main_row: 侧栏+内容的主行布局。
+        shell: 外壳容器。
+        scrollable_content: 可滚动内容区。
+        content: 当前视图内容宿主。
+    """
+
     sidebar: ResponsiveSidebar
     main_row: ft.Row
     shell: ft.Container
@@ -30,6 +44,17 @@ class ResponsiveShellHost:
 
 @dataclass(frozen=True)
 class WindowManagerDependencies:
+    """WindowManager 显式依赖注入包。
+
+    Attributes:
+        page: Flet 页面。
+        translate: 翻译函数 ``(key, default) -> str``。
+        apply_compact_layout: 窗口变窄时切换紧凑布局。
+        stop_gui_optimizer: 关闭时停止 GUI 优化后台任务。
+        dispose_views: 关闭时释放视图资源。
+        dispose_file_dialogs: 关闭时销毁 Tk 文件对话框工作线程。
+    """
+
     page: ft.Page
     translate: Callable[[str, str], str]
     apply_compact_layout: Callable[[bool], None]
@@ -50,6 +75,11 @@ class WindowManager:
     """
 
     def __init__(self, dependencies: WindowManagerDependencies) -> None:
+        """用注入依赖构造窗口管理器（不执行窗口配置）。
+
+        Args:
+            dependencies: 页面、翻译与关闭清理回调。
+        """
         self._deps = dependencies
         self.page = dependencies.page
         self._shutdown_started = False

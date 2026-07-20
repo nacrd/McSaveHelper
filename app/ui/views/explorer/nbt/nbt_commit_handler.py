@@ -37,6 +37,7 @@ class NbtCommitHandler:
         log: LogCallback,
         session_factory: Optional[SessionFactory] = None,
     ) -> None:
+        """注入提交所需的会话与 UI 端口。"""
         self._store = store
         self._get_world_session = get_world_session
         self._replace_world_session = replace_world_session
@@ -248,6 +249,7 @@ class NbtCommitHandler:
                 )
 
     def get_commit_summary(self) -> str:
+        """生成待提交变更的摘要文本。"""
         if not self._store:
             return "无变更"
 

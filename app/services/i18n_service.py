@@ -15,6 +15,11 @@ class I18nService:
     """
 
     def __init__(self, config: Optional[ConfigService] = None) -> None:
+        """绑定配置中的语言读写并初始化翻译管理器。
+
+        Args:
+            config: 配置服务；缺省新建（仅用于独立脚本场景）。
+        """
         self._config = config or ConfigService()
         self._manager: TranslationManager = init_translations(
             language_loader=lambda: self._config.language,

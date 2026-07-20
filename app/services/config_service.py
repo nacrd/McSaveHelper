@@ -27,6 +27,11 @@ class ConfigService:
     """配置文件名称"""
 
     def __init__(self, config_dir: Optional[Path] = None) -> None:
+        """创建配置目录并加载 ``config.json``。
+
+        Args:
+            config_dir: 配置根目录；默认 ``~/.mcsavehelper``。
+        """
         self._config_dir: Path = config_dir or (Path.home() / ".mcsavehelper")
         self._config_dir.mkdir(parents=True, exist_ok=True)
         self._config: Dict[str, Any] = {}
@@ -188,6 +193,11 @@ class ConfigService:
 
     @use_custom_mapping.setter
     def use_custom_mapping(self, value: bool) -> None:
+        """设置是否使用自定义 UUID 映射（仅内存；需 ``save`` 落盘）。
+
+        Args:
+            value: 是否启用自定义映射。
+        """
         with self._lock:
             self._config["use_custom_mapping"] = value
 
@@ -203,6 +213,11 @@ class ConfigService:
 
     @custom_uuid_mappings.setter
     def custom_uuid_mappings(self, value: Dict[str, str]) -> None:
+        """替换内存中的自定义 UUID 映射（需 ``save`` 落盘）。
+
+        Args:
+            value: 玩家名到 UUID 的映射。
+        """
         with self._lock:
             self._config["custom_uuid_mappings"] = value
 
@@ -284,6 +299,11 @@ class ConfigService:
 
     @language.setter
     def language(self, value: str) -> None:
+        """设置界面语言代码（仅内存；需 ``save`` 落盘）。
+
+        Args:
+            value: 如 ``zh_CN`` / ``en_US``。
+        """
         with self._lock:
             ui_settings = self._config.get("ui_settings", {})
             ui_settings["language"] = value
@@ -310,6 +330,11 @@ class ConfigService:
 
     @cleanup_patterns.setter
     def cleanup_patterns(self, value: list) -> None:
+        """替换清理模式列表（仅内存；需 ``save`` 落盘）。
+
+        Args:
+            value: glob/目录模式列表。
+        """
         with self._lock:
             self._config["cleanup_patterns"] = value
 

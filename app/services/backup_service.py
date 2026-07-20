@@ -55,6 +55,7 @@ class BackupRecord:
 
     @property
     def integrity_available(self) -> bool:
+        """是否具备可用于完整性校验的 manifest 摘要。"""
         return bool(self.manifest_sha256)
 
 
@@ -71,6 +72,8 @@ class BackupVerification:
 
 @dataclass
 class _ManifestVerification:
+    """清单校验中间状态（内部聚合，不对外暴露）。"""
+
     expected_paths: set[str]
     checked_files: int
     checked_bytes: int
@@ -84,6 +87,11 @@ class BackupService:
         self,
         coordinator: Optional[WorldWriteCoordinator] = None,
     ) -> None:
+        """构造备份服务。
+
+        Args:
+            coordinator: 世界写租约协调器；缺省使用进程内共享默认实例。
+        """
         self._cancel_event = threading.Event()
         self._coordinator = coordinator or WorldWriteCoordinator()
 

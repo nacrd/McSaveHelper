@@ -16,6 +16,7 @@ class RebuildScheduler:
         is_active: Callable[[], bool],
         min_interval: float = 1.0 / 60.0,
     ) -> None:
+        """创建节流的地图重绘调度器。"""
         self._request_rebuild = request_rebuild
         self._is_active = is_active
         self._min_interval = min_interval

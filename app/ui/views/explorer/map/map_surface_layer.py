@@ -36,6 +36,8 @@ TaskScheduler = Callable[[Coroutine[object, object, object]], Optional[Scheduled
 
 @dataclass(frozen=True)
 class _RenderRequest:
+    """一次后台合成请求的不可变快照（内部用）。"""
+
     spec: MapSurfaceSpec
     data: Dict[RegionCoord, int]
     colors: Dict[RegionCoord, RgbColor]
@@ -45,7 +47,11 @@ class _RenderRequest:
 
 
 class MapSurfaceLayer:
-    """Own one buffered RawImage and its asynchronous replacement frames."""
+    """持有一块缓冲 RawImage 及其异步替换帧。
+
+    负责量化 LOD、缓冲边界、同一时刻仅一次后台 compose/upload，
+    以及用户平移/缩放时的廉价相机几何更新。
+    """
 
     SOURCE_OVERSAMPLE = 2.0
 
@@ -62,6 +68,19 @@ class MapSurfaceLayer:
         max_regions: int = 192,
         max_pixels: int = 6_000_000,
     ) -> None:
+        """绑定服务与调度回调，并尝试创建 RawImage 宿主。
+
+        Args:
+            service: 区域地图数据与俯视瓦片服务。
+            schedule_task: 将协程调度到 UI 任务循环。
+            request_rebuild: 需要重绘时回调宿主。
+            is_active: 图层所属页面是否仍活跃。
+            background_color: 缓冲表面背景色。
+            cell_size: 单区域基础像素边长。
+            buffer_regions: 可见区外缓冲环数。
+            max_regions: 单轴最大区域数。
+            max_pixels: 表面像素预算上限。
+        """
         self._service = service
         self._schedule_task = schedule_task
         self._request_rebuild = request_rebuild
@@ -125,22 +144,36 @@ class MapSurfaceLayer:
 
     @property
     def frame(self) -> Optional[MapSurfaceFrame]:
+        """当前已上传的表面帧；尚未合成时为 None。"""
         return self._frame
 
     @property
     def spec(self) -> Optional[MapSurfaceSpec]:
+        """当前活跃表面规格。"""
         return self._spec
 
     @property
     def visible_regions(self) -> set[RegionCoord]:
+        """本表面覆盖的区域坐标副本。"""
         return set(self._visible_regions)
 
     @property
     def rendering(self) -> bool:
+        """后台合成循环是否正在运行。"""
         return self._rendering
 
     def mark_tile_ready(self, coord: RegionCoord) -> bool:
-        """Mark a completed tile dirty only when it intersects this surface."""
+        """瓦片完成时，仅当与本表面相交才标脏。
+
+        瓦片 revision 是解码缓存键的一部分，因此下次 compose 不能
+        复用陈旧像素。避免在合成进行中从服务线程加 renderer 锁。
+
+        Args:
+            coord: 完成的区域坐标。
+
+        Returns:
+            已标脏为 True；与可见集无关时为 False。
+        """
         if coord not in self._visible_regions:
             return False
         # Tile revision is part of the decoded-image cache key, so the next
@@ -151,11 +184,15 @@ class MapSurfaceLayer:
         return True
 
     def mark_dirty(self) -> None:
+        """强制下次 ``sync`` 重新排队合成。"""
         self._dirty = True
         self._blocked_spec = None
 
     def clear(self) -> None:
-        """Drop the old-world frame without cancelling an in-flight upload."""
+        """丢弃旧世界帧，但不取消进行中的上传 ACK。
+
+        通过递增 token 使过期上传结果在完成后被忽略。
+        """
         self._token += 1
         self._dirty = True
         self._visible_regions.clear()
@@ -168,6 +205,7 @@ class MapSurfaceLayer:
         self.hide()
 
     def hide(self) -> None:
+        """隐藏表面宿主控件。"""
         host = self.control
         if host is not None and getattr(host, "visible", True):
             host.visible = False
@@ -184,7 +222,20 @@ class MapSurfaceLayer:
         use_topview: bool,
         color_for_region: ColorProvider,
     ) -> list[RegionCoord]:
-        """Reuse or queue the surface for the latest viewport state."""
+        """按最新视口复用或排队表面帧。
+
+        Args:
+            viewport: 当前地图视口。
+            width: 视口像素宽。
+            height: 视口像素高。
+            data: 区域坐标 -> 文件大小等元数据。
+            display_mode: 着色/显示模式。
+            use_topview: 是否使用俯视瓦片。
+            color_for_region: 区域着色回调。
+
+        Returns:
+            仍缺俯视瓦片的区域坐标列表；未启用时为空。
+        """
         if not self.enabled:
             return []
         self._sync_viewport_geometry(viewport)

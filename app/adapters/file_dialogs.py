@@ -22,9 +22,17 @@ FileTypes = Sequence[FileType]
 
 
 class FileDialogPort(Protocol):
-    """Platform-independent commands required by the application shell."""
+    """应用壳层所需的平台无关文件对话框端口。"""
 
     def pick_directory(self, title: str) -> Optional[str]:
+        """弹出目录选择对话框。
+
+        Args:
+            title: 对话框标题。
+
+        Returns:
+            选中目录路径；取消或关闭后为 None。
+        """
         ...
 
     def pick_file(
@@ -32,6 +40,15 @@ class FileDialogPort(Protocol):
         title: str,
         file_types: FileTypes,
     ) -> Optional[str]:
+        """弹出单文件打开对话框。
+
+        Args:
+            title: 对话框标题。
+            file_types: ``(说明, 扩展名)`` 过滤器序列。
+
+        Returns:
+            选中文件路径；取消时为 None。
+        """
         ...
 
     def pick_files(
@@ -39,6 +56,15 @@ class FileDialogPort(Protocol):
         title: str,
         file_types: FileTypes,
     ) -> Optional[list[str]]:
+        """弹出多文件打开对话框。
+
+        Args:
+            title: 对话框标题。
+            file_types: ``(说明, 扩展名)`` 过滤器序列。
+
+        Returns:
+            非空路径列表；取消或无有效选择时为 None。
+        """
         ...
 
     def save_file(
@@ -47,21 +73,33 @@ class FileDialogPort(Protocol):
         default_ext: str,
         file_types: FileTypes,
     ) -> Optional[str]:
+        """弹出另存为对话框。
+
+        Args:
+            title: 对话框标题。
+            default_ext: 默认扩展名（含或不含点均可）。
+            file_types: ``(说明, 扩展名)`` 过滤器序列。
+
+        Returns:
+            目标路径；取消时为 None。
+        """
         ...
 
 
 @dataclass(frozen=True)
 class _DialogRequest:
+    """投递给 Tk 工作线程的一次对话框请求。"""
+
     method_name: str
     options: dict[str, Any]
     response: "queue.Queue[Any]"
 
 
 class TkFileDialogs:
-    """Tkinter implementation isolated from Flet dialog management.
+    """与 Flet 对话框隔离的 Tkinter 实现。
 
-    Owns a dedicated Tk worker thread. Call :meth:`close` during app shutdown
-    so the root is destroyed on the same thread that created it.
+    进程内独占一条 Tk 工作线程；应用关闭时必须调用 :meth:`close`，
+    以便在创建 root 的同一线程上销毁，避免 Tcl 跨线程删除错误。
     """
 
     _STARTUP_TIMEOUT_S = 5.0
@@ -70,6 +108,7 @@ class TkFileDialogs:
     _JOIN_TIMEOUT_S = 5.0
 
     def __init__(self) -> None:
+        """启动守护工作线程并等待 Tk root 就绪。"""
         self._closed = False
         self._ready = threading.Event()
         self._requests: "queue.Queue[Optional[_DialogRequest]]" = queue.Queue()
@@ -81,7 +120,7 @@ class TkFileDialogs:
         self._thread.start()
 
     def close(self) -> None:
-        """Stop the Tk worker and destroy its root (idempotent)."""
+        """停止 Tk 工作线程并销毁 root（幂等）。"""
         if self._closed:
             return
         self._closed = True
@@ -89,17 +128,36 @@ class TkFileDialogs:
         self._thread.join(timeout=self._JOIN_TIMEOUT_S)
 
     def pick_directory(self, title: str) -> Optional[str]:
-        return self._show("askdirectory", title=title)
+        """在 Tk 线程上选择目录。
+
+        Args:
+            title: 对话框标题。
+
+        Returns:
+            选中目录路径；关闭后、超时或取消时为 None。
+        """
+        return self._as_optional_path(self._show("askdirectory", title=title))
 
     def pick_file(
         self,
         title: str,
         file_types: FileTypes,
     ) -> Optional[str]:
-        return self._show(
-            "askopenfilename",
-            title=title,
-            filetypes=list(file_types),
+        """在 Tk 线程上选择单个文件。
+
+        Args:
+            title: 对话框标题。
+            file_types: ``(说明, 扩展名)`` 过滤器序列。
+
+        Returns:
+            选中文件路径；关闭后、超时或取消时为 None。
+        """
+        return self._as_optional_path(
+            self._show(
+                "askopenfilename",
+                title=title,
+                filetypes=list(file_types),
+            )
         )
 
     def pick_files(
@@ -107,6 +165,15 @@ class TkFileDialogs:
         title: str,
         file_types: FileTypes,
     ) -> Optional[list[str]]:
+        """在 Tk 线程上选择多个文件。
+
+        Args:
+            title: 对话框标题。
+            file_types: ``(说明, 扩展名)`` 过滤器序列。
+
+        Returns:
+            非空路径列表；关闭后、超时或取消时为 None。
+        """
         result = self._show(
             "askopenfilenames",
             title=title,
@@ -127,12 +194,32 @@ class TkFileDialogs:
         default_ext: str,
         file_types: FileTypes,
     ) -> Optional[str]:
-        return self._show(
-            "asksaveasfilename",
-            title=title,
-            defaultextension=default_ext,
-            filetypes=list(file_types),
+        """在 Tk 线程上选择保存路径。
+
+        Args:
+            title: 对话框标题。
+            default_ext: 默认扩展名。
+            file_types: ``(说明, 扩展名)`` 过滤器序列。
+
+        Returns:
+            目标路径；关闭后、超时或取消时为 None。
+        """
+        return self._as_optional_path(
+            self._show(
+                "asksaveasfilename",
+                title=title,
+                defaultextension=default_ext,
+                filetypes=list(file_types),
+            )
         )
+
+    @staticmethod
+    def _as_optional_path(result: Any) -> Optional[str]:
+        """Normalize a Tk single-path result to ``str | None``."""
+        if result is None:
+            return None
+        text = str(result).strip()
+        return text or None
 
     def _show(self, method_name: str, **options: Any) -> Any:
         if self._closed:

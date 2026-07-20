@@ -1,4 +1,4 @@
-"""Equipment Preview component - armor + offhand with textures."""
+"""装备预览组件：盔甲 + 副手槽，支持贴图异步加载。"""
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, cast
@@ -22,7 +22,10 @@ Translate = Callable[..., str]
 
 
 class EquipmentPreview(ft.Column):
-    """Player equipment preview - helmet/chest/legs/boots/offhand."""
+    """玩家装备预览：头盔/胸甲/护腿/靴子/副手及自定义槽。
+
+    贴图异步加载用 generation 丢弃过期回调。
+    """
 
     DEFAULT_EQUIP_SLOTS = {
         103: ("🪖", "player.equip.helmet", "头盔"),
@@ -40,6 +43,14 @@ class EquipmentPreview(ft.Column):
         *,
         t_cb: Optional[Translate] = None,
     ) -> None:
+        """构建装备条（含 ItemService 自定义槽）。
+
+        Args:
+            item_service: 物品解析与自定义槽配置。
+            texture_service: 贴图异步加载。
+            slot_size: 格子边长像素。
+            t_cb: 翻译回调 ``(key, default, **kw)``。
+        """
         super().__init__(spacing=4)
         self._slot_size = slot_size
         self._slot_rows: Dict[int, ft.Column] = {}
@@ -121,7 +132,13 @@ class EquipmentPreview(ft.Column):
         )
 
     def set_equipment(self, inventory: List[Dict[str, Any]]) -> None:
-        """Fill equipment slots from inventory or equipment-only item list."""
+        """用物品列表填充装备槽并异步加载贴图。
+
+        仅匹配已知装备 slot 编号；其它物品忽略。
+
+        Args:
+            inventory: 含 ``slot`` 字段的物品字典列表。
+        """
         self._texture_generation += 1
         for nbt_slot in self._slot_order:
             if nbt_slot in self._slot_controls:
@@ -187,6 +204,15 @@ class EquipmentPreview(ft.Column):
         )
 
     def add_custom_slot(self, slot_id: int, icon: str, label: str) -> None:
+        """动态追加装备槽并重建横向布局。
+
+        已存在的 ``slot_id`` 会被忽略（幂等）。
+
+        Args:
+            slot_id: NBT 装备槽编号。
+            icon: 槽位上方 emoji/图标文案。
+            label: 槽位下方标签。
+        """
         if slot_id in self._equip_slots:
             return
 
@@ -215,4 +241,5 @@ class EquipmentPreview(ft.Column):
         safe_update(self)
 
     def clear(self) -> None:
+        """清空全部装备槽。"""
         self.set_equipment([])

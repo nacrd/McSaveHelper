@@ -31,7 +31,15 @@ _NAME_KEYS = (
 
 @dataclass(frozen=True)
 class PlayerItemStack:
-    """One inventory / ender / equipment stack with a stable dict shape."""
+    """背包/末影箱/装备中的一件物品，序列化形状稳定。
+
+    Attributes:
+        slot: Java 槽位索引。
+        id: 物品注册 id（如 ``minecraft:stone``）。
+        count: 堆叠数量。
+        tag: 旧版 NBT ``tag``（可能为 None）。
+        components: 1.20.5+ components 映射（可能为 None）。
+    """
 
     slot: int
     id: str
@@ -40,6 +48,11 @@ class PlayerItemStack:
     components: Any = None
 
     def to_dict(self) -> Dict[str, Any]:
+        """转为 UI/服务层复用的字典；缺省字段不写入。
+
+        Returns:
+            至少含 slot/id/count；有 tag/components 时一并带上。
+        """
         payload: Dict[str, Any] = {
             "slot": self.slot,
             "id": self.id,
@@ -54,6 +67,14 @@ class PlayerItemStack:
 
 @dataclass(frozen=True)
 class PlayerIdentity:
+    """玩家身份：规范化 UUID、带连字符 UUID 与显示名。
+
+    Attributes:
+        uuid_norm: 32 位小写无连字符 UUID。
+        uuid_hyphen: 标准 8-4-4-4-12 形式。
+        name: 解析到的玩家名；未知时为 None。
+    """
+
     uuid_norm: str
     uuid_hyphen: str
     name: Optional[str]
@@ -61,6 +82,22 @@ class PlayerIdentity:
 
 @dataclass(frozen=True)
 class PlayerState:
+    """玩家生存/模式相关状态字段（均可选，缺省为 None）。
+
+    Attributes:
+        health: 生命值。
+        food_level: 饥饿值。
+        food_saturation: 饱和度。
+        xp_level: 经验等级。
+        xp_total: 总经验。
+        xp_p: 当前等级进度 (0-1)。
+        air: 剩余空气。
+        dimension: 所在维度 id。
+        game_type: 游戏模式枚举值。
+        selected_slot: 快捷栏选中槽。
+        score: 分数。
+    """
+
     health: Optional[float]
     food_level: Optional[int]
     food_saturation: Optional[float]
@@ -76,6 +113,16 @@ class PlayerState:
 
 @dataclass(frozen=True)
 class PlayerPose:
+    """玩家世界坐标与朝向。
+
+    Attributes:
+        x: 世界 X。
+        y: 世界 Y。
+        z: 世界 Z。
+        yaw: 偏航角。
+        pitch: 俯仰角。
+    """
+
     x: Optional[float]
     y: Optional[float]
     z: Optional[float]
@@ -85,6 +132,16 @@ class PlayerPose:
 
 @dataclass(frozen=True)
 class PlayerSpawn:
+    """个人重生点（床/重生锚等）。
+
+    Attributes:
+        x: 方块 X。
+        y: 方块 Y。
+        z: 方块 Z。
+        dimension: 重生维度。
+        forced: 是否强制重生点。
+    """
+
     x: Optional[int]
     y: Optional[int]
     z: Optional[int]
@@ -94,6 +151,15 @@ class PlayerSpawn:
 
 @dataclass(frozen=True)
 class PlayerDeathLocation:
+    """最近一次死亡位置。
+
+    Attributes:
+        dimension: 死亡维度。
+        x: 死亡 X。
+        y: 死亡 Y。
+        z: 死亡 Z。
+    """
+
     dimension: Optional[str]
     x: Optional[float]
     y: Optional[float]
@@ -102,6 +168,18 @@ class PlayerDeathLocation:
 
 @dataclass(frozen=True)
 class PlayerAbilities:
+    """玩家 abilities 子标签（飞行/建造权限与速度）。
+
+    Attributes:
+        flying: 当前是否在飞。
+        may_fly: 是否允许飞行。
+        instabuild: 创造模式瞬间放置。
+        invulnerable: 是否无敌。
+        may_build: 是否可破坏/放置方块。
+        walk_speed: 行走速度。
+        fly_speed: 飞行速度。
+    """
+
     flying: Optional[bool]
     may_fly: Optional[bool]
     instabuild: Optional[bool]
@@ -113,7 +191,13 @@ class PlayerAbilities:
 
 @dataclass(frozen=True)
 class PlayerAttribute:
-    """One entry from the player Attributes list."""
+    """Attributes 列表中的一项属性。
+
+    Attributes:
+        name: 属性 id。
+        base: 基础值。
+        modifiers: 修饰器数量。
+    """
 
     name: str
     base: Optional[float]
@@ -122,7 +206,16 @@ class PlayerAttribute:
 
 @dataclass(frozen=True)
 class PlayerEffect:
-    """One potion / status effect on the player."""
+    """玩家身上的一个药水/状态效果。
+
+    Attributes:
+        id: 效果 id（字符串或 ``effect:N``）。
+        amplifier: 放大器等级。
+        duration: 剩余 tick。
+        ambient: 是否环境效果。
+        show_particles: 是否显示粒子。
+        show_icon: 是否显示图标。
+    """
 
     id: str
     amplifier: int
@@ -134,15 +227,32 @@ class PlayerEffect:
 
 @dataclass(frozen=True)
 class PlayerContainers:
+    """按槽位范围拆分后的三类容器。
+
+    Attributes:
+        inventory: 主背包 0–35。
+        equipment: 装备与副手槽。
+        ender_items: 末影箱 0–26。
+    """
+
     inventory: tuple[PlayerItemStack, ...]
     equipment: tuple[PlayerItemStack, ...]
     ender_items: tuple[PlayerItemStack, ...]
 
 
 class PlayerManager:
-    """玩家数据管理器"""
+    """玩家数据管理器。
+
+    负责 UUID 规范化、名称缓存、从 player.dat Compound 提取状态/容器等。
+    不直接读写磁盘路径以外的业务事务；加载文件由调用方完成。
+    """
 
     def __init__(self, log_callback: Optional[Callable] = None):
+        """创建管理器。
+
+        Args:
+            log_callback: 可选 ``(message, level)`` 日志回调；缺省为静默。
+        """
         self._log = log_callback or (lambda msg, lvl="INFO": None)
         self._player_names: Dict[str, Optional[str]] = {}
         self._usercache: Dict[str, str] = {}
@@ -186,10 +296,16 @@ class PlayerManager:
         return result
 
     def get_known_name(self, uuid: str) -> Optional[str]:
-        """Return a cached display name without loading player NBT.
+        """返回缓存显示名，不加载 player NBT。
 
-        Looks up both the per-player cache and the full usercache map so
-        stats-only UUIDs can still resolve to a name.
+        同时查 per-player 缓存与完整 usercache，使仅有 stats 的 UUID
+        仍能解析名称。
+
+        Args:
+            uuid: 任意格式的玩家 UUID。
+
+        Returns:
+            已知名称；无法解析时为 None。
         """
         norm = normalize_uuid(uuid)
         if not norm:
@@ -200,7 +316,11 @@ class PlayerManager:
         return self._usercache.get(norm)
 
     def seed_names(self, names: Dict[str, Optional[str]]) -> None:
-        """Merge an external UUID -> name mapping into the cache."""
+        """合并外部 UUID -> 名称映射到缓存。
+
+        Args:
+            names: 外部提供的名称表；空名会被跳过。
+        """
         for uuid, name in names.items():
             if not name:
                 continue
@@ -218,7 +338,15 @@ class PlayerManager:
         uuid: str,
         player_data: Optional[Compound],
     ) -> Optional[str]:
-        """按需解析单个玩家名称（从 NBT 加载）"""
+        """按需解析单个玩家名称（缓存优先，再读 NBT 候选键）。
+
+        Args:
+            uuid: 玩家 UUID。
+            player_data: 可选 player.dat 根 Compound。
+
+        Returns:
+            解析到的名称；失败为 None。
+        """
         norm = normalize_uuid(uuid)
         known = self.get_known_name(norm)
         if known:
@@ -245,7 +373,15 @@ class PlayerManager:
         uuid: str,
         player_data: Optional[Compound] = None,
     ) -> PlayerIdentity:
-        """Build identity for a UUID, optionally resolving name from NBT."""
+        """构建玩家身份；可选从 NBT 解析名称。
+
+        Args:
+            uuid: 玩家 UUID。
+            player_data: 可选 player.dat Compound。
+
+        Returns:
+            规范化后的 ``PlayerIdentity``。
+        """
         norm = normalize_uuid(uuid)
         if player_data is not None:
             name = self.resolve_player_name(norm, player_data)
@@ -258,6 +394,14 @@ class PlayerManager:
         )
 
     def extract_state(self, player_data: Optional[Compound]) -> PlayerState:
+        """从 player.dat 提取生存/模式状态。
+
+        Args:
+            player_data: player.dat 根；None 时返回全空字段。
+
+        Returns:
+            ``PlayerState`` 快照。
+        """
         if player_data is None:
             return PlayerState(
                 health=None,
@@ -289,6 +433,14 @@ class PlayerManager:
         )
 
     def extract_pose(self, player_data: Optional[Compound]) -> PlayerPose:
+        """提取 Pos/Rotation 坐标与朝向。
+
+        Args:
+            player_data: player.dat 根；None 时坐标全为 None。
+
+        Returns:
+            ``PlayerPose`` 快照。
+        """
         if player_data is None:
             return PlayerPose(x=None, y=None, z=None, yaw=None, pitch=None)
         pos = player_data.get("Pos")
@@ -302,6 +454,14 @@ class PlayerManager:
         )
 
     def extract_spawn(self, player_data: Optional[Compound]) -> PlayerSpawn:
+        """提取个人重生点字段。
+
+        Args:
+            player_data: player.dat 根。
+
+        Returns:
+            ``PlayerSpawn``；无数据时字段为 None。
+        """
         if player_data is None:
             return PlayerSpawn(
                 x=None, y=None, z=None, dimension=None, forced=None
@@ -318,6 +478,14 @@ class PlayerManager:
         self,
         player_data: Optional[Compound],
     ) -> Optional[PlayerDeathLocation]:
+        """提取 ``LastDeathLocation``；无记录时返回 None。
+
+        Args:
+            player_data: player.dat 根。
+
+        Returns:
+            死亡位置，或 None 表示从未记录。
+        """
         if player_data is None:
             return None
         death = player_data.get("LastDeathLocation")
@@ -337,6 +505,14 @@ class PlayerManager:
         self,
         player_data: Optional[Compound],
     ) -> PlayerAbilities:
+        """提取 abilities 子 compound（飞行/建造权限等）。
+
+        Args:
+            player_data: player.dat 根。
+
+        Returns:
+            ``PlayerAbilities``；缺字段时对应项为 None。
+        """
         empty = PlayerAbilities(
             flying=None,
             may_fly=None,
@@ -365,6 +541,14 @@ class PlayerManager:
         self,
         player_data: Optional[Compound],
     ) -> PlayerContainers:
+        """按槽位范围拆分背包、装备与末影箱。
+
+        Args:
+            player_data: player.dat 根。
+
+        Returns:
+            三类容器的不可变 tuple 集合。
+        """
         if player_data is None:
             return PlayerContainers(inventory=(), equipment=(), ender_items=())
 
@@ -390,6 +574,14 @@ class PlayerManager:
         self,
         player_data: Optional[Compound],
     ) -> tuple[PlayerAttribute, ...]:
+        """提取 Attributes 列表（兼容大小写字段名）。
+
+        Args:
+            player_data: player.dat 根。
+
+        Returns:
+            ``PlayerAttribute`` 元组；无数据时为空元组。
+        """
         if player_data is None:
             return ()
         raw = player_data.get("Attributes")
@@ -421,6 +613,14 @@ class PlayerManager:
         self,
         player_data: Optional[Compound],
     ) -> tuple[PlayerEffect, ...]:
+        """提取状态效果；兼容 pre-1.20 数字 Id 与新版字符串 id。
+
+        Args:
+            player_data: player.dat 根。
+
+        Returns:
+            ``PlayerEffect`` 元组。
+        """
         if player_data is None:
             return ()
         raw = player_data.get("active_effects")
@@ -470,12 +670,16 @@ class PlayerManager:
     def extract_nested_container_items(
         item: Mapping[str, Any] | PlayerItemStack,
     ) -> List[Dict[str, Any]]:
-        """Extract items stored inside a shulker / bundle-like stack.
+        """提取潜影盒/收纳袋等内部物品列表。
 
-        Supports:
-        - legacy ``tag.BlockEntityTag.Items``
-        - 1.20.5+ ``components['minecraft:container']`` list of
-          ``{slot, item: {id, count, ...}}``
+        支持旧版 ``tag.BlockEntityTag.Items`` 与 1.20.5+
+        ``components['minecraft:container']``。
+
+        Args:
+            item: ``PlayerItemStack`` 或含 tag/components 的映射。
+
+        Returns:
+            内部物品字典列表；空潜影盒返回 ``[]``，非容器返回 ``[]``。
         """
         if isinstance(item, PlayerItemStack):
             tag = item.tag
@@ -513,7 +717,14 @@ class PlayerManager:
 
     @staticmethod
     def is_container_item(item_id: str) -> bool:
-        """Return True if the item id is a known openable container."""
+        """判断物品 id 是否为可打开的容器（潜影盒/收纳袋等）。
+
+        Args:
+            item_id: 物品注册 id。
+
+        Returns:
+            可打开时为 True。
+        """
         text = (item_id or "").lower()
         return (
             "shulker_box" in text

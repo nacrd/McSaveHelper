@@ -24,6 +24,14 @@ class Timer:
         auto_record: bool = True,
         callback: Optional[Callable[[str, float], None]] = None
     ):
+        """创建命名计时器。
+
+        Args:
+            name: 指标名。
+            enabled: False 时 no-op。
+            auto_record: 结束时写入 perf_monitor。
+            callback: 可选 ``(name, elapsed_ms)``。
+        """
         self.name = name
         self.enabled = enabled
         self.auto_record = auto_record
@@ -32,11 +40,13 @@ class Timer:
         self.elapsed: float = 0.0
 
     def __enter__(self):
+        """开始计时。"""
         if self.enabled:
             self.start_time = time.perf_counter()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """结束计时并可选记录。"""
         if self.enabled:
             # 转换为毫秒
             self.elapsed = (time.perf_counter() - self.start_time) * 1000
@@ -54,13 +64,13 @@ class Timer:
 
 
 def measure_time(func: Callable) -> Callable:
-    """函数执行时间装饰器
+    """函数执行时间装饰器。
 
     Args:
-        func: 要测量的函数
+        func: 要测量的函数。
 
     Returns:
-        包装后的函数
+        包装后的函数（每次调用记一次 ``func.__name__``）。
     """
     def wrapper(*args, **kwargs):
         with Timer(func.__name__):
@@ -69,12 +79,15 @@ def measure_time(func: Callable) -> Callable:
 
 
 def log_slow_operation(threshold_ms: float = 100):
-    """慢操作日志装饰器
+    """慢操作日志装饰器。
 
-    如果操作超过阈值，自动记录日志
+    若耗时超过阈值，打印警告并写入性能监控。
 
     Args:
-        threshold_ms: 阈值（毫秒）
+        threshold_ms: 阈值（毫秒）。
+
+    Returns:
+        接受函数并返回包装器的装饰器。
     """
     def decorator(func: Callable) -> Callable:
         def wrapper(*args, **kwargs):
@@ -107,6 +120,7 @@ class AsyncOperationTracker:
     """
 
     def __init__(self):
+        """创建空跟踪器。"""
         self.operations: Dict[str, float] = {}
         self.completed: Dict[str, float] = {}
         self._lock = threading.Lock()

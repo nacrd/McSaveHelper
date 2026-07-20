@@ -1,4 +1,4 @@
-"""Minecraft-style button components"""
+"""Minecraft 风格按钮组件。"""
 import asyncio
 from typing import Optional, Callable, Any, cast
 
@@ -10,9 +10,9 @@ from app.ui.theme import THEME
 
 
 class McButton(ft.Container):
-    """Minecraft-style button that supports disabled state with hover/pressed animations
+    """Minecraft 风格按钮：支持禁用态与悬停/按下动画。
 
-    Modernized with better styling and rounded corners while keeping Minecraft feel.
+    保留斜切边框与圆角，点击时短暂反转边框并压暗背景。
     """
 
     def __init__(
@@ -25,6 +25,17 @@ class McButton(ft.Container):
         icon: Optional[ft.IconData] = None,
         text_color: Optional[str] = None,
     ) -> None:
+        """创建按钮并构建内容与边框样式。
+
+        Args:
+            text: 按钮文案。
+            bgcolor: 基础背景色（十六进制）。
+            on_click: 点击回调。
+            width: 可选固定宽度。
+            height: 高度，默认 42。
+            icon: 可选前置图标。
+            text_color: 可选文字颜色。
+        """
         self._text = text
         self._bgcolor = bgcolor
         self._bgcolor_hover = self._adjust_brightness(bgcolor, 1.15)
@@ -207,20 +218,36 @@ class McButton(ft.Container):
 
     @property
     def disabled(self) -> bool:
+        """是否禁用（禁用时半透明且忽略点击）。"""
         return self._disabled
 
     @disabled.setter
     def disabled(self, value: bool) -> None:
+        """设置禁用态并重建内容颜色。
+
+        Args:
+            value: True 表示禁用。
+        """
         self._disabled = value
         self.opacity = 0.5 if value else 1.0
         self.content = self._build_content()
 
     def set_text(self, text: str) -> None:
+        """更新按钮文案并重建内容。
+
+        Args:
+            text: 新文案。
+        """
         self._text = text
         self.content = self._build_content()
 
     def set_on_click(
             self, on_click: Optional[Callable[[ft.ControlEvent], Any]]) -> None:
+        """替换点击处理器。
+
+        Args:
+            on_click: 新回调；None 表示清除。
+        """
         self._on_click_handler = on_click
 
 
@@ -233,19 +260,19 @@ def _mc_button(
     icon: Optional[ft.IconData] = None,
     text_color: Optional[str] = None,
 ) -> McButton:
-    """Create a Minecraft-style button with beveled borders
+    """创建带斜切边框的 Minecraft 风格按钮。
 
     Args:
-        text: Button text
-        bgcolor: Background color
-        on_click: Click handler
-        width: Button width (optional)
-        height: Button height (default: 42)
-        icon: Icon name (optional)
-        text_color: Text color (optional)
+        text: 按钮文案。
+        bgcolor: 背景色。
+        on_click: 点击回调。
+        width: 可选宽度。
+        height: 高度，默认 42。
+        icon: 可选图标。
+        text_color: 可选文字色。
 
     Returns:
-        McButton: Configured button
+        配置好的 ``McButton``。
     """
     return McButton(text, bgcolor, on_click, width, height, icon, text_color)
 
@@ -257,17 +284,17 @@ def btn_primary(
     height: int = 42,
     icon: Optional[ft.IconData] = None,
 ) -> McButton:
-    """Primary button - grass green
+    """主按钮（草地绿）。
 
     Args:
-        text: Button text
-        on_click: Click handler
-        width: Button width (optional)
-        height: Button height (default: 42)
-        icon: Icon name (optional)
+        text: 按钮文案。
+        on_click: 点击回调。
+        width: 可选宽度。
+        height: 高度，默认 42。
+        icon: 可选图标。
 
     Returns:
-        ft.Container: Primary button
+        主色 ``McButton``。
     """
     return _mc_button(text, THEME.mc_grass, on_click, width, height, icon)
 
@@ -278,16 +305,16 @@ def btn_ghost(
     width: Optional[int] = None,
     height: int = 42,
 ) -> McButton:
-    """Secondary button - stone gray
+    """次要按钮（石头灰）。
 
     Args:
-        text: Button text
-        on_click: Click handler
-        width: Button width (optional)
-        height: Button height (default: 42)
+        text: 按钮文案。
+        on_click: 点击回调。
+        width: 可选宽度。
+        height: 高度，默认 42。
 
     Returns:
-        ft.Container: Secondary button
+        次要色 ``McButton``。
     """
     return _mc_button(text, THEME.mc_stone, on_click, width,
                       height, text_color=THEME.text_primary)
@@ -299,16 +326,16 @@ def btn_success(
     width: Optional[int] = None,
     height: int = 42,
 ) -> McButton:
-    """Success button - emerald green
+    """成功按钮（绿宝石色）。
 
     Args:
-        text: Button text
-        on_click: Click handler
-        width: Button width (optional)
-        height: Button height (default: 42)
+        text: 按钮文案。
+        on_click: 点击回调。
+        width: 可选宽度。
+        height: 高度，默认 42。
 
     Returns:
-        ft.Container: Success button
+        成功色 ``McButton``。
     """
     return _mc_button(text, THEME.mc_emerald, on_click, width, height)
 
@@ -319,15 +346,15 @@ def btn_danger(
     width: Optional[int] = None,
     height: int = 42,
 ) -> McButton:
-    """Danger button - redstone red
+    """危险按钮（红石红）。
 
     Args:
-        text: Button text
-        on_click: Click handler
-        width: Button width (optional)
-        height: Button height (default: 42)
+        text: 按钮文案。
+        on_click: 点击回调。
+        width: 可选宽度。
+        height: 高度，默认 42。
 
     Returns:
-        ft.Container: Danger button
+        危险色 ``McButton``。
     """
     return _mc_button(text, THEME.mc_redstone, on_click, width, height)

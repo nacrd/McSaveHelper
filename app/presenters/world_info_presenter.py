@@ -10,12 +10,16 @@ from core.omni.models import ModInfo, WorldInfo
 
 @dataclass(frozen=True)
 class InfoRow:
+    """世界信息一行：标签与值文本。"""
+
     label: str
     value: str
 
 
 @dataclass(frozen=True)
 class InfoSection:
+    """世界信息分区（标题 + 行列表）。"""
+
     title: str
     rows: tuple[InfoRow, ...]
 
@@ -37,6 +41,13 @@ def build_world_info_sections(
     stats: Optional[Mapping[str, object]] = None,
     translate: Optional[Translate] = None,
 ) -> List[InfoSection]:
+    """将 WorldInfo 转为 UI 无关的分区列表（空分区会被丢弃）。
+
+    Args:
+        world_info: 核心世界摘要。
+        stats: 可选统计字典。
+        translate: 可选翻译函数。
+    """
     sections = [
         _basic_section(world_info, translate),
         _generation_section(world_info, translate),

@@ -1,8 +1,7 @@
-"""Build a contiguous, viewport-sized map surface off the UI thread.
+"""在 UI 线程外拼出连续、视口尺寸的地图表面。
 
-The Minecraft map mods keep a textured surface around the camera and move
-that surface with a camera transform.  This module provides the same boundary
-for Flet: one RGBA frame replaces hundreds of Canvas image shapes.
+地图模组通常缓存相机周围纹理表面，再通过相机变换移动。
+本模块为 Flet 提供同样边界：一帧 RGBA 替代成百上千个 Canvas 图元。
 """
 from __future__ import annotations
 
@@ -21,7 +20,19 @@ CancelCheck = Callable[[], bool]
 
 @dataclass(frozen=True)
 class MapSurfaceSpec:
-    """Immutable description of the world rectangle represented by a frame."""
+    """一帧地图表面所覆盖世界矩形的不可变描述。
+
+    Attributes:
+        min_region_x: 区域 X 下界（含）。
+        max_region_x: 区域 X 上界（含）。
+        min_region_z: 区域 Z 下界（含）。
+        max_region_z: 区域 Z 上界（含）。
+        pixels_per_region: 每个 region 边长像素数。
+        display_mode: 显示模式标签（如 topview）。
+        use_topview: 是否优先贴俯视瓦片，否则退回纯色块。
+        source_generation: 数据源代数，用于缓存失效。
+        data_revision: 内容修订号，用于缓存失效。
+    """
 
     min_region_x: int
     max_region_x: int
@@ -45,24 +56,38 @@ class MapSurfaceSpec:
 
     @property
     def columns(self) -> int:
+        """表面横向 region 列数（至少 1）。"""
         return max(1, self.max_region_x - self.min_region_x + 1)
 
     @property
     def rows(self) -> int:
+        """表面纵向 region 行数（至少 1）。"""
         return max(1, self.max_region_z - self.min_region_z + 1)
 
     @property
     def pixel_width(self) -> int:
+        """表面像素宽 = 列数 × 每 region 像素。"""
         return self.columns * max(1, int(self.pixels_per_region))
 
     @property
     def pixel_height(self) -> int:
+        """表面像素高 = 行数 × 每 region 像素。"""
         return self.rows * max(1, int(self.pixels_per_region))
 
 
 @dataclass(frozen=True)
 class MapSurfaceFrame:
-    """RGBA pixels plus the world rectangle they cover."""
+    """合成后的 RGBA 像素及其覆盖的世界矩形。
+
+    Attributes:
+        pixels: 行主序 RGBA 原始字节。
+        width: 像素宽。
+        height: 像素高。
+        min_region_x: 左上角 region X。
+        min_region_z: 左上角 region Z。
+        pixels_per_region: 每 region 边长像素。
+        spec: 生成该帧时使用的规格。
+    """
 
     pixels: bytes
     width: int
@@ -74,9 +99,17 @@ class MapSurfaceFrame:
 
 
 class MapSurfaceRenderer:
-    """Compose cached region tiles into one seamless RGBA frame."""
+    """将缓存的区域瓦片合成为无缝隙的 RGBA 帧。
+
+    解码瓦片有 LRU 上限；可在后台线程调用，不触碰 Flet 控件。
+    """
 
     def __init__(self, max_decoded_tiles: int = 192) -> None:
+        """创建渲染器并限制已解码瓦片缓存容量。
+
+        Args:
+            max_decoded_tiles: 解码缓存上限；小于 16 时抬升到 16。
+        """
         self._max_decoded_tiles = max(16, int(max_decoded_tiles))
         self._decoded: OrderedDict[
             Tuple[int, RegionCoord, int, int], Image.Image
@@ -84,7 +117,11 @@ class MapSurfaceRenderer:
         self._lock = RLock()
 
     def invalidate(self, coord: Optional[RegionCoord] = None) -> None:
-        """Drop decoded source images, optionally only for one region."""
+        """丢弃已解码源图；可仅针对单个 region。
+
+        Args:
+            coord: 可选 ``(rx, rz)``；None 时清空全部缓存。
+        """
         with self._lock:
             if coord is None:
                 for image in self._decoded.values():
@@ -106,7 +143,19 @@ class MapSurfaceRenderer:
         *,
         cancel_check: Optional[CancelCheck] = None,
     ) -> MapSurfaceFrame:
-        """Compose a frame without touching Flet controls."""
+        """合成一帧表面，不触碰 Flet 控件。
+
+        Args:
+            spec: 目标世界矩形与像素密度。
+            data: 有数据的 region 集合（值为任意标记即可）。
+            tile_bytes: region → 俯视瓦片 PNG 字节；缺失则画纯色。
+            tile_revisions: region → 瓦片修订号，参与缓存键。
+            colors: region → 回退填充 RGB。
+            cancel_check: 可选取消探测；返回 True 时中止并抛内部取消。
+
+        Returns:
+            合成后的 ``MapSurfaceFrame``。
+        """
         pixels_per_region = max(1, int(spec.pixels_per_region))
         min_x = spec.min_region_x
         min_z = spec.min_region_z
@@ -235,7 +284,7 @@ class MapSurfaceRenderer:
 
 
 class _SurfaceCancelled(Exception):
-    """Internal cancellation marker for a superseded composition job."""
+    """内部取消标记：合成任务已被更新的请求取代。"""
 
 
 def _rgb(value: object) -> Color:

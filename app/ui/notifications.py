@@ -34,6 +34,11 @@ class NotificationManager:
     """通知管理器"""
 
     def __init__(self, page: ft.Page):
+        """绑定 Flet 页面实例。
+
+        Args:
+            page: 用于弹出 SnackBar / 对话框的页面。
+        """
         self.page = page
         self._current_dialog: Optional[ft.AlertDialog] = None
 
@@ -276,6 +281,11 @@ class Toast:
     """
 
     def __init__(self, page: ft.Page):
+        """绑定 Flet 页面实例。
+
+        Args:
+            page: 用于展示 Toast 的页面。
+        """
         self.page = page
         self.overlay_container: Optional[ft.Container] = None
 
@@ -340,6 +350,12 @@ class ProgressDialog:
     """
 
     def __init__(self, page: ft.Page, title: str = "处理中..."):
+        """创建进度对话框控件树。
+
+        Args:
+            page: 用于 ``show_dialog`` 的页面。
+            title: 对话框标题文本。
+        """
         self.page = page
         self.title = title
 

@@ -20,6 +20,7 @@ class BlockBounds:
     max_z: int
 
     def format(self) -> str:
+        """格式化为 ``X a~b, Z c~d`` 的人类可读区间。"""
         return (
             f"X {self.min_x}~{self.max_x}, "
             f"Z {self.min_z}~{self.max_z}"
@@ -27,6 +28,14 @@ class BlockBounds:
 
 
 def region_block_bounds(coord: MapCoordinate) -> BlockBounds:
+    """区域坐标 → 该区域覆盖的 512×512 方块闭区间。
+
+    Args:
+        coord: ``(region_x, region_z)``。
+
+    Returns:
+        含边界方块的 :class:`BlockBounds`。
+    """
     region_x, region_z = coord
     min_x = region_x * 512
     min_z = region_z * 512
@@ -34,6 +43,11 @@ def region_block_bounds(coord: MapCoordinate) -> BlockBounds:
 
 
 def chunk_block_bounds(coord: MapCoordinate) -> BlockBounds:
+    """世界区块坐标 → 该区块 16×16 方块闭区间。
+
+    Args:
+        coord: ``(chunk_x, chunk_z)``。
+    """
     chunk_x, chunk_z = coord
     min_x = chunk_x * 16
     min_z = chunk_z * 16
@@ -41,10 +55,12 @@ def chunk_block_bounds(coord: MapCoordinate) -> BlockBounds:
 
 
 def format_region_block_range(coord: MapCoordinate) -> str:
+    """区域坐标的方块范围字符串（选择详情/状态栏用）。"""
     return region_block_bounds(coord).format()
 
 
 def format_chunk_block_range(coord: MapCoordinate) -> str:
+    """区块坐标的方块范围字符串。"""
     return chunk_block_bounds(coord).format()
 
 

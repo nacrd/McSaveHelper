@@ -46,6 +46,7 @@ class HangDetector:
     """
 
     def __init__(self):
+        """初始化 UI 挂起检测器。"""
         self._enabled = False
         self._running = False
         self._thread: Optional[threading.Thread] = None

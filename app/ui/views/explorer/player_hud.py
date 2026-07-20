@@ -26,6 +26,7 @@ class PlayerHUDCard(ft.Column):
     """
 
     def __init__(self, t_cb: Optional[Translate] = None) -> None:
+        """构建玩家 HUD 卡片控件。"""
         super().__init__(spacing=6)
         self._t = t_cb or (lambda key, default="", **_kw: default or key)
         self._attrs: Dict[str, ft.Text] = {}
@@ -153,6 +154,7 @@ class PlayerHUDCard(ft.Column):
         avatar_src: Optional[str] = None,
         initial: str = "?",
     ) -> None:
+        """更新头像与显示名身份区。"""
         self._name_text.value = name or "--"
         self._uuid_text.value = uuid_text or ""
         if avatar_src:

@@ -39,6 +39,7 @@ class PerformanceMonitor:
     """
 
     def __init__(self) -> None:
+        """初始化性能指标收集器。"""
         self.enabled: bool = False
         self.metrics: Dict[str, deque] = {}
         self.max_samples: int = 1000
