@@ -9,16 +9,15 @@ from pathlib import Path
 from typing import Callable, List, Optional, Set
 
 import nbtlib
-from core.mca import NativeRegion as Region
 
 from core.scanner import scan_all_regions
 from core.constants import MinecraftConstants
-from core.utils import find_player_data_dirs
+from core.utils import list_player_dat_files
 
 from .level_repairer import LEVEL_DAT_REQUIRED_FIELDS
 from .models import DetectReport, WorldInfo
 from .validation_utils import (
-    validate_chunk,
+    count_damaged_chunks,
     validate_player_data,
     validate_level_dat_data,
 )
@@ -139,7 +138,6 @@ class WorldDetector:
 
         # level.dat 存在性
         info.has_level_dat = (world_path / "level.dat").exists()
-        info.has_level_dat_old = (world_path / "level.dat_old").exists()
 
         # 从 level.dat 读取世界信息
         if info.has_level_dat:
@@ -149,10 +147,7 @@ class WorldDetector:
         region_files = self._detect_dimensions(world_path, info)
 
         # 玩家数量（兼容 26.1 新旧路径）
-        info.player_count = 0
-        for playerdata_dir in find_player_data_dirs(world_path):
-            if playerdata_dir.exists():
-                info.player_count += len(list(playerdata_dir.glob("*.dat")))
+        info.player_count = len(list_player_dat_files(world_path))
 
         log(
             f"世界: {info.world_name}, 版本: {info.version_name}, "
@@ -276,25 +271,10 @@ class WorldDetector:
             return RegionDetectionResult(unreadable_error=message)
 
     def _count_damaged_chunks(self, region_file: Path) -> int:
-        damaged = 0
-        with Region.from_file(str(region_file)) as region:
-            try:
-                coordinates = region.iter_present_chunks()
-            except AttributeError:
-                coordinates = (
-                    (chunk_x, chunk_z)
-                    for chunk_x in range(32)
-                    for chunk_z in range(32)
-                )
-            for chunk_x, chunk_z in coordinates:
-                if self.is_cancelled:
-                    return damaged
-                try:
-                    chunk = region.get_chunk(chunk_x, chunk_z)
-                    if chunk is not None and not validate_chunk(chunk):
-                        damaged += 1
-                except Exception:
-                    damaged += 1
+        damaged, _completed = count_damaged_chunks(
+            region_file,
+            lambda: self.is_cancelled,
+        )
         return damaged
 
     def _detect_players(
@@ -304,10 +284,7 @@ class WorldDetector:
         log: Callable[[str, str], None],
     ) -> None:
         """检测玩家数据（兼容 Minecraft 26.1 新旧路径）"""
-        player_files: List[Path] = []
-        for playerdata_dir in find_player_data_dirs(world_path):
-            if playerdata_dir.exists():
-                player_files.extend(list(playerdata_dir.glob("*.dat")))
+        player_files = list_player_dat_files(world_path)
 
         if not player_files:
             log("玩家数据目录不存在", "INFO")

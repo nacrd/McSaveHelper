@@ -155,3 +155,42 @@ def quarantine_file(
         log(f"已隔离损坏文件: {file_path.name} -> {new_path.name}", "WARNING")
     except Exception as exc:
         log(f"无法隔离文件 {file_path.name}: {exc}", "ERROR")
+
+
+def iter_region_chunk_coordinates(region: Any):
+    """Yield local chunk coords present in ``region`` (or a full 32x32 grid)."""
+    try:
+        return region.iter_present_chunks()
+    except AttributeError:
+        return (
+            (chunk_x, chunk_z)
+            for chunk_x in range(32)
+            for chunk_z in range(32)
+        )
+
+
+def count_damaged_chunks(
+    region_file: Path,
+    is_cancelled: Callable[[], bool],
+    region_factory: Optional[Callable[[str], Any]] = None,
+) -> Tuple[int, bool]:
+    """Count unreadable/invalid chunks in one region file.
+
+    Returns ``(damaged_count, completed)``. When ``is_cancelled`` fires mid-scan,
+    ``completed`` is ``False`` and the partial count is returned.
+    """
+    from core.mca import NativeRegion as Region
+
+    open_region = region_factory or (lambda path: Region.from_file(path))
+    damaged = 0
+    with open_region(str(region_file)) as region:
+        for chunk_x, chunk_z in iter_region_chunk_coordinates(region):
+            if is_cancelled():
+                return damaged, False
+            try:
+                chunk = region.get_chunk(chunk_x, chunk_z)
+                if chunk is not None and not validate_chunk(chunk):
+                    damaged += 1
+            except Exception:
+                damaged += 1
+    return damaged, True

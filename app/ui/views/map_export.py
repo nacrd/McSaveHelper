@@ -11,7 +11,7 @@ from app.ui.components.buttons import btn_primary, btn_ghost
 from app.ui.components.fields import text_field, current_save_field, dropdown
 from app.ui.components.cards import card, section_title
 from app.ui.components.layout import page_header
-from app.ui.utils import run_on_ui
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 from app.services.map_export_service import (
     MapExportService,
@@ -373,7 +373,7 @@ class MapExportView(ft.Column):
             if path:
                 self._output_path_field.value = path
                 self._auto_output_path = ""
-                self._output_path_field.update()
+                safe_update(self._output_path_field)
         except Exception as ex:
             self.app.error_dialog(
                 self.app.translate("map_export.error", "错误"),
@@ -387,10 +387,7 @@ class MapExportView(ft.Column):
     def _on_range_mode_changed(self, _event: ft.ControlEvent) -> None:
         mode = self._range_mode_dropdown.value or "full"
         self._selection_fields.visible = mode != "full"
-        try:
-            self._selection_fields.update()
-        except RuntimeError:
-            pass
+        safe_update(self._selection_fields)
 
     def _on_dimension_changed(self, _event: ft.ControlEvent) -> None:
         if not self._auto_output_path:
@@ -404,10 +401,7 @@ class MapExportView(ft.Column):
         )
         self._auto_output_path = str(path)
         self._output_path_field.value = str(path)
-        try:
-            self._output_path_field.update()
-        except RuntimeError:
-            pass
+        safe_update(self._output_path_field)
 
     def _build_export_spec(self, map_type: str, scale: int) -> MapExportSpec:
         mode = self._range_mode_dropdown.value or "full"
@@ -450,11 +444,8 @@ class MapExportView(ft.Column):
             "map_export.cancelling",
             "正在取消导出...",
         )
-        try:
-            self._cancel_btn.update()
-            self._result_text.update()
-        except RuntimeError:
-            pass
+        safe_update(self._cancel_btn)
+        safe_update(self._result_text)
 
     def _start_export(self, e: ft.ControlEvent) -> None:
         """开始导出"""
@@ -537,21 +528,7 @@ class MapExportView(ft.Column):
         thread.start()
 
     def _set_export_controls_enabled(self, enabled: bool) -> None:
-        self._select_output_btn.disabled = not enabled
-        self._export_btn.disabled = not enabled
-        self._cancel_btn.disabled = enabled
-        self._map_type_dropdown.disabled = not enabled
-        self._scale_dropdown.disabled = not enabled
-        self._dimension_dropdown.disabled = not enabled
-        self._range_mode_dropdown.disabled = not enabled
-        for field in (
-            self._selection_start_x,
-            self._selection_start_z,
-            self._selection_end_x,
-            self._selection_end_z,
-        ):
-            field.disabled = not enabled
-        for control in (
+        controls = (
             self._select_output_btn,
             self._export_btn,
             self._cancel_btn,
@@ -563,11 +540,10 @@ class MapExportView(ft.Column):
             self._selection_start_z,
             self._selection_end_x,
             self._selection_end_z,
-        ):
-            try:
-                control.update()
-            except Exception:
-                pass
+        )
+        for control in controls:
+            control.disabled = enabled if control is self._cancel_btn else not enabled
+            safe_update(control)
 
     def _export_thread(
             self,
@@ -690,7 +666,7 @@ class MapExportView(ft.Column):
         """统一入口设置当前存档回调"""
         try:
             self._world_path_field.value = path
-            self._world_path_field.update()
+            safe_update(self._world_path_field)
             dimensions = discover_dimension_region_dirs(Path(path))
             self._dimension_dropdown.options = [
                 ft.dropdown.Option(item.id, item.name)
@@ -703,7 +679,7 @@ class MapExportView(ft.Column):
                     if "overworld" in available_ids
                     else next(iter(available_ids), None)
                 )
-            self._dimension_dropdown.update()
+            safe_update(self._dimension_dropdown)
             if (
                 not self._output_path_field.value
                 or self._output_path_field.value == self._auto_output_path
@@ -715,7 +691,7 @@ class MapExportView(ft.Column):
                 )
                 self._auto_output_path = str(output)
                 self._output_path_field.value = str(output)
-                self._output_path_field.update()
+                safe_update(self._output_path_field)
         except Exception:
             pass
 

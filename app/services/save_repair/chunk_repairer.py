@@ -8,12 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from core.mca import NativeRegion as Region
-
 from core.scanner import scan_all_regions
 
 from .models import RepairReport
-from .validation_utils import quarantine_file, validate_chunk
+from .validation_utils import count_damaged_chunks, quarantine_file
 
 
 @dataclass(frozen=True)
@@ -86,7 +84,10 @@ class ChunkRepairer:
         if self.is_cancelled:
             return ChunkRepairResult()
         try:
-            damaged, completed = self._count_damaged_chunks(region_file)
+            damaged, completed = count_damaged_chunks(
+                region_file,
+                lambda: self.is_cancelled,
+            )
             if damaged:
                 log(
                     f"区块文件 {region_file.name} 包含 {damaged} 个损坏区块",
@@ -95,34 +96,5 @@ class ChunkRepairer:
             return ChunkRepairResult(1 if completed else 0, damaged, 0)
         except Exception as exc:
             log(f"无法读取区块文件 {region_file.name}: {exc}", "ERROR")
-            self._quarantine_file(region_file, log)
+            quarantine_file(region_file, log)
             return ChunkRepairResult(0, 0, 1)
-
-    def _count_damaged_chunks(self, region_file: Path) -> tuple[int, bool]:
-        damaged = 0
-        with Region.from_file(str(region_file)) as region:
-            try:
-                coordinates = region.iter_present_chunks()
-            except AttributeError:
-                coordinates = (
-                    (chunk_x, chunk_z)
-                    for chunk_x in range(32)
-                    for chunk_z in range(32)
-                )
-            for chunk_x, chunk_z in coordinates:
-                if self.is_cancelled:
-                    return damaged, False
-                try:
-                    chunk = region.get_chunk(chunk_x, chunk_z)
-                    if chunk is not None and not validate_chunk(chunk):
-                        damaged += 1
-                except Exception:
-                    damaged += 1
-        return damaged, True
-
-    def _quarantine_file(
-        self,
-        file_path: Path,
-        log: Callable[[str, str], None],
-    ) -> None:
-        quarantine_file(file_path, log)

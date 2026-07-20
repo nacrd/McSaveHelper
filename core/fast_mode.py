@@ -7,7 +7,7 @@ from .pure_cleaner import purge_mod_blocks_and_entities
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
 from .utils import (
     safe_destination_world, update_server_properties, replace_directory_tree,
-    find_player_data_dirs, get_write_player_data_dir,
+    get_write_player_data_dir, list_player_dat_files,
 )
 from .types import LogCallback
 
@@ -22,21 +22,20 @@ def _collect_player_names(
     names: set[str] = set()
     templates: Dict[str, Path] = {}
     unresolved: List[Path] = []
-    for player_dir in find_player_data_dirs(world_path):
-        for player_file in player_dir.glob("*.dat"):
-            old_uuid = player_file.stem
-            name = cache.get(old_uuid)
-            if not name and not offline_mode:
-                name = get_name_from_uuid(old_uuid, log)
-            if name:
-                names.add(name)
-                templates.setdefault(name, player_file)
-            else:
-                unresolved.append(player_file)
-                log(
-                    f"无法识别 UUID: {old_uuid}，如果这是您的账号，请在手动输入框中填写玩家名",
-                    "WARN",
-                )
+    for player_file in list_player_dat_files(world_path):
+        old_uuid = player_file.stem
+        name = cache.get(old_uuid)
+        if not name and not offline_mode:
+            name = get_name_from_uuid(old_uuid, log)
+        if name:
+            names.add(name)
+            templates.setdefault(name, player_file)
+        else:
+            unresolved.append(player_file)
+            log(
+                f"无法识别 UUID: {old_uuid}，如果这是您的账号，请在手动输入框中填写玩家名",
+                "WARN",
+            )
     if manual_names:
         names_list = [name.strip() for name in manual_names if name.strip()]
         if len(names_list) != len(unresolved) or len(set(names_list)) != len(names_list):

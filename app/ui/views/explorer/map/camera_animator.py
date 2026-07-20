@@ -106,16 +106,17 @@ class MapCameraAnimator:
         self._complete_animation()
 
     def _notify_frame(self) -> None:
-        try:
-            self._on_frame()
-        except Exception:
-            pass
+        self._safe_call(self._on_frame)
 
     def _complete_animation(self) -> None:
         self.active = False
         self._timer = None
         self._viewport.apply(self.target)
+        self._safe_call(self._on_complete)
+
+    @staticmethod
+    def _safe_call(callback: Callable[[], None]) -> None:
         try:
-            self._on_complete()
+            callback()
         except Exception:
             pass

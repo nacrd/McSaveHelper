@@ -151,7 +151,6 @@ class SaveRepairService:
         fix_players: bool = True,
         fix_level_dat: bool = True,
         backup: bool = True,
-        max_workers: int = 4,
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> RepairReport:
@@ -164,7 +163,6 @@ class SaveRepairService:
                     fix_players=fix_players,
                     fix_level_dat=fix_level_dat,
                     backup=backup,
-                    max_workers=max_workers,
                     progress_callback=progress_callback,
                     log_callback=log_callback,
                 )
@@ -188,7 +186,6 @@ class SaveRepairService:
         fix_players: bool = True,
         fix_level_dat: bool = True,
         backup: bool = True,
-        max_workers: int = 4,
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> RepairReport:
@@ -200,7 +197,6 @@ class SaveRepairService:
             fix_players: 是否修复玩家数据
             fix_level_dat: 是否修复 level.dat
             backup: 是否备份
-            max_workers: 并发处理区域文件的最大线程数（保留参数以兼容）
             progress_callback: 进度回调 (0.0~1.0, 描述)
             log_callback: 日志回调 (消息, 级别)
 

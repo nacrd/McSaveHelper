@@ -41,35 +41,6 @@ class RepairReport:
     cancelled: bool = False
     issues: List[RepairIssue] = field(default_factory=list)
 
-    @property
-    def total_fixes(self) -> int:
-        return (
-            self.chunks_damaged
-            + self.chunks_quarantined_regions * 1024
-            + self.players_fixed
-            + self.players_quarantined
-            + (1 if self.level_dat_fixed else 0)
-        )
-
-    def summary_text(self) -> str:
-        lines = [
-            f"区块检查: {self.chunks_checked}",
-            f"区块损坏: {self.chunks_damaged}",
-            f"区域文件隔离: {self.chunks_quarantined_regions}",
-            f"玩家检查: {self.players_checked}",
-            f"玩家修复: {self.players_fixed}",
-            f"玩家隔离: {self.players_quarantined}",
-            f"level.dat: {'已修复' if self.level_dat_fixed else '正常'}",
-        ]
-        if self.level_dat_repaired_fields:
-            lines.append(f"  修复字段: {', '.join(self.level_dat_repaired_fields)}")
-        if self.backup_path:
-            lines.append(f"备份位置: {self.backup_path}")
-        lines.append(f"耗时: {self.elapsed_seconds:.1f}s")
-        if self.cancelled:
-            lines.append("(操作已取消)")
-        return "\n".join(lines)
-
 
 @dataclass
 class WorldInfo:
@@ -90,52 +61,7 @@ class WorldInfo:
     total_chunks: int = 0
     player_count: int = 0
     has_level_dat: bool = False
-    has_level_dat_old: bool = False
     play_time_ticks: int = 0
-
-
-def _world_info_summary_lines(info: WorldInfo) -> List[str]:
-    lines = ["── 世界信息 ──"]
-    if info.world_name:
-        lines.append(f"名称: {info.world_name}")
-    if info.version_name:
-        lines.append(f"版本: {info.version_name} (DataVersion {info.data_version})")
-    if info.game_type_name:
-        lines.append(f"模式: {info.game_type_name}")
-    lines.extend([
-        f"难度: {info.difficulty_name}",
-        f"种子: {info.seed}",
-        f"出生点: {info.spawn_pos}",
-    ])
-    if info.play_time_ticks > 0:
-        hours = info.play_time_ticks / 72000
-        lines.append(f"游戏时间: {hours:.1f} 小时")
-    lines.extend([
-        f"存档大小: {info.world_size_mb:.1f} MB",
-        f"维度: {', '.join(info.dimensions) if info.dimensions else '无'}",
-        f"区域文件: {info.region_count}, 区块: {info.total_chunks}",
-        f"玩家: {info.player_count}",
-    ])
-    return lines
-
-
-def _unreadable_region_summary_lines(region_names: List[str]) -> List[str]:
-    if not region_names:
-        return []
-    lines = [f"无法读取的区域文件: {len(region_names)}"]
-    lines.extend(f"  - {name}" for name in region_names[:10])
-    if len(region_names) > 10:
-        lines.append(f"  ... 共 {len(region_names)} 个")
-    return lines
-
-
-def _player_issue_summary_lines(
-    player_issues: Dict[str, List[str]],
-) -> List[str]:
-    return [
-        f"  {player_name}: {', '.join(issues)}"
-        for player_name, issues in list(player_issues.items())[:5]
-    ]
 
 
 @dataclass
@@ -162,26 +88,3 @@ class DetectReport:
             or self.players_with_issues > 0
             or not self.level_dat_ok
         )
-
-    def summary_text(self) -> str:
-        lines = _world_info_summary_lines(self.world_info)
-        lines.extend([
-            "",
-            "── 检测结果 ──",
-            f"区块检查: {self.chunks_checked}, 损坏: {self.chunks_damaged}",
-        ])
-        lines.extend(_unreadable_region_summary_lines(self.unreadable_regions))
-        lines.append(
-            f"玩家检查: {self.players_checked}, 有问题: {self.players_with_issues}"
-        )
-        lines.extend(_player_issue_summary_lines(self.player_issues))
-        lines.append(f"level.dat: {'正常' if self.level_dat_ok else '异常'}")
-        lines.extend(f"  - {issue}" for issue in self.level_dat_issues)
-        lines.append(f"\n耗时: {self.elapsed_seconds:.1f}s")
-        if self.cancelled:
-            lines.append("(操作已取消)")
-        if not self.has_problems:
-            lines.append("\n存档状态良好，未发现问题。")
-        else:
-            lines.append(f"\n发现 {len(self.issues)} 个问题，建议执行修复。")
-        return "\n".join(lines)

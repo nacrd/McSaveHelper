@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple
 
 from core.types import LogCallback, UUIDMapping
 from core.constants import MinecraftConstants
-from core.utils import find_player_data_dirs
 
 # requests 延迟导入：仅联网查询 Mojang API 时需要（启动期不联网），
 # 避免启动时拉入 requests + urllib3 + idna 等重库。
@@ -253,10 +252,9 @@ def build_mappings(
 
 
 def _find_player_dat_files(world_path: Path) -> List[Path]:
-    files: List[Path] = []
-    for player_dir in find_player_data_dirs(world_path):
-        files.extend(player_dir.glob("*.dat"))
-    return files
+    from core.utils import list_player_dat_files
+
+    return list_player_dat_files(world_path)
 
 
 def _map_known_players(

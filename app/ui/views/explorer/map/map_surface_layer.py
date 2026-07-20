@@ -519,18 +519,24 @@ class MapSurfaceLayer:
         """Render one request and report whether a newer request should retry."""
         frame = await self._compose_request(request)
         if frame is None:
-            return request.token != self._token
-        if request.token != self._token:
+            return not self._request_token_matches(request)
+        if not self._request_token_matches(request):
             return True
         if not self._source_is_current(request.spec):
             self._invalidate_current_request()
             return False
         if not await self._upload_frame(request, frame):
-            return request.token != self._token
-        if request.token != self._token or not self._is_active():
+            return not self._request_token_matches(request)
+        if not self._request_is_current(request):
             return True
         self._store_frame(request, frame)
         return False
+
+    def _request_token_matches(self, request: _RenderRequest) -> bool:
+        return request.token == self._token
+
+    def _request_is_current(self, request: _RenderRequest) -> bool:
+        return self._request_token_matches(request) and self._is_active()
 
     def _store_frame(self, request: _RenderRequest, frame: MapSurfaceFrame) -> None:
         self._frame = frame
@@ -575,12 +581,10 @@ class MapSurfaceLayer:
                 request.tile_bytes,
                 request.tile_revisions,
                 request.colors,
-                cancel_check=lambda: (
-                    request.token != self._token or not self._is_active()
-                ),
+                cancel_check=lambda: not self._request_is_current(request),
             )
         except Exception:
-            if request.token == self._token:
+            if self._request_token_matches(request):
                 self._blocked_spec = request.spec
                 self._dirty = False
             return None

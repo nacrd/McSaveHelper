@@ -514,16 +514,7 @@ class McaMapView(ft.Container):
         if self._use_topview:
             self._tile_requests.request_region_detail(coord, self._current_data)
 
-        if animate:
-            self._camera.animate_to(
-                target.scale,
-                target.offset_x,
-                target.offset_y,
-                duration=0.28,
-            )
-        else:
-            self._viewport.apply(target)
-            self._request_rebuild()
+        self._apply_camera_target(target, animate=animate)
 
     def _focus_chunk(
         self,
@@ -555,16 +546,28 @@ class McaMapView(ft.Container):
         if self._use_topview:
             self._request_detail_tiles([(rx, rz)], force=True, priority=True)
 
+        self._apply_camera_target(target, animate=animate)
+
+    def _apply_camera_target(
+        self,
+        target: ViewportTarget,
+        *,
+        animate: bool,
+        duration: float = 0.28,
+        sync_view_level: bool = False,
+    ) -> None:
         if animate:
             self._camera.animate_to(
                 target.scale,
                 target.offset_x,
                 target.offset_y,
-                duration=0.28,
+                duration=duration,
             )
-        else:
-            self._viewport.apply(target)
-            self._request_rebuild()
+            return
+        self._viewport.apply(target)
+        if sync_view_level:
+            self._sync_view_level_from_scale(notify=True)
+        self._request_rebuild()
 
     def _on_scroll(self, e: ft.ScrollEvent) -> None:
         scroll_delta = getattr(e, "scroll_delta", None)
@@ -1351,17 +1354,11 @@ class McaMapView(ft.Container):
             view_w / 2.0 - world_x * scale,
             view_h / 2.0 - world_z * scale,
         )
-        if animate:
-            self._camera.animate_to(
-                target.scale,
-                target.offset_x,
-                target.offset_y,
-                duration=0.28,
-            )
-        else:
-            self._viewport.apply(target)
-            self._sync_view_level_from_scale(notify=True)
-            self._request_rebuild()
+        self._apply_camera_target(
+            target,
+            animate=animate,
+            sync_view_level=True,
+        )
 
     def block_at_screen(self, x: float, y: float) -> Optional[Tuple[int, int]]:
         return self._viewport.screen_to_block(x, y)

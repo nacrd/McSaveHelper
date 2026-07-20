@@ -58,6 +58,18 @@ def first_key(node: Any, *keys: str) -> Any:
     return None
 
 
+def section_y(section: Any) -> Optional[int]:
+    """Decode a section Y as a signed world section index.
+
+    NBT Byte tags are normally already signed, but plain JSON-like test trees
+    may carry the equivalent unsigned byte (``128..255``).
+    """
+    value = as_int(first_key(section, "Y", "y"))
+    if value is None:
+        return None
+    return value - 256 if value > 127 else value
+
+
 def is_mapping(node: Any) -> bool:
     raw = tag_value(node)
     return isinstance(raw, dict) or (

@@ -11,7 +11,7 @@ from nbtlib import Compound, String, Float, Int, List as NbtList, Double
 
 from .models import RepairReport, IssueLevel, RepairIssue
 from .validation_utils import quarantine_file
-from core.utils import find_player_data_dirs
+from core.utils import list_player_dat_files
 
 
 # 玩家数据必需字段列表
@@ -62,10 +62,7 @@ class PlayerRepairer:
         log: Callable[[str, str], None],
     ) -> None:
         """修复玩家数据（兼容 Minecraft 26.1 新旧路径）"""
-        player_files: List[Path] = []
-        for playerdata_dir in find_player_data_dirs(world_path):
-            if playerdata_dir.exists():
-                player_files.extend(list(playerdata_dir.glob("*.dat")))
+        player_files = list_player_dat_files(world_path)
 
         if not player_files:
             log("玩家数据目录不存在", "WARNING")
@@ -103,7 +100,7 @@ class PlayerRepairer:
 
             except Exception as e:
                 log(f"无法读取玩家数据 {player_file.name}: {e}", "ERROR")
-                self._quarantine_file(player_file, log)
+                quarantine_file(player_file, log)
                 report.players_quarantined += 1
                 report.issues.append(RepairIssue(
                     level=IssueLevel.ERROR,
@@ -139,9 +136,3 @@ class PlayerRepairer:
                 pass
         return repaired
 
-    def _quarantine_file(
-        self,
-        file_path: Path,
-        log: Callable[[str, str], None],
-    ) -> None:
-        quarantine_file(file_path, log)

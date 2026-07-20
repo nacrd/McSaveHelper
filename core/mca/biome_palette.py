@@ -13,13 +13,13 @@ from math import ceil
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from core.mca.nbt_access import (
-    as_int,
     as_str,
     chunk_root_and_version,
     first_key,
     is_mapping,
     iter_sequence,
     long_array_values,
+    section_y as _section_y,
 )
 
 _BIOME_EDGE = 4
@@ -38,15 +38,6 @@ def _palette_name(entry: Any) -> str:
         value = first_key(entry, "Name", "name", "Id", "id", "biome")
         return as_str(value).strip() if value is not None else ""
     return as_str(entry).strip()
-
-
-def _section_y(section: Any) -> Optional[int]:
-    value = as_int(first_key(section, "Y", "y"))
-    if value is None:
-        return None
-    # NBT Byte tags are normally already signed, but plain JSON-like test
-    # trees may carry the equivalent unsigned byte.
-    return value - 256 if value > 127 else value
 
 
 def _biome_container(section_or_container: Any) -> Any:

@@ -13,13 +13,13 @@ from core.mca.heightmaps import (
 )
 from core.mca.biome_palette import ChunkBiomes
 from core.mca.nbt_access import (
-    as_int,
     as_str,
     chunk_root_and_version,
     first_key,
     is_mapping,
     iter_sequence,
     long_array_values,
+    section_y as _section_y,
     tag_value,
 )
 from core.mca.versions import DATA_VERSION_1_13
@@ -130,15 +130,6 @@ def _palette_name(entry: Any) -> str:
         name = first_key(entry, "Name", "name")
         return as_str(name) if name is not None else "minecraft:air"
     return as_str(entry) or "minecraft:air"
-
-
-def _section_y(section: Any) -> Optional[int]:
-    y = as_int(first_key(section, "Y", "y"))
-    if y is None:
-        return None
-    if y > 127:
-        y -= 256
-    return y
 
 
 def _palette_and_data(section: Any) -> Tuple[List[str], Optional[List[int]]]:

@@ -47,6 +47,21 @@ def find_player_data_dirs(world_path: Path) -> List[Path]:
     return dirs if dirs else [old_dir]
 
 
+def list_player_dat_files(world_path: Path) -> List[Path]:
+    """Collect player ``*.dat`` files from all known playerdata directories.
+
+    Existing directories are scanned in 26.1-first order. When no directory exists
+    yet, the default placeholder from :func:`find_player_data_dirs` is ignored
+    so callers receive an empty list rather than an OSError on a missing path.
+    """
+    files: List[Path] = []
+    for player_dir in find_player_data_dirs(world_path):
+        if not player_dir.is_dir():
+            continue
+        files.extend(player_dir.glob("*.dat"))
+    return files
+
+
 def find_stats_dirs(world_path: Path) -> List[Path]:
     """返回所有可能的统计数据目录（新版 26.1 优先，向后兼容旧版）
 

@@ -106,8 +106,7 @@ def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:
     如果 byteorder 为 None，则自动检测。
     """
     if byteorder is None:
-        endian = detect_endian(file_path)
-        byteorder = endian  # 'big' or 'little'
+        byteorder = detect_endian(file_path)
     try:
         return nbtlib.load(file_path, byteorder=byteorder)
     except Exception as e:
@@ -229,11 +228,6 @@ class IdMapping:
             return cls.BLOCK_JAVA_TO_BEDROCK.get(block_id, block_id)
         else:
             return cls.BLOCK_BEDROCK_TO_JAVA.get(block_id, block_id)
-
-    @classmethod
-    def convert_item_id(cls, item_id: str, to_bedrock: bool) -> str:
-        """转换物品 ID（暂时与方块相同）"""
-        return cls.convert_block_id(item_id, to_bedrock)
 
 
 def convert_block_ids_in_nbt(tag: Any, to_bedrock: bool) -> Any:
