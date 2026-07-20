@@ -15,6 +15,7 @@ from app.ui.components.fields import text_field, checkbox, label, dropdown
 from app.ui.components.cards import card
 from app.ui.components.layout import page_header
 from app.ui.views.settings_sections import collapsible_section as _collapsible_section
+from app.ui.utils import safe_update
 
 
 Translate = Callable[..., str]
@@ -602,10 +603,7 @@ class SettingsView(ft.Column):
                 return
             self._minecraft_dir_field.value = path
             self._persist()
-            try:
-                self._minecraft_dir_field.update()
-            except RuntimeError:
-                pass
+            safe_update(self._minecraft_dir_field)
         except Exception as ex:
             self._deps.error_dialog(
                 self._t("settings.ui.minecraft_dir_error", "选择目录失败"),

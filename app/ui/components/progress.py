@@ -4,6 +4,7 @@ from typing import Optional
 import flet as ft
 
 from app.ui.theme import THEME, mc_border
+from app.ui.utils import safe_update
 
 
 class McProgressBar(ft.Container):
@@ -114,10 +115,7 @@ class McProgressBar(ft.Container):
         if self._show_percentage:
             self._percentage_text.value = self._format_percentage(self._value)
         if refresh:
-            try:
-                self.update()
-            except Exception:
-                pass
+            safe_update(self)
 
     def set_color(self, color: str) -> None:
         """Set progress bar color
@@ -127,10 +125,7 @@ class McProgressBar(ft.Container):
         """
         self._color = color
         self._progress_bar.color = color
-        try:
-            self.update()
-        except Exception:
-            pass
+        safe_update(self)
 
     def reset(self) -> None:
         """Reset progress to 0"""

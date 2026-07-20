@@ -18,6 +18,7 @@ from app.ui.components.fields import text_field, dropdown
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 from app.ui.view_actions import ViewAction
+from app.ui.utils import safe_update
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -107,10 +108,7 @@ class ServerPropertiesView(ft.Column):
                 control,
                 ft.Text(desc, size=11, color=THEME.text_muted),
             ], spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER))
-        try:
-            self.update()
-        except RuntimeError:
-            pass
+        safe_update(self)
 
     def _save(self, e: ft.ControlEvent) -> None:
         try:

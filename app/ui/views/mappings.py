@@ -11,6 +11,7 @@ from app.ui.components.fields import text_field
 from app.ui.components.layout import page_header
 from app.ui.components.uuid_table import UUIDMappingTable
 from app.ui.view_actions import ViewAction
+from app.ui.utils import safe_update
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -275,10 +276,7 @@ class MappingsView(ft.Column):
 
     def _on_item_search(self) -> None:
         self._render_item_table(self._item_search_field.value or "")
-        try:
-            self._item_table_container.update()
-        except RuntimeError:
-            pass
+        safe_update(self._item_table_container)
 
     def _add_item_mapping(self, e: ft.ControlEvent) -> None:
         item_id = (self._item_id_field.value or "").strip()
