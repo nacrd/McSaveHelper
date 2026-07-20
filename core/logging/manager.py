@@ -56,8 +56,9 @@ class LogManager:
                     self._queue.task_done()
             except Empty:
                 continue
-            except Exception as e:
-                print(f"日志处理器异常: {e}", file=sys.stderr)
+            except Exception as exc:
+                # Worker boundary: logging must not crash the process.
+                print(f"日志处理器异常: {exc}", file=sys.stderr)
 
     def _dispatch(self, record: LogRecord) -> None:
         module_level = self._module_levels.get(record.module)
@@ -68,8 +69,11 @@ class LogManager:
         for handler in self.handlers:
             try:
                 handler.handle(record)
-            except Exception as e:
-                print(f"日志处理器 {handler.__class__.__name__} 失败: {e}", file=sys.stderr)
+            except Exception as exc:
+                print(
+                    f"日志处理器 {handler.__class__.__name__} 失败: {exc}",
+                    file=sys.stderr,
+                )
 
     def add_handler(self, handler: LogHandler) -> None:
         self.handlers.append(handler)
@@ -136,6 +140,7 @@ class LogManager:
             try:
                 handler.flush()
             except Exception:
+                # Best-effort flush on shutdown/teardown.
                 pass
 
     def shutdown(self) -> None:
@@ -148,5 +153,6 @@ class LogManager:
             try:
                 handler.close()
             except Exception:
+                # Best-effort close; handlers may already be torn down.
                 pass
         self.handlers.clear()

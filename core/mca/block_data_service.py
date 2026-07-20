@@ -369,7 +369,7 @@ class BlockDataService:
                 clear()
                 extend(longs)
                 return True
-        except Exception:
+        except (TypeError, ValueError, AttributeError, IndexError):
             return False
         return False
 
@@ -380,6 +380,8 @@ class BlockDataService:
 
             block_states["data"] = LongArray(longs)
             return True
+        except (ImportError, TypeError, ValueError, KeyError, AttributeError):
+            return False
         except Exception:
             return False
 
@@ -390,6 +392,8 @@ class BlockDataService:
 
             block_states["data"] = TAG_Long_Array(longs)
             return True
+        except (ImportError, TypeError, ValueError, KeyError, AttributeError):
+            return False
         except Exception:
             return False
 
@@ -397,7 +401,7 @@ class BlockDataService:
     def _set_plain_long_array(block_states: Any, longs: List[int]) -> None:
         try:
             block_states["data"] = longs
-        except Exception:
+        except (TypeError, ValueError, KeyError, AttributeError):
             pass
 
     def _find_section(self, sections: Any, section_y: int) -> Any:
@@ -449,7 +453,7 @@ class BlockDataService:
         if hasattr(node, "keys") and hasattr(node, "__getitem__"):
             try:
                 return node[key] if key in node.keys() else default
-            except Exception:
+            except (TypeError, KeyError, AttributeError, IndexError):
                 return default
         return default
 

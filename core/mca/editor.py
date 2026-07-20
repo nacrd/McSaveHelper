@@ -58,6 +58,9 @@ class RegionEditor:
                 size=region_path.stat().st_size,
                 chunk_count=chunk_count,
             )
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self._log(f"获取区域信息失败: {exc}", "ERROR")
+            return None
         except Exception as exc:
             self._log(f"获取区域信息失败: {exc}", "ERROR")
             return None
@@ -77,6 +80,8 @@ class RegionEditor:
                                 timestamp=region.chunk_timestamp(x, z),
                             )
                         )
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self._log(f"读取区块信息失败: {exc}", "ERROR")
         except Exception as exc:
             self._log(f"读取区块信息失败: {exc}", "ERROR")
         return chunks
@@ -94,7 +99,7 @@ class RegionEditor:
             region_path.unlink()
             self._log(f"已删除区域文件: {region_path.name}", "DELETE")
             return True
-        except Exception as exc:
+        except OSError as exc:
             self._log(f"删除区域文件失败: {exc}", "ERROR")
             return False
 
@@ -120,6 +125,9 @@ class RegionEditor:
             failed = len(chunk_coords) - success
             self._log(f"已从 {region_path.name} 重置 {success} 个区块", "SAVE")
             return success, failed
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self._log(f"操作区域文件失败: {exc}", "ERROR")
+            return 0, len(chunk_coords)
         except Exception as exc:
             self._log(f"操作区域文件失败: {exc}", "ERROR")
             return 0, len(chunk_coords)
@@ -167,6 +175,9 @@ class RegionEditor:
             )
             self._log(f"已复制区块 {source_chunk} -> {destination_chunk}", "SAVE")
             return True
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self._log(f"复制区块失败: {exc}", "ERROR")
+            return False
         except Exception as exc:
             self._log(f"复制区块失败: {exc}", "ERROR")
             return False

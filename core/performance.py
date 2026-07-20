@@ -126,7 +126,7 @@ class PerfTracker:
         if self._process is not None:
             try:
                 return float(self._process.memory_info().rss) / 1024 / 1024
-            except Exception:
+            except (OSError, AttributeError, TypeError, ValueError):
                 pass
         return 0.0
 
@@ -150,11 +150,12 @@ class PerfTracker:
             pass
 
     def _log_metrics(self, metrics: PerformanceMetrics) -> None:
-        """通过 core.logger 输出性能日志"""
+        """通过 core.logger 输出性能日志。"""
         try:
             from core.logger import logger as _logger
             _logger.info(metrics.summary_line(), module="Perf")
         except Exception:
+            # Logger may be unavailable during early bootstrap/teardown.
             print(f"[Perf] {metrics.summary_line()}")
 
     @contextmanager
@@ -163,15 +164,14 @@ class PerfTracker:
         operation: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Iterator["PerfTracker"]:
-        """追踪操作的性能指标
+        """追踪操作的性能指标。
 
         Args:
-            operation: 操作名称
-            metadata: 额外元数据
+            operation: 操作名称。
+            metadata: 额外元数据。
 
-        示例:
-            >>> with tracker.track("UUID 迁移", {"mode": "fast"}):
-            ...     migrate_fast(world_path, mapping)
+        Yields:
+            PerfTracker: 当前 tracker 实例，供操作内部累加计数。
         """
         start_time = time.perf_counter()
         start_memory = self._get_memory_mb()

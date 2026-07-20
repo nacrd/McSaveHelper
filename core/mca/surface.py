@@ -524,6 +524,10 @@ def _decode_misses_sequential(
             return
         try:
             key, sampled = _decode_one(region, chunk_x, chunk_z, samples)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+            if failed_chunks is not None:
+                failed_chunks.add((chunk_x, chunk_z))
+            continue
         except Exception:
             if failed_chunks is not None:
                 failed_chunks.add((chunk_x, chunk_z))
@@ -566,6 +570,10 @@ def _decode_misses_parallel(
         for future in as_completed(future_coords):
             try:
                 key, sampled = future.result()
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+                if failed_chunks is not None:
+                    failed_chunks.add(future_coords[future])
+                continue
             except Exception:
                 if failed_chunks is not None:
                     failed_chunks.add(future_coords[future])
@@ -625,6 +633,8 @@ def _sample_coarse_grid(
                 )
             else:
                 grid[row][column] = view.surface_block_id(local_x, local_z)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, IndexError):
+            grid[row][column] = None
         except Exception:
             grid[row][column] = None
     return grid
@@ -868,6 +878,8 @@ def _resolve_surface_color(
             return color_for_surface(name, biome)
         if color_for_block is not None:
             return color_for_block(name)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        return DEFAULT_UNKNOWN
     except Exception:
         return DEFAULT_UNKNOWN
     return DEFAULT_UNKNOWN
