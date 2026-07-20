@@ -139,32 +139,51 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._center_section_index = 0
         self._shulker_dialog: Optional[ft.AlertDialog] = None
 
-        # ── Left: player list (compact) ───────────────────────
-        left = ft.Column(spacing=6, expand=True)
+        # ── Left: search on top, player list immediately under it ──
+        # Keep list top-aligned under the search field (not vertically centered).
+        left = ft.Column(
+            spacing=8,
+            expand=True,
+            alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+        )
         left.controls.append(
             ft.Text(
                 t("explorer.select_player", "选择玩家"),
-                size=13,
+                size=14,
                 weight=ft.FontWeight.BOLD,
                 color=THEME.text_primary,
             )
         )
         self._player_filter = text_field(
-            label=t("player.filter", "搜索"),
+            label=t("player.filter", "搜索玩家"),
             expand=True,
             on_change=self._on_player_filter_changed,
         )
         left.controls.append(self._player_filter)
+        # Secondary action stays under search, above the list.
+        left.controls.append(
+            btn_ghost(
+                t("explorer.import_usercache", "导入 usercache"),
+                height=30,
+                on_click=self._import_usercache,
+            )
+        )
         self._player_list_column = ft.Column(
-            spacing=3,
+            spacing=4,
             scroll=ft.ScrollMode.AUTO,
             expand=True,
+            alignment=ft.MainAxisAlignment.START,
+            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        left.controls.append(self._player_list_column)
+        # Expand wrapper so leftover height is empty space *below* the tiles,
+        # not gaps that push tiles toward the vertical middle.
         left.controls.append(
-            self._chip_button(
-                t("explorer.import_usercache", "导入 usercache"),
-                self._import_usercache,
+            ft.Container(
+                content=self._player_list_column,
+                expand=True,
+                alignment=ft.Alignment(-1, -1),
+                clip_behavior=ft.ClipBehavior.HARD_EDGE,
             )
         )
 
@@ -792,6 +811,9 @@ class PlayerTabMixin(ExplorerMixinHost):
                 uuid
             ),
             ink=True,
+            # Fill the list column width; tiles stack from the top under search.
+            width=None,
+            expand=False,
         )
 
     def _load_list_avatar(self, ref: Any) -> None:
