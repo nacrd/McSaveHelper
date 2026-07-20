@@ -413,57 +413,25 @@ def _load_chunk_views(
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
 ) -> Dict[Tuple[int, int], Optional[Any]]:
     views: Dict[Tuple[int, int], Optional[Any]] = {}
-    jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
-    if jobs is not None:
-        for _, _, chunk_x, chunk_z, local_x, local_z in jobs:
-            jobs_by_chunk.setdefault((chunk_x, chunk_z), []).append(
-                (local_x, local_z)
-            )
-    misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
-    requested_edge = 0
-    if jobs:
-        requested_edge = max(
-            max(int(job[0]), int(job[1])) + 1
-            for job in jobs
-        )
+    jobs_by_chunk = _jobs_by_chunk(jobs)
+    requested_edge = _requested_edge(jobs)
     # Preview LODs should only decode the points they display.  Once a focused
     # tile reaches 64px, preload the higher-detail positions for that chunk so
     # subsequent 128/256/512 upgrades reuse one NBT decode.
     preload_detail_positions = requested_edge >= 64
     external_signatures = external_signatures or {}
     cache_epoch = _lru_epoch()
-    for chunk_x, chunk_z in needed:
-        external_signature = external_signatures.get((chunk_x, chunk_z), "")
-        hit, view = _lru_get(
-            (
-                path_key,
-                mtime_ns,
-                file_size,
-                chunk_x,
-                chunk_z,
-                external_signature,
-            )
-        )
-        requested = jobs_by_chunk.get((chunk_x, chunk_z), [])
-        if hit and all(position in view for position in requested):
-            views[(chunk_x, chunk_z)] = _SurfaceView(view)
-        else:
-            if preload_detail_positions:
-                source_samples = (
-                    _ALL_LOD_SAMPLES
-                    if requested_edge >= 512
-                    else _FOCUSED_LOD_SAMPLES
-                )
-                all_lod_positions = source_samples.get(
-                    (chunk_x, chunk_z),
-                    requested,
-                )
-            else:
-                all_lod_positions = requested
-            missing_positions = [
-                position for position in all_lod_positions if position not in view
-            ]
-            misses.append((chunk_x, chunk_z, missing_positions))
+    misses = _collect_chunk_cache_misses(
+        needed=needed,
+        path_key=path_key,
+        mtime_ns=mtime_ns,
+        file_size=file_size,
+        external_signatures=external_signatures,
+        jobs_by_chunk=jobs_by_chunk,
+        preload_detail_positions=preload_detail_positions,
+        requested_edge=requested_edge,
+        views=views,
+    )
 
     requested_workers = (
         _DECODE_WORKERS if decode_workers is None else max(1, int(decode_workers))
@@ -503,6 +471,73 @@ def _load_chunk_views(
             external_signatures=external_signatures,
         )
     return views
+
+
+def _jobs_by_chunk(
+    jobs: Optional[List[SampleJob]],
+) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
+    jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+    if jobs is None:
+        return jobs_by_chunk
+    for _, _, chunk_x, chunk_z, local_x, local_z in jobs:
+        jobs_by_chunk.setdefault((chunk_x, chunk_z), []).append(
+            (local_x, local_z)
+        )
+    return jobs_by_chunk
+
+
+def _requested_edge(jobs: Optional[List[SampleJob]]) -> int:
+    if not jobs:
+        return 0
+    return max(max(int(job[0]), int(job[1])) + 1 for job in jobs)
+
+
+def _collect_chunk_cache_misses(
+    *,
+    needed: Set[Tuple[int, int]],
+    path_key: str,
+    mtime_ns: int,
+    file_size: int,
+    external_signatures: Dict[Tuple[int, int], str],
+    jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]],
+    preload_detail_positions: bool,
+    requested_edge: int,
+    views: Dict[Tuple[int, int], Optional[Any]],
+) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
+    misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
+    for chunk_x, chunk_z in needed:
+        external_signature = external_signatures.get((chunk_x, chunk_z), "")
+        hit, view = _lru_get(
+            (
+                path_key,
+                mtime_ns,
+                file_size,
+                chunk_x,
+                chunk_z,
+                external_signature,
+            )
+        )
+        requested = jobs_by_chunk.get((chunk_x, chunk_z), [])
+        if hit and all(position in view for position in requested):
+            views[(chunk_x, chunk_z)] = _SurfaceView(view)
+            continue
+        if preload_detail_positions:
+            source_samples = (
+                _ALL_LOD_SAMPLES
+                if requested_edge >= 512
+                else _FOCUSED_LOD_SAMPLES
+            )
+            all_lod_positions = source_samples.get(
+                (chunk_x, chunk_z),
+                requested,
+            )
+        else:
+            all_lod_positions = requested
+        missing_positions = [
+            position for position in all_lod_positions if position not in view
+        ]
+        misses.append((chunk_x, chunk_z, missing_positions))
+    return misses
 
 
 def _decode_misses_sequential(
