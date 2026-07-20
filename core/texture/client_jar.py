@@ -335,7 +335,12 @@ def _is_valid_jar(path: Path) -> bool:
 
 
 def cleanup_old_jars(jar_cache_dir: Path, keep_count: int = 1) -> None:
-    """Keep only the newest N cached minecraft-*-client.jar files."""
+    """Keep only the newest N cached ``minecraft-*-client.jar`` files.
+
+    Args:
+        jar_cache_dir: Directory holding downloaded client jars.
+        keep_count: Number of newest jars to retain.
+    """
     try:
         if not jar_cache_dir.exists():
             return
@@ -350,14 +355,21 @@ def cleanup_old_jars(jar_cache_dir: Path, keep_count: int = 1) -> None:
                 logger.info(
                     f"已清理旧版本 JAR: {old_jar.name} ({size_mb:.1f} MB)"
                 )
-            except Exception as exc:
+            except OSError as exc:
                 logger.warning(f"清理 JAR 失败 {old_jar.name}: {exc}")
-    except Exception as exc:
+    except OSError as exc:
         logger.warning(f"清理旧 JAR 文件时出错: {exc}")
 
 
 def download_client_jar(jar_cache_dir: Path) -> Optional[Path]:
-    """Download the latest client jar into jar_cache_dir when needed."""
+    """Download the latest client jar into *jar_cache_dir* when needed.
+
+    Args:
+        jar_cache_dir: Target cache directory.
+
+    Returns:
+        Path | None: Local jar path on success, otherwise ``None``.
+    """
     try:
         logger.info("开始下载 Minecraft 客户端 JAR...")
         cleanup_old_jars(jar_cache_dir, keep_count=1)
@@ -371,6 +383,9 @@ def download_client_jar(jar_cache_dir: Path) -> Optional[Path]:
         if stream_client_jar(info, jar_path):
             logger.info(f"JAR 下载完成: {jar_path}")
             return jar_path
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        logger.error(f"下载 JAR 失败: {exc}")
     except Exception as exc:
+        # Network libraries may raise RequestException subclasses.
         logger.error(f"下载 JAR 失败: {exc}")
     return None

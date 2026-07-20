@@ -505,10 +505,13 @@ def _color_for_surface_sample(name: str, biome: Optional[str]) -> Color:
 
 
 def _load_cached_tile(region_path: Path, tile_size: int) -> Optional[bytes]:
+    """Load a disk-cached topview PNG when the cache module is available."""
     try:
         from core.mca.tile_cache import load_tile
 
         return load_tile(region_path, tile_size)
+    except (OSError, ValueError, TypeError, ImportError):
+        return None
     except Exception:
         return None
 
@@ -524,6 +527,8 @@ def _uses_external_streams_cached(
 
         with RegionFile.open(path) as region:
             return region.has_external_chunks()
+    except (OSError, ValueError, TypeError, RuntimeError, ImportError):
+        return False
     except Exception:
         return False
 
@@ -576,6 +581,10 @@ def _sample_surface_grid(
         if status_out is not None:
             status_out.append(grid is not None and not failed_chunks)
         return grid
+    except (OSError, ValueError, TypeError, RuntimeError, ImportError):
+        if status_out is not None:
+            status_out.append(False)
+        return None
     except Exception:
         if status_out is not None:
             status_out.append(False)
@@ -583,11 +592,12 @@ def _sample_surface_grid(
 
 
 def _encode_png(grid: ColorGrid, tile_size: int) -> Optional[bytes]:
+    """Encode a color grid as PNG bytes."""
     image = Image.new("RGB", (tile_size, tile_size), color=(40, 55, 45))
     try:
         try:
             image.putdata([color for row in grid for color in row])
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             pixels = image.load()
             if pixels is None:
                 return None
@@ -598,6 +608,8 @@ def _encode_png(grid: ColorGrid, tile_size: int) -> Optional[bytes]:
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=False, compress_level=1)
         return buffer.getvalue()
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
     except Exception:
         return None
     finally:
@@ -609,10 +621,13 @@ def _store_cached_tile(
     tile_size: int,
     png: bytes,
 ) -> None:
+    """Best-effort write of a rendered tile into the disk cache."""
     try:
         from core.mca.tile_cache import store_tile
 
         store_tile(region_path, tile_size, png)
+    except (OSError, ValueError, TypeError, ImportError):
+        pass
     except Exception:
         pass
 

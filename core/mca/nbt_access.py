@@ -5,7 +5,14 @@ from typing import Any, List, Optional, Tuple
 
 
 def tag_value(node: Any) -> Any:
-    """Unwrap nbtlib tags to plain Python values when possible."""
+    """Unwrap nbtlib tags to plain Python values when possible.
+
+    Args:
+        node: An nbtlib tag or already-plain Python value.
+
+    Returns:
+        Any: Unpacked value when available, otherwise ``node`` itself.
+    """
     if node is None:
         return None
     # nbtlib numeric/string tags expose .unpack() or behave like their type
@@ -13,44 +20,48 @@ def tag_value(node: Any) -> Any:
     if callable(unpack):
         try:
             return unpack()
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             pass
     if hasattr(node, "value") and not isinstance(node, (dict, list)):
         try:
             return node.value
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             pass
     return node
 
 
 def as_int(node: Any) -> Optional[int]:
+    """Best-effort integer conversion of an NBT node."""
     try:
         return int(tag_value(node))
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
 def as_str(node: Any) -> str:
-    v = tag_value(node)
-    if v is None:
+    """Best-effort string conversion of an NBT node."""
+    value = tag_value(node)
+    if value is None:
         return ""
-    if isinstance(v, bytes):
-        return v.decode("utf-8", errors="ignore")
-    return str(v)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+    return str(value)
 
 
 def mapping_get(node: Any, key: str) -> Any:
+    """Read ``key`` from a mapping-like NBT node without raising."""
     if node is None:
         return None
     try:
         if hasattr(node, "get"):
             return node.get(key)
         return node[key]
-    except Exception:
+    except (TypeError, KeyError, AttributeError, IndexError):
         return None
 
 
 def first_key(node: Any, *keys: str) -> Any:
+    """Return the first present key among ``keys``."""
     for key in keys:
         value = mapping_get(node, key)
         if value is not None:
@@ -71,6 +82,7 @@ def section_y(section: Any) -> Optional[int]:
 
 
 def is_mapping(node: Any) -> bool:
+    """Whether *node* behaves like a key/value mapping."""
     raw = tag_value(node)
     return isinstance(raw, dict) or (
         hasattr(node, "get") and hasattr(node, "keys")
@@ -78,6 +90,7 @@ def is_mapping(node: Any) -> bool:
 
 
 def is_sequence(node: Any) -> bool:
+    """Whether *node* behaves like a non-string sequence."""
     raw = tag_value(node)
     if isinstance(raw, (str, bytes, dict)):
         return False
@@ -87,15 +100,16 @@ def is_sequence(node: Any) -> bool:
 
 
 def iter_sequence(node: Any) -> List[Any]:
+    """Materialize a sequence-like NBT node into a list."""
     if node is None:
         return []
     raw = tag_value(node)
     try:
         return list(raw)
-    except Exception:
+    except (TypeError, ValueError):
         try:
             return list(node)
-        except Exception:
+        except (TypeError, ValueError):
             return []
 
 
@@ -105,19 +119,19 @@ def long_array_values(node: Any) -> List[int]:
     out: List[int] = []
     for item in items:
         try:
-            v = int(tag_value(item))
-        except Exception:
+            value = int(tag_value(item))
+        except (TypeError, ValueError):
             continue
-        if v < 0:
-            v &= (1 << 64) - 1
-        out.append(v)
+        if value < 0:
+            value &= (1 << 64) - 1
+        out.append(value)
     return out
 
 
 def chunk_root_and_version(chunk_nbt: Any) -> Tuple[Any, Optional[int]]:
-    """Return (payload_root, data_version).
+    """Return ``(payload_root, data_version)``.
 
-    Modern chunks store fields at root; older ones nest under Level.
+    Modern chunks store fields at root; older ones nest under ``Level``.
     """
     if chunk_nbt is None:
         return None, None
