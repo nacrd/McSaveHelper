@@ -2,13 +2,16 @@
 
 定义存档修复服务使用的所有数据模型。
 """
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Dict, Tuple
+from typing import Dict, List, Tuple
 
 
 class IssueLevel(Enum):
-    """问题严重程度"""
+    """问题严重程度。"""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -17,7 +20,15 @@ class IssueLevel(Enum):
 
 @dataclass
 class RepairIssue:
-    """单条修复问题记录"""
+    """单条修复问题记录。
+
+    Attributes:
+        level: 严重程度。
+        category: 分类，如 ``player`` / ``chunk`` / ``level``。
+        message: 人类可读描述。
+        file_path: 相关文件路径（可空）。
+    """
+
     level: IssueLevel
     category: str
     message: str
@@ -26,7 +37,11 @@ class RepairIssue:
 
 @dataclass
 class RepairReport:
-    """修复报告"""
+    """修复操作的累计报告。
+
+    由各 repairer 在同一实例上累加计数与问题列表。
+    """
+
     success: bool = False
     chunks_checked: int = 0
     chunks_damaged: int = 0
@@ -44,7 +59,8 @@ class RepairReport:
 
 @dataclass
 class WorldInfo:
-    """世界基本信息"""
+    """世界基本信息（检测/展示用快照）。"""
+
     world_name: str = ""
     data_version: int = 0
     version_name: str = ""
@@ -66,7 +82,8 @@ class WorldInfo:
 
 @dataclass
 class DetectReport:
-    """存档检测报告（只读，不修改任何文件）"""
+    """存档检测报告（只读，不修改任何文件）。"""
+
     world_info: WorldInfo = field(default_factory=WorldInfo)
     chunks_checked: int = 0
     chunks_damaged: int = 0
@@ -82,6 +99,7 @@ class DetectReport:
 
     @property
     def has_problems(self) -> bool:
+        """是否存在需要用户关注的问题。"""
         return (
             self.chunks_damaged > 0
             or len(self.unreadable_regions) > 0
