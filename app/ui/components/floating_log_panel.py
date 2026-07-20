@@ -15,11 +15,12 @@ from app.ui.components.floating_position import (
 
 
 def _is_app_closing() -> bool:
-    """检查应用是否正在关闭"""
+    """检查应用是否正在关闭。"""
     try:
         from app.ui.utils import is_app_closing
         return is_app_closing()
     except Exception:
+        # Import/state lookup best-effort during teardown.
         return False
 
 
@@ -194,6 +195,7 @@ class FloatingLogPanel(ft.Container):
         try:
             self._page.run_task(self._log_col.scroll_to, offset=-1)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
@@ -201,6 +203,7 @@ class FloatingLogPanel(ft.Container):
         try:
             self._drag.start(e.local_position.x, e.local_position.y)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
@@ -225,6 +228,7 @@ class FloatingLogPanel(ft.Container):
                 self._apply_position(left, top)
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_end(self, e: ft.DragEndEvent) -> None:
@@ -233,6 +237,7 @@ class FloatingLogPanel(ft.Container):
             self._drag.end()
             self._save_position()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_scroll(self, e: ft.OnScrollEvent) -> None:
@@ -249,6 +254,7 @@ class FloatingLogPanel(ft.Container):
                 self._auto_scroll_btn.tooltip = "已暂停自动滚动"
                 self._auto_scroll_btn.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _toggle_auto_scroll(self) -> None:
@@ -267,6 +273,7 @@ class FloatingLogPanel(ft.Container):
                 self._scroll_to_end()
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _expand(self) -> None:
@@ -277,6 +284,7 @@ class FloatingLogPanel(ft.Container):
             self._flush_pending_ui(refresh=False)
             self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _collapse(self) -> None:
@@ -298,6 +306,7 @@ class FloatingLogPanel(ft.Container):
             self._save_position()
             self._page.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _clear(self) -> None:
@@ -309,6 +318,7 @@ class FloatingLogPanel(ft.Container):
             self._status_text.value = ""
             self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def log(self, message: str, level: str = "info") -> None:
@@ -420,6 +430,7 @@ class FloatingLogPanel(ft.Container):
                 self._flush_pending_ui(refresh=False)
             self._page.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     @property
@@ -495,6 +506,7 @@ class FloatingLogButton(ft.Container):
         try:
             self._drag.start(e.local_position.x, e.local_position.y)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
@@ -519,6 +531,7 @@ class FloatingLogButton(ft.Container):
                 self._apply_position(right, bottom)
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_end(self, e: ft.DragEndEvent) -> None:
@@ -527,6 +540,7 @@ class FloatingLogButton(ft.Container):
             self._drag.end()
             self._save_position()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _click(self) -> None:
@@ -546,6 +560,7 @@ class FloatingLogButton(ft.Container):
             if self._on_click_handler:
                 self._on_click_handler()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def set_visible(self, visible: bool) -> None:
@@ -554,6 +569,7 @@ class FloatingLogButton(ft.Container):
             self.visible = visible
             self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def update_icon(self, expanded: bool) -> None:
@@ -567,4 +583,5 @@ class FloatingLogButton(ft.Container):
                     IconSet.DOCUMENT, size=22, color=THEME.mc_gold)
             self._button.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass

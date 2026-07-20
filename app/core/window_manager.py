@@ -87,7 +87,11 @@ class WindowManager:
         try:
             page.on_resize = self._on_window_resize
         except Exception:
-            logger.warning("on_resize 事件不可用，跳过窗口大小监听", module="WindowManager")
+            # Flet versions may not expose on_resize on all platforms.
+            logger.warning(
+                "on_resize 事件不可用，跳过窗口大小监听",
+                module="WindowManager",
+            )
 
         # 设置图标
         icon_path = self._resolve_icon_path()
@@ -106,6 +110,7 @@ class WindowManager:
                 ft.ThemeMode.LIGHT if mode == "light" else ft.ThemeMode.DARK
             )
         except Exception:
+            # Theme may update after page dispose; ignore.
             pass
 
     def build_title_bar(self) -> ft.Container:
@@ -251,7 +256,10 @@ class WindowManager:
             self.page.window.update()
             self._sync_maximize_button_state()
         except Exception as ex:
-            logger.error(f"切换窗口最大化失败: {ex}", module="WindowManager")
+            logger.error(
+                f"切换窗口最大化失败: {ex}",
+                module="WindowManager",
+            )
 
     def _sync_maximize_button_state(self) -> None:
         """同步最大化按钮显示状态"""
@@ -266,6 +274,7 @@ class WindowManager:
             self._maximize_button.tooltip = "还原" if is_maximized else "最大化"
             self._maximize_button.update()
         except Exception:
+            # Button may already be unmounted.
             pass
 
     def _close(self, e: ft.ControlEvent) -> None:
@@ -284,11 +293,17 @@ class WindowManager:
         """
         try:
             event_type = getattr(e, "type", None)
-            if event_type == ft.WindowEventType.CLOSE or str(event_type).lower().endswith("close"):
+            if (
+                event_type == ft.WindowEventType.CLOSE
+                or str(event_type).lower().endswith("close")
+            ):
                 self.shutdown()
-            elif str(event_type).lower().endswith(("maximize", "unmaximize", "restore", "resize")):
+            elif str(event_type).lower().endswith(
+                ("maximize", "unmaximize", "restore", "resize")
+            ):
                 self._sync_maximize_button_state()
         except Exception:
+            # Event plumbing is best-effort across Flet hosts.
             pass
 
     def _on_window_resize(self, e: Any) -> None:
@@ -307,7 +322,10 @@ class WindowManager:
             self._resize_timer.daemon = True
             self._resize_timer.start()
         except Exception as ex:
-            logger.error(f"窗口大小变化处理失败: {ex}", module="WindowManager")
+            logger.error(
+                f"窗口大小变化处理失败: {ex}",
+                module="WindowManager",
+            )
 
     def _apply_resize(self) -> None:
         """实际执行窗口大小调整"""
@@ -321,10 +339,13 @@ class WindowManager:
 
             logger.debug(
                 f"窗口大小变化: {width}x{height}",
-                module="WindowManager"
+                module="WindowManager",
             )
         except Exception as ex:
-            logger.error(f"窗口大小变化处理失败: {ex}", module="WindowManager")
+            logger.error(
+                f"窗口大小变化处理失败: {ex}",
+                module="WindowManager",
+            )
 
     def apply_responsive_layout(self, width: float, height: float) -> None:
         """应用响应式布局
@@ -414,6 +435,7 @@ class WindowManager:
         try:
             self._deps.stop_gui_optimizer()
         except Exception:
+            # Shutdown must continue even if monitor teardown fails.
             pass
 
     def _dispose_views(self) -> None:
@@ -433,8 +455,8 @@ class WindowManager:
     def _shutdown_logger(self) -> None:
         """关闭日志"""
         try:
-            from core.logger import logger
-            logger.shutdown()
+            from core.logger import logger as app_logger
+            app_logger.shutdown()
         except Exception:
             pass
 
@@ -449,6 +471,7 @@ class WindowManager:
                     try:
                         await self.page.window.close()
                     except Exception:
+                        # Final close path is best-effort.
                         pass
 
             self.page.run_task(_destroy_window)
@@ -473,8 +496,8 @@ class WindowManager:
 
         candidates.append(Path(__file__).parent.parent.parent / icon_name)
 
-        for p in candidates:
-            if p.exists():
-                return str(p)
+        for path in candidates:
+            if path.exists():
+                return str(path)
 
         return None
