@@ -203,58 +203,13 @@ class WorldStatsService:
             region_files = scan_all_regions(world_path)
             stats.total_regions = len(region_files)
             tracker.increment_files(len(region_files))
-
-            block_counter: Counter[str] = Counter()
-            entity_counter: Counter[str] = Counter()
-            total_regions = len(region_files)
-
-            if total_regions == 0:
-                self._report_progress(
-                    progress_callback,
-                    self._FINALIZE_VALUE,
-                    "finalizing",
-                )
-            else:
-                self._report_progress(
-                    progress_callback,
-                    self._REGION_START,
-                    f"regions:0:{total_regions}",
-                )
-
-            for idx, region_path in enumerate(region_files):
-                try:
-                    rel_key = self._region_size_key(world_path, region_path)
-                    stats.region_sizes[rel_key] = region_path.stat().st_size
-                    region_stats = self._analyze_region_chunks(region_path)
-                    self._merge_region_stats(
-                        stats,
-                        region_stats,
-                        block_counter,
-                        entity_counter,
-                    )
-                except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                    self.log(
-                        f"分析区域 {region_path.name} 失败: {exc}",
-                        "WARNING",
-                    )
-                    tracker.increment_errors(1)
-                except Exception as exc:
-                    # 区域解析库可能抛出非标准错误；跳过该文件继续。
-                    self.log(
-                        f"分析区域 {region_path.name} 失败: {exc}",
-                        "WARNING",
-                    )
-                    tracker.increment_errors(1)
-                done = idx + 1
-                if total_regions > 0:
-                    fraction = done / total_regions
-                    value = self._REGION_START + self._REGION_SPAN * fraction
-                    self._report_progress(
-                        progress_callback,
-                        value,
-                        f"regions:{done}:{total_regions}",
-                    )
-
+            block_counter, entity_counter = self._analyze_all_regions(
+                world_path,
+                region_files,
+                stats,
+                progress_callback,
+                tracker,
+            )
             self._report_progress(
                 progress_callback,
                 self._FINALIZE_VALUE,
@@ -265,6 +220,84 @@ class WorldStatsService:
             self._report_progress(progress_callback, 1.0, "done")
 
         return stats
+
+    def _analyze_all_regions(
+        self,
+        world_path: Path,
+        region_files: List[Path],
+        stats: WorldStatistics,
+        progress_callback: Optional[StatsProgressCallback],
+        tracker: Any,
+    ) -> Tuple[Counter[str], Counter[str]]:
+        """Scan every region file and merge block/entity counters."""
+        block_counter: Counter[str] = Counter()
+        entity_counter: Counter[str] = Counter()
+        total_regions = len(region_files)
+        if total_regions == 0:
+            self._report_progress(
+                progress_callback,
+                self._FINALIZE_VALUE,
+                "finalizing",
+            )
+            return block_counter, entity_counter
+
+        self._report_progress(
+            progress_callback,
+            self._REGION_START,
+            f"regions:0:{total_regions}",
+        )
+        for idx, region_path in enumerate(region_files):
+            self._analyze_one_region(
+                world_path,
+                region_path,
+                stats,
+                block_counter,
+                entity_counter,
+                tracker,
+            )
+            done = idx + 1
+            fraction = done / total_regions
+            value = self._REGION_START + self._REGION_SPAN * fraction
+            self._report_progress(
+                progress_callback,
+                value,
+                f"regions:{done}:{total_regions}",
+            )
+        return block_counter, entity_counter
+
+    def _analyze_one_region(
+        self,
+        world_path: Path,
+        region_path: Path,
+        stats: WorldStatistics,
+        block_counter: Counter[str],
+        entity_counter: Counter[str],
+        tracker: Any,
+    ) -> None:
+        """Analyze a single region file; log and continue on failure."""
+        try:
+            rel_key = self._region_size_key(world_path, region_path)
+            stats.region_sizes[rel_key] = region_path.stat().st_size
+            region_stats = self._analyze_region_chunks(region_path)
+            self._merge_region_stats(
+                stats,
+                region_stats,
+                block_counter,
+                entity_counter,
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            self.log(
+                f"分析区域 {region_path.name} 失败: {exc}",
+                "WARNING",
+            )
+            tracker.increment_errors(1)
+        except Exception as exc:
+            # 区域解析库可能抛出非标准错误；跳过该文件继续。
+            self.log(
+                f"分析区域 {region_path.name} 失败: {exc}",
+                "WARNING",
+            )
+            tracker.increment_errors(1)
 
     @staticmethod
     def _report_progress(
