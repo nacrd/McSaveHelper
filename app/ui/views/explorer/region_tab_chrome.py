@@ -513,6 +513,23 @@ def build_region_tab_chrome(
         on_fill_nbt=on_fill_nbt,
         on_delete_region=on_delete_region,
     )
+    return _assemble_region_tab_chrome(
+        controls=controls,
+        side=side,
+        help_text=help_text,
+        map_host=map_host,
+        map_card=map_card,
+    )
+
+
+def _assemble_region_tab_chrome(
+    *,
+    controls: dict[str, Any],
+    side: dict[str, Any],
+    help_text: ft.Text,
+    map_host: ft.Container,
+    map_card: ft.Container,
+) -> RegionTabChrome:
     left_panel = ft.Container(content=map_host, expand=True)
     side_panel = ft.Container(
         content=ft.Column(
@@ -682,6 +699,38 @@ def _build_region_side_panel(
         add_marker_callback=add_marker_callback,
         delete_marker_callback=delete_marker_callback,
     )
+    selection_panel, stats_panel = _build_status_stats_panels(
+        t,
+        status_text=status_text,
+        stats_text=stats_text,
+    )
+    legend_container = ft.Container(content=build_region_legend_content(translate))
+    action_panel = _build_region_action_panel(
+        t,
+        on_fill_nbt=on_fill_nbt,
+        on_delete_region=on_delete_region,
+    )
+    return {
+        "stats_text": stats_text,
+        "status_text": status_text,
+        "marker_count_text": marker_controls["marker_count_text"],
+        "marker_list": marker_controls["marker_list"],
+        "add_marker_button": marker_controls["add_marker_button"],
+        "delete_marker_button": marker_controls["delete_marker_button"],
+        "selection_panel": selection_panel,
+        "stats_panel": stats_panel,
+        "marker_panel": marker_controls["marker_panel"],
+        "legend_container": legend_container,
+        "action_panel": action_panel,
+    }
+
+
+def _build_status_stats_panels(
+    t: Translate,
+    *,
+    status_text: ft.Text,
+    stats_text: ft.Text,
+) -> tuple[ft.Control, ft.Control]:
     selection_panel = card(
         ft.Column(
             [
@@ -712,25 +761,7 @@ def _build_region_side_panel(
         ),
         padding=8,
     )
-    legend_container = ft.Container(content=build_region_legend_content(translate))
-    action_panel = _build_region_action_panel(
-        t,
-        on_fill_nbt=on_fill_nbt,
-        on_delete_region=on_delete_region,
-    )
-    return {
-        "stats_text": stats_text,
-        "status_text": status_text,
-        "marker_count_text": marker_controls["marker_count_text"],
-        "marker_list": marker_controls["marker_list"],
-        "add_marker_button": marker_controls["add_marker_button"],
-        "delete_marker_button": marker_controls["delete_marker_button"],
-        "selection_panel": selection_panel,
-        "stats_panel": stats_panel,
-        "marker_panel": marker_controls["marker_panel"],
-        "legend_container": legend_container,
-        "action_panel": action_panel,
-    }
+    return selection_panel, stats_panel
 
 
 def _build_marker_side_controls(

@@ -25,47 +25,18 @@ def parse_item(
     Returns:
         ItemInfo: 结构化物品信息。
     """
-    item_id = str(item_data.get("id", "") or "")
-    count = _as_int(item_data.get("count", item_data.get("Count", 1))) or 1
-    slot = _as_int(item_data.get("slot", item_data.get("Slot", -1)))
-    if slot is None:
-        slot = -1
-    tag = item_data.get("tag")
-    components = item_data.get("components")
-
+    item_id, count, slot, tag, components = _item_core_fields(item_data)
     display_name = get_item_name(item_id)
     max_dur = _MAX_DURABILITY.get(item_id)
-    damage: Optional[int] = None
-    durability_percent: Optional[float] = None
-    enchantments: List[Dict[str, Any]] = []
-    custom_name: Optional[str] = None
-    lore: List[str] = []
-
-    if components is not None:
-        custom_name, lore, damage, enchantments = _safe_parse_components(
-            components,
-            get_enchantment_name,
-        )
-        if custom_name:
-            display_name = custom_name
-
-    display_name, custom_name, lore, damage, enchantments = _merge_legacy_fields(
+    custom_name, lore, damage, enchantments = _parse_item_details(
         tag=tag,
+        components=components,
         get_enchantment_name=get_enchantment_name,
         display_name=display_name,
-        custom_name=custom_name,
-        lore=lore,
-        damage=damage,
-        enchantments=enchantments,
     )
-
-    if damage is not None and max_dur is not None and max_dur > 0:
-        remaining = max_dur - damage
-        durability_percent = max(
-            0.0,
-            min(100.0, (remaining / max_dur) * 100.0),
-        )
-
+    if custom_name:
+        display_name = custom_name
+    durability_percent = _durability_percent(damage, max_dur)
     return ItemInfo(
         id=item_id,
         display_name=display_name,
@@ -78,6 +49,61 @@ def parse_item(
         lore=lore,
         slot=slot,
     )
+
+
+def _item_core_fields(
+    item_data: Dict[str, Any],
+) -> tuple[str, int, int, Any, Any]:
+    item_id = str(item_data.get("id", "") or "")
+    count = _as_int(item_data.get("count", item_data.get("Count", 1))) or 1
+    slot = _as_int(item_data.get("slot", item_data.get("Slot", -1)))
+    if slot is None:
+        slot = -1
+    return (
+        item_id,
+        count,
+        slot,
+        item_data.get("tag"),
+        item_data.get("components"),
+    )
+
+
+def _parse_item_details(
+    *,
+    tag: Any,
+    components: Any,
+    get_enchantment_name: Callable[[str], str],
+    display_name: str,
+) -> tuple[Optional[str], List[str], Optional[int], List[Dict[str, Any]]]:
+    damage: Optional[int] = None
+    enchantments: List[Dict[str, Any]] = []
+    custom_name: Optional[str] = None
+    lore: List[str] = []
+    if components is not None:
+        custom_name, lore, damage, enchantments = _safe_parse_components(
+            components,
+            get_enchantment_name,
+        )
+    _, custom_name, lore, damage, enchantments = _merge_legacy_fields(
+        tag=tag,
+        get_enchantment_name=get_enchantment_name,
+        display_name=display_name,
+        custom_name=custom_name,
+        lore=lore,
+        damage=damage,
+        enchantments=enchantments,
+    )
+    return custom_name, lore, damage, enchantments
+
+
+def _durability_percent(
+    damage: Optional[int],
+    max_dur: Optional[int],
+) -> Optional[float]:
+    if damage is None or max_dur is None or max_dur <= 0:
+        return None
+    remaining = max_dur - damage
+    return max(0.0, min(100.0, (remaining / max_dur) * 100.0))
 
 
 def _merge_legacy_fields(

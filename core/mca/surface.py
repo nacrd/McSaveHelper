@@ -433,6 +433,36 @@ def _load_chunk_views(
         views=views,
     )
 
+    _decode_chunk_view_misses(
+        region=region,
+        misses=misses,
+        path_key=path_key,
+        mtime_ns=mtime_ns,
+        file_size=file_size,
+        views=views,
+        cache_epoch=cache_epoch,
+        cancel_check=cancel_check,
+        decode_workers=decode_workers,
+        failed_chunks=failed_chunks,
+        external_signatures=external_signatures,
+    )
+    return views
+
+
+def _decode_chunk_view_misses(
+    *,
+    region: RegionFile,
+    misses: List[Tuple[int, int, List[Tuple[int, int]]]],
+    path_key: str,
+    mtime_ns: int,
+    file_size: int,
+    views: Dict[Tuple[int, int], Optional[Any]],
+    cache_epoch: int,
+    cancel_check: Optional[Callable[[], bool]],
+    decode_workers: Optional[int],
+    failed_chunks: Optional[Set[Tuple[int, int]]],
+    external_signatures: Dict[Tuple[int, int], str],
+) -> None:
     requested_workers = (
         _DECODE_WORKERS if decode_workers is None else max(1, int(decode_workers))
     )
@@ -457,20 +487,19 @@ def _load_chunk_views(
             failed_chunks=failed_chunks,
             external_signatures=external_signatures,
         )
-    else:
-        _decode_misses_parallel(
-            region,
-            misses,
-            path_key,
-            mtime_ns,
-            file_size,
-            views,
-            cache_epoch,
-            workers=workers,
-            failed_chunks=failed_chunks,
-            external_signatures=external_signatures,
-        )
-    return views
+        return
+    _decode_misses_parallel(
+        region,
+        misses,
+        path_key,
+        mtime_ns,
+        file_size,
+        views,
+        cache_epoch,
+        workers=workers,
+        failed_chunks=failed_chunks,
+        external_signatures=external_signatures,
+    )
 
 
 def _jobs_by_chunk(

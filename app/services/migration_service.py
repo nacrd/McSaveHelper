@@ -180,27 +180,7 @@ class MigrationService:
     ) -> str:
         """执行单存档迁移。
 
-        Args:
-            src: 源存档目录路径。
-            dest: 目标输出目录路径。
-            world_name: 世界存档名称。
-            mode: 迁移模式，``fast`` 或 ``full``。
-            offline: 是否启用离线 UUID 解析。
-            clean: 是否启用清理模式。
-            pure_clean: 是否启用纯清理模式。
-            target_platform: 目标平台（当前仅支持 ``java``）。
-            target_version: 目标版本；非空表示跨版本（当前会拒绝）。
-            manual_names_str: 逗号分隔的手动指定玩家名称。
-            log_cb: 日志回调。
-            progress_cb: 进度回调。
-
-        Returns:
-            str: 发布后的世界目录路径。
-
-        Raises:
-            ValueError: 路径/模式无效。
-            RuntimeError: 产物无效或平台/版本转换被拒绝。
-            OSError: 备份、暂存或发布 I/O 失败。
+        See class docs and :class:`MigrationOptions` for parameter meaning.
         """
         options = MigrationOptions.from_manual_names_str(
             mode=mode,
@@ -253,25 +233,6 @@ class MigrationService:
 
         内部将公共选项收束为 :class:`MigrationOptions`，再交给
         :class:`BatchProcessor`。
-
-        Args:
-            dest_dir: 目标输出目录路径。
-            mode: 迁移模式，``fast`` 或 ``full``。
-            offline: 是否启用离线 UUID 解析。
-            clean: 是否启用清理模式。
-            pure_clean: 是否启用纯清理模式。
-            target_platform: 目标平台（当前仅支持 ``java``）。
-            target_version: 目标版本；非空表示跨版本（当前会拒绝）。
-            manual_names_str: 逗号分隔的手动指定玩家名称。
-            max_concurrent: 最大并发处理数量。
-            log_cb: 日志回调。
-            progress_cb: 进度回调。
-
-        Returns:
-            dict[str, Any]: 按任务键汇总的结果字典。
-
-        Raises:
-            ValueError: 目标目录为空等输入错误。
         """
         if not dest_dir.strip():
             raise ValueError("批量目标输出目录不能为空")
