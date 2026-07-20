@@ -169,44 +169,7 @@ class MapFullscreenController:
         body: ft.Container,
     ) -> ft.Container:
         top_bar = ft.Container(
-            content=ft.Row(
-                [
-                    ft.Text(
-                        self._translate("map.fullscreen_title", "区域地图 · 全屏"),
-                        size=14,
-                        weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary,
-                    ),
-                    ft.Container(expand=True),
-                    btn_primary(
-                        self._translate("map.refresh", "刷新地图"),
-                        width=84,
-                        on_click=lambda e: self._refresh(),
-                    ),
-                    btn_ghost(
-                        "🔍+",
-                        width=52,
-                        on_click=lambda e: self._zoom_in(),
-                    ),
-                    btn_ghost(
-                        "🔍−",
-                        width=52,
-                        on_click=lambda e: self._zoom_out(),
-                    ),
-                    btn_ghost(
-                        "🏠",
-                        width=52,
-                        on_click=lambda e: self._reset(),
-                    ),
-                    btn_ghost(
-                        self._translate("map.exit_fullscreen", "退出全屏"),
-                        width=120,
-                        on_click=lambda e: self.exit(),
-                    ),
-                ],
-                spacing=8,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
+            content=self._build_overlay_actions(),
             padding=ft.Padding(left=12, right=12, top=8, bottom=8),
             height=bar_height,
             bgcolor=THEME.bg_card,
@@ -222,6 +185,46 @@ class MapFullscreenController:
             bgcolor="#0B120B",
             opacity=0.0,
             animate_opacity=ft.Animation(180, ft.AnimationCurve.EASE_OUT),
+        )
+
+    def _build_overlay_actions(self) -> ft.Row:
+        return ft.Row(
+            [
+                ft.Text(
+                    self._translate("map.fullscreen_title", "区域地图 · 全屏"),
+                    size=14,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                ft.Container(expand=True),
+                btn_primary(
+                    self._translate("map.refresh", "刷新地图"),
+                    width=84,
+                    on_click=lambda e: self._refresh(),
+                ),
+                btn_ghost(
+                    "🔍+",
+                    width=52,
+                    on_click=lambda e: self._zoom_in(),
+                ),
+                btn_ghost(
+                    "🔍−",
+                    width=52,
+                    on_click=lambda e: self._zoom_out(),
+                ),
+                btn_ghost(
+                    "🏠",
+                    width=52,
+                    on_click=lambda e: self._reset(),
+                ),
+                btn_ghost(
+                    self._translate("map.exit_fullscreen", "退出全屏"),
+                    width=120,
+                    on_click=lambda e: self.exit(),
+                ),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     def _schedule_enter_animation(

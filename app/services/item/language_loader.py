@@ -326,19 +326,6 @@ def extract_language_from_local_minecraft(
     1. Resolve data dir from config / jar / save path / platform default
     2. Modern assets: ``assets/indexes/*.json`` → ``assets/objects/<hh>/<hash>``
     3. Client jar embedded lang (legacy ``.lang`` or rare embeds)
-
-    Args:
-        name_map: Mutable item/block name map.
-        enchantment_names: Mutable enchantment name map.
-        locale: Preferred locale.
-        jar_path: Optional explicit client jar.
-        minecraft_dir: Optional ``.minecraft`` directory (legacy alias of
-            ``configured_dir``).
-        start_path: Path used to walk upward for ``.minecraft`` (often a save).
-        configured_dir: Settings-page configured Minecraft data root.
-
-    Returns:
-        LanguageImportResult: First successful source wins; empty result if none.
     """
     from core.texture.client_jar import discover_minecraft_directory
 
@@ -359,7 +346,7 @@ def extract_language_from_local_minecraft(
     )
     if assets_result is not None:
         return assets_result
-    jar_result = _try_import_from_client_jar(
+    return _try_import_from_client_jar(
         name_map,
         enchantment_names,
         locale=locale,
@@ -367,9 +354,6 @@ def extract_language_from_local_minecraft(
         jar_path=jar_path,
         mc_dir=mc_dir,
     )
-    if jar_result.count > 0:
-        return jar_result
-    return jar_result
 
 
 def _try_import_from_assets(

@@ -670,18 +670,14 @@ def _build_region_map_controls(
         on_display_mode_changed,
     )
     search_field, search_button = _build_search_controls(t, search_callback)
-    (
-        coord_button,
-        empty_button,
-        marker_button,
-        fullscreen_button,
-    ) = _build_map_toggle_buttons(
+    toggle_buttons = _build_map_toggle_buttons(
         t,
         on_toggle_coordinates,
         on_toggle_empty,
         marker_callback,
         on_toggle_fullscreen,
     )
+    coord_button, empty_button, marker_button, fullscreen_button = toggle_buttons
     top_bar, left_toolbar, right_toolbar = _build_floating_toolbars(
         t,
         dimension_dropdown=dimension_dropdown,
@@ -836,22 +832,11 @@ def _build_marker_side_controls(
     marker_panel = card(
         ft.Column(
             [
-                ft.Row(
-                    [
-                        ft.Icon(ft.Icons.LOCATION_ON, size=16, color=THEME.mc_gold),
-                        ft.Text(
-                            t("map.markers", "地图标记"),
-                            size=12,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
-                        ),
-                        ft.Container(expand=True),
-                        marker_count_text,
-                        add_marker_button,
-                        delete_marker_button,
-                    ],
-                    spacing=3,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                _marker_header_row(
+                    t,
+                    marker_count_text,
+                    add_marker_button,
+                    delete_marker_button,
                 ),
                 marker_list,
             ],
@@ -866,6 +851,31 @@ def _build_marker_side_controls(
         "delete_marker_button": delete_marker_button,
         "marker_panel": marker_panel,
     }
+
+
+def _marker_header_row(
+    t: Translate,
+    marker_count_text: ft.Text,
+    add_marker_button: ft.IconButton,
+    delete_marker_button: ft.IconButton,
+) -> ft.Row:
+    return ft.Row(
+        [
+            ft.Icon(ft.Icons.LOCATION_ON, size=16, color=THEME.mc_gold),
+            ft.Text(
+                t("map.markers", "地图标记"),
+                size=12,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.text_primary,
+            ),
+            ft.Container(expand=True),
+            marker_count_text,
+            add_marker_button,
+            delete_marker_button,
+        ],
+        spacing=3,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
 
 
 def _build_region_action_panel(

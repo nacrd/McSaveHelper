@@ -240,65 +240,74 @@ class MapExportView(ft.Column):
         """构建缺少依赖时的 UI"""
         self.spacing = 20
         self.expand = True
-
         error_card = card(
             ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        self.app.translate(
-                                            "map_export.missing_dependency",
-                                            "缺少依赖库",
-                                        ),
-                                        size=20,
-                                        weight=ft.FontWeight.BOLD,
-                                        color=THEME.text_primary,
-                                    ),
-                                    ft.Text(
-                                        self.app.translate(
-                                            "map_export.pillow_required",
-                                            "地图导出功能需要 Pillow 库支持",
-                                        ),
-                                        size=13,
-                                        color=THEME.text_secondary,
-                                    ),
-                                ],
-                                spacing=4,
-                            ),
-                        ],
-                        spacing=16,
-                    ),
+                    self._missing_dependency_header(),
                     ft.Divider(height=20, color=THEME.border_subtle),
-                    ft.Text(
-                        self.app.translate(
-                            "map_export.install_hint",
-                            "请在命令行运行以下命令安装依赖：",
-                        ),
-                        size=13,
-                        color=THEME.text_secondary,
-                    ),
-                    ft.Container(
-                        content=ft.Text(
-                            "pip install Pillow",
-                            size=13,
-                            color=THEME.mc_grass,
-                            font_family="monospace",
-                            selectable=True,
-                        ),
-                        padding=12,
-                        bgcolor=THEME.bg_secondary,
-                        border_radius=8,
-                    ),
+                    self._missing_dependency_install_hint(),
                 ],
                 spacing=12,
             )
         )
-
         self.controls = [error_card]
+
+    def _missing_dependency_header(self) -> ft.Row:
+        return ft.Row(
+            [
+                ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
+                ft.Column(
+                    [
+                        ft.Text(
+                            self.app.translate(
+                                "map_export.missing_dependency",
+                                "缺少依赖库",
+                            ),
+                            size=20,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.text_primary,
+                        ),
+                        ft.Text(
+                            self.app.translate(
+                                "map_export.pillow_required",
+                                "地图导出功能需要 Pillow 库支持",
+                            ),
+                            size=13,
+                            color=THEME.text_secondary,
+                        ),
+                    ],
+                    spacing=4,
+                ),
+            ],
+            spacing=16,
+        )
+
+    def _missing_dependency_install_hint(self) -> ft.Column:
+        return ft.Column(
+            [
+                ft.Text(
+                    self.app.translate(
+                        "map_export.install_hint",
+                        "请在命令行运行以下命令安装依赖：",
+                    ),
+                    size=13,
+                    color=THEME.text_secondary,
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "pip install Pillow",
+                        size=13,
+                        color=THEME.mc_grass,
+                        font_family="monospace",
+                        selectable=True,
+                    ),
+                    padding=12,
+                    bgcolor=THEME.bg_secondary,
+                    border_radius=8,
+                ),
+            ],
+            spacing=12,
+        )
 
     def _build_ui(self) -> None:
         """构建 UI"""

@@ -166,7 +166,36 @@ def _build_shell_log_controls(
 
 
 def _build_top_bar(translate: Translate, top_actions: ft.Row) -> ft.Container:
-    identity = ft.Row(
+    identity = _build_top_bar_identity(translate)
+    header = ft.Container(
+        content=ft.Row(
+            [identity, top_actions],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
+        bgcolor=THEME.mc_wood,
+    )
+    grass_strip = ft.Container(
+        height=6,
+        bgcolor=THEME.mc_grass,
+        border_radius=ft.BorderRadius(
+            top_left=8,
+            top_right=8,
+            bottom_left=0,
+            bottom_right=0,
+        ),
+    )
+    return ft.Container(
+        content=ft.Column([grass_strip, header], spacing=0),
+        bgcolor=THEME.mc_wood,
+        border=mc_border(3),
+        border_radius=8,
+    )
+
+
+def _build_top_bar_identity(translate: Translate) -> ft.Row:
+    return ft.Row(
         [
             ft.Container(
                 content=ft.Icon(
@@ -202,31 +231,6 @@ def _build_top_bar(translate: Translate, top_actions: ft.Row) -> ft.Container:
         ],
         spacing=14,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-    header = ft.Container(
-        content=ft.Row(
-            [identity, top_actions],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
-        bgcolor=THEME.mc_wood,
-    )
-    grass_strip = ft.Container(
-        height=6,
-        bgcolor=THEME.mc_grass,
-        border_radius=ft.BorderRadius(
-            top_left=8,
-            top_right=8,
-            bottom_left=0,
-            bottom_right=0,
-        ),
-    )
-    return ft.Container(
-        content=ft.Column([grass_strip, header], spacing=0),
-        bgcolor=THEME.mc_wood,
-        border=mc_border(3),
-        border_radius=8,
     )
 
 

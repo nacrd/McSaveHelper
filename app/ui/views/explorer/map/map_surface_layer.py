@@ -387,6 +387,26 @@ class MapSurfaceLayer:
             self._max_regions,
             center_z,
         )
+        return self._shrink_bounds_to_pixel_budget(
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+            center_x,
+            center_z,
+            pixels_per_region,
+        )
+
+    def _shrink_bounds_to_pixel_budget(
+        self,
+        min_x: int,
+        max_x: int,
+        min_z: int,
+        max_z: int,
+        center_x: int,
+        center_z: int,
+        pixels_per_region: int,
+    ) -> Tuple[int, int, int, int]:
         while (
             (max_x - min_x + 1)
             * (max_z - min_z + 1)

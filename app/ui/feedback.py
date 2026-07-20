@@ -201,8 +201,6 @@ class FeedbackDialog:
     def __init__(self, page: ft.Page, on_submit: Optional[Callable] = None):
         self.page = page
         self.on_submit_callback = on_submit
-
-        # 反馈类型选择
         self.feedback_type = ft.Dropdown(
             label="反馈类型",
             options=[
@@ -214,15 +212,11 @@ class FeedbackDialog:
             value="bug",
             width=200,
         )
-
-        # 标题输入
         self.title_field = ft.TextField(
             label="标题",
             hint_text="简要描述您的反馈",
             max_length=100,
         )
-
-        # 详细描述
         self.description_field = ft.TextField(
             label="详细描述",
             hint_text="请提供更多细节...",
@@ -230,36 +224,35 @@ class FeedbackDialog:
             min_lines=5,
             max_lines=10,
         )
-
-        # 邮箱（可选）
         self.email_field = ft.TextField(
             label="您的邮箱（可选）",
             hint_text="如需回复，请留下邮箱",
         )
-
-        # 对话框
         self.dialog = ft.AlertDialog(
             title=ft.Text("提交反馈", size=20, weight=ft.FontWeight.BOLD),
-            content=ft.Container(
-                content=ft.Column([
-                    self.feedback_type,
-                    self.title_field,
-                    self.description_field,
-                    self.email_field,
-                    ft.Text(
-                        "感谢您的反馈！这将帮助我们改进产品。",
-                        size=12,
-                        color="grey",
-                        italic=True,
-                    ),
-                ], spacing=15, scroll=ft.ScrollMode.AUTO),
-                width=500,
-                height=500,
-            ),
+            content=self._build_dialog_content(),
             actions=[
                 ft.TextButton("取消", on_click=self._on_cancel),
                 ft.ElevatedButton("提交", on_click=self._on_submit),
             ],
+        )
+
+    def _build_dialog_content(self) -> ft.Container:
+        return ft.Container(
+            content=ft.Column([
+                self.feedback_type,
+                self.title_field,
+                self.description_field,
+                self.email_field,
+                ft.Text(
+                    "感谢您的反馈！这将帮助我们改进产品。",
+                    size=12,
+                    color="grey",
+                    italic=True,
+                ),
+            ], spacing=15, scroll=ft.ScrollMode.AUTO),
+            width=500,
+            height=500,
         )
 
     def show(self) -> None:

@@ -83,22 +83,7 @@ class MapExportService:
         region_dir: Optional[Path] = None,
         cancel_event: Optional[threading.Event] = None,
     ) -> Dict[str, Any]:
-        """导出地图，旧式参数和领域规格均可使用。
-
-        Args:
-            world_path: 存档路径。
-            output_path: 输出 PNG 路径。
-            map_type: 旧 API 的地图样式。
-            scale: 旧 API 的正整数缩放比例。
-            progress_callback: 进度回调。
-            log_callback: 日志回调。
-            spec: 可选的维度/样式/选择规格。
-            region_dir: 显式 region 目录，优先于维度发现。
-            cancel_event: 设置后尽快取消导出。
-
-        Returns:
-            dict[str, Any]: 含 success/cancelled/error 与尺寸等信息的结果。
-        """
+        """导出地图，旧式参数和领域规格均可使用。"""
         results = self._empty_export_result(spec)
         log = partial(self._emit_log, callback=log_callback)
         progress = partial(self._emit_progress, callback=progress_callback)

@@ -350,65 +350,86 @@ class MappingsView(ft.Column):
         try:
             paths = self._pick_asset_sources()
             locale = self._preferred_locale()
-            lang_count = 0
-            texture_count = 0
-            jar_count = 0
-
-            if paths:
-                json_files = [p for p in paths if p.suffix.lower() == ".json"]
-                jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
-                for json_path in json_files:
-                    lang_count += self._item_service.load_language_file(json_path)
-                for jar_path in jar_files:
-                    result = self._item_service.extract_language_from_jar_detailed(
-                        jar_path,
-                        locale=locale,
-                    )
-                    lang_count += result.count
-                    if result.count > 0:
-                        jar_count += 1
-                if jar_files:
-                    texture = self.app.texture.import_textures_from_jars(jar_files)
-                    texture_count = texture.extracted
-                    jar_count = max(jar_count, texture.jars)
-            else:
-                # No files chosen — fall back to configured / inferred Minecraft.
-                result = self._item_service.import_language_from_local_minecraft(
-                    locale=locale,
-                    configured_dir=self._configured_minecraft_dir(),
-                    start_path=self._current_save_start_path(),
-                )
-                lang_count = result.count
-                if result.jar_path and str(result.jar_path).lower().endswith(".jar"):
-                    jar_path = Path(result.jar_path)
-                    texture = self.app.texture.import_textures_from_jars([jar_path])
-                    texture_count = texture.extracted
-                    jar_count = max(1, texture.jars)
-                    self.app.texture.set_minecraft_jar(jar_path)
-                elif result.count > 0:
-                    # Assets path only (indexes/objects) — no jar textures.
-                    jar_count = 0
-
-            if lang_count <= 0 and texture_count <= 0:
-                self._item_mapping_status.value = self._t(
-                    "mappings.import_assets_empty",
-                    "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。",
-                )
-                self._item_mapping_status.color = THEME.warning
-            else:
-                parts = []
-                if lang_count > 0:
-                    parts.append(f"语言 {lang_count}")
-                if texture_count > 0:
-                    parts.append(f"贴图 {texture_count}（{max(1, jar_count)} jar）")
-                self._item_mapping_status.value = (
-                    f"导入完成：{'；'.join(parts)}（优先 {locale}）。"
-                )
-                self._item_mapping_status.color = THEME.mc_grass
+            lang_count, texture_count, jar_count = self._import_assets_from_sources(
+                paths,
+                locale,
+            )
+            self._set_asset_import_status(
+                lang_count,
+                texture_count,
+                jar_count,
+                locale,
+            )
             self._render_item_table(self._item_search_field.value or "")
             self.update()
         except Exception as ex:
             self.app.handle_exception(ex, title="导入语言/贴图失败")
+
+    def _import_assets_from_sources(
+        self,
+        paths: list[Path],
+        locale: str,
+    ) -> tuple[int, int, int]:
+        lang_count = 0
+        texture_count = 0
+        jar_count = 0
+        if paths:
+            json_files = [p for p in paths if p.suffix.lower() == ".json"]
+            jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
+            for json_path in json_files:
+                lang_count += self._item_service.load_language_file(json_path)
+            for jar_path in jar_files:
+                result = self._item_service.extract_language_from_jar_detailed(
+                    jar_path,
+                    locale=locale,
+                )
+                lang_count += result.count
+                if result.count > 0:
+                    jar_count += 1
+            if jar_files:
+                texture = self.app.texture.import_textures_from_jars(jar_files)
+                texture_count = texture.extracted
+                jar_count = max(jar_count, texture.jars)
+            return lang_count, texture_count, jar_count
+
+        # No files chosen — fall back to configured / inferred Minecraft.
+        result = self._item_service.import_language_from_local_minecraft(
+            locale=locale,
+            configured_dir=self._configured_minecraft_dir(),
+            start_path=self._current_save_start_path(),
+        )
+        lang_count = result.count
+        if result.jar_path and str(result.jar_path).lower().endswith(".jar"):
+            jar_path = Path(result.jar_path)
+            texture = self.app.texture.import_textures_from_jars([jar_path])
+            texture_count = texture.extracted
+            jar_count = max(1, texture.jars)
+            self.app.texture.set_minecraft_jar(jar_path)
+        return lang_count, texture_count, jar_count
+
+    def _set_asset_import_status(
+        self,
+        lang_count: int,
+        texture_count: int,
+        jar_count: int,
+        locale: str,
+    ) -> None:
+        if lang_count <= 0 and texture_count <= 0:
+            self._item_mapping_status.value = self._t(
+                "mappings.import_assets_empty",
+                "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。",
+            )
+            self._item_mapping_status.color = THEME.warning
+            return
+        parts = []
+        if lang_count > 0:
+            parts.append(f"语言 {lang_count}")
+        if texture_count > 0:
+            parts.append(f"贴图 {texture_count}（{max(1, jar_count)} jar）")
+        self._item_mapping_status.value = (
+            f"导入完成：{'；'.join(parts)}（优先 {locale}）。"
+        )
+        self._item_mapping_status.color = THEME.mc_grass
 
     def _pick_asset_sources(self) -> list[Path]:
         title = self._t(

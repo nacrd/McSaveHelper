@@ -66,6 +66,11 @@ class RegionMapService:
 
     def __init__(self) -> None:
         """初始化内部状态"""
+        self._init_scan_state()
+        self._init_topview_state()
+        self._init_topview_workers()
+
+    def _init_scan_state(self) -> None:
         self._mca_data: Dict[Tuple[int, int], int] = {}
         self._region_meta: Dict[Tuple[int, int], Dict[str, Any]] = {}
         # Metadata is intentionally loaded on demand.  Keep in-flight loads
@@ -73,9 +78,6 @@ class RegionMapService:
         self._region_meta_tasks: Dict[Tuple[int, int], asyncio.Task] = {}
         # region 坐标 → mca 文件路径（俯视图渲染用）
         self._region_paths: Dict[Tuple[int, int], str] = {}
-        # region 坐标 → PNG bytes（顶视瓦片缓存）
-        self._topview_tiles: OrderedDict[Tuple[int, int], bytes] = OrderedDict()
-        self._topview_memory_bytes = 0
         self._is_scanning: bool = False
         self._scan_progress: float = 0.0
         self._scan_task: Optional[asyncio.Task] = None
@@ -92,6 +94,11 @@ class RegionMapService:
         self._cached_snapshot_count: int = -1
         # 扫描线程与 UI 查询之间的共享数据保护。
         self._data_lock = threading.Lock()
+
+    def _init_topview_state(self) -> None:
+        # region 坐标 → PNG bytes（顶视瓦片缓存）
+        self._topview_tiles: OrderedDict[Tuple[int, int], bytes] = OrderedDict()
+        self._topview_memory_bytes = 0
         # 俯视图生成代数：clear/start 时递增，丢弃过期回调
         self._topview_generation: int = 0
         # coord -> generation.  The generation check prevents an old worker
@@ -117,6 +124,8 @@ class RegionMapService:
         ] = {}
         # 瓦片变更回调（由 UI 注册，在 UI 线程调度）
         self._tile_ready_callback: Optional[Any] = None
+
+    def _init_topview_workers(self) -> None:
         # Bounded topview queue: rendering also performs limited parallel chunk
         # decoding, so keep the outer pool small to avoid nested thread storms.
         cpu = os.cpu_count() or 2
@@ -865,21 +874,16 @@ class RegionMapService:
         source_file_size: int,
     ) -> None:
         """Publish worker output, notify UI, and refill the queue."""
-        source_signature = ""
-        with self._data_lock:
-            result_is_current = (
-                generation == self._topview_generation
-                and not cancel_event.is_set()
-                and not self._closed
-            )
-        if result_is_current and (png is None or not render_complete):
-            source_signature = self._topview_source_signature(
-                path,
-                coord,
-                source_mtime_ns,
-                source_file_size,
-                cancel_check=cancel_event.is_set,
-            )
+        source_signature = self._topview_result_signature(
+            path=path,
+            coord=coord,
+            generation=generation,
+            cancel_event=cancel_event,
+            png=png,
+            render_complete=render_complete,
+            source_mtime_ns=source_mtime_ns,
+            source_file_size=source_file_size,
+        )
         callback, upgrade_size = self._publish_topview_result_locked(
             coord=coord,
             tile_size=tile_size,
@@ -891,17 +895,70 @@ class RegionMapService:
             source_file_size=source_file_size,
             source_signature=source_signature,
         )
-        if callback is not None:
-            try:
-                callback(coord)
-            except Exception:
-                # UI callback may fail after dispose; keep worker alive.
-                pass
+        self._notify_topview_ready(callback, coord)
+        self._safe_pump_topview_queue()
+        self._request_topview_upgrade_if_needed(
+            coord,
+            tile_size,
+            generation,
+            upgrade_size,
+        )
+
+    def _topview_result_signature(
+        self,
+        *,
+        path: str,
+        coord: Tuple[int, int],
+        generation: int,
+        cancel_event: threading.Event,
+        png: Optional[bytes],
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+    ) -> str:
+        with self._data_lock:
+            result_is_current = (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+            )
+        if result_is_current and (png is None or not render_complete):
+            return self._topview_source_signature(
+                path,
+                coord,
+                source_mtime_ns,
+                source_file_size,
+                cancel_check=cancel_event.is_set,
+            )
+        return ""
+
+    def _notify_topview_ready(
+        self,
+        callback: Optional[Any],
+        coord: Tuple[int, int],
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(coord)
+        except Exception:
+            # UI callback may fail after dispose; keep worker alive.
+            pass
+
+    def _safe_pump_topview_queue(self) -> None:
         try:
             self._pump_topview_queue()
         except (RuntimeError, ValueError, OSError):
             # Queue pump failures must not kill the worker thread.
             pass
+
+    def _request_topview_upgrade_if_needed(
+        self,
+        coord: Tuple[int, int],
+        tile_size: int,
+        generation: int,
+        upgrade_size: Optional[int],
+    ) -> None:
         if (
             upgrade_size is not None
             and upgrade_size > tile_size

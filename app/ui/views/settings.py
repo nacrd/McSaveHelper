@@ -312,8 +312,17 @@ class SettingsView(ft.Column):
 
     def _build_cache_card(self) -> None:
         body = ft.Column(spacing=0)
+        body.controls.append(self._cache_description())
+        body.controls.append(self._cache_summary_block())
+        body.controls.append(self._cache_action_row())
+        self.controls.append(_collapsible_section(
+            self._t("settings.cache.title", "地图缓存"),
+            body,
+            expanded=True,
+        ))
 
-        body.controls.append(ft.Container(
+    def _cache_description(self) -> ft.Container:
+        return ft.Container(
             content=ft.Text(
                 self._t(
                     "settings.cache.description",
@@ -324,8 +333,9 @@ class SettingsView(ft.Column):
                 color=THEME.text_muted,
             ),
             padding=ft.Padding(left=16, right=16, bottom=8, top=10),
-        ))
+        )
 
+    def _cache_summary_block(self) -> ft.Container:
         self._cache_summary = ft.Text(
             self._cache_summary_text(),
             size=13,
@@ -338,41 +348,35 @@ class SettingsView(ft.Column):
             color=THEME.text_muted,
             selectable=True,
         )
-        body.controls.append(ft.Container(
+        return ft.Container(
             content=ft.Column([
                 self._cache_summary,
                 self._cache_path_label,
             ], spacing=6),
             padding=ft.Padding(left=16, right=16, bottom=10),
-        ))
-
-        btn_row = ft.Row(
-            [
-                btn_ghost(
-                    self._t("settings.cache.refresh", "刷新"),
-                    width=100,
-                    height=32,
-                    on_click=lambda e: self._refresh_cache_stats(),
-                ),
-                btn_ghost(
-                    self._t("settings.cache.clear", "清理缓存"),
-                    width=120,
-                    height=32,
-                    on_click=lambda e: self._clear_map_cache(),
-                ),
-            ],
-            spacing=10,
         )
-        body.controls.append(ft.Container(
-            content=btn_row,
-            padding=ft.Padding(left=16, right=16, bottom=16),
-        ))
 
-        self.controls.append(_collapsible_section(
-            self._t("settings.cache.title", "地图缓存"),
-            body,
-            expanded=True,
-        ))
+    def _cache_action_row(self) -> ft.Container:
+        return ft.Container(
+            content=ft.Row(
+                [
+                    btn_ghost(
+                        self._t("settings.cache.refresh", "刷新"),
+                        width=100,
+                        height=32,
+                        on_click=lambda e: self._refresh_cache_stats(),
+                    ),
+                    btn_ghost(
+                        self._t("settings.cache.clear", "清理缓存"),
+                        width=120,
+                        height=32,
+                        on_click=lambda e: self._clear_map_cache(),
+                    ),
+                ],
+                spacing=10,
+            ),
+            padding=ft.Padding(left=16, right=16, bottom=16),
+        )
 
     def _cache_summary_text(self) -> str:
         try:

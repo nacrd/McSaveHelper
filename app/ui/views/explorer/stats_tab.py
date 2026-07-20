@@ -520,45 +520,59 @@ class StatsTabMixin(ExplorerMixinHost):
         if max_metric <= 0:
             max_metric = 1
         for item in players[:20]:
-            display = self._player_display_name(item)
-            metric = WorldStatsService.player_metric_value(item, sort_key)
-            primary = self._format_player_metric(item, sort_key, service)
-            detail = self._t(
-                "stats.player_detail",
-                "游玩 {duration} · 死亡 {deaths} · 击杀 {kills}"
-                " · 挖掘 {mined} · 放置 {placed}",
-                duration=service.format_ticks_as_duration(
-                    item.play_time_ticks,
-                ),
-                deaths=item.deaths,
-                kills=item.mob_kills,
-                mined=item.mined,
-                placed=item.placed,
-            )
             col.controls.append(
-                ft.Column([
-                    ft.Row([
-                        ft.Text(
-                            display,
-                            size=11,
-                            color=THEME.text_secondary,
-                            expand=True,
-                        ),
-                        ft.Text(
-                            primary,
-                            size=11,
-                            color=THEME.text_muted,
-                        ),
-                    ], spacing=8),
-                    ft.ProgressBar(
-                        value=metric / max_metric,
-                        width=None,
-                        color=THEME.accent,
-                        bgcolor=THEME.bg_secondary,
-                    ),
-                    ft.Text(detail, size=10, color=THEME.text_muted),
-                ], spacing=2)
+                self._build_player_stat_row(
+                    item,
+                    service,
+                    sort_key,
+                    max_metric,
+                )
             )
+
+    def _build_player_stat_row(
+        self,
+        item: PlayerPlaytimeStats,
+        service: WorldStatsService,
+        sort_key: str,
+        max_metric: float,
+    ) -> ft.Column:
+        display = self._player_display_name(item)
+        metric = WorldStatsService.player_metric_value(item, sort_key)
+        primary = self._format_player_metric(item, sort_key, service)
+        detail = self._t(
+            "stats.player_detail",
+            "游玩 {duration} · 死亡 {deaths} · 击杀 {kills}"
+            " · 挖掘 {mined} · 放置 {placed}",
+            duration=service.format_ticks_as_duration(
+                item.play_time_ticks,
+            ),
+            deaths=item.deaths,
+            kills=item.mob_kills,
+            mined=item.mined,
+            placed=item.placed,
+        )
+        return ft.Column([
+            ft.Row([
+                ft.Text(
+                    display,
+                    size=11,
+                    color=THEME.text_secondary,
+                    expand=True,
+                ),
+                ft.Text(
+                    primary,
+                    size=11,
+                    color=THEME.text_muted,
+                ),
+            ], spacing=8),
+            ft.ProgressBar(
+                value=metric / max_metric,
+                width=None,
+                color=THEME.accent,
+                bgcolor=THEME.bg_secondary,
+            ),
+            ft.Text(detail, size=10, color=THEME.text_muted),
+        ], spacing=2)
 
     def _format_player_metric(
         self,

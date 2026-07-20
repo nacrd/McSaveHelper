@@ -482,18 +482,6 @@ def convert_world(
 
     当前可靠路径仅支持 Java 同构复制与保守校验；Bedrock 与跨版本
     会显式拒绝，避免写出半损坏世界。
-
-    Args:
-        src_path: 源世界路径。
-        dst_path: 目标世界路径。
-        target_platform: ``java`` 或 ``bedrock``。
-        target_version: 目标版本 ID（仅 Java；非空时当前会拒绝）。
-
-    Returns:
-        ConversionResult: 转换结果，包含成功状态、已转换文件数和错误摘要。
-
-    Raises:
-        ConversionError: 不支持的平台/版本组合。
     """
     _reject_unsupported_conversion(target_platform, target_version)
     if src_path.resolve() == dst_path.resolve():

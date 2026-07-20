@@ -29,7 +29,6 @@ class PlayerHUDCard(ft.Column):
         super().__init__(spacing=6)
         self._t = t_cb or (lambda key, default="", **_kw: default or key)
         self._attrs: Dict[str, ft.Text] = {}
-
         self._avatar = ft.CircleAvatar(
             content=ft.Text("?", size=16, color=THEME.text_primary),
             radius=20,
@@ -53,22 +52,7 @@ class PlayerHUDCard(ft.Column):
             overflow=ft.TextOverflow.ELLIPSIS,
             font_family="monospace",
         )
-
-        self.controls.append(
-            ft.Row(
-                [
-                    self._avatar,
-                    ft.Column(
-                        [self._name_text, self._uuid_text],
-                        spacing=1,
-                        expand=True,
-                    ),
-                ],
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            )
-        )
-
+        self.controls.append(self._identity_row())
         # Compact metrics: primary vitals first, secondary below.
         primary = (
             ("health", "explorer.health", "生命", "♥"),
@@ -86,6 +70,20 @@ class PlayerHUDCard(ft.Column):
         )
         self.controls.append(self._metric_grid(primary))
         self.controls.append(self._metric_grid(secondary, muted=True))
+
+    def _identity_row(self) -> ft.Row:
+        return ft.Row(
+            [
+                self._avatar,
+                ft.Column(
+                    [self._name_text, self._uuid_text],
+                    spacing=1,
+                    expand=True,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
     def _metric_grid(
         self,
