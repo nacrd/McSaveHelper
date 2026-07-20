@@ -708,6 +708,8 @@ class RegionMapService:
             # region is replaced or removed while a retry is being checked.
             pass
         except Exception:
+            # The MCA signature still prevents stale suppression when the
+            # region is replaced or removed while a retry is being checked.
             pass
         return hashlib.sha1("|".join(parts).encode("ascii")).hexdigest()
 

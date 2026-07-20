@@ -494,7 +494,11 @@ class WorldStatsService:
                     entity_counts.update(chunk_entities)
                 elif present is None:
                     empty_chunks += 1
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+                if present is None:
+                    empty_chunks += 1
             except Exception:
+                # Region adapters may raise package-specific errors.
                 if present is None:
                     empty_chunks += 1
         return _RegionChunkStats(
@@ -592,7 +596,10 @@ class WorldStatsService:
                 'block_entities',
                 prefix='block:',
             ))
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+            pass
         except Exception:
+            # Corrupted chunk payloads should not abort region analysis.
             pass
         return block_counter, entity_counter
 
@@ -636,6 +643,8 @@ class WorldStatsService:
             manager.initialize_names(player_files, usercache)
             uuids.update(player_files.keys())
             uuids.update(usercache.keys())
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self.log(f"加载玩家名称失败: {exc}", "WARNING")
         except Exception as exc:
             self.log(f"加载玩家名称失败: {exc}", "WARNING")
         if name_map:
