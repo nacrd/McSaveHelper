@@ -113,17 +113,22 @@ def run_fast(
     manual_names: Optional[List[str]],
     log: LogCallback
 ) -> None:
-    """执行快速模式迁移
+    """执行快速模式迁移。
+
+    复制世界后按 usercache/手动名单生成双 UUID 玩家文件，可选清理。
 
     Args:
-        src_world: 源世界路径
-        dest_dir: 目标目录
-        world_name: 世界名称
-        offline_mode: 是否离线模式
-        do_clean: 是否清理
-        pure_clean: 是否进行纯净扫描（移除模组方块/实体）
-        manual_names: 手动玩家名列表
-        log: 日志回调函数
+        src_world: 源世界路径。
+        dest_dir: 目标输出父目录。
+        world_name: 目标世界文件夹名。
+        offline_mode: 是否以离线 UUID 为主生成副本。
+        do_clean: 是否执行常规清理。
+        pure_clean: 是否执行纯净清理（移除模组方块/实体）。
+        manual_names: 额外手动玩家名列表。
+        log: 日志回调。
+
+    Raises:
+        ValueError / OSError: 目标路径不安全或复制失败时由工具函数抛出。
     """
     dest_world = safe_destination_world(src_world, dest_dir, world_name)
 
