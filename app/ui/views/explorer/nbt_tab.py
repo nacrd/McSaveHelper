@@ -26,11 +26,17 @@ class NbtTabMixin(ExplorerMixinHost):
 
     def _build_nbt_tab(self) -> None:
         """构建 NBT 页签 UI - 三栏布局"""
-        # 初始化折叠状态
         self._nbt_left_collapsed = False
         self._nbt_right_collapsed = False
+        chrome = self._create_nbt_chrome()
+        self._bind_nbt_chrome(chrome)
+        self._wire_nbt_coordinators()
+        self._stage_manager.update_stage_status()
+        self._chunk_ops.render_chunk_object_rows([])
 
-        chrome = build_nbt_tab_chrome(
+    def _create_nbt_chrome(self) -> Any:
+        """Build static chrome controls for the NBT tab."""
+        return build_nbt_tab_chrome(
             current_label=self._current_nbt_label,
             callbacks=NbtTabCallbacks(
                 load_target=self._load_selected_nbt_target,
@@ -51,6 +57,9 @@ class NbtTabMixin(ExplorerMixinHost):
                 discard=self._discard_nbt_changes,
             ),
         )
+
+    def _bind_nbt_chrome(self, chrome: Any) -> None:
+        """Attach chrome controls to mixin state."""
         self._nbt_left_panel = chrome.left_panel
         self._nbt_center_panel = chrome.center_panel
         self._nbt_right_panel = chrome.right_panel
@@ -70,7 +79,8 @@ class NbtTabMixin(ExplorerMixinHost):
         self._nbt_stage_list = chrome.stage_list
         self._tab_nbt.content = chrome.root
 
-        # 控件构建完成后再装配交互协调器，依赖关系保持显式。
+    def _wire_nbt_coordinators(self) -> None:
+        """Create stage/chunk/data/commit coordinators after chrome exists."""
         self._stage_manager = NbtStageManager(
             store=self._nbt_stage_store,
             status_control=self._nbt_stage_status,
@@ -146,8 +156,6 @@ class NbtTabMixin(ExplorerMixinHost):
             ),
             log=self.app.log,
         )
-        self._stage_manager.update_stage_status()
-        self._chunk_ops.render_chunk_object_rows([])
 
     def _replace_world_session(self, session: WorldSession) -> None:
         self.world_session = session
