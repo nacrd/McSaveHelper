@@ -475,74 +475,41 @@ def build_region_tab_chrome(
 ) -> RegionTabChrome:
     """创建地图页面，并返回 controller 需要更新的控件引用。"""
     t = _translator(translate)
-    search_callback = on_search or (lambda _event: None)
-    marker_callback = on_toggle_markers or (lambda: None)
-    add_marker_callback = on_add_marker or (lambda _event: None)
-    delete_marker_callback = on_delete_marker or (lambda _event: None)
-
-    def sync_map_size(event: Any) -> None:
-        """Propagate the expanding host's measured size to the map camera."""
-        resize = getattr(map_content, "resize_map", None)
-        if not callable(resize):
-            return
-        try:
-            width = int(getattr(event, "width", 0) or 0)
-            height = int(getattr(event, "height", 0) or 0)
-        except (TypeError, ValueError):
-            return
-        if width >= 80 and height >= 80:
-            resize(width, height)
-
-    dimension_dropdown, display_mode_dropdown = _build_dimension_style_dropdowns(
-        t,
-        on_dimension_changed,
-        on_display_mode_changed,
+    callbacks = _normalize_region_callbacks(
+        on_search=on_search,
+        on_toggle_markers=on_toggle_markers,
+        on_add_marker=on_add_marker,
+        on_delete_marker=on_delete_marker,
     )
-    search_field, search_button = _build_search_controls(t, search_callback)
-    (
-        coord_button,
-        empty_button,
-        marker_button,
-        fullscreen_button,
-    ) = _build_map_toggle_buttons(
-        t,
-        on_toggle_coordinates,
-        on_toggle_empty,
-        marker_callback,
-        on_toggle_fullscreen,
-    )
-
-    top_bar, left_toolbar, right_toolbar = _build_floating_toolbars(
-        t,
-        dimension_dropdown=dimension_dropdown,
-        display_mode_dropdown=display_mode_dropdown,
-        search_field=search_field,
-        search_button=search_button,
+    sync_map_size = _make_map_size_sync(map_content)
+    controls = _build_region_map_controls(
+        t=t,
+        on_dimension_changed=on_dimension_changed,
+        on_display_mode_changed=on_display_mode_changed,
+        on_refresh=on_refresh,
         on_zoom_in=on_zoom_in,
         on_zoom_out=on_zoom_out,
         on_reset=on_reset,
-        on_refresh=on_refresh,
-        coord_button=coord_button,
-        empty_button=empty_button,
-        marker_button=marker_button,
-        fullscreen_button=fullscreen_button,
+        on_toggle_coordinates=on_toggle_coordinates,
+        on_toggle_empty=on_toggle_empty,
+        on_toggle_fullscreen=on_toggle_fullscreen,
+        search_callback=callbacks["search_callback"],
+        marker_callback=callbacks["marker_callback"],
     )
     help_text, bottom_bar = _build_map_help_bar(t)
     map_host, map_card = _build_map_host_stack(
         map_content,
-        top_bar,
-        left_toolbar,
-        right_toolbar,
+        controls["top_bar"],
+        controls["left_toolbar"],
+        controls["right_toolbar"],
         bottom_bar,
         sync_map_size,
     )
-    toolbar = top_bar
-
     side = _build_region_side_panel(
         t=t,
         translate=translate,
-        add_marker_callback=add_marker_callback,
-        delete_marker_callback=delete_marker_callback,
+        add_marker_callback=callbacks["add_marker_callback"],
+        delete_marker_callback=callbacks["delete_marker_callback"],
         on_fill_nbt=on_fill_nbt,
         on_delete_region=on_delete_region,
     )
@@ -570,14 +537,14 @@ def build_region_tab_chrome(
     )
     return RegionTabChrome(
         layout=layout,
-        dimension_dropdown=dimension_dropdown,
-        display_mode_dropdown=display_mode_dropdown,
-        search_field=search_field,
-        search_button=search_button,
-        coord_button=coord_button,
-        empty_button=empty_button,
-        marker_button=marker_button,
-        fullscreen_button=fullscreen_button,
+        dimension_dropdown=controls["dimension_dropdown"],
+        display_mode_dropdown=controls["display_mode_dropdown"],
+        search_field=controls["search_field"],
+        search_button=controls["search_button"],
+        coord_button=controls["coord_button"],
+        empty_button=controls["empty_button"],
+        marker_button=controls["marker_button"],
+        fullscreen_button=controls["fullscreen_button"],
         add_marker_button=side["add_marker_button"],
         delete_marker_button=side["delete_marker_button"],
         marker_list=side["marker_list"],
@@ -586,12 +553,107 @@ def build_region_tab_chrome(
         stats_text=side["stats_text"],
         status_text=side["status_text"],
         legend_container=side["legend_container"],
-        toolbar=toolbar,
+        toolbar=controls["top_bar"],
         map_host=map_host,
         map_card=map_card,
         left_panel=left_panel,
         side_panel=side_panel,
     )
+
+
+def _normalize_region_callbacks(
+    *,
+    on_search: Optional[EventCallback],
+    on_toggle_markers: Optional[SimpleCallback],
+    on_add_marker: Optional[EventCallback],
+    on_delete_marker: Optional[EventCallback],
+) -> dict[str, Any]:
+    return {
+        "search_callback": on_search or (lambda _event: None),
+        "marker_callback": on_toggle_markers or (lambda: None),
+        "add_marker_callback": on_add_marker or (lambda _event: None),
+        "delete_marker_callback": on_delete_marker or (lambda _event: None),
+    }
+
+
+def _make_map_size_sync(map_content: ft.Control) -> Callable[[Any], None]:
+    def sync_map_size(event: Any) -> None:
+        """Propagate the expanding host's measured size to the map camera."""
+        resize = getattr(map_content, "resize_map", None)
+        if not callable(resize):
+            return
+        try:
+            width = int(getattr(event, "width", 0) or 0)
+            height = int(getattr(event, "height", 0) or 0)
+        except (TypeError, ValueError):
+            return
+        if width >= 80 and height >= 80:
+            resize(width, height)
+
+    return sync_map_size
+
+
+def _build_region_map_controls(
+    *,
+    t: Translate,
+    on_dimension_changed: EventCallback,
+    on_display_mode_changed: SimpleCallback,
+    on_refresh: SimpleCallback,
+    on_zoom_in: SimpleCallback,
+    on_zoom_out: SimpleCallback,
+    on_reset: SimpleCallback,
+    on_toggle_coordinates: SimpleCallback,
+    on_toggle_empty: SimpleCallback,
+    on_toggle_fullscreen: SimpleCallback,
+    search_callback: EventCallback,
+    marker_callback: SimpleCallback,
+) -> dict[str, Any]:
+    dimension_dropdown, display_mode_dropdown = _build_dimension_style_dropdowns(
+        t,
+        on_dimension_changed,
+        on_display_mode_changed,
+    )
+    search_field, search_button = _build_search_controls(t, search_callback)
+    (
+        coord_button,
+        empty_button,
+        marker_button,
+        fullscreen_button,
+    ) = _build_map_toggle_buttons(
+        t,
+        on_toggle_coordinates,
+        on_toggle_empty,
+        marker_callback,
+        on_toggle_fullscreen,
+    )
+    top_bar, left_toolbar, right_toolbar = _build_floating_toolbars(
+        t,
+        dimension_dropdown=dimension_dropdown,
+        display_mode_dropdown=display_mode_dropdown,
+        search_field=search_field,
+        search_button=search_button,
+        on_zoom_in=on_zoom_in,
+        on_zoom_out=on_zoom_out,
+        on_reset=on_reset,
+        on_refresh=on_refresh,
+        coord_button=coord_button,
+        empty_button=empty_button,
+        marker_button=marker_button,
+        fullscreen_button=fullscreen_button,
+    )
+    return {
+        "dimension_dropdown": dimension_dropdown,
+        "display_mode_dropdown": display_mode_dropdown,
+        "search_field": search_field,
+        "search_button": search_button,
+        "coord_button": coord_button,
+        "empty_button": empty_button,
+        "marker_button": marker_button,
+        "fullscreen_button": fullscreen_button,
+        "top_bar": top_bar,
+        "left_toolbar": left_toolbar,
+        "right_toolbar": right_toolbar,
+    }
 
 
 def _build_region_side_panel(

@@ -255,23 +255,13 @@ def extract_language_from_jar(
 
     try:
         with zipfile.ZipFile(jar_path) as jar:
-            names = jar.namelist()
-            for loc in locales:
-                paths = _select_lang_paths(
-                    names, loc, include_mods=include_mods
-                )
-                if not paths:
-                    continue
-                used_locale = loc
-                for entry in paths:
-                    loaded = _load_jar_lang_entry(
-                        jar, entry, name_map, enchantment_names
-                    )
-                    if loaded > 0:
-                        total += loaded
-                        sources.append(entry)
-                if total > 0:
-                    break
+            total, sources, used_locale = _load_locales_from_jar(
+                jar,
+                locales=locales,
+                include_mods=include_mods,
+                name_map=name_map,
+                enchantment_names=enchantment_names,
+            )
     except (OSError, zipfile.BadZipFile, RuntimeError):
         return LanguageImportResult(
             count=0,
@@ -286,6 +276,37 @@ def extract_language_from_jar(
         locale=used_locale,
         jar_path=str(jar_path),
     )
+
+
+def _load_locales_from_jar(
+    jar: zipfile.ZipFile,
+    *,
+    locales: List[str],
+    include_mods: bool,
+    name_map: NameMap,
+    enchantment_names: EnchantMap,
+) -> tuple[int, List[str], str]:
+    names = jar.namelist()
+    total = 0
+    sources: List[str] = []
+    used_locale = locales[0]
+    for loc in locales:
+        paths = _select_lang_paths(
+            names, loc, include_mods=include_mods
+        )
+        if not paths:
+            continue
+        used_locale = loc
+        for entry in paths:
+            loaded = _load_jar_lang_entry(
+                jar, entry, name_map, enchantment_names
+            )
+            if loaded > 0:
+                total += loaded
+                sources.append(entry)
+        if total > 0:
+            break
+    return total, sources, used_locale
 
 
 def extract_language_from_local_minecraft(

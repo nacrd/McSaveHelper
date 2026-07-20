@@ -429,8 +429,6 @@ class MigrationService:
             RuntimeError: 产物无效或平台/版本转换被拒绝。
             OSError: 备份、暂存或发布过程中的 I/O 失败。
         """
-        from core.utils import publish_directory_tree, update_server_properties
-
         manual = list(options.manual_names)
         with self._backup_service.exclusive_operation(output_path):
             self._raise_if_batch_cancelled(cancel_event)
@@ -452,23 +450,46 @@ class MigrationService:
                     progress_cb=progress_cb,
                 )
                 prepared_world = staging_root / world_name
-                if not (prepared_world / "level.dat").is_file():
-                    raise RuntimeError("迁移产物无效：缺少 level.dat")
-                if not self._apply_version_conversion(
-                    prepared_world,
-                    options.target_platform,
-                    options.target_version,
-                    log_cb,
-                ):
-                    raise RuntimeError(
-                        "版本/平台转换失败，请查看日志获取详细信息"
-                    )
-                self._raise_if_batch_cancelled(cancel_event)
-                publish_directory_tree(prepared_world, output_path)
-                update_server_properties(dest_path, world_name, log_cb)
+                self._publish_prepared_world(
+                    prepared_world=prepared_world,
+                    dest_path=dest_path,
+                    output_path=output_path,
+                    world_name=world_name,
+                    options=options,
+                    log_cb=log_cb,
+                    cancel_event=cancel_event,
+                )
                 return output_path
             finally:
                 shutil.rmtree(staging_root, ignore_errors=True)
+
+    def _publish_prepared_world(
+        self,
+        *,
+        prepared_world: Path,
+        dest_path: Path,
+        output_path: Path,
+        world_name: str,
+        options: MigrationOptions,
+        log_cb: LogCallback,
+        cancel_event: Optional[threading.Event],
+    ) -> None:
+        from core.utils import publish_directory_tree, update_server_properties
+
+        if not (prepared_world / "level.dat").is_file():
+            raise RuntimeError("迁移产物无效：缺少 level.dat")
+        if not self._apply_version_conversion(
+            prepared_world,
+            options.target_platform,
+            options.target_version,
+            log_cb,
+        ):
+            raise RuntimeError(
+                "版本/平台转换失败，请查看日志获取详细信息"
+            )
+        self._raise_if_batch_cancelled(cancel_event)
+        publish_directory_tree(prepared_world, output_path)
+        update_server_properties(dest_path, world_name, log_cb)
 
     def _backup_existing_destination_if_needed(
         self,
