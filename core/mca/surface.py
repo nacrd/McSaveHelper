@@ -948,54 +948,72 @@ def sample_region_surface_colors(
     previous_heights: Optional[List[Optional[int]]] = None
     processed = 0
     for row in samples:
-        color_row: List[Color] = []
-        current_heights: List[Optional[int]] = []
-        north_source = (
-            current_heights if previous_heights is None else previous_heights
+        color_row, current_heights = _colorize_surface_row(
+            row,
+            previous_heights=previous_heights,
+            spacing_scale=spacing_scale,
+            color_for_block=color_for_block,
+            color_for_surface=color_for_surface,
         )
-        for x, value in enumerate(row):
-            parts = _surface_parts(value)
-            name, height, water_depth, biome, overlay, overlay_alpha = parts
-            current_heights.append(height)
-            if name is None:
-                base = DEFAULT_EMPTY
-            elif is_air_name(name):
-                base = DEFAULT_WATERISH
-            else:
-                base = _resolve_surface_color(
-                    name,
-                    biome,
-                    color_for_block,
-                    color_for_surface,
-                )
-            if overlay and overlay_alpha > 0.0:
-                overlay_color = _resolve_surface_color(
-                    overlay,
-                    biome,
-                    color_for_block,
-                    color_for_surface,
-                )
-                base = _blend_surface_color(base, overlay_color, overlay_alpha)
-            factor = _relief_factor_from_neighbors(
-                height,
-                _height_from_row(north_source, x, height or 0),
-                _height_from_row(current_heights, x - 1, height or 0),
-                _height_from_row(north_source, x - 1, height or 0),
-                name,
-                water_depth,
-                spacing_scale,
-            )
-            color_row.append(_shade_color(base, factor))
-            processed += 1
-            if (
-                cancel_check is not None
-                and processed % 4096 == 0
-                and cancel_check()
-            ):
-                return None
         colors.append(color_row)
         previous_heights = current_heights
+        processed += len(row)
+        if (
+            cancel_check is not None
+            and processed % 4096 == 0
+            and cancel_check()
+        ):
+            return None
     return colors
+
+
+def _colorize_surface_row(
+    row: List[Any],
+    *,
+    previous_heights: Optional[List[Optional[int]]],
+    spacing_scale: float,
+    color_for_block: Optional[ColorFunc],
+    color_for_surface: Optional[SurfaceColorFunc],
+) -> tuple[List[Color], List[Optional[int]]]:
+    color_row: List[Color] = []
+    current_heights: List[Optional[int]] = []
+    north_source = (
+        current_heights if previous_heights is None else previous_heights
+    )
+    for x, value in enumerate(row):
+        parts = _surface_parts(value)
+        name, height, water_depth, biome, overlay, overlay_alpha = parts
+        current_heights.append(height)
+        if name is None:
+            base = DEFAULT_EMPTY
+        elif is_air_name(name):
+            base = DEFAULT_WATERISH
+        else:
+            base = _resolve_surface_color(
+                name,
+                biome,
+                color_for_block,
+                color_for_surface,
+            )
+        if overlay and overlay_alpha > 0.0:
+            overlay_color = _resolve_surface_color(
+                overlay,
+                biome,
+                color_for_block,
+                color_for_surface,
+            )
+            base = _blend_surface_color(base, overlay_color, overlay_alpha)
+        factor = _relief_factor_from_neighbors(
+            height,
+            _height_from_row(north_source, x, height or 0),
+            _height_from_row(current_heights, x - 1, height or 0),
+            _height_from_row(north_source, x - 1, height or 0),
+            name,
+            water_depth,
+            spacing_scale,
+        )
+        color_row.append(_shade_color(base, factor))
+    return color_row, current_heights
 
 
 def clear_chunk_decode_cache() -> None:

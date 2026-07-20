@@ -239,36 +239,8 @@ def _build_nbt_chunk_section(
     ft.Control,
     ft.Column,
 ]:
-    region_file_field = text_field(
-        label="区域文件",
-        hint_text="region/r.0.0.mca",
-        width=250,
-        expand=False,
-    )
-    chunk_x_field = text_field(
-        value="0",
-        label="区块X",
-        width=80,
-        expand=False,
-    )
-    chunk_z_field = text_field(
-        value="0",
-        label="区块Z",
-        width=80,
-        expand=False,
-    )
-    world_x_field = text_field(
-        value="0",
-        label="世界X",
-        width=80,
-        expand=False,
-    )
-    world_z_field = text_field(
-        value="0",
-        label="世界Z",
-        width=80,
-        expand=False,
-    )
+    region_file_field, chunk_x_field, chunk_z_field = _nbt_chunk_file_fields()
+    world_x_field, world_z_field = _nbt_world_coord_fields()
     chunk_section = ft.Column(
         [
             ft.Text(
@@ -315,6 +287,44 @@ def _build_nbt_chunk_section(
         world_z_field,
         chunk_section,
     )
+
+
+def _nbt_chunk_file_fields() -> tuple[ft.Control, ft.Control, ft.Control]:
+    region_file_field = text_field(
+        label="区域文件",
+        hint_text="region/r.0.0.mca",
+        width=250,
+        expand=False,
+    )
+    chunk_x_field = text_field(
+        value="0",
+        label="区块X",
+        width=80,
+        expand=False,
+    )
+    chunk_z_field = text_field(
+        value="0",
+        label="区块Z",
+        width=80,
+        expand=False,
+    )
+    return region_file_field, chunk_x_field, chunk_z_field
+
+
+def _nbt_world_coord_fields() -> tuple[ft.Control, ft.Control]:
+    world_x_field = text_field(
+        value="0",
+        label="世界X",
+        width=80,
+        expand=False,
+    )
+    world_z_field = text_field(
+        value="0",
+        label="世界Z",
+        width=80,
+        expand=False,
+    )
+    return world_x_field, world_z_field
 
 
 def _build_nbt_block_section(

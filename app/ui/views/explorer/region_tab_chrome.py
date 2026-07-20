@@ -212,7 +212,37 @@ def _build_floating_toolbars(
     fullscreen_button: ft.IconButton,
 ) -> tuple[ft.Container, ft.Container, ft.Container]:
     """Top/left/right floating toolbars over the map."""
-    top_bar = ft.Container(
+    top_bar = _build_top_toolbar(
+        dimension_dropdown=dimension_dropdown,
+        display_mode_dropdown=display_mode_dropdown,
+        search_field=search_field,
+        search_button=search_button,
+    )
+    left_toolbar = _build_left_zoom_toolbar(
+        t,
+        on_zoom_in=on_zoom_in,
+        on_zoom_out=on_zoom_out,
+        on_reset=on_reset,
+    )
+    right_toolbar = _build_right_map_toolbar(
+        t,
+        on_refresh=on_refresh,
+        coord_button=coord_button,
+        empty_button=empty_button,
+        marker_button=marker_button,
+        fullscreen_button=fullscreen_button,
+    )
+    return top_bar, left_toolbar, right_toolbar
+
+
+def _build_top_toolbar(
+    *,
+    dimension_dropdown: ft.Dropdown,
+    display_mode_dropdown: ft.Dropdown,
+    search_field: ft.TextField,
+    search_button: ft.IconButton,
+) -> ft.Container:
+    return ft.Container(
         content=ft.Row(
             [
                 ft.Icon(ft.Icons.MAP_OUTLINED, size=20, color=THEME.mc_gold),
@@ -234,7 +264,16 @@ def _build_floating_toolbars(
         border=mc_border(1),
         border_radius=6,
     )
-    left_toolbar = ft.Container(
+
+
+def _build_left_zoom_toolbar(
+    t: Translate,
+    *,
+    on_zoom_in: SimpleCallback,
+    on_zoom_out: SimpleCallback,
+    on_reset: SimpleCallback,
+) -> ft.Container:
+    return ft.Container(
         content=ft.Column(
             [
                 _icon_button(
@@ -262,7 +301,18 @@ def _build_floating_toolbars(
         bgcolor="#0B120BCC",
         border_radius=6,
     )
-    right_toolbar = ft.Container(
+
+
+def _build_right_map_toolbar(
+    t: Translate,
+    *,
+    on_refresh: SimpleCallback,
+    coord_button: ft.IconButton,
+    empty_button: ft.IconButton,
+    marker_button: ft.IconButton,
+    fullscreen_button: ft.IconButton,
+) -> ft.Container:
+    return ft.Container(
         content=ft.Column(
             [
                 _icon_button(
@@ -284,7 +334,6 @@ def _build_floating_toolbars(
         bgcolor="#0B120BCC",
         border_radius=6,
     )
-    return top_bar, left_toolbar, right_toolbar
 
 
 def _build_map_help_bar(t: Translate) -> tuple[ft.Text, ft.Container]:
