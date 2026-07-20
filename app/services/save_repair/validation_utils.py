@@ -10,13 +10,17 @@ import nbtlib
 
 
 def validate_chunk(chunk: Any) -> bool:
-    """验证区块数据完整性
+    """验证区块数据完整性。
 
-    检查:
-    1. chunk.data 存在且为 Compound
-    2. Level 字段存在
-    3. Sections 列表存在且非空
-    4. DataVersion 存在
+    检查 ``chunk.data`` 是否为 Compound，并确认至少具备
+    ``DataVersion``、``Level`` 或扁平化 ``sections`` 之一；
+    若存在 ``Level`` 子结构，则 Sections 不得为空列表。
+
+    Args:
+        chunk: 区域读取得到的区块对象（需暴露 ``data``）。
+
+    Returns:
+        bool: 结构可接受时为 True；损坏或异常访问时为 False。
     """
     try:
         data = getattr(chunk, "data", None)
@@ -25,7 +29,7 @@ def validate_chunk(chunk: Any) -> bool:
         if not isinstance(data, nbtlib.tag.Compound):
             return False
 
-        # 检查 Level 或直接子字段 (1.18+ 扁平化)
+        # Level 或 1.18+ 扁平化 sections / DataVersion
         has_level = "Level" in data
         has_sections = "sections" in data or "Sections" in data
         has_data_version = "DataVersion" in data
@@ -33,7 +37,6 @@ def validate_chunk(chunk: Any) -> bool:
         if not has_data_version and not has_level and not has_sections:
             return False
 
-        # 如果有 Level 子结构，验证其完整性
         if has_level:
             level = data["Level"]
             if not isinstance(level, nbtlib.tag.Compound):
@@ -43,19 +46,19 @@ def validate_chunk(chunk: Any) -> bool:
                 return False
 
         return True
-    except Exception:
+    except (TypeError, ValueError, KeyError, AttributeError):
         return False
 
 
 def validate_player_data(nbt_data: Any, required_fields: List[str]) -> List[str]:
-    """验证玩家数据，返回问题列表
+    """验证玩家数据，返回问题描述列表。
 
     Args:
-        nbt_data: 玩家数据 NBT
-        required_fields: 必需字段列表
+        nbt_data: 玩家数据 NBT 根标签。
+        required_fields: 必需字段名列表。
 
     Returns:
-        问题列表
+        list[str]: 问题描述；无问题时为空列表。
     """
     issues: List[str] = []
 
@@ -122,14 +125,14 @@ def validate_level_dat_data(
     data: Any,
     required_fields: Mapping[str, Any],
 ) -> List[str]:
-    """验证 level.dat 数据，返回问题列表
+    """验证 ``level.dat`` 的 ``Data`` 字段，返回问题描述列表。
 
     Args:
-        data: level.dat 的 Data 字段
-        required_fields: 必需字段及默认值字典
+        data: ``level.dat`` 的 ``Data`` Compound。
+        required_fields: 必需字段映射（值可为默认值占位，非 None 表示必填）。
 
     Returns:
-        问题列表
+        list[str]: 缺失字段与范围问题描述。
     """
     missing_fields = _missing_level_fields(data, required_fields)
     return [
@@ -142,7 +145,12 @@ def quarantine_file(
     file_path: Path,
     log: Callable[[str, str], None],
 ) -> None:
-    """Rename a damaged file to a ``.corrupted`` sibling for later inspection."""
+    """将损坏文件重命名为同目录 ``.corrupted`` 旁路副本以便排查。
+
+    Args:
+        file_path: 待隔离文件路径。
+        log: 日志回调 ``(message, level)``。
+    """
     try:
         new_path = file_path.with_suffix(file_path.suffix + ".corrupted")
         if new_path.exists():
@@ -153,12 +161,16 @@ def quarantine_file(
             log(f"已有隔离文件存在，使用新名称: {new_path.name}", "WARNING")
         file_path.rename(new_path)
         log(f"已隔离损坏文件: {file_path.name} -> {new_path.name}", "WARNING")
-    except Exception as exc:
+    except OSError as exc:
         log(f"无法隔离文件 {file_path.name}: {exc}", "ERROR")
 
 
 def iter_region_chunk_coordinates(region: Any):
-    """Yield local chunk coords present in ``region`` (or a full 32x32 grid)."""
+    """Yield local chunk coords present in ``region`` (or a full 32x32 grid).
+
+    Prefers ``region.iter_present_chunks()`` when available so empty slots are
+    not scanned.
+    """
     try:
         return region.iter_present_chunks()
     except AttributeError:
@@ -174,10 +186,17 @@ def count_damaged_chunks(
     is_cancelled: Callable[[], bool],
     region_factory: Optional[Callable[[str], Any]] = None,
 ) -> Tuple[int, bool]:
-    """Count unreadable/invalid chunks in one region file.
+    """统计单个区域文件中不可读或结构无效的区块数。
 
-    Returns ``(damaged_count, completed)``. When ``is_cancelled`` fires mid-scan,
-    ``completed`` is ``False`` and the partial count is returned.
+    Args:
+        region_file: ``.mca`` 路径。
+        is_cancelled: 返回 True 时中止扫描。
+        region_factory: 可选区域打开工厂（测试注入）；默认使用
+            :class:`core.mca.NativeRegion`。
+
+    Returns:
+        tuple[int, bool]: ``(damaged_count, completed)``。若中途取消，
+        ``completed`` 为 False，并返回已累计的部分计数。
     """
     from core.mca import NativeRegion as Region
 
@@ -191,6 +210,9 @@ def count_damaged_chunks(
                 chunk = region.get_chunk(chunk_x, chunk_z)
                 if chunk is not None and not validate_chunk(chunk):
                     damaged += 1
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+                damaged += 1
             except Exception:
+                # 第三方/区域解析库的未知错误也计为损坏区块。
                 damaged += 1
     return damaged, True
