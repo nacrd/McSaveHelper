@@ -512,8 +512,6 @@ def _load_cached_tile(region_path: Path, tile_size: int) -> Optional[bytes]:
         return load_tile(region_path, tile_size)
     except (OSError, ValueError, TypeError, ImportError):
         return None
-    except Exception:
-        return None
 
 
 @lru_cache(maxsize=4096)
@@ -528,8 +526,6 @@ def _uses_external_streams_cached(
         with RegionFile.open(path) as region:
             return region.has_external_chunks()
     except (OSError, ValueError, TypeError, RuntimeError, ImportError):
-        return False
-    except Exception:
         return False
 
 
@@ -585,10 +581,6 @@ def _sample_surface_grid(
         if status_out is not None:
             status_out.append(False)
         return None
-    except Exception:
-        if status_out is not None:
-            status_out.append(False)
-        return None
 
 
 def _encode_png(grid: ColorGrid, tile_size: int) -> Optional[bytes]:
@@ -610,8 +602,6 @@ def _encode_png(grid: ColorGrid, tile_size: int) -> Optional[bytes]:
         return buffer.getvalue()
     except (OSError, ValueError, TypeError, AttributeError):
         return None
-    except Exception:
-        return None
     finally:
         image.close()
 
@@ -627,8 +617,7 @@ def _store_cached_tile(
 
         store_tile(region_path, tile_size, png)
     except (OSError, ValueError, TypeError, ImportError):
-        pass
-    except Exception:
+        # Disk cache is best-effort only.
         pass
 
 

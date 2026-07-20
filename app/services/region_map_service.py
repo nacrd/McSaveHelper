@@ -15,6 +15,7 @@ from typing import Any, Deque, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 from core.region_utils import parse_region_coords, scan_region_dir
+from core.mca.errors import McaError
 from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
 from core.mca.region_meta import scan_region_meta
 from core.mca.region_file import RegionFile
@@ -729,11 +730,7 @@ class RegionMapService:
                 )
             if external_signature:
                 parts.append(f"mcc:{external_signature}")
-        except (OSError, ValueError, TypeError, RuntimeError):
-            # The MCA signature still prevents stale suppression when the
-            # region is replaced or removed while a retry is being checked.
-            pass
-        except Exception:
+        except (OSError, ValueError, TypeError, RuntimeError, McaError):
             # The MCA signature still prevents stale suppression when the
             # region is replaced or removed while a retry is being checked.
             pass
@@ -854,8 +851,7 @@ class RegionMapService:
         try:
             self._pump_topview_queue()
         except (RuntimeError, ValueError, OSError):
-            pass
-        except Exception:
+            # Queue pump failures must not kill the worker thread.
             pass
         if (
             upgrade_size is not None
