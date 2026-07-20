@@ -107,7 +107,7 @@ class FeedbackCollector:
                     ensure_ascii=False,
                 )
                 f.write(payload + "\n")
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             print(f"[ERROR] 保存反馈失败: {e}")
 
     def track_usage(
@@ -139,7 +139,7 @@ class FeedbackCollector:
         try:
             with open(self.usage_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event.to_dict(), ensure_ascii=False) + "\n")
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             print(f"[ERROR] 保存使用事件失败: {e}")
 
     def get_feedback_stats(self) -> Dict[str, int]:
@@ -159,7 +159,7 @@ class FeedbackCollector:
                     feedback = json.loads(line)
                     feedback_type = feedback.get("type", "other")
                     stats[feedback_type] = stats.get(feedback_type, 0) + 1
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
             print(f"[ERROR] 读取反馈统计失败: {e}")
 
         return stats
@@ -182,7 +182,7 @@ class FeedbackCollector:
                     if event.get("event_type") == "feature_used":
                         feature = event.get("event_name", "unknown")
                         stats[feature] = stats.get(feature, 0) + 1
-        except Exception as e:
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as e:
             print(f"[ERROR] 读取使用统计失败: {e}")
 
         return stats

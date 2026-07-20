@@ -105,6 +105,7 @@ class HangDetector:
                 self._check_thread_blocking(now)
 
             except Exception:
+                # Detector must never crash the monitor thread.
                 pass
 
             time.sleep(check_interval)
@@ -132,6 +133,7 @@ class HangDetector:
             self._remove_dead_threads(current_threads)
 
         except Exception:
+            # Frame introspection can fail under concurrent teardown.
             pass
 
     def _inspect_thread_frame(self, thread_id: int, frame: Any, now: float) -> None:
@@ -222,6 +224,9 @@ class HangDetector:
             for thread in threading.enumerate():
                 if thread.ident == thread_id:
                     return thread.name
+        except RuntimeError:
+            # enumerate() can race while threads exit
+            pass
         except Exception:
             pass
         return f"Thread-{thread_id}"
@@ -236,6 +241,8 @@ class HangDetector:
                 if self._is_benign_wait_frame(current):
                     return True
                 current = current.f_back
+        except (AttributeError, RuntimeError, TypeError):
+            pass
         except Exception:
             pass
 

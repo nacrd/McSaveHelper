@@ -65,6 +65,7 @@ class SaveContextManager:
         try:
             self._activate_save(context.display_path)
         except Exception as exc:
+            # Explorer activation is best-effort after selection succeeds.
             self._log(f"激活存档浏览器失败: {exc}", "ERROR")
 
     def set_current_save_path(self, path: Optional[str]) -> None:
@@ -86,6 +87,8 @@ class SaveContextManager:
                 )
                 return
             self.set_current_save_context(context)
+        except (OSError, ValueError, TypeError) as exc:
+            self._error_dialog("错误", f"设置当前存档失败: {exc}")
         except Exception as exc:
             self._error_dialog("错误", f"设置当前存档失败: {exc}")
 
@@ -101,6 +104,8 @@ class SaveContextManager:
                     self._save_recent_saves()
                 return
             self.set_current_save_context(context)
+        except (OSError, ValueError, TypeError) as exc:
+            self._error_dialog("错误", f"设置当前存档失败: {exc}")
         except Exception as exc:
             self._error_dialog("错误", f"设置当前存档失败: {exc}")
 
@@ -109,6 +114,8 @@ class SaveContextManager:
             saves = self._config.get_recent_saves()
             if isinstance(saves, list):
                 return [save for save in saves if isinstance(save, Mapping)]
+        except (OSError, TypeError, ValueError, KeyError) as exc:
+            self._log(f"加载最近存档失败: {exc}", "ERROR")
         except Exception as exc:
             self._log(f"加载最近存档失败: {exc}", "ERROR")
         return []
@@ -116,5 +123,7 @@ class SaveContextManager:
     def _save_recent_saves(self) -> None:
         try:
             self._config.set_recent_saves(self.get_recent_saves())
+        except (OSError, TypeError, ValueError) as exc:
+            self._log(f"保存最近存档失败: {exc}", "ERROR")
         except Exception as exc:
             self._log(f"保存最近存档失败: {exc}", "ERROR")
