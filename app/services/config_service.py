@@ -145,16 +145,26 @@ class ConfigService:
         return merged
 
     def _auto_fix(self) -> None:
-        """自动修复无效配置字段，用默认值替换"""
+        """自动修复缺失或类型错误的配置字段。
+
+        用默认值补齐缺失键；嵌套 dict 中类型不匹配的子键也会被替换。
+        """
         defaults = self._defaults()
         for key, default_val in defaults.items():
             if key not in self._config:
                 self._config[key] = default_val
-            elif isinstance(default_val, dict) and isinstance(self._config[key], dict):
-                for sub_key, sub_default in default_val.items():
-                    if sub_key not in self._config[key] or type(
-                            self._config[key][sub_key]) is not type(sub_default):
-                        self._config[key][sub_key] = sub_default
+                continue
+            if not (
+                isinstance(default_val, dict)
+                and isinstance(self._config[key], dict)
+            ):
+                continue
+            for sub_key, sub_default in default_val.items():
+                current = self._config[key]
+                if sub_key not in current or type(
+                    current[sub_key]
+                ) is not type(sub_default):
+                    current[sub_key] = sub_default
 
     # ─── 快捷访问 ──────────────────────────────────
 
