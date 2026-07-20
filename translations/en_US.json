@@ -381,7 +381,9 @@
       "minecraft_dir_hint": "e.g. F:\\Game\\minecraft\\.minecraft (leave empty to auto-detect)",
       "minecraft_dir_help": "Used when importing language/textures. Prefer this path; if empty, walk up from the current save or use the default directory.",
       "browse": "Browse",
-      "minecraft_dir_error": "Failed to choose directory"
+      "minecraft_dir_error": "Failed to choose directory",
+      "auto_import_mc_lang": "Auto-import Minecraft language on save select",
+      "auto_import_mc_lang_help": "After selecting a save, import vanilla item/block names in the UI language in the background."
     },
     "batch": {
       "title": "Batch Processing",
@@ -401,7 +403,8 @@
       "save": "Save Settings",
       "reset": "Reset to Defaults",
       "cancel": "Cancel"
-    }
+    },
+    "auto_import_mc_lang_ok": "Auto-imported {count} Minecraft names ({locale})"
   },
   "dialogs": {
     "load": "Select usercache.json File",

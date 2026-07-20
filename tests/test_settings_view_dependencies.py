@@ -64,6 +64,7 @@ def test_config_service_persists_typed_settings(tmp_path: Path) -> None:
         preserve_structure=False,
         cleanup_patterns=("session.lock",),
         minecraft_dir=r"F:\Game\minecraft\.minecraft",
+        auto_import_mc_lang=False,
     )
 
     config.update_settings(settings)
@@ -72,6 +73,8 @@ def test_config_service_persists_typed_settings(tmp_path: Path) -> None:
     assert config.get_settings() == settings
     assert stored["minecraft_dir"] == r"F:\Game\minecraft\.minecraft"
     assert config.get_minecraft_dir() == r"F:\Game\minecraft\.minecraft"
+    assert stored["auto_import_mc_lang"] is False
+    assert config.is_auto_import_mc_lang_enabled() is False
     assert stored["batch_processing"] == {
         "max_concurrent": 8,
         "preserve_structure": False,

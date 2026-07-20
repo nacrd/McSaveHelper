@@ -207,6 +207,31 @@ class SettingsView(ft.Column):
             padding=ft.Padding(left=16, right=16, bottom=8),
         ))
 
+        self._auto_import_mc_lang_var = checkbox(
+            self._t(
+                "settings.ui.auto_import_mc_lang",
+                "设置存档后自动导入 Minecraft 语言",
+            ),
+            value=cfg.auto_import_mc_lang,
+            on_change=lambda _: self._on_auto_import_mc_lang_change(
+                bool(self._auto_import_mc_lang_var.value)
+            ),
+        )
+        body.controls.append(ft.Container(
+            content=ft.Column([
+                self._auto_import_mc_lang_var,
+                ft.Text(
+                    self._t(
+                        "settings.ui.auto_import_mc_lang_help",
+                        "选择当前存档后，后台按 UI 语言自动导入原版物品/方块名称。",
+                    ),
+                    size=11,
+                    color=THEME.text_muted,
+                ),
+            ], spacing=2),
+            padding=ft.Padding(left=16, right=16, bottom=8),
+        ))
+
         self._auto_clear_var = checkbox(
             self._t("settings.ui.auto_clear_log", "自动清除旧日志"),
             value=cfg.auto_clear_log,
@@ -534,6 +559,7 @@ class SettingsView(ft.Column):
                 if item.strip()
             ),
             minecraft_dir=(self._minecraft_dir_field.value or "").strip(),
+            auto_import_mc_lang=bool(self._auto_import_mc_lang_var.value),
         )
 
     def _persist(self) -> None:
@@ -557,6 +583,15 @@ class SettingsView(ft.Column):
         self._deps.apply_language(lang)
 
     def _on_minecraft_dir_change(self) -> None:
+        self._persist()
+
+    def _on_auto_import_mc_lang_change(self, enabled: bool) -> None:
+        """持久化「设置存档后自动导入语言」开关。
+
+        Args:
+            enabled: 复选框新值（由控件绑定传入；实际以控件当前状态为准）。
+        """
+        del enabled
         self._persist()
 
     def _browse_minecraft_dir(self, e: ft.ControlEvent = None) -> None:

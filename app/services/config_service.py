@@ -113,6 +113,7 @@ class ConfigService:
                 "cache/",
                 "logs/"],
             "minecraft_dir": "",
+            "auto_import_mc_lang": True,
         }
 
     @staticmethod
@@ -365,6 +366,9 @@ class ConfigService:
                 ),
                 cleanup_patterns=tuple(str(item) for item in patterns),
                 minecraft_dir=str(self._config.get("minecraft_dir", "") or ""),
+                auto_import_mc_lang=bool(
+                    self._config.get("auto_import_mc_lang", True)
+                ),
             )
 
     def update_settings(self, settings: ApplicationSettings) -> None:
@@ -373,6 +377,9 @@ class ConfigService:
             self._config["version_detection"] = settings.version_detection
             self._config["api_timeout"] = settings.api_timeout
             self._config["minecraft_dir"] = str(settings.minecraft_dir or "")
+            self._config["auto_import_mc_lang"] = bool(
+                settings.auto_import_mc_lang
+            )
 
             ui = dict(self._config.get("ui_settings", {}))
             ui.update({
@@ -412,6 +419,15 @@ class ConfigService:
         with self._lock:
             self._config["minecraft_dir"] = str(path or "").strip()
         self.save()
+
+    def is_auto_import_mc_lang_enabled(self) -> bool:
+        """是否在选择存档后自动导入 Minecraft 原版语言。
+
+        Returns:
+            bool: 配置开启时为 True；缺省键视为开启。
+        """
+        with self._lock:
+            return bool(self._config.get("auto_import_mc_lang", True))
 
     # ─── 运行时迁移配置 ────────────────────────────
 

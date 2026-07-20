@@ -381,7 +381,9 @@
       "minecraft_dir_hint": "例如 F:\\Game\\minecraft\\.minecraft（可留空自动推断）",
       "minecraft_dir_help": "用于导入语言/贴图。优先此路径；留空则从当前存档向上查找 .minecraft，或使用系统默认目录。",
       "browse": "浏览",
-      "minecraft_dir_error": "选择目录失败"
+      "minecraft_dir_error": "选择目录失败",
+      "auto_import_mc_lang": "设置存档后自动导入 Minecraft 语言",
+      "auto_import_mc_lang_help": "选择当前存档后，后台按 UI 语言自动导入原版物品/方块名称。"
     },
     "batch": {
       "title": "批量处理",
@@ -401,7 +403,8 @@
       "save": "保存设置",
       "reset": "重置为默认",
       "cancel": "取消"
-    }
+    },
+    "auto_import_mc_lang_ok": "已自动导入 {count} 个 Minecraft 名称（{locale}）"
   },
   "dialogs": {
     "load": "选择 usercache.json 文件",

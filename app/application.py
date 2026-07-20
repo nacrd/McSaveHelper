@@ -12,8 +12,10 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 import traceback
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional, List, Dict
 import flet as ft
 
@@ -29,6 +31,7 @@ from app.controllers.migration_controller import (
 )
 
 from app.ui.theme import THEME, get_theme_manager
+from app.ui.utils import run_on_ui
 from app.ui.view_catalog import create_default_view_catalog
 from app.ui.application_shell import (
     ApplicationShellDependencies,
@@ -79,6 +82,10 @@ class Application:
         """
         self.page: ft.Page = page
         self.services = services or create_app_services()
+        # 自动语言导入：同路径去重 + generation 丢弃过期后台结果
+        self._auto_lang_import_path: Optional[str] = None
+        self._auto_lang_import_generation: int = 0
+        self._auto_lang_import_lock = threading.Lock()
 
         # 全局异常兜底
         page.on_error = self._on_page_error
@@ -307,6 +314,8 @@ class Application:
             notification_manager.show_success(
                 f"当前存档已设置为 {context.name}，相关功能将自动使用该存档"
             )
+        # 后台按 UI 语言导入原版物品/方块名称，避免阻塞存档切换。
+        self._schedule_auto_import_mc_language(context)
 
     def _on_recent_saves_changed(
         self,
@@ -325,6 +334,121 @@ class Application:
             self._sidebar.select_tab("explorer")
             return
         self.view_manager.switch_view("explorer")
+
+    def _schedule_auto_import_mc_language(
+        self,
+        context: CurrentSaveContext,
+    ) -> None:
+        """在后台线程导入当前存档对应的原版语言文件。
+
+        快速重复选择同一存档会去重；切换到新存档会提升 generation，
+        使旧线程的通知与失败回滚失效。
+
+        Args:
+            context: 当前已选中的有效存档上下文。
+        """
+        if not self.config.is_auto_import_mc_lang_enabled():
+            return
+
+        save_path = str(context.path).strip()
+        if not save_path:
+            return
+
+        with self._auto_lang_import_lock:
+            if self._auto_lang_import_path == save_path:
+                return
+            self._auto_lang_import_path = save_path
+            self._auto_lang_import_generation += 1
+            generation = self._auto_lang_import_generation
+
+        thread = threading.Thread(
+            target=self._auto_import_mc_language_worker,
+            args=(save_path, generation),
+            name="auto-import-mc-lang",
+            daemon=True,
+        )
+        thread.start()
+
+    def _auto_import_mc_language_worker(
+        self,
+        save_path: str,
+        generation: int,
+    ) -> None:
+        """解析 .minecraft 并导入 UI 语言对应的原版语言表。
+
+        Args:
+            save_path: 触发导入的存档绝对路径。
+            generation: 调度时捕获的代数；过期结果会被丢弃。
+        """
+        try:
+            locale = self.item.normalize_locale(self.i18n.current_language)
+            configured = self.config.get_minecraft_dir()
+            configured_dir = Path(configured) if configured else None
+            result = self.item.import_language_from_local_minecraft(
+                locale=locale,
+                configured_dir=configured_dir,
+                start_path=Path(save_path),
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            self._handle_auto_import_failure(save_path, generation, exc)
+            return
+        except Exception as exc:
+            # 语言导入依赖本地文件/zip/json，边界兜底避免后台线程静默崩溃。
+            self._handle_auto_import_failure(save_path, generation, exc)
+            return
+
+        if not self._is_auto_import_current(save_path, generation):
+            return
+
+        if result.count <= 0:
+            self.log(
+                f"自动导入语言未找到可用文件（locale={locale}）",
+                "WARN",
+            )
+            return
+
+        source = result.sources[0] if result.sources else "unknown"
+        self.log(
+            f"已自动导入 Minecraft 语言 {result.count} 项"
+            f"（{result.locale}，{source}）",
+            "INFO",
+        )
+        message = self._t(
+            "settings.auto_import_mc_lang_ok",
+            "已自动导入 {count} 个 Minecraft 名称（{locale}）",
+            count=result.count,
+            locale=result.locale,
+        )
+        run_on_ui(self.page, self._notify_auto_import_success, message)
+
+    def _is_auto_import_current(self, save_path: str, generation: int) -> bool:
+        """判断后台导入结果是否仍对应当前选择。"""
+        with self._auto_lang_import_lock:
+            return (
+                self._auto_lang_import_generation == generation
+                and self._auto_lang_import_path == save_path
+            )
+
+    def _handle_auto_import_failure(
+        self,
+        save_path: str,
+        generation: int,
+        exc: BaseException,
+    ) -> None:
+        """记录失败并在结果仍有效时允许同路径重试。"""
+        self.log(f"自动导入 Minecraft 语言失败: {exc}", "ERROR")
+        with self._auto_lang_import_lock:
+            if (
+                self._auto_lang_import_generation == generation
+                and self._auto_lang_import_path == save_path
+            ):
+                self._auto_lang_import_path = None
+
+    def _notify_auto_import_success(self, message: str) -> None:
+        """在 UI 线程显示自动导入成功提示。"""
+        notification_manager = self.gui_optimizer.notification_manager
+        if notification_manager is not None:
+            notification_manager.show_success(message)
 
     def _sync_config_to_migration(self) -> None:
         """同步配置到迁移参数"""
