@@ -81,122 +81,188 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._player_refs_cache: List[Any] = []
         self._player_list_tiles: Dict[str, ft.Container] = {}
         self._player_container_index = 0
+        self._center_section_index = 0
         self._shulker_dialog: Optional[ft.AlertDialog] = None
 
-        # ── Left: player list ─────────────────────────────────
-        left = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+        # ── Left: player list (compact) ───────────────────────
+        left = ft.Column(spacing=6)
         left.controls.append(
             ft.Text(
                 t("explorer.select_player", "选择玩家"),
-                size=14,
+                size=13,
                 weight=ft.FontWeight.BOLD,
                 color=THEME.text_primary,
             )
         )
         self._player_filter = text_field(
-            label=t("player.filter", "搜索玩家"),
-            width=220,
-            expand=False,
+            label=t("player.filter", "搜索"),
+            expand=True,
             on_change=self._on_player_filter_changed,
         )
         left.controls.append(self._player_filter)
-        self._player_list_column = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
+        self._player_list_column = ft.Column(
+            spacing=3,
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+        )
         left.controls.append(self._player_list_column)
         left.controls.append(
+            btn_ghost(
+                t("explorer.import_usercache", "导入 usercache"),
+                height=28,
+                on_click=self._import_usercache,
+            )
+        )
+
+        # ── Center: HUD + categorized editor sections ─────────
+        center = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+        self._player_hud = PlayerHUDCard(t_cb=self._t)
+        center.controls.append(card(self._player_hud, padding=10))
+
+        action_row = ft.Row(
+            [
+                btn_ghost(
+                    t("player.export_action", "导出"),
+                    height=28,
+                    on_click=self._export_player_summary,
+                ),
+                btn_ghost(
+                    t("player.teleport_death", "死亡点"),
+                    height=28,
+                    on_click=self._stage_teleport_to_death,
+                ),
+                btn_ghost(
+                    t("player.import_language", "语言"),
+                    height=28,
+                    on_click=self._import_language_file,
+                ),
+                btn_ghost(
+                    t("player.import_mc_jar", "MC jar"),
+                    height=28,
+                    on_click=self._import_language_from_minecraft,
+                ),
+            ],
+            spacing=6,
+        )
+        center.controls.append(action_row)
+
+        # Section switcher keeps one category visible at a time.
+        self._center_section_btns: List[ft.Control] = []
+        section_defs = (
+            (0, "player.section.vitals", "生命/经验"),
+            (1, "player.section.world", "坐标/出生"),
+            (2, "player.section.abilities", "能力"),
+            (3, "player.section.advanced", "属性/效果"),
+        )
+        for index, key, default in section_defs:
+            btn = btn_ghost(
+                t(key, default),
+                height=28,
+                on_click=lambda e, i=index: self._switch_center_section(i),
+            )
+            self._center_section_btns.append(btn)
+        center.controls.append(
+            ft.Row(self._center_section_btns, spacing=4)
+        )
+
+        self._build_player_edit_fields()
+        self._attributes_list = ft.Column(spacing=2)
+        self._effects_list = ft.Column(spacing=2)
+
+        self._section_vitals = self._build_section_card(
+            t("player.edit.section_vitals", "生命 / 饥饿 / 经验"),
+            [
+                self._field_row("Health", "foodLevel", "foodSaturationLevel"),
+                self._field_row("XpLevel", "XpTotal", "XpP"),
+                self._field_row("Air", "playerGameType", "SelectedItemSlot"),
+            ],
+        )
+        self._section_world = self._build_section_card(
+            t("player.edit.section_pos", "坐标与维度"),
+            [
+                self._field_row("Pos.0", "Pos.1", "Pos.2"),
+                self._field_row("Dimension"),
+                ft.Text(
+                    t("player.edit.section_spawn", "出生点"),
+                    size=12,
+                    color=THEME.text_secondary,
+                ),
+                self._field_row("SpawnX", "SpawnY", "SpawnZ"),
+                self._field_row("SpawnDimension", "SpawnForced"),
+            ],
+        )
+        self._section_abilities = self._build_section_card(
+            t("player.edit.section_abilities", "能力"),
+            [
+                self._field_row("abilities.flying", "abilities.mayfly"),
+                self._field_row(
+                    "abilities.instabuild", "abilities.invulnerable"
+                ),
+                self._field_row("abilities.mayBuild"),
+            ],
+        )
+        self._section_advanced = self._build_section_card(
+            t("player.section.advanced", "属性 / 效果"),
+            [
+                ft.Text(
+                    t("player.attributes.title", "属性 Attributes"),
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                self._attributes_list,
+                ft.Container(height=6),
+                ft.Text(
+                    t("player.effects.title", "状态效果"),
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                self._effects_list,
+            ],
+        )
+        center.controls.extend(
+            [
+                self._section_vitals,
+                self._section_world,
+                self._section_abilities,
+                self._section_advanced,
+            ]
+        )
+        center.controls.append(
             ft.Row(
                 [
                     btn_ghost(
-                        t("explorer.import_usercache", "导入 usercache"),
+                        t("player.edit.refresh", "刷新表单"),
                         height=30,
-                        on_click=self._import_usercache,
+                        on_click=self._refresh_player_edit_form,
+                    ),
+                    btn_primary(
+                        t("player.edit.stage", "暂存修改"),
+                        height=30,
+                        on_click=self._stage_player_edit_form,
                     ),
                 ],
                 spacing=8,
             )
         )
+        self._switch_center_section(0)
 
-        # ── Center: HUD / edit / attributes / effects ─────────
-        center = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
-        self._player_hud = PlayerHUDCard(t_cb=self._t)
-        center.controls.append(card(self._player_hud, padding=15))
-
+        # ── Right: equipment + inventory ──────────────────────
+        right = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self._equipment = EquipmentPreview(
-            self.app.item, self.app.texture, t_cb=self._t
+            self.app.item,
+            self.app.texture,
+            slot_size=40,
+            t_cb=self._t,
         )
-        center.controls.append(card(self._equipment, padding=15))
+        right.controls.append(card(self._equipment, padding=10))
 
-        action_row = ft.Row(
-            [
-                btn_ghost(
-                    t("player.export_action", "导出摘要"),
-                    height=30,
-                    on_click=self._export_player_summary,
-                ),
-                btn_ghost(
-                    t("player.teleport_death", "传送到死亡点"),
-                    height=30,
-                    on_click=self._stage_teleport_to_death,
-                ),
-                btn_ghost(
-                    t("player.import_language", "导入语言文件"),
-                    height=30,
-                    on_click=self._import_language_file,
-                ),
-                btn_ghost(
-                    t("player.import_mc_jar", "从 MC jar 导入语言"),
-                    height=30,
-                    on_click=self._import_language_from_minecraft,
-                ),
-            ],
-            spacing=8,
-        )
-        center.controls.append(action_row)
-        self._build_player_edit_panel(center)
-
-        self._attributes_list = ft.Column(spacing=2)
-        self._effects_list = ft.Column(spacing=2)
-        center.controls.append(
-            card(
-                ft.Column(
-                    [
-                        ft.Text(
-                            t("player.attributes.title", "属性 Attributes"),
-                            size=14,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
-                        ),
-                        self._attributes_list,
-                    ],
-                    spacing=6,
-                ),
-                padding=12,
-            )
-        )
-        center.controls.append(
-            card(
-                ft.Column(
-                    [
-                        ft.Text(
-                            t("player.effects.title", "状态效果"),
-                            size=14,
-                            weight=ft.FontWeight.BOLD,
-                            color=THEME.text_primary,
-                        ),
-                        self._effects_list,
-                    ],
-                    spacing=6,
-                ),
-                padding=12,
-            )
-        )
-
-        # ── Right: inventory / ender ──────────────────────────
-        right = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
-        right.expand = True
         self._inventory = InventoryGrid(
             self.app.item,
             self.app.texture,
             layout="main",
+            slot_size=44,
             t_cb=self._t,
             on_slot_click=self._on_inventory_slot_click,
         )
@@ -204,27 +270,28 @@ class PlayerTabMixin(ExplorerMixinHost):
             self.app.item,
             self.app.texture,
             layout="ender",
+            slot_size=44,
             t_cb=self._t,
             on_slot_click=self._on_inventory_slot_click,
         )
         self._inventory_panel = ft.Container(
             content=self._inventory,
-            padding=ft.Padding(0, 8, 0, 0),
+            padding=ft.Padding(0, 4, 0, 0),
             visible=True,
         )
         self._ender_panel = ft.Container(
             content=self._ender_inventory,
-            padding=ft.Padding(0, 8, 0, 0),
+            padding=ft.Padding(0, 4, 0, 0),
             visible=False,
         )
         self._container_tab_inventory_btn = btn_ghost(
             t("player.tab.inventory", "主背包"),
-            height=30,
+            height=28,
             on_click=lambda e: self._switch_player_container_tab(0),
         )
         self._container_tab_ender_btn = btn_ghost(
             t("player.tab.ender", "末影箱"),
-            height=30,
+            height=28,
             on_click=lambda e: self._switch_player_container_tab(1),
         )
         right.controls.append(
@@ -233,14 +300,18 @@ class PlayerTabMixin(ExplorerMixinHost):
                     self._container_tab_inventory_btn,
                     self._container_tab_ender_btn,
                 ],
-                spacing=8,
+                spacing=6,
             )
         )
         right.controls.append(self._inventory_panel)
         right.controls.append(self._ender_panel)
 
-        self._player_left_panel = ft.Container(content=left, width=240)
-        self._player_center_panel = ft.Container(content=center, width=360)
+        self._player_left_panel = ft.Container(
+            content=left, width=210, expand=False
+        )
+        self._player_center_panel = ft.Container(
+            content=center, width=340, expand=False
+        )
         self._player_right_panel = ft.Container(content=right, expand=True)
         self._player_layout = ft.Row(
             [
@@ -248,13 +319,13 @@ class PlayerTabMixin(ExplorerMixinHost):
                 self._player_center_panel,
                 self._player_right_panel,
             ],
-            spacing=10,
+            spacing=8,
             vertical_alignment=ft.CrossAxisAlignment.START,
             expand=True,
         )
         self._tab_player.content = self._player_layout
 
-    def _build_player_edit_panel(self, parent: ft.Column) -> None:
+    def _build_player_edit_fields(self) -> None:
         t = self._t
         label_defaults = {
             "Health": ("player.edit.health", "生命值"),
@@ -281,77 +352,58 @@ class PlayerTabMixin(ExplorerMixinHost):
             "abilities.invulnerable": ("player.edit.invulnerable", "无敌"),
             "abilities.mayBuild": ("player.edit.may_build", "可建造"),
         }
-
-        self._player_edit_fields: Dict[str, ft.TextField] = {}
+        self._player_edit_fields = {}
         for field_id in _FORM_FIELD_IDS:
             key, default = label_defaults.get(
                 field_id, (f"player.edit.{field_id}", field_id)
             )
             self._player_edit_fields[field_id] = text_field(
                 label=t(key, default),
-                width=105,
+                width=100,
                 expand=False,
             )
 
-        def row(*field_ids: str) -> ft.Row:
-            return ft.Row(
-                [self._player_edit_fields[fid] for fid in field_ids],
-                spacing=8,
-            )
-
-        form = ft.Column(
-            [
-                ft.Text(
-                    t("player.edit.title", "玩家数据编辑"),
-                    size=16,
-                    weight=ft.FontWeight.BOLD,
-                    color=THEME.text_primary,
-                ),
-                row("Health", "foodLevel", "foodSaturationLevel"),
-                row("XpLevel", "XpTotal"),
-                row("XpP", "Air"),
-                ft.Text(
-                    t("player.edit.section_pos", "坐标与维度"),
-                    size=12,
-                    color=THEME.text_secondary,
-                ),
-                row("Pos.0", "Pos.1", "Pos.2"),
-                row("Dimension", "playerGameType"),
-                row("SelectedItemSlot"),
-                ft.Text(
-                    t("player.edit.section_spawn", "出生点"),
-                    size=12,
-                    color=THEME.text_secondary,
-                ),
-                row("SpawnX", "SpawnY", "SpawnZ"),
-                row("SpawnDimension", "SpawnForced"),
-                ft.Text(
-                    t("player.edit.section_abilities", "能力"),
-                    size=12,
-                    color=THEME.text_secondary,
-                ),
-                row("abilities.flying", "abilities.mayfly"),
-                row("abilities.instabuild", "abilities.invulnerable"),
-                row("abilities.mayBuild"),
-                ft.Row(
-                    [
-                        btn_ghost(
-                            t("player.edit.refresh", "刷新表单"),
-                            height=30,
-                            on_click=self._refresh_player_edit_form,
-                        ),
-                        btn_primary(
-                            t("player.edit.stage", "暂存修改"),
-                            height=30,
-                            on_click=self._stage_player_edit_form,
-                        ),
-                    ],
-                    spacing=8,
-                ),
-            ],
-            spacing=8,
+    def _field_row(self, *field_ids: str) -> ft.Row:
+        return ft.Row(
+            [self._player_edit_fields[fid] for fid in field_ids],
+            spacing=6,
         )
-        parent.controls.append(card(form, padding=15))
+
+    def _build_section_card(
+        self,
+        title: str,
+        body: List[ft.Control],
+    ) -> ft.Container:
+        return card(
+            ft.Column(
+                [
+                    ft.Text(
+                        title,
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary,
+                    ),
+                    *body,
+                ],
+                spacing=6,
+            ),
+            padding=10,
+        )
+
+    def _switch_center_section(self, index: int) -> None:
+        """Show one edit category at a time to avoid a long scroll stack."""
+        self._center_section_index = index
+        panels = (
+            getattr(self, "_section_vitals", None),
+            getattr(self, "_section_world", None),
+            getattr(self, "_section_abilities", None),
+            getattr(self, "_section_advanced", None),
+        )
+        for i, panel in enumerate(panels):
+            if panel is None:
+                continue
+            panel.visible = i == index
+            safe_update(panel)
 
     # ── Player list (left column) ─────────────────────────────
 
@@ -419,13 +471,15 @@ class PlayerTabMixin(ExplorerMixinHost):
             selected = (
                 PlayerManager.normalize_uuid(self.current_uuid) == ref.uuid_norm
             )
-        subtitle = ref.uuid_hyphen[:13] + "…" if ref.uuid_hyphen else ref.uuid_norm
+        subtitle = (
+            ref.uuid_hyphen[:10] + "…" if ref.uuid_hyphen else ref.uuid_norm[:10]
+        )
         return ft.Container(
             content=ft.Column(
                 [
                     ft.Text(
                         ref.display_name,
-                        size=13,
+                        size=12,
                         weight=ft.FontWeight.BOLD,
                         color=THEME.text_primary,
                         max_lines=1,
@@ -433,15 +487,16 @@ class PlayerTabMixin(ExplorerMixinHost):
                     ),
                     ft.Text(
                         subtitle,
-                        size=10,
+                        size=9,
                         color=THEME.text_muted,
                         max_lines=1,
                         overflow=ft.TextOverflow.ELLIPSIS,
+                        font_family="monospace",
                     ),
                 ],
-                spacing=2,
+                spacing=1,
             ),
-            padding=10,
+            padding=ft.Padding(8, 6, 8, 6),
             border_radius=6,
             bgcolor=THEME.mc_stone if selected else THEME.bg_secondary,
             border=ft.Border.all(

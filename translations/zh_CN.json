@@ -622,7 +622,8 @@
       "staged_title": "已暂存",
       "staged_body": "已暂存 {count} 个玩家数据修改，可到 NBT 页查看并提交。",
       "no_changes": "没有检测到需要暂存的玩家数据修改。",
-      "validation_errors": "部分字段未暂存：{errors}"
+      "validation_errors": "部分字段未暂存：{errors}",
+      "section_vitals": "生命 / 饥饿 / 经验"
     },
     "export": {
       "title": "玩家摘要",
@@ -670,6 +671,12 @@
     "import_mc_jar": "从 MC jar 导入语言",
     "import_mc_jar_ok": "已从本地 Minecraft 导入 {count} 个物品/附魔名称{jar_info}。\n物品栏和装备预览将使用新名称。",
     "import_mc_jar_title": "选择 Minecraft 客户端 JAR",
-    "import_mc_jar_missing": "未找到本机 Minecraft 客户端 jar。\n请选择 versions/<版本>/<版本>.jar 后重试。"
+    "import_mc_jar_missing": "未找到本机 Minecraft 客户端 jar。\n请选择 versions/<版本>/<版本>.jar 后重试。",
+    "section": {
+      "vitals": "生命/经验",
+      "world": "坐标/出生",
+      "abilities": "能力",
+      "advanced": "属性/效果"
+    }
   }
 }

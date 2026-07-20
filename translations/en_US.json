@@ -622,7 +622,8 @@
       "staged_title": "Staged",
       "staged_body": "Staged {count} player changes. Review and commit on the NBT tab.",
       "no_changes": "No player data changes to stage.",
-      "validation_errors": "Some fields were not staged: {errors}"
+      "validation_errors": "Some fields were not staged: {errors}",
+      "section_vitals": "Health / Food / XP"
     },
     "export": {
       "title": "Player summary",
@@ -670,6 +671,12 @@
     "import_mc_jar": "Import language from MC jar",
     "import_mc_jar_ok": "Imported {count} item/enchantment names from local Minecraft{jar_info}.\nInventory and equipment will use the new names.",
     "import_mc_jar_title": "Select Minecraft client JAR",
-    "import_mc_jar_missing": "No local Minecraft client jar found.\nPick versions/<version>/<version>.jar and try again."
+    "import_mc_jar_missing": "No local Minecraft client jar found.\nPick versions/<version>/<version>.jar and try again.",
+    "section": {
+      "vitals": "Vitals/XP",
+      "world": "Pos/Spawn",
+      "abilities": "Abilities",
+      "advanced": "Attrs/Effects"
+    }
   }
 }

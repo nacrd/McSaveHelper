@@ -1,7 +1,7 @@
-"""Player HUD Card component."""
+"""Player HUD Card component — compact identity + status metrics."""
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flet as ft
 
@@ -19,16 +19,20 @@ _GAME_TYPES = {
 
 
 class PlayerHUDCard(ft.Column):
-    """Player status quick view with optional avatar image."""
+    """Player status quick view with optional avatar image.
+
+    Layout is intentionally dense: identity row + compact 2-column metrics,
+    so the center column has room for categorized editors.
+    """
 
     def __init__(self, t_cb: Optional[Translate] = None) -> None:
-        super().__init__(spacing=8)
+        super().__init__(spacing=6)
         self._t = t_cb or (lambda key, default="", **_kw: default or key)
         self._attrs: Dict[str, ft.Text] = {}
 
         self._avatar = ft.CircleAvatar(
             content=ft.Text("?", size=16, color=THEME.text_primary),
-            radius=22,
+            radius=20,
             bgcolor=THEME.bg_secondary,
         )
         self._name_text = ft.Text(
@@ -37,29 +41,26 @@ class PlayerHUDCard(ft.Column):
             weight=ft.FontWeight.BOLD,
             color=THEME.text_primary,
             expand=True,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
         )
         self._uuid_text = ft.Text(
             "",
-            size=11,
+            size=10,
             color=THEME.text_muted,
             expand=True,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
+            font_family="monospace",
         )
 
-        self.controls.append(
-            ft.Text(
-                self._t("explorer.player_status", "玩家状态"),
-                size=16,
-                weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary,
-            )
-        )
         self.controls.append(
             ft.Row(
                 [
                     self._avatar,
                     ft.Column(
                         [self._name_text, self._uuid_text],
-                        spacing=2,
+                        spacing=1,
                         expand=True,
                     ),
                 ],
@@ -68,44 +69,74 @@ class PlayerHUDCard(ft.Column):
             )
         )
 
-        rows_data = [
-            ("health", "explorer.health", "生命值", "♥"),
-            ("food", "explorer.food", "饥饿值", "🍖"),
-            ("level", "explorer.level", "经验等级", "⭐"),
-            ("air", "explorer.air", "氧气", "🌊"),
-            ("game_type", "player.hud.game_type", "游戏模式", "🎮"),
+        # Compact metrics: primary vitals first, secondary below.
+        primary = (
+            ("health", "explorer.health", "生命", "♥"),
+            ("food", "explorer.food", "饥饿", "🍖"),
+            ("level", "explorer.level", "等级", "⭐"),
+            ("game_type", "player.hud.game_type", "模式", "🎮"),
+        )
+        secondary = (
             ("dimension", "explorer.dimension", "维度", "🌍"),
             ("pos", "explorer.position", "坐标", "📍"),
-            ("spawn", "player.hud.spawn", "出生点", "🛏️"),
-            ("death", "player.hud.death", "死亡位置", "💀"),
-            ("selected", "player.hud.selected_slot", "选中槽", "🔢"),
-        ]
+            ("air", "explorer.air", "氧气", "🌊"),
+            ("selected", "player.hud.selected_slot", "选中", "🔢"),
+            ("spawn", "player.hud.spawn", "出生", "🛏️"),
+            ("death", "player.hud.death", "死亡", "💀"),
+        )
+        self.controls.append(self._metric_grid(primary))
+        self.controls.append(self._metric_grid(secondary, muted=True))
 
+    def _metric_grid(
+        self,
+        rows_data: Tuple[Tuple[str, str, str, str], ...],
+        *,
+        muted: bool = False,
+    ) -> ft.Column:
+        cells: List[ft.Control] = []
         for key, i18n_key, default_label, icon in rows_data:
+            label_color = THEME.text_muted if muted else THEME.text_secondary
+            value_color = THEME.text_secondary if muted else THEME.accent_light
             lbl = ft.Text(
-                f"{icon} {self._t(i18n_key, default_label)}:",
-                size=13,
-                color=THEME.text_secondary,
+                f"{icon} {self._t(i18n_key, default_label)}",
+                size=11,
+                color=label_color,
             )
             val = ft.Text(
                 "--",
-                size=13,
+                size=12,
                 weight=ft.FontWeight.BOLD,
-                color=THEME.accent_light,
-                expand=True,
+                color=value_color,
+                max_lines=1,
+                overflow=ft.TextOverflow.ELLIPSIS,
             )
             self._attrs[key] = val
-            self.controls.append(ft.Row([lbl, val], spacing=10))
+            cells.append(
+                ft.Container(
+                    content=ft.Column([lbl, val], spacing=1),
+                    expand=True,
+                    padding=ft.Padding(4, 2, 4, 2),
+                )
+            )
+
+        # Two cells per row.
+        rows: List[ft.Control] = []
+        for index in range(0, len(cells), 2):
+            pair = cells[index:index + 2]
+            if len(pair) == 1:
+                pair.append(ft.Container(expand=True))
+            rows.append(ft.Row(pair, spacing=4))
+        return ft.Column(rows, spacing=2)
 
     def set_avatar_src(self, avatar_src: Optional[str], initial: str = "?") -> None:
         """Update only the avatar art, keeping name/uuid labels."""
         if avatar_src:
             self._avatar.content = ft.Image(
                 src=avatar_src,
-                width=44,
-                height=44,
+                width=40,
+                height=40,
                 fit=ft.BoxFit.COVER,
-                border_radius=22,
+                border_radius=20,
             )
         else:
             letter = (initial or "?")[:1].upper()
@@ -127,20 +158,9 @@ class PlayerHUDCard(ft.Column):
         self._name_text.value = name or "--"
         self._uuid_text.value = uuid_text or ""
         if avatar_src:
-            self._avatar.content = ft.Image(
-                src=avatar_src,
-                width=44,
-                height=44,
-                fit=ft.BoxFit.COVER,
-                border_radius=22,
-            )
+            self.set_avatar_src(avatar_src, initial=initial)
         else:
-            letter = (initial or name or "?")[:1].upper()
-            self._avatar.content = ft.Text(
-                letter,
-                size=16,
-                color=THEME.text_primary,
-            )
+            self.set_avatar_src(None, initial=initial or (name or "?")[:1])
         safe_update(self)
 
     def update_from_summary(self, summary: Any) -> None:
@@ -160,14 +180,8 @@ class PlayerHUDCard(ft.Column):
                 initial=(ref.name or ref.uuid_norm or "?")[:1],
             )
 
-            self._set_text(
-                "health",
-                self._fmt_ratio(state.health, 20),
-            )
-            self._set_text(
-                "food",
-                self._fmt_ratio(state.food_level, 20),
-            )
+            self._set_text("health", self._fmt_ratio(state.health, 20))
+            self._set_text("food", self._fmt_ratio(state.food_level, 20))
             self._set_text("level", self._fmt(state.xp_level))
             self._set_text("air", self._fmt(state.air))
             self._set_game_type(state.game_type)
@@ -305,7 +319,7 @@ class PlayerHUDCard(ft.Column):
         if value is None:
             return "--"
         try:
-            return f"{int(float(value))} / {total}"
+            return f"{int(float(value))}/{total}"
         except (TypeError, ValueError):
             return str(value)
 
@@ -319,11 +333,12 @@ class PlayerHUDCard(ft.Column):
         if x is None and y is None and z is None:
             return "--"
         try:
-            coords = f"{float(x):.1f}, {float(y):.1f}, {float(z):.1f}"
+            coords = f"{float(x):.0f},{float(y):.0f},{float(z):.0f}"
         except (TypeError, ValueError):
-            coords = f"{x}, {y}, {z}"
+            coords = f"{x},{y},{z}"
         if dimension:
-            return f"{coords} @ {dimension}"
+            short = str(dimension).replace("minecraft:", "")
+            return f"{coords}@{short}"
         return coords
 
     @staticmethod
