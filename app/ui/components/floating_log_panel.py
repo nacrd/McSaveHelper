@@ -1,6 +1,8 @@
 """Floating log panel component — 可拖拽移动的悬浮球日志面板"""
 import threading
 from collections import deque
+from typing import Any, Callable
+
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
@@ -99,38 +101,28 @@ class FloatingLogPanel(ft.Container):
 
     def _build_header_controls(self, title: str) -> None:
         """Build title-bar buttons and drag detector."""
-        self._auto_scroll_btn = ft.Container(
-            content=ft.Icon(
-                ft.Icons.VERTICAL_ALIGN_BOTTOM,
-                size=14,
-                color=(
-                    THEME.terminal_green
-                    if self._auto_scroll
-                    else THEME.text_secondary
-                ),
+        self._auto_scroll_btn = self._header_icon_button(
+            icon=ft.Icons.VERTICAL_ALIGN_BOTTOM,
+            color=(
+                THEME.terminal_green
+                if self._auto_scroll
+                else THEME.text_secondary
             ),
             on_click=self._toggle_auto_scroll,
-            padding=4,
-            border_radius=4,
             tooltip="自动滚动" if self._auto_scroll else "已暂停自动滚动",
         )
-        self._clear_btn = ft.Container(
-            content=ft.Icon(
-                ft.Icons.DELETE_OUTLINE,
-                size=14,
-                color=THEME.text_secondary,
-            ),
+        self._clear_btn = self._header_icon_button(
+            icon=ft.Icons.DELETE_OUTLINE,
+            color=THEME.text_secondary,
             on_click=self._clear,
-            padding=4,
-            border_radius=4,
             tooltip="清除日志",
         )
-        self._close_btn = ft.Container(
-            content=ft.Icon(IconSet.CLOSE, size=16, color=THEME.text_secondary),
+        self._close_btn = self._header_icon_button(
+            icon=IconSet.CLOSE,
+            color=THEME.text_secondary,
             on_click=self._collapse,
-            padding=4,
-            border_radius=4,
             tooltip="收起",
+            size=16,
         )
         header_content = ft.Row(
             [
@@ -171,6 +163,23 @@ class FloatingLogPanel(ft.Container):
             on_pan_start=self._on_pan_start,
             on_pan_update=self._on_pan_update,
             on_pan_end=self._on_pan_end,
+        )
+
+    @staticmethod
+    def _header_icon_button(
+        *,
+        icon: Any,
+        color: str,
+        on_click: Callable[..., Any],
+        tooltip: str,
+        size: int = 14,
+    ) -> ft.Container:
+        return ft.Container(
+            content=ft.Icon(icon, size=size, color=color),
+            on_click=on_click,
+            padding=4,
+            border_radius=4,
+            tooltip=tooltip,
         )
 
     def _load_position(self) -> None:
