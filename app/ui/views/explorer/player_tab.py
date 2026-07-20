@@ -195,38 +195,8 @@ class PlayerTabMixin(ExplorerMixinHost):
         center = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self._player_hud = PlayerHUDCard(t_cb=self._t)
         center.controls.append(card(self._player_hud, padding=10))
-
-        action_controls = [
-            self._chip_button(
-                t("player.export_action", "导出"),
-                self._export_player_summary,
-            ),
-            self._chip_button(
-                t("player.teleport_death", "死亡点"),
-                self._stage_teleport_to_death,
-            ),
-            self._chip_button(
-                t("player.import_assets", "导入语言/贴图"),
-                self._import_language_and_textures,
-            ),
-        ]
-        center.controls.append(self._responsive_chips(action_controls))
-
-        section_defs = (
-            (0, "player.section.vitals", "生命/经验"),
-            (1, "player.section.world", "坐标/出生"),
-            (2, "player.section.abilities", "能力"),
-            (3, "player.section.advanced", "属性/效果"),
-        )
-        section_controls = [
-            self._chip_button(
-                t(key, default),
-                lambda e, i=index: self._switch_center_section(i),
-            )
-            for index, key, default in section_defs
-        ]
-        self._center_section_btns = section_controls
-        center.controls.append(self._responsive_chips(section_controls))
+        center.controls.append(self._responsive_chips(self._player_action_chips(t)))
+        center.controls.append(self._responsive_chips(self._player_section_chips(t)))
 
         self._build_player_edit_fields()
         self._attributes_list = ft.Column(
@@ -235,61 +205,10 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._effects_list = ft.Column(
             spacing=2, scroll=ft.ScrollMode.AUTO, height=140
         )
-        self._section_vitals = self._build_section_card(
-            t("player.edit.section_vitals", "生命 / 饥饿 / 经验"),
-            [
-                self._field_row("Health", "foodLevel"),
-                self._field_row("foodSaturationLevel", "Air"),
-                self._field_row("XpLevel", "XpTotal"),
-                self._field_row("XpP", "playerGameType"),
-                self._field_row("SelectedItemSlot"),
-            ],
-        )
-        self._section_world = self._build_section_card(
-            t("player.edit.section_pos", "坐标与维度"),
-            [
-                self._field_row("Pos.0", "Pos.1"),
-                self._field_row("Pos.2", "Dimension"),
-                ft.Text(
-                    t("player.edit.section_spawn", "出生点"),
-                    size=12,
-                    color=THEME.text_secondary,
-                ),
-                self._field_row("SpawnX", "SpawnY"),
-                self._field_row("SpawnZ", "SpawnForced"),
-                self._field_row("SpawnDimension"),
-            ],
-        )
-        self._section_abilities = self._build_section_card(
-            t("player.edit.section_abilities", "能力"),
-            [
-                self._field_row("abilities.flying", "abilities.mayfly"),
-                self._field_row(
-                    "abilities.instabuild", "abilities.invulnerable"
-                ),
-                self._field_row("abilities.mayBuild"),
-            ],
-        )
-        self._section_advanced = self._build_section_card(
-            t("player.section.advanced", "属性 / 效果"),
-            [
-                ft.Text(
-                    t("player.attributes.title", "属性 Attributes"),
-                    size=12,
-                    weight=ft.FontWeight.BOLD,
-                    color=THEME.text_primary,
-                ),
-                self._attributes_list,
-                ft.Container(height=6),
-                ft.Text(
-                    t("player.effects.title", "状态效果"),
-                    size=12,
-                    weight=ft.FontWeight.BOLD,
-                    color=THEME.text_primary,
-                ),
-                self._effects_list,
-            ],
-        )
+        self._section_vitals = self._build_vitals_section(t)
+        self._section_world = self._build_world_section(t)
+        self._section_abilities = self._build_abilities_section(t)
+        self._section_advanced = self._build_advanced_section(t)
         center.controls.extend(
             [
                 self._section_vitals,
@@ -315,6 +234,102 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         self._switch_center_section(0)
         return center
+
+    def _player_action_chips(self, t: Any) -> list[ft.Control]:
+        return [
+            self._chip_button(
+                t("player.export_action", "导出"),
+                self._export_player_summary,
+            ),
+            self._chip_button(
+                t("player.teleport_death", "死亡点"),
+                self._stage_teleport_to_death,
+            ),
+            self._chip_button(
+                t("player.import_assets", "导入语言/贴图"),
+                self._import_language_and_textures,
+            ),
+        ]
+
+    def _player_section_chips(self, t: Any) -> list[ft.Control]:
+        section_defs = (
+            (0, "player.section.vitals", "生命/经验"),
+            (1, "player.section.world", "坐标/出生"),
+            (2, "player.section.abilities", "能力"),
+            (3, "player.section.advanced", "属性/效果"),
+        )
+        section_controls = [
+            self._chip_button(
+                t(key, default),
+                lambda e, i=index: self._switch_center_section(i),
+            )
+            for index, key, default in section_defs
+        ]
+        self._center_section_btns = section_controls
+        return section_controls
+
+    def _build_vitals_section(self, t: Any) -> ft.Control:
+        return self._build_section_card(
+            t("player.edit.section_vitals", "生命 / 饥饿 / 经验"),
+            [
+                self._field_row("Health", "foodLevel"),
+                self._field_row("foodSaturationLevel", "Air"),
+                self._field_row("XpLevel", "XpTotal"),
+                self._field_row("XpP", "playerGameType"),
+                self._field_row("SelectedItemSlot"),
+            ],
+        )
+
+    def _build_world_section(self, t: Any) -> ft.Control:
+        return self._build_section_card(
+            t("player.edit.section_pos", "坐标与维度"),
+            [
+                self._field_row("Pos.0", "Pos.1"),
+                self._field_row("Pos.2", "Dimension"),
+                ft.Text(
+                    t("player.edit.section_spawn", "出生点"),
+                    size=12,
+                    color=THEME.text_secondary,
+                ),
+                self._field_row("SpawnX", "SpawnY"),
+                self._field_row("SpawnZ", "SpawnForced"),
+                self._field_row("SpawnDimension"),
+            ],
+        )
+
+    def _build_abilities_section(self, t: Any) -> ft.Control:
+        return self._build_section_card(
+            t("player.edit.section_abilities", "能力"),
+            [
+                self._field_row("abilities.flying", "abilities.mayfly"),
+                self._field_row(
+                    "abilities.instabuild", "abilities.invulnerable"
+                ),
+                self._field_row("abilities.mayBuild"),
+            ],
+        )
+
+    def _build_advanced_section(self, t: Any) -> ft.Control:
+        return self._build_section_card(
+            t("player.section.advanced", "属性 / 效果"),
+            [
+                ft.Text(
+                    t("player.attributes.title", "属性 Attributes"),
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                self._attributes_list,
+                ft.Container(height=6),
+                ft.Text(
+                    t("player.effects.title", "状态效果"),
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color=THEME.text_primary,
+                ),
+                self._effects_list,
+            ],
+        )
 
     def _build_player_right_column(self, t: Any) -> ft.Column:
         """Equipment, inventory/ender tabs, and nested container preview."""
