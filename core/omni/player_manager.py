@@ -590,6 +590,9 @@ class PlayerManager:
             self._log(f"更新了 {updated} 个玩家名称", "IMPORT")
             return imported
 
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            self._log(f"导入 usercache.json 失败: {exc}", "ERROR")
+            return 0
         except Exception as exc:
             self._log(f"导入 usercache.json 失败: {exc}", "ERROR")
             return 0
@@ -725,7 +728,7 @@ def _as_str(value: Any) -> Optional[str]:
     if hasattr(value, "value") and not isinstance(value, (str, bytes)):
         try:
             text = str(value.value)
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             text = str(value)
     else:
         text = str(value)

@@ -27,7 +27,10 @@ def scan_region_meta(region_file: Path) -> Dict[str, Any]:
                     chunk_count += _scan_fallback_chunks(
                         region, chunk_count, biomes, structures, structure_positions
                     )
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+            pass
         except Exception:
+            # Damaged MCA: return empty-ish meta rather than fail the map UI.
             pass
 
     dominant_biome = biomes.most_common(1)[0][0] if biomes else "unknown"
@@ -64,6 +67,8 @@ def _collect_region_chunk(
         collect_biomes(chunk.data, biomes)
         collect_structures(chunk.data, structures, positions)
         return 1
+    except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+        return 0
     except Exception:
         return 0
 
@@ -139,7 +144,7 @@ def collect_structures(
             try:
                 if len(value) > 0:
                     counter[str(name)] += 1
-            except Exception:
+            except (TypeError, ValueError, AttributeError):
                 counter[str(name)] += 1
 
 
@@ -176,7 +181,7 @@ def extract_structure_position(
                 "block_z": bz,
                 "source": "chunk",
             }
-        except Exception:
+        except (TypeError, ValueError):
             return None
     return None
 
@@ -195,7 +200,7 @@ def position_from_bb(name: str, bb: Any) -> Optional[Dict[str, Any]]:
             "block_z": int(tag_value(raw[2])),
             "source": "bb",
         }
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
@@ -238,7 +243,7 @@ def mapping_get(data: Any, key: str) -> Any:
         if hasattr(raw, "get"):
             return raw.get(key)
         return raw[key]
-    except Exception:
+    except (TypeError, KeyError, AttributeError, IndexError):
         return None
 
 
@@ -247,7 +252,7 @@ def items(data: Any) -> list[tuple[Any, Any]]:
     try:
         if hasattr(raw, "items"):
             return list(raw.items())
-    except Exception:
+    except (TypeError, AttributeError):
         pass
     return []
 
@@ -256,7 +261,7 @@ def iter_values(data: Any) -> list[Any]:
     raw = tag_value(data)
     try:
         return list(raw)
-    except Exception:
+    except (TypeError, ValueError):
         return []
 
 

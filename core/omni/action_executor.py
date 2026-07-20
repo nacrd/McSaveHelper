@@ -57,7 +57,11 @@ class ActionExecutor:
             if backup and target_world.exists():
                 self._create_backup(target_world)
             return self._execute_transaction(actions, target_world)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self._log(f"提交失败，原存档保持不变: {exc}", "ERROR")
+            return False
         except Exception as exc:
+            # Transaction boundary: never leave partial writes published.
             self._log(f"提交失败，原存档保持不变: {exc}", "ERROR")
             return False
 
