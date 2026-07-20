@@ -83,7 +83,8 @@ class MapCameraAnimator:
         try:
             if self._timer is not None:
                 self._timer.cancel()
-        except Exception:
+        except RuntimeError:
+            # Timer may already have finished or been GC'd.
             pass
         self._timer = None
 
@@ -119,4 +120,5 @@ class MapCameraAnimator:
         try:
             callback()
         except Exception:
+            # Camera frame callbacks must not stop the animation loop.
             pass

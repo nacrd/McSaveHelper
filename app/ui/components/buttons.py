@@ -148,7 +148,7 @@ class McButton(ft.Container):
         except RuntimeError:
             self._reset_pressed_state_sync()
         except Exception:
-            # UI best-effort: control may already be unmounted.
+            # Page/task scheduler may be unavailable during teardown.
             pass
 
     async def _reset_pressed_state(self) -> None:

@@ -126,7 +126,34 @@ def build_directory_card(
     section.controls.append(
         section_title(translate("left_panel.archive_config", "📁 存档配置"))
     )
-    section.controls.append(
+    section.controls.extend(
+        _directory_card_body_controls(
+            translate=translate,
+            src_field=src_field,
+            dest_field=dest_field,
+            name_field=name_field,
+            on_browse_dest=on_browse_dest,
+        )
+    )
+    container = card(ft.Column(spacing=0), padding=0)
+    container.content = section
+    return DirectoryCardControls(
+        container=container,
+        src_field=src_field,
+        dest_field=dest_field,
+        name_field=name_field,
+    )
+
+
+def _directory_card_body_controls(
+    *,
+    translate: Translate,
+    src_field: ft.Control,
+    dest_field: ft.Control,
+    name_field: ft.Control,
+    on_browse_dest: SimpleCallback,
+) -> list[ft.Control]:
+    return [
         ft.Container(
             content=ft.Text(
                 "设置要转换的源存档和输出位置",
@@ -134,15 +161,11 @@ def build_directory_card(
                 color=THEME.text_muted,
             ),
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-    section.controls.append(
+        ),
         ft.Container(
             content=src_field,
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-    section.controls.append(
+        ),
         ft.Container(
             content=ft.Row(
                 [
@@ -157,22 +180,12 @@ def build_directory_card(
                 spacing=10,
             ),
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-    section.controls.append(
+        ),
         ft.Container(
             content=name_field,
             padding=ft.Padding(left=20, right=20, bottom=20),
-        )
-    )
-    container = card(ft.Column(spacing=0), padding=0)
-    container.content = section
-    return DirectoryCardControls(
-        container=container,
-        src_field=src_field,
-        dest_field=dest_field,
-        name_field=name_field,
-    )
+        ),
+    ]
 
 
 def _build_directory_fields(

@@ -108,23 +108,11 @@ class SaveRepairService:
         self._cancel_event.clear()
         report = DetectReport()
         start_time = time.monotonic()
-
-        def log(msg: str, level: str = "INFO") -> None:
-            getattr(logger, level.lower(), logger.info)(
-                msg, module="SaveDetect"
-            )
-            if log_callback:
-                log_callback(msg, level)
-            issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
-            report.issues.append(RepairIssue(
-                level=issue_level,
-                category="detect",
-                message=msg,
-            ))
-
-        def progress(value: float, msg: str) -> None:
-            if progress_callback:
-                progress_callback(min(value, 1.0), msg)
+        log, progress = self._make_detect_callbacks(
+            report,
+            progress_callback,
+            log_callback,
+        )
 
         try:
             if not world_path.exists():
@@ -155,6 +143,31 @@ class SaveRepairService:
 
         report.elapsed_seconds = time.monotonic() - start_time
         return report
+
+    def _make_detect_callbacks(
+        self,
+        report: DetectReport,
+        progress_callback: Optional[Callable[[float, str], None]],
+        log_callback: Optional[Callable[[str, str], None]],
+    ) -> tuple[Callable[[str, str], None], Callable[[float, str], None]]:
+        def log(msg: str, level: str = "INFO") -> None:
+            getattr(logger, level.lower(), logger.info)(
+                msg, module="SaveDetect"
+            )
+            if log_callback:
+                log_callback(msg, level)
+            issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
+            report.issues.append(RepairIssue(
+                level=issue_level,
+                category="detect",
+                message=msg,
+            ))
+
+        def progress(value: float, msg: str) -> None:
+            if progress_callback:
+                progress_callback(min(value, 1.0), msg)
+
+        return log, progress
 
     # ── 修复接口 ──────────────────────────────────────────
 
