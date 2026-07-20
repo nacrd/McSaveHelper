@@ -615,29 +615,10 @@ def _build_region_side_panel(
         color=THEME.text_secondary,
         selectable=True,
     )
-    marker_count_text = ft.Text(
-        t("map.marker_count_empty", "0 个标记"),
-        size=11,
-        color=THEME.text_muted,
-    )
-    marker_list = ft.ListView(
-        controls=[],
-        spacing=3,
-        height=150,
-        padding=0,
-    )
-    add_marker_button = ft.IconButton(
-        icon=ft.Icons.ADD_LOCATION_ALT,
-        icon_color=THEME.success,
-        tooltip=t("map.add_marker", "添加标记"),
-        on_click=add_marker_callback,
-    )
-    delete_marker_button = ft.IconButton(
-        icon=ft.Icons.DELETE_OUTLINE,
-        icon_color=THEME.error,
-        tooltip=t("map.delete_marker", "删除选中标记"),
-        disabled=True,
-        on_click=delete_marker_callback,
+    marker_controls = _build_marker_side_controls(
+        t,
+        add_marker_callback=add_marker_callback,
+        delete_marker_callback=delete_marker_callback,
     )
     selection_panel = card(
         ft.Column(
@@ -669,6 +650,57 @@ def _build_region_side_panel(
         ),
         padding=8,
     )
+    legend_container = ft.Container(content=build_region_legend_content(translate))
+    action_panel = _build_region_action_panel(
+        t,
+        on_fill_nbt=on_fill_nbt,
+        on_delete_region=on_delete_region,
+    )
+    return {
+        "stats_text": stats_text,
+        "status_text": status_text,
+        "marker_count_text": marker_controls["marker_count_text"],
+        "marker_list": marker_controls["marker_list"],
+        "add_marker_button": marker_controls["add_marker_button"],
+        "delete_marker_button": marker_controls["delete_marker_button"],
+        "selection_panel": selection_panel,
+        "stats_panel": stats_panel,
+        "marker_panel": marker_controls["marker_panel"],
+        "legend_container": legend_container,
+        "action_panel": action_panel,
+    }
+
+
+def _build_marker_side_controls(
+    t: Translate,
+    *,
+    add_marker_callback: EventCallback,
+    delete_marker_callback: EventCallback,
+) -> dict[str, Any]:
+    marker_count_text = ft.Text(
+        t("map.marker_count_empty", "0 个标记"),
+        size=11,
+        color=THEME.text_muted,
+    )
+    marker_list = ft.ListView(
+        controls=[],
+        spacing=3,
+        height=150,
+        padding=0,
+    )
+    add_marker_button = ft.IconButton(
+        icon=ft.Icons.ADD_LOCATION_ALT,
+        icon_color=THEME.success,
+        tooltip=t("map.add_marker", "添加标记"),
+        on_click=add_marker_callback,
+    )
+    delete_marker_button = ft.IconButton(
+        icon=ft.Icons.DELETE_OUTLINE,
+        icon_color=THEME.error,
+        tooltip=t("map.delete_marker", "删除选中标记"),
+        disabled=True,
+        on_click=delete_marker_callback,
+    )
     marker_panel = card(
         ft.Column(
             [
@@ -695,8 +727,22 @@ def _build_region_side_panel(
         ),
         padding=8,
     )
-    legend_container = ft.Container(content=build_region_legend_content(translate))
-    action_panel = card(
+    return {
+        "marker_count_text": marker_count_text,
+        "marker_list": marker_list,
+        "add_marker_button": add_marker_button,
+        "delete_marker_button": delete_marker_button,
+        "marker_panel": marker_panel,
+    }
+
+
+def _build_region_action_panel(
+    t: Translate,
+    *,
+    on_fill_nbt: EventCallback,
+    on_delete_region: EventCallback,
+) -> ft.Control:
+    return card(
         ft.Column(
             [
                 ft.Text(
@@ -725,16 +771,3 @@ def _build_region_side_panel(
         ),
         padding=8,
     )
-    return {
-        "stats_text": stats_text,
-        "status_text": status_text,
-        "marker_count_text": marker_count_text,
-        "marker_list": marker_list,
-        "add_marker_button": add_marker_button,
-        "delete_marker_button": delete_marker_button,
-        "selection_panel": selection_panel,
-        "stats_panel": stats_panel,
-        "marker_panel": marker_panel,
-        "legend_container": legend_container,
-        "action_panel": action_panel,
-    }

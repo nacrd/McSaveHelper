@@ -577,6 +577,45 @@ def build_batch_card(
         )
     )
 
+    (
+        batch_dir_field,
+        batch_scan_btn,
+        batch_result,
+        batch_detail_col,
+    ) = _build_batch_detail_controls(
+        batch_dir_path=batch_dir_path,
+        batch_mode=batch_mode,
+        on_field_change=on_field_change,
+        on_browse_batch=on_browse_batch,
+        on_scan_batch=on_scan_batch,
+    )
+    section.controls.append(
+        ft.Container(
+            content=batch_detail_col,
+            padding=ft.Padding(left=20, right=20, bottom=18),
+        )
+    )
+
+    container = card(ft.Column(spacing=0), padding=0)
+    container.content = section
+    return BatchCardControls(
+        container=container,
+        batch_mode_cb=batch_mode_cb,
+        batch_dir_field=batch_dir_field,
+        batch_scan_btn=batch_scan_btn,
+        batch_result=batch_result,
+        batch_detail_col=batch_detail_col,
+    )
+
+
+def _build_batch_detail_controls(
+    *,
+    batch_dir_path: str,
+    batch_mode: bool,
+    on_field_change: SimpleCallback,
+    on_browse_batch: SimpleCallback,
+    on_scan_batch: SimpleCallback,
+) -> tuple[ft.Control, ft.Control, ft.Text, ft.Column]:
     batch_dir_field = text_field(
         label="批量存档目录",
         hint_text="包含多个世界存档的目录",
@@ -610,20 +649,4 @@ def build_batch_card(
         spacing=8,
     )
     batch_detail_col.visible = batch_mode
-    section.controls.append(
-        ft.Container(
-            content=batch_detail_col,
-            padding=ft.Padding(left=20, right=20, bottom=18),
-        )
-    )
-
-    container = card(ft.Column(spacing=0), padding=0)
-    container.content = section
-    return BatchCardControls(
-        container=container,
-        batch_mode_cb=batch_mode_cb,
-        batch_dir_field=batch_dir_field,
-        batch_scan_btn=batch_scan_btn,
-        batch_result=batch_result,
-        batch_detail_col=batch_detail_col,
-    )
+    return batch_dir_field, batch_scan_btn, batch_result, batch_detail_col

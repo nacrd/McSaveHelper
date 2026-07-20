@@ -49,21 +49,15 @@ def parse_item(
         if custom_name:
             display_name = custom_name
 
-    needs_legacy = (
-        tag is not None
-        and (custom_name is None or not enchantments or damage is None)
+    display_name, custom_name, lore, damage, enchantments = _merge_legacy_fields(
+        tag=tag,
+        get_enchantment_name=get_enchantment_name,
+        display_name=display_name,
+        custom_name=custom_name,
+        lore=lore,
+        damage=damage,
+        enchantments=enchantments,
     )
-    if needs_legacy:
-        legacy = _safe_parse_legacy_tag(tag, get_enchantment_name)
-        if custom_name is None and legacy["custom_name"]:
-            custom_name = legacy["custom_name"]
-            display_name = custom_name
-        if not lore and legacy["lore"]:
-            lore = legacy["lore"]
-        if damage is None and legacy["damage"] is not None:
-            damage = legacy["damage"]
-        if not enchantments and legacy["enchantments"]:
-            enchantments = legacy["enchantments"]
 
     if damage is not None and max_dur is not None and max_dur > 0:
         remaining = max_dur - damage
@@ -84,6 +78,42 @@ def parse_item(
         lore=lore,
         slot=slot,
     )
+
+
+def _merge_legacy_fields(
+    *,
+    tag: Any,
+    get_enchantment_name: Callable[[str], str],
+    display_name: str,
+    custom_name: Optional[str],
+    lore: List[str],
+    damage: Optional[int],
+    enchantments: List[Dict[str, Any]],
+) -> tuple[
+    str,
+    Optional[str],
+    List[str],
+    Optional[int],
+    List[Dict[str, Any]],
+]:
+    """Fill missing component fields from legacy ``tag`` data."""
+    needs_legacy = (
+        tag is not None
+        and (custom_name is None or not enchantments or damage is None)
+    )
+    if not needs_legacy:
+        return display_name, custom_name, lore, damage, enchantments
+    legacy = _safe_parse_legacy_tag(tag, get_enchantment_name)
+    if custom_name is None and legacy["custom_name"]:
+        custom_name = legacy["custom_name"]
+        display_name = custom_name
+    if not lore and legacy["lore"]:
+        lore = legacy["lore"]
+    if damage is None and legacy["damage"] is not None:
+        damage = legacy["damage"]
+    if not enchantments and legacy["enchantments"]:
+        enchantments = legacy["enchantments"]
+    return display_name, custom_name, lore, damage, enchantments
 
 
 def _safe_parse_components(
