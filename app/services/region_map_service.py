@@ -232,26 +232,48 @@ class RegionMapService:
         if not path:
             return {}
 
-        if task is None:
-            task = asyncio.create_task(
-                asyncio.to_thread(scan_region_meta, Path(path))
-            )
-            with self._data_lock:
-                existing = self._region_meta_tasks.get(coord)
-                if existing is None:
-                    self._region_meta_tasks[coord] = task
-                    task.add_done_callback(
-                        lambda completed: self._finish_region_meta_task(
-                            coord,
-                            path,
-                            generation,
-                            completed,
-                        )
-                    )
-                else:
-                    task.cancel()
-                    task = existing
+        task = self._get_or_create_region_meta_task(coord, path, generation, task)
+        meta = await self._await_region_meta_task(coord, task)
+        return self._store_region_meta_if_current(
+            coord,
+            path,
+            generation,
+            meta,
+        )
 
+    def _get_or_create_region_meta_task(
+        self,
+        coord: Tuple[int, int],
+        path: str,
+        generation: int,
+        task: Optional[Any],
+    ) -> Any:
+        if task is not None:
+            return task
+        task = asyncio.create_task(
+            asyncio.to_thread(scan_region_meta, Path(path))
+        )
+        with self._data_lock:
+            existing = self._region_meta_tasks.get(coord)
+            if existing is None:
+                self._region_meta_tasks[coord] = task
+                task.add_done_callback(
+                    lambda completed: self._finish_region_meta_task(
+                        coord,
+                        path,
+                        generation,
+                        completed,
+                    )
+                )
+                return task
+            task.cancel()
+            return existing
+
+    async def _await_region_meta_task(
+        self,
+        coord: Tuple[int, int],
+        task: Any,
+    ) -> Dict[str, Any]:
         try:
             # One caller cancelling its UI operation must not cancel a shared
             # parse still awaited by another consumer. Lifecycle methods can
@@ -268,7 +290,15 @@ class RegionMapService:
             with self._data_lock:
                 if self._region_meta_tasks.get(coord) is task and task.done():
                     self._region_meta_tasks.pop(coord, None)
+        return dict(meta or {})
 
+    def _store_region_meta_if_current(
+        self,
+        coord: Tuple[int, int],
+        path: str,
+        generation: int,
+        meta: Dict[str, Any],
+    ) -> Dict[str, Any]:
         with self._data_lock:
             if (
                 self._closed
@@ -276,7 +306,7 @@ class RegionMapService:
                 or self._region_paths.get(coord) != path
             ):
                 return {}
-            self._region_meta[coord] = dict(meta or {})
+            self._region_meta[coord] = dict(meta)
             return dict(self._region_meta[coord])
 
     def clear_data(self) -> None:

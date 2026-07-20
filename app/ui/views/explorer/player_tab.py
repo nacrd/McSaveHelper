@@ -1180,63 +1180,65 @@ class PlayerTabMixin(ExplorerMixinHost):
                     self._t("player.need_select", "请先选择玩家。"),
                 )
                 return
-
-            field_values: Dict[str, str] = {}
-            for field_id, field in self._player_edit_fields.items():
-                if field.value is None:
-                    continue
-                text = str(field.value).strip()
-                if text == "":
-                    continue
-                field_values[field_id] = text
-
             result = self._player_service().build_edit_changes(
                 self.current_uuid,
                 self._current_player_data,
-                field_values,
+                self._collect_player_field_values(),
                 specs=self._active_edit_specs(),
                 target_label=(
                     f"{self._t('player.nbt_label', '玩家 NBT')}: "
                     f"{self.current_uuid}"
                 ),
             )
-
-            if result.errors:
-                self.app.warn_dialog(
-                    self._t("dialogs.hint", "提示"),
-                    self._t(
-                        "player.edit.validation_errors",
-                        "部分字段未暂存：{errors}",
-                        errors=", ".join(result.errors),
-                    ),
-                )
-
-            for change in result.changes:
-                self._nbt_stage_store.add(change)
-
-            self._update_nbt_stage_status()
-            if result.staged_count:
-                self.app.info_dialog(
-                    self._t("player.edit.staged_title", "已暂存"),
-                    self._t(
-                        "player.edit.staged_body",
-                        "已暂存 {count} 个玩家数据修改，可到 NBT 页查看并提交。",
-                        count=result.staged_count,
-                    ),
-                )
-                self._switch_tab(5)
-            elif not result.errors:
-                self.app.info_dialog(
-                    self._t("dialogs.hint", "提示"),
-                    self._t(
-                        "player.edit.no_changes",
-                        "没有检测到需要暂存的玩家数据修改。",
-                    ),
-                )
+            self._apply_player_stage_result(result)
         except Exception as ex:
             self.app.handle_exception(
                 ex,
                 title=self._t("player.error.stage", "暂存玩家数据失败"),
+            )
+
+    def _collect_player_field_values(self) -> Dict[str, str]:
+        field_values: Dict[str, str] = {}
+        for field_id, field in self._player_edit_fields.items():
+            if field.value is None:
+                continue
+            text = str(field.value).strip()
+            if text == "":
+                continue
+            field_values[field_id] = text
+        return field_values
+
+    def _apply_player_stage_result(self, result: Any) -> None:
+        if result.errors:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t(
+                    "player.edit.validation_errors",
+                    "部分字段未暂存：{errors}",
+                    errors=", ".join(result.errors),
+                ),
+            )
+        for change in result.changes:
+            self._nbt_stage_store.add(change)
+        self._update_nbt_stage_status()
+        if result.staged_count:
+            self.app.info_dialog(
+                self._t("player.edit.staged_title", "已暂存"),
+                self._t(
+                    "player.edit.staged_body",
+                    "已暂存 {count} 个玩家数据修改，可到 NBT 页查看并提交。",
+                    count=result.staged_count,
+                ),
+            )
+            self._switch_tab(5)
+            return
+        if not result.errors:
+            self.app.info_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t(
+                    "player.edit.no_changes",
+                    "没有检测到需要暂存的玩家数据修改。",
+                ),
             )
 
     def _stage_teleport_to_death(self, e: Any = None) -> None:

@@ -334,20 +334,7 @@ class MapExportService:
         image: Any = None
         try:
             progress(0.25, "创建地图图像...")
-            renderer_kwargs: Dict[str, Any] = {}
-            if job.selection_bounds is not None:
-                renderer_kwargs["block_bounds"] = job.selection_bounds
-            if job.cancel_event is not None:
-                renderer_kwargs["cancel_event"] = job.cancel_event
-            image = self._renderer.create_map_image(
-                list(job.region_files),
-                dict(job.bounds),
-                job.style,
-                job.scale,
-                log,
-                progress,
-                **renderer_kwargs,
-            )
+            image = self._create_export_image(job, log, progress)
             self._check_cancelled(job.cancel_event)
             image_size = (int(image.size[0]), int(image.size[1]))
             progress(0.95, "保存图像...")
@@ -372,6 +359,27 @@ class MapExportService:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
                     pass
+
+    def _create_export_image(
+        self,
+        job: _RenderJob,
+        log: LogFn,
+        progress: ProgressFn,
+    ) -> Any:
+        renderer_kwargs: Dict[str, Any] = {}
+        if job.selection_bounds is not None:
+            renderer_kwargs["block_bounds"] = job.selection_bounds
+        if job.cancel_event is not None:
+            renderer_kwargs["cancel_event"] = job.cancel_event
+        return self._renderer.create_map_image(
+            list(job.region_files),
+            dict(job.bounds),
+            job.style,
+            job.scale,
+            log,
+            progress,
+            **renderer_kwargs,
+        )
 
     @staticmethod
     def _dimension_id(spec: Optional[MapExportSpec]) -> str:
