@@ -8,6 +8,13 @@ from typing import Any, Dict, List, Optional
 import flet as ft
 
 from app.presenters.player_presenter import format_export_bundle_text
+from app.services.asset_import import (
+    import_assets_from_sources,
+    pick_asset_sources,
+    preferred_mc_locale,
+    configured_minecraft_dir,
+    current_save_start_path,
+)
 from app.services.player.models import PLAYER_EDIT_SPECS, PlayerEditSpec
 from app.services.player_avatar_service import PlayerAvatarService
 from app.services.player_service import PlayerService
@@ -1376,16 +1383,28 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _import_language_and_textures(self, e: Any = None) -> None:
         """Unified importer: language JSON/JAR and bulk jar textures."""
         try:
-            paths = self._pick_asset_sources()
+            title = self._t(
+                "player.import_assets_title",
+                "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+            )
+            paths = pick_asset_sources(self.app, title)
             if not paths:
                 return
-            locale = self._preferred_item_locale()
-            counts = self._import_selected_asset_sources(paths, locale)
+            locale = preferred_mc_locale(self.app)
+            counts = import_assets_from_sources(
+                item_service=self.app.item,
+                texture_service=self.app.texture,
+                paths=paths,
+                locale=locale,
+                configured_dir=configured_minecraft_dir(self.app),
+                start_path=current_save_start_path(self.app),
+                empty_jar_results_fallback=True,
+            )
             self._notify_asset_import(
-                lang_count=counts["lang_count"],
-                texture_count=counts["texture_count"],
-                jar_count=counts["jar_count"],
-                lang_sources=counts["lang_sources"],
+                lang_count=counts.lang_count,
+                texture_count=counts.texture_count,
+                jar_count=counts.jar_count,
+                lang_sources=counts.lang_sources,
             )
         except Exception as ex:
             self.app.handle_exception(
@@ -1395,79 +1414,6 @@ class PlayerTabMixin(ExplorerMixinHost):
                     "导入语言/贴图失败",
                 ),
             )
-
-    def _import_selected_asset_sources(
-        self,
-        paths: List[Path],
-        locale: str,
-    ) -> Dict[str, int]:
-        lang_count = 0
-        texture_count = 0
-        jar_count = 0
-        lang_sources = 0
-        json_files = [p for p in paths if p.suffix.lower() == ".json"]
-        jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
-
-        for json_path in json_files:
-            lang_count += self.app.item.load_language_file(json_path)
-
-        if jar_files:
-            for jar_path in jar_files:
-                result = self.app.item.extract_language_from_jar_detailed(
-                    jar_path,
-                    locale=locale,
-                )
-                if result.count > 0:
-                    lang_count += result.count
-                    lang_sources += len(result.sources)
-                    jar_count += 1
-            tex = self.app.texture.import_textures_from_jars(jar_files)
-            texture_count = tex.extracted
-            if tex.jars and not jar_count:
-                jar_count = tex.jars
-
-        if lang_count == 0 and texture_count == 0 and not jar_files:
-            # Only JSON selected but empty.
-            self._notify_language_import(0)
-        elif lang_count == 0 and texture_count == 0 and jar_files:
-            # Try discovered/local Minecraft as additional language source.
-            local = self.app.item.import_language_from_local_minecraft(
-                locale=locale,
-                configured_dir=self._configured_minecraft_dir(),
-                start_path=self._current_save_start_path(),
-            )
-            if local.count > 0:
-                lang_count = local.count
-                if local.jar_path:
-                    jar_count = max(jar_count, 1)
-
-        return {
-            "lang_count": lang_count,
-            "texture_count": texture_count,
-            "jar_count": jar_count,
-            "lang_sources": lang_sources,
-        }
-
-    def _pick_asset_sources(self) -> List[Path]:
-        """Pick JSON and/or JAR sources (multi-select when available)."""
-        title = self._t(
-            "player.import_assets_title",
-            "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
-        )
-        file_types = [
-            ("JSON / JAR", "*.json;*.jar"),
-            ("JSON (*.json)", "*.json"),
-            ("JAR (*.jar)", "*.jar"),
-        ]
-        pick_files = getattr(self.app, "pick_files", None)
-        if callable(pick_files):
-            selected = pick_files(title=title, file_types=file_types)
-            if selected:
-                return [Path(item) for item in selected if item]
-            return []
-        # Fallback single-file picker.
-        path = self.app.pick_file(title=title, file_types=file_types)
-        return [Path(path)] if path else []
 
     def _notify_asset_import(
         self,
@@ -1526,25 +1472,21 @@ class PlayerTabMixin(ExplorerMixinHost):
 
     def _import_language_from_minecraft(self, e: Any = None) -> None:
         try:
-            locale = self._preferred_item_locale()
-            result = self.app.item.import_language_from_local_minecraft(
+            locale = preferred_mc_locale(self.app)
+            counts = import_assets_from_sources(
+                item_service=self.app.item,
+                texture_service=self.app.texture,
+                paths=[],
                 locale=locale,
-                configured_dir=self._configured_minecraft_dir(),
-                start_path=self._current_save_start_path(),
+                configured_dir=configured_minecraft_dir(self.app),
+                start_path=current_save_start_path(self.app),
+                empty_paths_fallback=True,
             )
-            texture_count = 0
-            jar_count = 0
-            if result.jar_path and str(result.jar_path).lower().endswith(".jar"):
-                jar_path = Path(result.jar_path)
-                tex = self.app.texture.import_textures_from_jars([jar_path])
-                texture_count = tex.extracted
-                jar_count = max(1, tex.jars)
-                self.app.texture.set_minecraft_jar(jar_path)
             self._notify_asset_import(
-                lang_count=result.count,
-                texture_count=texture_count,
-                jar_count=jar_count,
-                lang_sources=1 if result.count else 0,
+                lang_count=counts.lang_count,
+                texture_count=counts.texture_count,
+                jar_count=counts.jar_count,
+                lang_sources=counts.lang_sources,
             )
         except Exception as ex:
             self.app.handle_exception(
@@ -1554,63 +1496,6 @@ class PlayerTabMixin(ExplorerMixinHost):
                     "导入语言/贴图失败",
                 ),
             )
-
-    def _notify_language_import(self, count: int) -> None:
-        self._notify_asset_import(
-            lang_count=count,
-            texture_count=0,
-            jar_count=0,
-            lang_sources=0,
-        )
-
-    def _configured_minecraft_dir(self) -> Optional[Path]:
-        try:
-            getter = getattr(self.app.config, "get_minecraft_dir", None)
-            raw = ""
-            if callable(getter):
-                raw = str(getter() or "")
-            else:
-                settings = getattr(self.app.config, "get_settings", None)
-                if callable(settings):
-                    raw = str(getattr(settings(), "minecraft_dir", "") or "")
-            text = raw.strip()
-            return Path(text) if text else None
-        except Exception:
-            return None
-
-    def _current_save_start_path(self) -> Optional[Path]:
-        try:
-            value = getattr(self.app, "current_save_path", None)
-            text = str(value or "").strip()
-            return Path(text) if text else None
-        except Exception:
-            return None
-
-    def _preferred_item_locale(self) -> str:
-        """Map the app UI language to a Minecraft jar lang stem.
-
-        Prefer ``app.i18n.current_language`` (the loaded translation catalog),
-        then config language. UI ``zh_CN`` → jar ``zh_cn``.
-        """
-        from app.services.item.language_loader import normalize_locale
-
-        try:
-            code = ""
-            i18n = getattr(self.app, "i18n", None)
-            if i18n is not None:
-                code = str(getattr(i18n, "current_language", "") or "")
-            if not code and hasattr(self.app, "config"):
-                settings = getattr(self.app.config, "get_settings", None)
-                if callable(settings):
-                    code = str(getattr(settings(), "language", "") or "")
-                else:
-                    code = str(getattr(self.app.config, "language", "") or "")
-            if code:
-                return normalize_locale(code)
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
-        return "zh_cn"
 
     def _active_edit_specs(self) -> List[PlayerEditSpec]:
         wanted = set(_FORM_FIELD_IDS)

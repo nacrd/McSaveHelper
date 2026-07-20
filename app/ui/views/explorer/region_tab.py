@@ -15,7 +15,6 @@ from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.ui.views.explorer.region_tab_chrome import (
     REGION_DISPLAY_HELP,
-    REGION_LEGEND,
     build_map_fallback,
     build_region_legend_content,
     build_region_tab_chrome,
@@ -134,21 +133,6 @@ class RegionTabMixin(ExplorerMixinHost):
         if controller is not None:
             controller.dispose()
 
-    def _enter_map_fullscreen(self) -> None:
-        if self._map_fullscreen_controller is not None:
-            self._map_fullscreen_controller.enter()
-
-    def _exit_map_fullscreen(self) -> None:
-        if self._map_fullscreen_controller is not None:
-            self._map_fullscreen_controller.exit()
-
-    def _create_region_legend_content(self) -> ft.Column:
-        return build_region_legend_content(self.app.translate)
-
-    def _get_region_display_legend(
-            self) -> tuple[str, list[tuple[str, str, str]]]:
-        return self.app.translate("map.legend", "地图图例"), list(REGION_LEGEND)
-
     def _change_region_display_mode(self) -> None:
         mode = self._region_display_mode_dropdown.value or "topview"
         self._region_display_mode = mode
@@ -158,7 +142,9 @@ class RegionTabMixin(ExplorerMixinHost):
         if self._map_view is not None and hasattr(self._map_view, "set_display_mode"):
             self._map_view.set_display_mode(mode)
         self._region_help_text.value = self._get_region_display_help(mode)
-        self._region_legend_container.content = self._create_region_legend_content()
+        self._region_legend_container.content = build_region_legend_content(
+            self.app.translate
+        )
         safe_update(self._region_help_text)
         safe_update(self._region_legend_container)
         if self._selected_region_coord is not None:

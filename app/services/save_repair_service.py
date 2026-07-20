@@ -41,18 +41,26 @@ _ISSUE_LEVELS = {
 
 @dataclass(frozen=True)
 class _RepairCallbacks:
-    report: RepairReport
+    """Log/progress helpers shared by repair and detect flows.
+
+    ``report`` is either ``RepairReport`` or ``DetectReport`` — both expose
+    an ``issues: list[RepairIssue]`` bag that ``log`` appends into.
+    """
+
+    report: RepairReport | DetectReport
     progress_callback: Optional[Callable[[float, str], None]]
     log_callback: Optional[Callable[[str, str], None]]
+    module: str = "SaveRepair"
+    category: str = "general"
 
     def log(self, message: str, level: str = "INFO") -> None:
-        getattr(logger, level.lower(), logger.info)(message, module="SaveRepair")
+        getattr(logger, level.lower(), logger.info)(message, module=self.module)
         if self.log_callback:
             self.log_callback(message, level)
         issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
         self.report.issues.append(RepairIssue(
             level=issue_level,
-            category="general",
+            category=self.category,
             message=message,
         ))
 
@@ -108,66 +116,48 @@ class SaveRepairService:
         self._cancel_event.clear()
         report = DetectReport()
         start_time = time.monotonic()
-        log, progress = self._make_detect_callbacks(
+        callbacks = _RepairCallbacks(
             report,
             progress_callback,
             log_callback,
+            module="SaveDetect",
+            category="detect",
         )
 
         try:
             if not world_path.exists():
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
-            log(f"开始检测存档: {world_path}")
+            callbacks.log(f"开始检测存档: {world_path}")
             detector = WorldDetector(self._cancel_event)
-            detector.detect_world(world_path, report, log, progress)
+            detector.detect_world(
+                world_path,
+                report,
+                callbacks.log,
+                callbacks.progress,
+            )
 
             if self.is_cancelled:
                 report.cancelled = True
-                log("检测操作已取消", "WARNING")
+                callbacks.log("检测操作已取消", "WARNING")
 
-            progress(1.0, "检测完成")
+            callbacks.progress(1.0, "检测完成")
             if report.has_problems:
-                log(
+                callbacks.log(
                     f"检测完成，发现 {len(report.issues)} 个问题",
                     "WARNING",
                 )
             else:
-                log("检测完成，存档状态良好", "SUCCESS")
+                callbacks.log("检测完成，存档状态良好", "SUCCESS")
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            log(f"检测失败: {exc}", "ERROR")
+            callbacks.log(f"检测失败: {exc}", "ERROR")
             logger.error(str(exc), module="SaveDetect")
         except Exception as exc:
-            log(f"检测失败: {exc}", "ERROR")
+            callbacks.log(f"检测失败: {exc}", "ERROR")
             logger.error(str(exc), module="SaveDetect")
 
         report.elapsed_seconds = time.monotonic() - start_time
         return report
-
-    def _make_detect_callbacks(
-        self,
-        report: DetectReport,
-        progress_callback: Optional[Callable[[float, str], None]],
-        log_callback: Optional[Callable[[str, str], None]],
-    ) -> tuple[Callable[[str, str], None], Callable[[float, str], None]]:
-        def log(msg: str, level: str = "INFO") -> None:
-            getattr(logger, level.lower(), logger.info)(
-                msg, module="SaveDetect"
-            )
-            if log_callback:
-                log_callback(msg, level)
-            issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
-            report.issues.append(RepairIssue(
-                level=issue_level,
-                category="detect",
-                message=msg,
-            ))
-
-        def progress(value: float, msg: str) -> None:
-            if progress_callback:
-                progress_callback(min(value, 1.0), msg)
-
-        return log, progress
 
     # ── 修复接口 ──────────────────────────────────────────
 

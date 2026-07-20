@@ -3,6 +3,13 @@ from pathlib import Path
 import flet as ft
 from typing import TYPE_CHECKING, Dict, Optional
 
+from app.services.asset_import import (
+    configured_minecraft_dir,
+    current_save_start_path,
+    import_assets_from_sources,
+    pick_asset_sources,
+    preferred_mc_locale,
+)
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
@@ -348,64 +355,31 @@ class MappingsView(ft.Column):
     def _import_assets(self, e: ft.ControlEvent = None) -> None:
         """Unified multi-select language + jar texture importer."""
         try:
-            paths = self._pick_asset_sources()
-            locale = self._preferred_locale()
-            lang_count, texture_count, jar_count = self._import_assets_from_sources(
-                paths,
-                locale,
+            title = self._t(
+                "mappings.import_assets_title",
+                "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+            )
+            paths = pick_asset_sources(self.app, title)
+            locale = preferred_mc_locale(self.app)
+            counts = import_assets_from_sources(
+                item_service=self._item_service,
+                texture_service=self.app.texture,
+                paths=paths,
+                locale=locale,
+                configured_dir=configured_minecraft_dir(self.app),
+                start_path=current_save_start_path(self.app),
+                empty_paths_fallback=True,
             )
             self._set_asset_import_status(
-                lang_count,
-                texture_count,
-                jar_count,
+                counts.lang_count,
+                counts.texture_count,
+                counts.jar_count,
                 locale,
             )
             self._render_item_table(self._item_search_field.value or "")
             self.update()
         except Exception as ex:
             self.app.handle_exception(ex, title="导入语言/贴图失败")
-
-    def _import_assets_from_sources(
-        self,
-        paths: list[Path],
-        locale: str,
-    ) -> tuple[int, int, int]:
-        lang_count = 0
-        texture_count = 0
-        jar_count = 0
-        if paths:
-            json_files = [p for p in paths if p.suffix.lower() == ".json"]
-            jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
-            for json_path in json_files:
-                lang_count += self._item_service.load_language_file(json_path)
-            for jar_path in jar_files:
-                result = self._item_service.extract_language_from_jar_detailed(
-                    jar_path,
-                    locale=locale,
-                )
-                lang_count += result.count
-                if result.count > 0:
-                    jar_count += 1
-            if jar_files:
-                texture = self.app.texture.import_textures_from_jars(jar_files)
-                texture_count = texture.extracted
-                jar_count = max(jar_count, texture.jars)
-            return lang_count, texture_count, jar_count
-
-        # No files chosen — fall back to configured / inferred Minecraft.
-        result = self._item_service.import_language_from_local_minecraft(
-            locale=locale,
-            configured_dir=self._configured_minecraft_dir(),
-            start_path=self._current_save_start_path(),
-        )
-        lang_count = result.count
-        if result.jar_path and str(result.jar_path).lower().endswith(".jar"):
-            jar_path = Path(result.jar_path)
-            texture = self.app.texture.import_textures_from_jars([jar_path])
-            texture_count = texture.extracted
-            jar_count = max(1, texture.jars)
-            self.app.texture.set_minecraft_jar(jar_path)
-        return lang_count, texture_count, jar_count
 
     def _set_asset_import_status(
         self,
@@ -431,25 +405,6 @@ class MappingsView(ft.Column):
         )
         self._item_mapping_status.color = THEME.mc_grass
 
-    def _pick_asset_sources(self) -> list[Path]:
-        title = self._t(
-            "mappings.import_assets_title",
-            "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
-        )
-        file_types = [
-            ("JSON / JAR", "*.json;*.jar"),
-            ("JSON (*.json)", "*.json"),
-            ("JAR (*.jar)", "*.jar"),
-        ]
-        pick_files = getattr(self.app, "pick_files", None)
-        if callable(pick_files):
-            selected = pick_files(title=title, file_types=file_types)
-            if selected:
-                return [Path(item) for item in selected if item]
-            return []
-        path = self.app.pick_file(title=title, file_types=file_types)
-        return [Path(path)] if path else []
-
     def _import_from_local_minecraft(self, e: ft.ControlEvent = None) -> None:
         """Back-compat: unified importer with empty selection falls back to local."""
         self._import_assets(e)
@@ -457,60 +412,6 @@ class MappingsView(ft.Column):
     def _import_from_jar_file(self, e: ft.ControlEvent = None) -> None:
         """Back-compat alias for the unified assets importer."""
         self._import_assets(e)
-
-    def _preferred_locale(self) -> str:
-        """Map app UI translation language to Minecraft jar lang stem."""
-        from app.services.item.language_loader import normalize_locale
-
-        try:
-            code = ""
-            i18n = getattr(self.app, "i18n", None)
-            if i18n is not None:
-                code = str(getattr(i18n, "current_language", "") or "")
-            if not code and hasattr(self.app, "config"):
-                settings = getattr(self.app.config, "get_settings", None)
-                if callable(settings):
-                    code = str(getattr(settings(), "language", "") or "")
-            if code:
-                return normalize_locale(code)
-        except (AttributeError, TypeError, ValueError):
-            pass
-        except Exception:
-            # UI best-effort: locale lookup must not block mapping import.
-            pass
-        return "zh_cn"
-
-    def _configured_minecraft_dir(self) -> Optional[Path]:
-        try:
-            getter = getattr(self.app.config, "get_minecraft_dir", None)
-            raw = ""
-            if callable(getter):
-                raw = str(getter() or "")
-            else:
-                settings = getattr(self.app.config, "get_settings", None)
-                if callable(settings):
-                    raw = str(getattr(settings(), "minecraft_dir", "") or "")
-            text = raw.strip()
-            return Path(text) if text else None
-        except (AttributeError, TypeError, ValueError, OSError):
-            return None
-        except Exception:
-            return None
-
-    def _current_save_start_path(self) -> Optional[Path]:
-        try:
-            value = getattr(self.app, "current_save_path", None)
-            if callable(value):
-                try:
-                    value = value()
-                except TypeError:
-                    pass
-            text = str(value or "").strip()
-            return Path(text) if text else None
-        except (AttributeError, TypeError, ValueError, OSError):
-            return None
-        except Exception:
-            return None
 
     def _import_json(self, e: ft.ControlEvent) -> None:
         try:
