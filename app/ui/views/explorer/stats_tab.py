@@ -131,17 +131,7 @@ class StatsTabMixin(ExplorerMixinHost):
         return ft.Container(
             content=ft.Column(
                 [
-                    card(
-                        ft.Column(
-                            [
-                                self._stats_status,
-                                self._stats_progress_label,
-                                self._stats_progress_bar,
-                            ],
-                            spacing=8,
-                        ),
-                        padding=12,
-                    ),
+                    self._build_stats_progress_card(),
                     self._stats_section_card(
                         self._t("stats.section_summary", "汇总"),
                         [self._stats_summary],
@@ -150,37 +140,7 @@ class StatsTabMixin(ExplorerMixinHost):
                         self._t("stats.section_dimensions", "维度大小"),
                         [self._dimension_stats_col],
                     ),
-                    card(
-                        ft.Column(
-                            [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            self._t(
-                                                "stats.section_playtime",
-                                                "玩家统计",
-                                            ),
-                                            size=14,
-                                            weight=ft.FontWeight.BOLD,
-                                            color=THEME.text_primary,
-                                            expand=True,
-                                        ),
-                                        ft.Text(
-                                            self._t("stats.sort_by", "排序"),
-                                            size=11,
-                                            color=THEME.text_muted,
-                                        ),
-                                        self._build_player_sort_dropdown(),
-                                    ],
-                                    spacing=8,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                self._player_stats_col,
-                            ],
-                            spacing=8,
-                        ),
-                        padding=12,
-                    ),
+                    self._build_player_stats_card(),
                     self._stats_section_card(
                         self._t("stats.section_blocks", "方块分布 Top 10"),
                         [self._block_stats_col],
@@ -200,6 +160,52 @@ class StatsTabMixin(ExplorerMixinHost):
                 spacing=12,
             ),
             col={"xs": 12, "sm": 12, "md": 7, "lg": 8},
+        )
+
+    def _build_stats_progress_card(self) -> ft.Control:
+        return card(
+            ft.Column(
+                [
+                    self._stats_status,
+                    self._stats_progress_label,
+                    self._stats_progress_bar,
+                ],
+                spacing=8,
+            ),
+            padding=12,
+        )
+
+    def _build_player_stats_card(self) -> ft.Control:
+        return card(
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            ft.Text(
+                                self._t(
+                                    "stats.section_playtime",
+                                    "玩家统计",
+                                ),
+                                size=14,
+                                weight=ft.FontWeight.BOLD,
+                                color=THEME.text_primary,
+                                expand=True,
+                            ),
+                            ft.Text(
+                                self._t("stats.sort_by", "排序"),
+                                size=11,
+                                color=THEME.text_muted,
+                            ),
+                            self._build_player_sort_dropdown(),
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    self._player_stats_col,
+                ],
+                spacing=8,
+            ),
+            padding=12,
         )
 
     def _build_stats_right_column(self) -> ft.Container:

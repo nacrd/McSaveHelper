@@ -196,6 +196,35 @@ class BackupCenterView(ft.Column):
         ]
 
     def _backup_row(self, record: BackupRecord) -> ft.Container:
+        status_color = THEME.success if record.valid else THEME.error
+        status_icon = IconSet.SUCCESS if record.valid else IconSet.ERROR
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(status_icon, size=24, color=status_color),
+                    ft.Column(
+                        self._backup_description_controls(record),
+                        spacing=3,
+                        expand=True,
+                    ),
+                    ft.Row(
+                        self._backup_action_buttons(record),
+                        spacing=2,
+                    ),
+                ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding(left=14, right=8, top=12, bottom=12),
+            bgcolor=THEME.bg_card,
+            border=mc_border(2),
+            border_radius=8,
+        )
+
+    def _backup_description_controls(
+        self,
+        record: BackupRecord,
+    ) -> list[ft.Control]:
         title = record.label or self._t("untitled", "未命名恢复点")
         created = record.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
         details = self._t(
@@ -211,65 +240,53 @@ class BackupCenterView(ft.Column):
             if record.integrity_available
             else self._t("integrity_legacy", "旧版无清单")
         )
-        details = f"{details} · {integrity}"
-        status_color = THEME.success if record.valid else THEME.error
-        status_icon = IconSet.SUCCESS if record.valid else IconSet.ERROR
-        verify_button = ft.IconButton(
-            icon=IconSet.VERIFY,
-            tooltip=self._t("verify", "验证完整性"),
-            icon_color=THEME.mc_emerald,
-            disabled=not record.valid or self._busy,
-            on_click=lambda e, item=record: self._start_verify(item),
-        )
-        restore_button = ft.IconButton(
-            icon=IconSet.RESTORE,
-            tooltip=self._t("restore", "恢复此备份"),
-            icon_color=THEME.mc_diamond,
-            disabled=not record.valid or self._busy,
-            on_click=lambda e, item=record: self._confirm_restore(item),
-        )
-        delete_button = ft.IconButton(
-            icon=IconSet.DELETE,
-            tooltip=self._t("delete", "删除此备份"),
-            icon_color=THEME.error,
-            disabled=self._busy,
-            on_click=lambda e, item=record: self._confirm_delete(item),
-        )
-        description_controls: list[ft.Control] = [
+        controls: list[ft.Control] = [
             ft.Text(
                 title,
                 size=14,
                 weight=ft.FontWeight.BOLD,
                 color=THEME.text_primary,
             ),
-            ft.Text(details, size=11, color=THEME.text_secondary),
+            ft.Text(
+                f"{details} · {integrity}",
+                size=11,
+                color=THEME.text_secondary,
+            ),
         ]
         if not record.valid:
-            description_controls.append(
+            controls.append(
                 ft.Text(
                     record.validation_error,
                     size=11,
                     color=THEME.error,
                 )
             )
-        return ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(status_icon, size=24, color=status_color),
-                    ft.Column(description_controls, spacing=3, expand=True),
-                    ft.Row(
-                        [verify_button, restore_button, delete_button],
-                        spacing=2,
-                    ),
-                ],
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        return controls
+
+    def _backup_action_buttons(self, record: BackupRecord) -> list[ft.Control]:
+        return [
+            ft.IconButton(
+                icon=IconSet.VERIFY,
+                tooltip=self._t("verify", "验证完整性"),
+                icon_color=THEME.mc_emerald,
+                disabled=not record.valid or self._busy,
+                on_click=lambda e, item=record: self._start_verify(item),
             ),
-            padding=ft.Padding(left=14, right=8, top=12, bottom=12),
-            bgcolor=THEME.bg_card,
-            border=mc_border(2),
-            border_radius=8,
-        )
+            ft.IconButton(
+                icon=IconSet.RESTORE,
+                tooltip=self._t("restore", "恢复此备份"),
+                icon_color=THEME.mc_diamond,
+                disabled=not record.valid or self._busy,
+                on_click=lambda e, item=record: self._confirm_restore(item),
+            ),
+            ft.IconButton(
+                icon=IconSet.DELETE,
+                tooltip=self._t("delete", "删除此备份"),
+                icon_color=THEME.error,
+                disabled=self._busy,
+                on_click=lambda e, item=record: self._confirm_delete(item),
+            ),
+        ]
 
     def _start_create(self, event: ft.ControlEvent) -> None:
         del event

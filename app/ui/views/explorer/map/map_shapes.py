@@ -583,6 +583,26 @@ def info_overlay(
     show_coordinates: bool = False,
 ) -> List[cv.Shape]:
     shapes: List[cv.Shape] = []
+    shapes.extend(_mode_title_badge(display_mode, view_level, scale))
+    if is_scanning:
+        shapes.extend(_scan_progress_badge(height, scan_progress))
+    if show_coordinates and selected_region:
+        shapes.extend(
+            _selection_info_badge(
+                width=width,
+                view_level=view_level,
+                selected_region=selected_region,
+                selected_chunk=selected_chunk,
+            )
+        )
+    return shapes
+
+
+def _mode_title_badge(
+    display_mode: str,
+    view_level: MapViewLevel,
+    scale: float,
+) -> List[cv.Shape]:
     level_title = {
         "world": "世界",
         "region": "区域",
@@ -590,57 +610,61 @@ def info_overlay(
         "block": "区块内",
     }.get(view_level, "世界")
     title = f"{get_mode_title(display_mode)} · {level_title} · {scale:.1f}x"
-    shapes.append(cv.Rect(10, 10, 260, 26, paint=ft.Paint(color="#00000099")))
-    shapes.append(
+    return [
+        cv.Rect(10, 10, 260, 26, paint=ft.Paint(color="#00000099")),
         cv.Text(
             x=15,
             y=15,
             value=title,
             style=ft.TextStyle(size=12, color="#D7CCC8"),
-        )
-    )
-    if is_scanning:
-        shapes.append(
-            cv.Rect(10, height - 34, 120, 24, paint=ft.Paint(color="#00000088"))
-        )
-        shapes.append(
-            cv.Text(
-                x=15,
-                y=height - 29,
-                value=f"扫描中: {int(scan_progress * 100)}%",
-                style=ft.TextStyle(size=12, color="#64B5F6"),
-            )
-        )
+        ),
+    ]
 
-    if show_coordinates and selected_region:
-        if selected_chunk is not None:
-            cx, cz = selected_chunk
-            prefix = "区块内" if view_level == "block" else "区块"
-            info = (
-                f"{prefix} ({cx},{cz}) · "
-                f"{format_chunk_block_range(selected_chunk)}"
-            )
-        else:
-            info = (
-                f"r.{selected_region[0]}.{selected_region[1]}.mca · "
-                f"{format_region_block_range(selected_region)}"
-            )
-        text_w = max(140, len(info) * 7 + 20)
-        shapes.append(
-            cv.Rect(
-                width - text_w - 10,
-                10,
-                text_w,
-                24,
-                paint=ft.Paint(color="#00000088"),
-            )
+
+def _scan_progress_badge(height: float, scan_progress: float) -> List[cv.Shape]:
+    return [
+        cv.Rect(10, height - 34, 120, 24, paint=ft.Paint(color="#00000088")),
+        cv.Text(
+            x=15,
+            y=height - 29,
+            value=f"扫描中: {int(scan_progress * 100)}%",
+            style=ft.TextStyle(size=12, color="#64B5F6"),
+        ),
+    ]
+
+
+def _selection_info_badge(
+    *,
+    width: float,
+    view_level: MapViewLevel,
+    selected_region: Coord,
+    selected_chunk: Optional[Coord],
+) -> List[cv.Shape]:
+    if selected_chunk is not None:
+        cx, cz = selected_chunk
+        prefix = "区块内" if view_level == "block" else "区块"
+        info = (
+            f"{prefix} ({cx},{cz}) · "
+            f"{format_chunk_block_range(selected_chunk)}"
         )
-        shapes.append(
-            cv.Text(
-                x=width - text_w - 5,
-                y=15,
-                value=info,
-                style=ft.TextStyle(size=12, color="#64B5F6"),
-            )
+    else:
+        info = (
+            f"r.{selected_region[0]}.{selected_region[1]}.mca · "
+            f"{format_region_block_range(selected_region)}"
         )
-    return shapes
+    text_w = max(140, len(info) * 7 + 20)
+    return [
+        cv.Rect(
+            width - text_w - 10,
+            10,
+            text_w,
+            24,
+            paint=ft.Paint(color="#00000088"),
+        ),
+        cv.Text(
+            x=width - text_w - 5,
+            y=15,
+            value=info,
+            style=ft.TextStyle(size=12, color="#64B5F6"),
+        ),
+    ]

@@ -289,16 +289,9 @@ class MigrationService:
         world_names = [
             f"world_{i + 1}" for i in range(len(self._batch_worlds))
         ]
-        migrate_task = self._make_batch_task_handler(options)
-        self._batch_processor = BatchProcessor(
-            max_concurrent,
-            version_detector=self._config.detect_minecraft_version,
-            custom_mappings=(
-                self._config.custom_uuid_mappings
-                if self._config.use_custom_mapping
-                else None
-            ),
-            task_handler=migrate_task,
+        self._batch_processor = self._create_batch_processor(
+            max_concurrent=max_concurrent,
+            options=options,
         )
         return self._batch_processor.process_batch(
             self._batch_worlds,
@@ -311,6 +304,23 @@ class MigrationService:
             list(options.manual_names),
             log_cb,
             progress_cb,
+        )
+
+    def _create_batch_processor(
+        self,
+        *,
+        max_concurrent: int,
+        options: MigrationOptions,
+    ) -> BatchProcessor:
+        return BatchProcessor(
+            max_concurrent,
+            version_detector=self._config.detect_minecraft_version,
+            custom_mappings=(
+                self._config.custom_uuid_mappings
+                if self._config.use_custom_mapping
+                else None
+            ),
+            task_handler=self._make_batch_task_handler(options),
         )
 
     def _make_batch_task_handler(
