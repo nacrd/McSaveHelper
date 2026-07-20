@@ -353,7 +353,13 @@
     "add_row": "添加一行",
     "import_list": "导入名单",
     "export_list": "导出名单",
-    "clear_all": "清空"
+    "clear_all": "清空",
+    "import_mc_jar": "从本地 Minecraft 导入",
+    "import_jar": "选择 JAR 导入",
+    "jar_hint": "可从本机 .minecraft/versions 客户端 jar 或模组 jar 提取 assets/*/lang/zh_cn.json。",
+    "local_mc_missing": "未找到本机 Minecraft 客户端 jar，请改用「选择 JAR 导入」。",
+    "pick_jar_title": "选择 Minecraft 客户端或模组 JAR",
+    "jar_empty": "JAR 中未找到可用语言文件（尝试 zh_cn / en_us）。"
   },
   "settings": {
     "general": {
@@ -646,7 +652,8 @@
       "export": "导出玩家摘要失败",
       "import_usercache": "导入 usercache 失败",
       "import_language": "导入语言文件失败",
-      "shulker": "打开潜影盒失败"
+      "shulker": "打开潜影盒失败",
+      "import_mc_jar": "从 Minecraft jar 导入语言失败"
     },
     "list_empty": "没有匹配的玩家",
     "attributes": {
@@ -659,6 +666,10 @@
     },
     "shulker": {
       "title": "容器内容"
-    }
+    },
+    "import_mc_jar": "从 MC jar 导入语言",
+    "import_mc_jar_ok": "已从本地 Minecraft 导入 {count} 个物品/附魔名称{jar_info}。\n物品栏和装备预览将使用新名称。",
+    "import_mc_jar_title": "选择 Minecraft 客户端 JAR",
+    "import_mc_jar_missing": "未找到本机 Minecraft 客户端 jar。\n请选择 versions/<版本>/<版本>.jar 后重试。"
   }
 }

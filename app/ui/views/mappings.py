@@ -112,11 +112,32 @@ class MappingsView(ft.Column):
         import_row = ft.Row([
             btn_primary("导入 JSON", width=110, on_click=self._import_json),
             btn_ghost("导出 JSON", width=110, on_click=self._export_json),
-            ft.Text("语言文件导入已移至顶栏。", size=11, color=THEME.text_muted),
+            btn_ghost(
+                self._t("mappings.import_mc_jar", "从本地 Minecraft 导入"),
+                width=170,
+                on_click=self._import_from_local_minecraft,
+            ),
+            btn_ghost(
+                self._t("mappings.import_jar", "选择 JAR 导入"),
+                width=130,
+                on_click=self._import_from_jar_file,
+            ),
         ], spacing=8)
         s.controls.append(ft.Container(
             content=import_row,
             padding=ft.Padding(left=20, right=20, bottom=12),
+        ))
+        s.controls.append(ft.Container(
+            content=ft.Text(
+                self._t(
+                    "mappings.jar_hint",
+                    "可从本机 .minecraft/versions 客户端 jar 或模组 jar 提取 "
+                    "assets/*/lang/zh_cn.json。",
+                ),
+                size=11,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=20, right=20, bottom=8),
         ))
 
         self._item_id_field = text_field(
@@ -296,16 +317,105 @@ class MappingsView(ft.Column):
         try:
             path = self.app.pick_file(
                 title="选择语言文件 (zh_cn.json 等)",
-                file_types=[("JSON 文件 (*.json)", "*.json")],
+                file_types=[
+                    ("JSON / JAR", "*.json;*.jar"),
+                    ("JSON 文件 (*.json)", "*.json"),
+                    ("JAR 文件 (*.jar)", "*.jar"),
+                ],
             )
-            if path:
-                count = self._item_service.load_language_file(Path(path))
-                self._item_mapping_status.value = f"已导入 {count} 个名称。"
-                self._item_mapping_status.color = THEME.mc_grass
-                self._render_item_table(self._item_search_field.value or "")
-                self.update()
+            if not path:
+                return
+            source = Path(path)
+            if source.suffix.lower() == ".jar":
+                result = self._item_service.extract_language_from_jar_detailed(
+                    source,
+                    locale=self._preferred_locale(),
+                )
+                count = result.count
+            else:
+                count = self._item_service.load_language_file(source)
+            self._item_mapping_status.value = f"已导入 {count} 个名称。"
+            self._item_mapping_status.color = (
+                THEME.mc_grass if count > 0 else THEME.warning
+            )
+            self._render_item_table(self._item_search_field.value or "")
+            self.update()
         except Exception as ex:
             self.app.handle_exception(ex, title="导入语言文件失败")
+
+    def _import_from_local_minecraft(self, e: ft.ControlEvent = None) -> None:
+        try:
+            result = self._item_service.import_language_from_local_minecraft(
+                locale=self._preferred_locale(),
+            )
+            if result.count > 0:
+                jar_name = Path(result.jar_path).name if result.jar_path else ""
+                self._item_mapping_status.value = (
+                    f"已从本地 Minecraft 导入 {result.count} 个名称"
+                    + (f"（{jar_name}, {result.locale}）" if jar_name else "")
+                    + "。"
+                )
+                self._item_mapping_status.color = THEME.mc_grass
+            else:
+                self._item_mapping_status.value = self._t(
+                    "mappings.local_mc_missing",
+                    "未找到本机 Minecraft 客户端 jar，请改用「选择 JAR 导入」。",
+                )
+                self._item_mapping_status.color = THEME.warning
+            self._render_item_table(self._item_search_field.value or "")
+            self.update()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="从本地 Minecraft 导入语言失败")
+
+    def _import_from_jar_file(self, e: ft.ControlEvent = None) -> None:
+        try:
+            path = self.app.pick_file(
+                title=self._t(
+                    "mappings.pick_jar_title",
+                    "选择 Minecraft 客户端或模组 JAR",
+                ),
+                file_types=[("JAR 文件 (*.jar)", "*.jar")],
+            )
+            if not path:
+                return
+            result = self._item_service.extract_language_from_jar_detailed(
+                Path(path),
+                locale=self._preferred_locale(),
+            )
+            if result.count > 0:
+                self._item_mapping_status.value = (
+                    f"已从 JAR 导入 {result.count} 个名称"
+                    f"（{result.locale}, {len(result.sources)} 个语言文件）。"
+                )
+                self._item_mapping_status.color = THEME.mc_grass
+            else:
+                self._item_mapping_status.value = self._t(
+                    "mappings.jar_empty",
+                    "JAR 中未找到可用语言文件（尝试 zh_cn / en_us）。",
+                )
+                self._item_mapping_status.color = THEME.warning
+            self._render_item_table(self._item_search_field.value or "")
+            self.update()
+        except Exception as ex:
+            self.app.handle_exception(ex, title="从 JAR 导入语言失败")
+
+    def _preferred_locale(self) -> str:
+        """Map app language setting to Minecraft lang code."""
+        try:
+            lang = getattr(self.app, "i18n", None)
+            code = ""
+            if lang is not None:
+                code = str(getattr(lang, "current_language", "") or "")
+            if not code and hasattr(self.app, "config"):
+                code = str(getattr(self.app.config, "language", "") or "")
+            code = code.replace("-", "_").lower()
+            if code.startswith("zh"):
+                return "zh_cn"
+            if code.startswith("en"):
+                return "en_us"
+        except Exception:
+            pass
+        return "zh_cn"
 
     def _import_json(self, e: ft.ControlEvent) -> None:
         try:

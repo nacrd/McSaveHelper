@@ -353,7 +353,13 @@
     "add_row": "Add Row",
     "import_list": "Import List",
     "export_list": "Export List",
-    "clear_all": "Clear All"
+    "clear_all": "Clear All",
+    "import_mc_jar": "Import from local Minecraft",
+    "import_jar": "Import from JAR",
+    "jar_hint": "Extract assets/*/lang/zh_cn.json from a local .minecraft/versions client jar or mod jar.",
+    "local_mc_missing": "No local Minecraft client jar found. Use \"Import from JAR\" instead.",
+    "pick_jar_title": "Select Minecraft client or mod JAR",
+    "jar_empty": "No language files found in the JAR (tried zh_cn / en_us)."
   },
   "settings": {
     "general": {
@@ -646,7 +652,8 @@
       "export": "Failed to export player summary",
       "import_usercache": "Failed to import usercache",
       "import_language": "Failed to import language file",
-      "shulker": "Failed to open container"
+      "shulker": "Failed to open container",
+      "import_mc_jar": "Failed to import language from Minecraft jar"
     },
     "list_empty": "No matching players",
     "attributes": {
@@ -659,6 +666,10 @@
     },
     "shulker": {
       "title": "Container contents"
-    }
+    },
+    "import_mc_jar": "Import language from MC jar",
+    "import_mc_jar_ok": "Imported {count} item/enchantment names from local Minecraft{jar_info}.\nInventory and equipment will use the new names.",
+    "import_mc_jar_title": "Select Minecraft client JAR",
+    "import_mc_jar_missing": "No local Minecraft client jar found.\nPick versions/<version>/<version>.jar and try again."
   }
 }

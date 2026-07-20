@@ -5,9 +5,13 @@ from typing import Any, Dict, Optional
 from .item.constants import _ENCHANTMENT_NAMES, _MAX_DURABILITY, _VANILLA_ITEM_NAMES
 from .item.models import ItemInfo
 from .item.language_loader import (
+    LanguageImportResult,
     extract_language_from_jar as _extract_jar,
+    extract_language_from_local_minecraft as _extract_local_mc,
     load_custom_mapping as _load_custom,
     load_language_file as _load_lang,
+    locale_fallbacks as _locale_fallbacks,
+    normalize_locale as _normalize_locale,
     save_custom_mapping as _save_custom,
 )
 from .item.parser import format_item_tooltip as _format_tooltip, parse_item as _parse_item
@@ -32,12 +36,62 @@ class ItemService:
 
     def save_custom_mapping_file(self, path: Path) -> None:
         """导出当前非内置物品/附魔映射"""
-        _save_custom(path, self._name_map, self._enchantment_names,
-                     _VANILLA_ITEM_NAMES, _ENCHANTMENT_NAMES)
+        _save_custom(
+            path,
+            self._name_map,
+            self._enchantment_names,
+            _VANILLA_ITEM_NAMES,
+            _ENCHANTMENT_NAMES,
+        )
 
-    def extract_language_from_jar(self, jar_path: Path, locale: str = "zh_cn") -> int:
-        """从模组 JAR 中提取指定语言文件并加载"""
-        return _extract_jar(jar_path, self._name_map, self._enchantment_names, locale)
+    def extract_language_from_jar(
+        self,
+        jar_path: Path,
+        locale: str = "zh_cn",
+    ) -> int:
+        """从客户端或模组 JAR 中提取指定语言文件并加载。"""
+        result = _extract_jar(
+            jar_path,
+            self._name_map,
+            self._enchantment_names,
+            locale,
+        )
+        return result.count
+
+    def extract_language_from_jar_detailed(
+        self,
+        jar_path: Path,
+        locale: str = "zh_cn",
+    ) -> LanguageImportResult:
+        """Extract language files from a jar and return a detailed result."""
+        return _extract_jar(
+            jar_path,
+            self._name_map,
+            self._enchantment_names,
+            locale,
+        )
+
+    def import_language_from_local_minecraft(
+        self,
+        locale: str = "zh_cn",
+        *,
+        jar_path: Optional[Path] = None,
+    ) -> LanguageImportResult:
+        """Load language from the installed Minecraft client jar if present."""
+        return _extract_local_mc(
+            self._name_map,
+            self._enchantment_names,
+            locale=locale,
+            jar_path=jar_path,
+        )
+
+    @staticmethod
+    def normalize_locale(locale: str) -> str:
+        return _normalize_locale(locale)
+
+    @staticmethod
+    def locale_fallbacks(locale: str) -> tuple[str, ...]:
+        return _locale_fallbacks(locale)
 
     def set_item_mapping(self, item_id: str, display_name: str) -> None:
         if item_id and display_name:
@@ -58,7 +112,11 @@ class ItemService:
         return True
 
     def get_custom_item_mappings(self) -> Dict[str, str]:
-        return {k: v for k, v in self._name_map.items() if _VANILLA_ITEM_NAMES.get(k) != v}
+        return {
+            k: v
+            for k, v in self._name_map.items()
+            if _VANILLA_ITEM_NAMES.get(k) != v
+        }
 
     def get_item_name(self, item_id: str) -> str:
         if item_id in self._name_map:

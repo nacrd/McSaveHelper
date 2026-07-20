@@ -142,6 +142,11 @@ class PlayerTabMixin(ExplorerMixinHost):
                     height=30,
                     on_click=self._import_language_file,
                 ),
+                btn_ghost(
+                    t("player.import_mc_jar", "从 MC jar 导入语言"),
+                    height=30,
+                    on_click=self._import_language_from_minecraft,
+                ),
             ],
             spacing=8,
         )
@@ -944,35 +949,26 @@ class PlayerTabMixin(ExplorerMixinHost):
             path = self.app.pick_file(
                 title=self._t(
                     "player.import_language_title",
-                    "选择语言文件 (zh_cn.json 等)",
+                    "选择语言文件 (zh_cn.json 等) 或 JAR",
                 ),
-                file_types=[("JSON (*.json)", "*.json")],
+                file_types=[
+                    ("JSON / JAR", "*.json;*.jar"),
+                    ("JSON (*.json)", "*.json"),
+                    ("JAR (*.jar)", "*.jar"),
+                ],
             )
-            if path:
-                count = self.app.item.load_language_file(Path(path))
-                if count > 0:
-                    self.app.info_dialog(
-                        self._t("dialogs.success", "成功"),
-                        self._t(
-                            "player.import_language_ok",
-                            "成功导入 {count} 个物品/附魔名称。\n"
-                            "物品栏和装备预览将使用新名称。",
-                            count=count,
-                        ),
-                    )
-                    if self.current_uuid:
-                        self._load_player_data(self.current_uuid)
-                else:
-                    self.app.info_dialog(
-                        self._t("dialogs.hint", "提示"),
-                        self._t(
-                            "player.import_language_empty",
-                            "未能从文件中解析出有效的物品名称。\n\n"
-                            "支持的格式：\n"
-                            "- Minecraft 语言文件 (item.minecraft.xxx)\n"
-                            "- 直接 ID 映射 (minecraft:xxx)",
-                        ),
-                    )
+            if not path:
+                return
+            source = Path(path)
+            if source.suffix.lower() == ".jar":
+                result = self.app.item.extract_language_from_jar_detailed(
+                    source,
+                    locale=self._preferred_item_locale(),
+                )
+                count = result.count
+            else:
+                count = self.app.item.load_language_file(source)
+            self._notify_language_import(count)
         except Exception as ex:
             self.app.handle_exception(
                 ex,
@@ -981,6 +977,104 @@ class PlayerTabMixin(ExplorerMixinHost):
                     "导入语言文件失败",
                 ),
             )
+
+    def _import_language_from_minecraft(self, e: Any = None) -> None:
+        try:
+            result = self.app.item.import_language_from_local_minecraft(
+                locale=self._preferred_item_locale(),
+            )
+            if result.count > 0:
+                jar_name = Path(result.jar_path).name if result.jar_path else ""
+                self.app.info_dialog(
+                    self._t("dialogs.success", "成功"),
+                    self._t(
+                        "player.import_mc_jar_ok",
+                        "已从本地 Minecraft 导入 {count} 个物品/附魔名称"
+                        "{jar_info}。\n物品栏和装备预览将使用新名称。",
+                        count=result.count,
+                        jar_info=(
+                            f"（{jar_name}, {result.locale}）" if jar_name else ""
+                        ),
+                    ),
+                )
+                if self.current_uuid:
+                    self._load_player_data(self.current_uuid)
+                return
+
+            # Fall back to manual jar picker when no local install is found.
+            path = self.app.pick_file(
+                title=self._t(
+                    "player.import_mc_jar_title",
+                    "选择 Minecraft 客户端 JAR",
+                ),
+                file_types=[("JAR (*.jar)", "*.jar")],
+            )
+            if not path:
+                self.app.info_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t(
+                        "player.import_mc_jar_missing",
+                        "未找到本机 Minecraft 客户端 jar。\n"
+                        "请选择 versions/<版本>/<版本>.jar 后重试。",
+                    ),
+                )
+                return
+            result = self.app.item.extract_language_from_jar_detailed(
+                Path(path),
+                locale=self._preferred_item_locale(),
+            )
+            self._notify_language_import(result.count)
+        except Exception as ex:
+            self.app.handle_exception(
+                ex,
+                title=self._t(
+                    "player.error.import_mc_jar",
+                    "从 Minecraft jar 导入语言失败",
+                ),
+            )
+
+    def _notify_language_import(self, count: int) -> None:
+        if count > 0:
+            self.app.info_dialog(
+                self._t("dialogs.success", "成功"),
+                self._t(
+                    "player.import_language_ok",
+                    "成功导入 {count} 个物品/附魔名称。\n"
+                    "物品栏和装备预览将使用新名称。",
+                    count=count,
+                ),
+            )
+            if self.current_uuid:
+                self._load_player_data(self.current_uuid)
+        else:
+            self.app.info_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t(
+                    "player.import_language_empty",
+                    "未能从文件中解析出有效的物品名称。\n\n"
+                    "支持的格式：\n"
+                    "- Minecraft 语言文件 (item.minecraft.xxx)\n"
+                    "- 直接 ID 映射 (minecraft:xxx)\n"
+                    "- 客户端/模组 JAR 内 assets/*/lang/*.json",
+                ),
+            )
+
+    def _preferred_item_locale(self) -> str:
+        try:
+            lang = getattr(self.app, "i18n", None)
+            code = ""
+            if lang is not None:
+                code = str(getattr(lang, "current_language", "") or "")
+            if not code and hasattr(self.app, "config"):
+                code = str(getattr(self.app.config, "language", "") or "")
+            code = code.replace("-", "_").lower()
+            if code.startswith("zh"):
+                return "zh_cn"
+            if code.startswith("en"):
+                return "en_us"
+        except Exception:
+            pass
+        return "zh_cn"
 
     def _active_edit_specs(self) -> List[PlayerEditSpec]:
         wanted = set(_FORM_FIELD_IDS)
