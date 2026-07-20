@@ -97,7 +97,21 @@ class BackupService:
         label: str = "",
         progress_callback: Optional[ProgressCallback] = None,
     ) -> BackupRecord:
-        """Create a complete snapshot and publish it atomically."""
+        """创建完整世界快照并以目录替换原子发布。
+
+        Args:
+            world_path: 有效世界路径（含 ``level.dat``）。
+            label: 可选用户标签。
+            progress_callback: 可选进度回调 ``(0..1, message)``。
+
+        Returns:
+            BackupRecord: 已发布备份的元数据。
+
+        Raises:
+            BackupError: 路径无效、标签非法或快照校验失败。
+            BackupCancelledError: 复制过程中被取消。
+            OSError: 复制或发布时的 I/O 错误。
+        """
         world = self._validate_world(world_path)
         clean_label = self._validate_label(label)
         with self.exclusive_operation(world):
@@ -107,45 +121,62 @@ class BackupService:
             final_dir = repository / backup_id
             temp_dir = Path(tempfile.mkdtemp(prefix=".creating-", dir=repository))
             try:
-                files = list(self._iter_source_files(world))
-                total_size = sum(size for _, _, size, _ in files)
-                snapshot = temp_dir / _SNAPSHOT_DIR
-                snapshot.mkdir()
-                copied_size = self._copy_files(
-                    files,
-                    snapshot,
-                    total_size,
-                    progress_callback,
-                    0.0,
-                    0.92,
-                )
-                self._check_cancelled()
-                manifest_sha256 = self._write_manifest(
-                    temp_dir,
-                    snapshot,
-                    files,
-                )
-                record = BackupRecord(
+                return self._build_and_publish_backup(
+                    world=world,
                     backup_id=backup_id,
                     label=clean_label,
-                    world_name=world.name,
-                    source_path=str(world),
-                    created_at=datetime.now(timezone.utc),
-                    size_bytes=copied_size,
-                    file_count=len(files),
-                    backup_path=final_dir,
-                    manifest_sha256=manifest_sha256,
+                    temp_dir=temp_dir,
+                    final_dir=final_dir,
+                    progress_callback=progress_callback,
                 )
-                self._write_metadata(temp_dir, record)
-                self._progress(progress_callback, 0.96, "正在验证备份...")
-                self._validate_snapshot(snapshot)
-                os.replace(temp_dir, final_dir)
-                self._progress(progress_callback, 1.0, "备份创建完成")
-                logger.info(f"已创建存档备份: {final_dir}", module="Backup")
-                return record
             except Exception:
+                # 失败时清理暂存目录；取消/校验/I/O 均需保留原始异常。
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 raise
+
+    def _build_and_publish_backup(
+        self,
+        *,
+        world: Path,
+        backup_id: str,
+        label: str,
+        temp_dir: Path,
+        final_dir: Path,
+        progress_callback: Optional[ProgressCallback],
+    ) -> BackupRecord:
+        """在 temp_dir 中组装快照、写清单并原子发布到 final_dir。"""
+        files = list(self._iter_source_files(world))
+        total_size = sum(size for _, _, size, _ in files)
+        snapshot = temp_dir / _SNAPSHOT_DIR
+        snapshot.mkdir()
+        copied_size = self._copy_files(
+            files,
+            snapshot,
+            total_size,
+            progress_callback,
+            0.0,
+            0.92,
+        )
+        self._check_cancelled()
+        manifest_sha256 = self._write_manifest(temp_dir, snapshot, files)
+        record = BackupRecord(
+            backup_id=backup_id,
+            label=label,
+            world_name=world.name,
+            source_path=str(world),
+            created_at=datetime.now(timezone.utc),
+            size_bytes=copied_size,
+            file_count=len(files),
+            backup_path=final_dir,
+            manifest_sha256=manifest_sha256,
+        )
+        self._write_metadata(temp_dir, record)
+        self._progress(progress_callback, 0.96, "正在验证备份...")
+        self._validate_snapshot(snapshot)
+        os.replace(temp_dir, final_dir)
+        self._progress(progress_callback, 1.0, "备份创建完成")
+        logger.info(f"已创建存档备份: {final_dir}", module="Backup")
+        return record
 
     def list_backups(self, world_path: Path | str) -> list[BackupRecord]:
         """List managed backups, including damaged entries with an error state."""

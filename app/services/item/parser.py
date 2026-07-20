@@ -281,7 +281,7 @@ def _parse_component_enchantments(
     if isinstance(levels, Mapping) or hasattr(levels, "items"):
         try:
             items = levels.items()
-        except Exception:
+        except (TypeError, AttributeError):
             return result
         for ench_id, level in items:
             ench_id_str = str(ench_id)
@@ -295,6 +295,7 @@ def _parse_component_enchantments(
 
 
 def _as_int(value: Any, default: Optional[int] = None) -> Optional[int]:
+    """Best-effort integer coercion for NBT/JSON scalar tags."""
     if value is None:
         return default
     try:
@@ -304,17 +305,26 @@ def _as_int(value: Any, default: Optional[int] = None) -> Optional[int]:
 
 
 def _as_int_required(value: Any, default: int = 0) -> int:
+    """Integer coercion that always returns an int."""
     parsed = _as_int(value, default=default)
     return default if parsed is None else parsed
 
 
 def _clean_text(value: Any) -> str:
+    """Normalize display text by stripping quotes/whitespace."""
     text = str(value)
     return text.strip().strip("'\"")
 
 
 def format_item_tooltip(item_info: ItemInfo) -> str:
-    """Format item tooltip text."""
+    """格式化物品悬停提示文本。
+
+    Args:
+        item_info: 已解析的物品信息。
+
+    Returns:
+        str: 多行提示字符串。
+    """
     lines = [item_info.display_name]
     if item_info.custom_name:
         lines.append(f"ID: {item_info.id}")
