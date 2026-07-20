@@ -95,13 +95,63 @@ class MapExportService:
             spec: 可选的维度/样式/选择规格。
             region_dir: 显式 region 目录，优先于维度发现。
             cancel_event: 设置后尽快取消导出。
+
+        Returns:
+            dict[str, Any]: 含 success/cancelled/error 与尺寸等信息的结果。
         """
+        results = self._empty_export_result(spec)
+        log = partial(self._emit_log, callback=log_callback)
+        progress = partial(self._emit_progress, callback=progress_callback)
+
+        try:
+            self._run_export(
+                results=results,
+                world_path=Path(world_path),
+                output_path=Path(output_path),
+                map_type=map_type,
+                scale=scale,
+                spec=spec,
+                region_dir=region_dir,
+                cancel_event=cancel_event,
+                log=log,
+                progress=progress,
+            )
+        except MapRenderCancelled:
+            results["cancelled"] = True
+            results["error"] = "地图导出已取消"
+            log("地图导出已取消", "INFO")
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            FileNotFoundError,
+            RuntimeError,
+        ) as exc:
+            if cancel_event is not None and cancel_event.is_set():
+                results["cancelled"] = True
+            results["error"] = str(exc)
+            log(f"导出失败: {exc}", "ERROR")
+            logger.error(traceback.format_exc(), module="MapExport")
+        except Exception as exc:
+            # 渲染/Pillow 边界：保留失败语义并写日志。
+            if cancel_event is not None and cancel_event.is_set():
+                results["cancelled"] = True
+            results["error"] = str(exc)
+            log(f"导出失败: {exc}", "ERROR")
+            logger.error(traceback.format_exc(), module="MapExport")
+        if results["cancelled"]:
+            results["output_path"] = None
+        return results
+
+    @staticmethod
+    def _empty_export_result(spec: Optional[MapExportSpec]) -> Dict[str, Any]:
+        """Build the default result skeleton before export runs."""
         dimension_id = str(
             getattr(spec, "dimension_id", "overworld")
             if spec is not None
             else "overworld"
         ).strip() or "overworld"
-        results: Dict[str, Any] = {
+        return {
             "success": False,
             "output_path": None,
             "dimensions": (0, 0),
@@ -112,74 +162,72 @@ class MapExportService:
             "selection_bounds": None,
             "error": None,
         }
-        log = partial(self._emit_log, callback=log_callback)
-        progress = partial(self._emit_progress, callback=progress_callback)
 
-        try:
-            world_path = Path(world_path)
-            output_path = Path(output_path)
-            dimension_id = self._dimension_id(spec)
-            results["dimension_id"] = dimension_id
-            style = self._effective_style(map_type, spec)
-            effective_scale = self._effective_scale(scale, spec)
-            self._check_cancelled(cancel_event)
-            if not world_path.exists():
-                raise FileNotFoundError(f"存档路径不存在: {world_path}")
+    def _run_export(
+        self,
+        *,
+        results: Dict[str, Any],
+        world_path: Path,
+        output_path: Path,
+        map_type: str,
+        scale: int,
+        spec: Optional[MapExportSpec],
+        region_dir: Optional[Path],
+        cancel_event: Optional[threading.Event],
+        log: LogFn,
+        progress: ProgressFn,
+    ) -> None:
+        """Execute the successful export path, mutating *results* in place."""
+        dimension_id = self._dimension_id(spec)
+        results["dimension_id"] = dimension_id
+        style = self._effective_style(map_type, spec)
+        effective_scale = self._effective_scale(scale, spec)
+        self._check_cancelled(cancel_event)
+        if not world_path.exists():
+            raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
-            from core.performance import get_tracker
+        from core.performance import get_tracker
 
-            tracker = get_tracker()
-            with tracker.track(
-                "地图导出",
-                {"world": world_path.name, "type": style, "dimension": dimension_id},
-            ):
-                log(f"开始导出地图: {world_path}", "INFO")
-                region_files, bounds, selection_bounds = self._prepare_regions(
-                    world_path,
-                    dimension_id,
-                    region_dir,
-                    spec,
-                    cancel_event,
-                    log,
-                    progress,
-                )
-                results["selection_bounds"] = selection_bounds
-                results["region_bounds"] = bounds
-                image_size, chunks_processed = self._render_and_save(
-                    _RenderJob(
-                        region_files=tuple(region_files),
-                        bounds=bounds,
-                        style=style,
-                        scale=effective_scale,
-                        output_path=output_path,
-                        selection_bounds=selection_bounds,
-                        cancel_event=cancel_event,
-                    ),
-                    log,
-                    progress,
-                )
-
-                results["success"] = True
-                results["output_path"] = str(output_path)
-                results["dimensions"] = image_size
-                results["chunks_processed"] = chunks_processed
-                tracker.increment_files(chunks_processed)
-                progress(1.0, "导出完成")
-
-        except MapRenderCancelled:
-            results["cancelled"] = True
-            results["error"] = "地图导出已取消"
-            log("地图导出已取消", "INFO")
-        except Exception as exc:
-            if cancel_event is not None and cancel_event.is_set():
-                results["cancelled"] = True
-            results["error"] = str(exc)
-            log(f"导出失败: {exc}", "ERROR")
-            logger.error(traceback.format_exc(), module="MapExport")
-        if results["cancelled"]:
-            results["output_path"] = None
-
-        return results
+        tracker = get_tracker()
+        with tracker.track(
+            "地图导出",
+            {
+                "world": world_path.name,
+                "type": style,
+                "dimension": dimension_id,
+            },
+        ):
+            log(f"开始导出地图: {world_path}", "INFO")
+            region_files, bounds, selection_bounds = self._prepare_regions(
+                world_path,
+                dimension_id,
+                region_dir,
+                spec,
+                cancel_event,
+                log,
+                progress,
+            )
+            results["selection_bounds"] = selection_bounds
+            results["region_bounds"] = bounds
+            image_size, chunks_processed = self._render_and_save(
+                _RenderJob(
+                    region_files=tuple(region_files),
+                    bounds=bounds,
+                    style=style,
+                    scale=effective_scale,
+                    output_path=output_path,
+                    selection_bounds=selection_bounds,
+                    cancel_event=cancel_event,
+                ),
+                log,
+                progress,
+            )
+            results["success"] = True
+            results["output_path"] = str(output_path)
+            results["dimensions"] = image_size
+            results["chunks_processed"] = chunks_processed
+            tracker.increment_files(chunks_processed)
+            progress(1.0, "导出完成")
 
     @staticmethod
     def _emit_log(

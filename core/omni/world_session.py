@@ -21,7 +21,7 @@ from nbtlib import Compound
 
 
 class WorldSession:
-    """存档会话管理器，提供延迟加载与任务队列（门面模式）"""
+    """存档会话管理器，提供延迟加载与任务队列（门面模式）。"""
 
     def __init__(
         self,
@@ -32,57 +32,53 @@ class WorldSession:
         ] = None,
         backup_callback: Optional[Callable[[Path], Path]] = None,
     ) -> None:
-        """初始化会话，仅读取基础信息并扫描目录结构
+        """初始化会话：扫描目录、加载 level.dat 并装配队列。
 
         Args:
-            world_path: 源世界存档路径
-            log: 日志回调函数，接受 (消息, 级别) 参数
+            world_path: 源世界存档路径。
+            log: 日志回调 ``(message, level)``。
+            write_lease_factory: 可选写租约工厂，用于提交阶段互斥。
+            backup_callback: 可选提交前备份钩子，返回备份路径。
         """
         self.world_path = world_path.resolve()
         self.log = log or (lambda msg, lvl="INFO": None)
         self._write_lease_factory = write_lease_factory
         self._backup_callback = backup_callback
 
-        # 初始化各模块
         self._scanner = WorldScanner(self.world_path, self.log)
         self._nbt_loader = NbtLoader(self.world_path, self.log)
         self._player_manager = PlayerManager(self.log)
 
-        # 存储扫描结果
         self._player_files: Dict[str, Path] = {}
         self._region_files: Dict[object, Path] = {}
         self._data_files: List[Path] = []
 
-        # 性能追踪
         from core.performance import get_tracker
         tracker = get_tracker()
 
         with tracker.track("存档加载", {"world": self.world_path.name}):
-            # 扫描文件
             scan_result = self._scanner.scan_all()
-            self._player_files = scan_result['player_files']
-            self._region_files = scan_result['region_files']
-            self._data_files = scan_result['data_files']
-            usercache = scan_result['usercache']
+            self._player_files = scan_result["player_files"]
+            self._region_files = scan_result["region_files"]
+            self._data_files = scan_result["data_files"]
+            usercache = scan_result["usercache"]
 
-            # 初始化玩家管理器
-            self._player_manager.initialize_names(self._player_files, usercache)
-
-            # 加载 level.dat
-            self._nbt_loader.load_level_info()
-
-            # 初始化操作队列
-            self._action_queue = ActionQueue(
-                self.world_path, self._player_files, self._region_files, self.log
+            self._player_manager.initialize_names(
+                self._player_files,
+                usercache,
             )
-
-            # 初始化执行器
+            self._nbt_loader.load_level_info()
+            self._action_queue = ActionQueue(
+                self.world_path,
+                self._player_files,
+                self._region_files,
+                self.log,
+            )
             self._executor = ActionExecutor(
                 self.world_path,
                 self.log,
                 backup_callback=self._backup_callback,
             )
-
             tracker.add_metadata("players", len(self._player_files))
             tracker.add_metadata("regions", len(self._region_files))
 

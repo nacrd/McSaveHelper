@@ -90,68 +90,97 @@ class PlayerEditResult:
     staged_count: int = 0
 
 
+def _state_to_dict(state: PlayerState) -> Dict[str, Any]:
+    """Serialize player vital state for export."""
+    return {
+        "health": state.health,
+        "food_level": state.food_level,
+        "food_saturation": state.food_saturation,
+        "xp_level": state.xp_level,
+        "xp_total": state.xp_total,
+        "xp_p": state.xp_p,
+        "air": state.air,
+        "dimension": state.dimension,
+        "game_type": state.game_type,
+        "selected_slot": state.selected_slot,
+        "score": state.score,
+    }
+
+
+def _pose_to_dict(pose: PlayerPose) -> Dict[str, Any]:
+    """Serialize position/orientation."""
+    return {
+        "x": pose.x,
+        "y": pose.y,
+        "z": pose.z,
+        "yaw": pose.yaw,
+        "pitch": pose.pitch,
+    }
+
+
+def _spawn_to_dict(spawn: PlayerSpawn) -> Dict[str, Any]:
+    """Serialize bed/respawn point."""
+    return {
+        "x": spawn.x,
+        "y": spawn.y,
+        "z": spawn.z,
+        "dimension": spawn.dimension,
+        "forced": spawn.forced,
+    }
+
+
+def _death_to_dict(
+    death: Optional[PlayerDeathLocation],
+) -> Optional[Dict[str, Any]]:
+    """Serialize last death location when present."""
+    if death is None:
+        return None
+    return {
+        "dimension": death.dimension,
+        "x": death.x,
+        "y": death.y,
+        "z": death.z,
+    }
+
+
+def _abilities_to_dict(abilities: PlayerAbilities) -> Dict[str, Any]:
+    """Serialize flight/build ability flags."""
+    return {
+        "flying": abilities.flying,
+        "may_fly": abilities.may_fly,
+        "instabuild": abilities.instabuild,
+        "invulnerable": abilities.invulnerable,
+        "may_build": abilities.may_build,
+        "walk_speed": abilities.walk_speed,
+        "fly_speed": abilities.fly_speed,
+    }
+
+
 @dataclass(frozen=True)
 class PlayerExportBundle:
+    """Portable player export payload for clipboard/file output."""
+
     summary: PlayerSummary
     containers: PlayerContainersView
     items_included: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize summary (and optional item lists) to a plain dict.
+
+        Returns:
+            dict[str, Any]: JSON-friendly export structure.
+        """
         ref = self.summary.ref
-        state = self.summary.state
-        pose = self.summary.pose
-        spawn = self.summary.spawn
-        death = self.summary.death
-        abilities = self.summary.abilities
         payload: Dict[str, Any] = {
             "uuid": ref.uuid_hyphen or ref.uuid_norm,
             "uuid_norm": ref.uuid_norm,
             "name": ref.name,
             "dat_path": str(ref.dat_path) if ref.dat_path else None,
-            "state": {
-                "health": state.health,
-                "food_level": state.food_level,
-                "food_saturation": state.food_saturation,
-                "xp_level": state.xp_level,
-                "xp_total": state.xp_total,
-                "xp_p": state.xp_p,
-                "air": state.air,
-                "dimension": state.dimension,
-                "game_type": state.game_type,
-                "selected_slot": state.selected_slot,
-                "score": state.score,
-            },
-            "pose": {
-                "x": pose.x,
-                "y": pose.y,
-                "z": pose.z,
-                "yaw": pose.yaw,
-                "pitch": pose.pitch,
-            },
-            "spawn": {
-                "x": spawn.x,
-                "y": spawn.y,
-                "z": spawn.z,
-                "dimension": spawn.dimension,
-                "forced": spawn.forced,
-            },
-            "death": None
-            if death is None
-            else {
-                "dimension": death.dimension,
-                "x": death.x,
-                "y": death.y,
-                "z": death.z,
-            },
-            "abilities": {
-                "flying": abilities.flying,
-                "may_fly": abilities.may_fly,
-                "instabuild": abilities.instabuild,
-                "invulnerable": abilities.invulnerable,
-                "may_build": abilities.may_build,
-                "walk_speed": abilities.walk_speed,
-                "fly_speed": abilities.fly_speed,
-            },
+            "state": _state_to_dict(self.summary.state),
+            "pose": _pose_to_dict(self.summary.pose),
+            "spawn": _spawn_to_dict(self.summary.spawn),
+            "death": _death_to_dict(self.summary.death),
+            "abilities": _abilities_to_dict(self.summary.abilities),
             "counts": {
                 "inventory": self.summary.inventory_count,
                 "ender": self.summary.ender_count,
