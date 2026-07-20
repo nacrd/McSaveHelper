@@ -139,20 +139,23 @@ class LogManager:
         for handler in self.handlers:
             try:
                 handler.flush()
-            except Exception:
+            except (OSError, IOError, RuntimeError, ValueError):
                 # Best-effort flush on shutdown/teardown.
                 pass
 
-    def shutdown(self) -> None:
+    def close(self) -> None:
         self._running = False
-        if self._worker_thread:
-            self._queue.put(self._STOP)
+        self._queue.put(self._STOP)
+        if self._worker_thread is not None:
             self._worker_thread.join(timeout=2.0)
         self.flush()
         for handler in self.handlers:
             try:
                 handler.close()
-            except Exception:
+            except (OSError, IOError, RuntimeError, ValueError):
                 # Best-effort close; handlers may already be torn down.
                 pass
         self.handlers.clear()
+
+    def shutdown(self) -> None:
+        self.close()

@@ -227,8 +227,6 @@ class HangDetector:
         except RuntimeError:
             # enumerate() can race while threads exit
             pass
-        except Exception:
-            pass
         return f"Thread-{thread_id}"
 
     def _is_benign_wait(self, frame: Any) -> bool:
@@ -242,8 +240,6 @@ class HangDetector:
                     return True
                 current = current.f_back
         except (AttributeError, RuntimeError, TypeError):
-            pass
-        except Exception:
             pass
 
         return False
@@ -266,7 +262,7 @@ class HangDetector:
             from core.logger import logger
             logger.warning(f"{message}", module="HangDetector")
         except Exception:
-            # 如果日志系统不可用，静默失败
+            # Logger may not be initialized during early startup/teardown.
             pass
 
 
