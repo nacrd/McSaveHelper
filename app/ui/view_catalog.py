@@ -25,11 +25,6 @@ def create_default_view_catalog(
         "app.ui.views.backup_center",
         "BackupCenterView",
     )
-    catalog.register_lazy(
-        "map_export",
-        "app.ui.views.map_export",
-        "MapExportView",
-    )
     catalog.register_lazy("compare", "app.ui.views.compare", "CompareView")
     catalog.register_lazy(
         "server_properties",

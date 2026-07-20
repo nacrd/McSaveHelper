@@ -141,10 +141,12 @@
     "cancel": "取消",
     "marker_deleted": "地图标记已删除",
     "delete_marker_failed": "删除地图标记失败",
-    "marker_count_empty": "0 个标记"
+    "marker_count_empty": "0 个标记",
+    "export": "导出地图"
   },
   "map_export": {
     "dimension": "维度",
+    "dimension_value": "维度: {dimension}",
     "range": "导出范围",
     "title": "地图导出",
     "subtitle": "将存档地图导出为 PNG 图片（俯视图/地形图）",
@@ -171,6 +173,8 @@
     "choose_output": "选择输出",
     "start": "开始导出",
     "cancel": "取消",
+    "cancel_export": "取消导出",
+    "close": "关闭",
     "current_save_section": "当前存档",
     "output_section": "输出设置",
     "options_section": "导出选项",

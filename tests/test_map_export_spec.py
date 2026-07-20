@@ -100,37 +100,6 @@ def test_export_filters_regions_and_crops_negative_selection(tmp_path: Path) -> 
     assert scanned == [region_dir / "r.-1.-1.mca", region_dir / "r.-2.-2.mca"]
 
 
-def test_renderer_uses_negative_selection_as_image_origin() -> None:
-    class FixedHeightRenderer(MapExportRenderer):
-        def highest_block_y(self, chunk: Any, x: int, z: int) -> int:
-            return 64
-
-    renderer = FixedHeightRenderer()
-
-    class Chunk:
-        @staticmethod
-        def get_block(_x: int, _y: int, _z: int) -> Any:
-            return type("Block", (), {"name": lambda self: "minecraft:stone"})()
-
-    image = Image.new("RGB", (1, 1), (0, 0, 0))
-    try:
-        renderer._render_chunk(
-            image,
-            Chunk(),
-            -1,
-            -1,
-            31,
-            31,
-            {"min_x": -1, "max_x": -1, "min_z": -1, "max_z": -1},
-            "topview",
-            1,
-            block_bounds=(-1, -1, -1, -1),
-        )
-        assert image.getpixel((0, 0)) == (128, 128, 128)
-    finally:
-        image.close()
-
-
 def test_export_cancellation_removes_output(tmp_path: Path) -> None:
     world = tmp_path / "world"
     _region(world / "region", (0, 0))

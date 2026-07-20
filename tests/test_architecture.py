@@ -117,7 +117,6 @@ def test_views_with_shell_actions_declare_public_action_provider() -> None:
         "app/ui/views/explorer/explorer_view.py",
         "app/ui/views/migrator.py",
         "app/ui/views/save_repair.py",
-        "app/ui/views/map_export.py",
         "app/ui/views/compare.py",
         "app/ui/views/mappings.py",
         "app/ui/views/server_properties.py",

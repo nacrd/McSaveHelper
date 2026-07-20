@@ -141,10 +141,12 @@
     "cancel": "Cancel",
     "marker_deleted": "Map marker deleted",
     "delete_marker_failed": "Failed to delete map marker",
-    "marker_count_empty": "0 markers"
+    "marker_count_empty": "0 markers",
+    "export": "Export map"
   },
   "map_export": {
     "dimension": "Dimension",
+    "dimension_value": "Dimension: {dimension}",
     "range": "Export Range",
     "title": "Map Export",
     "subtitle": "Export the save map as a PNG surface or terrain image",
@@ -171,6 +173,8 @@
     "choose_output": "Choose Output",
     "start": "Start Export",
     "cancel": "Cancel",
+    "cancel_export": "Cancel Export",
+    "close": "Close",
     "current_save_section": "Current Save",
     "output_section": "Output Settings",
     "options_section": "Export Options",

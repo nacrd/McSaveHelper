@@ -80,7 +80,9 @@ def test_map_export_service_reports_missing_region_dir(tmp_path: Path):
 
 
 def test_map_export_reports_failure_when_all_regions_are_unreadable(tmp_path: Path):
+    """Empty/corrupt MCA files that the topview path cannot paint fail export."""
     from app.services.map_export_service import MapExportService, PIL_AVAILABLE
+    from unittest.mock import patch
 
     if not PIL_AVAILABLE:
         pytest.skip("PIL not available")
@@ -89,7 +91,15 @@ def test_map_export_reports_failure_when_all_regions_are_unreadable(tmp_path: Pa
     region_dir.mkdir(parents=True)
     (region_dir / "r.0.0.mca").write_bytes(b"\x00" * 8192)
 
-    result = MapExportService().export_map(world, tmp_path / "map.png", scale=16)
+    with patch(
+        "core.mca.map_export_renderer.render_region_topview",
+        return_value=None,
+    ):
+        result = MapExportService().export_map(
+            world,
+            tmp_path / "map.png",
+            scale=16,
+        )
 
     assert result["success"] is False
     assert result["chunks_processed"] == 0

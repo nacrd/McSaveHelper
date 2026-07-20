@@ -57,7 +57,6 @@ def build_tab_definitions(translate: Translate) -> List[Dict[str, Any]]:
         ("migrator", "sidebar.migrator", "存档转换", IconSet.PACKAGE),
         ("save_repair", "sidebar.save_repair", "存档修复", IconSet.BUILD),
         ("backup_center", "sidebar.backup_center", "备份与恢复", IconSet.HISTORY),
-        ("map_export", "sidebar.map_export", "地图导出", IconSet.EXPORT),
         ("compare", "sidebar.compare", "存档对比", IconSet.BALANCE),
         ("mappings", "sidebar.mappings", "映射管理", IconSet.LINK),
         (

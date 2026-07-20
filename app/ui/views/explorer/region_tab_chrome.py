@@ -50,6 +50,7 @@ class RegionTabChrome:
     empty_button: ft.IconButton
     marker_button: ft.IconButton
     fullscreen_button: ft.IconButton
+    export_button: ft.IconButton
     add_marker_button: ft.IconButton
     delete_marker_button: ft.IconButton
     marker_list: ft.ListView
@@ -168,8 +169,15 @@ def _build_map_toggle_buttons(
     on_toggle_empty: SimpleCallback,
     marker_callback: SimpleCallback,
     on_toggle_fullscreen: SimpleCallback,
-) -> tuple[ft.IconButton, ft.IconButton, ft.IconButton, ft.IconButton]:
-    """Coordinate/empty/marker/fullscreen toggle buttons."""
+    on_export: SimpleCallback,
+) -> tuple[
+    ft.IconButton,
+    ft.IconButton,
+    ft.IconButton,
+    ft.IconButton,
+    ft.IconButton,
+]:
+    """Coordinate/empty/marker/fullscreen/export toolbar buttons."""
     coord_button = _icon_button(
         ft.Icons.LABEL_OUTLINE,
         t("map.show_coordinates", "显示坐标"),
@@ -192,7 +200,18 @@ def _build_map_toggle_buttons(
         t("map.fullscreen", "全屏地图"),
         on_toggle_fullscreen,
     )
-    return coord_button, empty_button, marker_button, fullscreen_button
+    export_button = _icon_button(
+        ft.Icons.FILE_DOWNLOAD_OUTLINED,
+        t("map.export", "导出地图"),
+        on_export,
+    )
+    return (
+        coord_button,
+        empty_button,
+        marker_button,
+        fullscreen_button,
+        export_button,
+    )
 
 
 def _build_floating_toolbars(
@@ -210,6 +229,7 @@ def _build_floating_toolbars(
     empty_button: ft.IconButton,
     marker_button: ft.IconButton,
     fullscreen_button: ft.IconButton,
+    export_button: ft.IconButton,
 ) -> tuple[ft.Container, ft.Container, ft.Container]:
     """Top/left/right floating toolbars over the map."""
     top_bar = _build_top_toolbar(
@@ -231,6 +251,7 @@ def _build_floating_toolbars(
         empty_button=empty_button,
         marker_button=marker_button,
         fullscreen_button=fullscreen_button,
+        export_button=export_button,
     )
     return top_bar, left_toolbar, right_toolbar
 
@@ -311,6 +332,7 @@ def _build_right_map_toolbar(
     empty_button: ft.IconButton,
     marker_button: ft.IconButton,
     fullscreen_button: ft.IconButton,
+    export_button: ft.IconButton,
 ) -> ft.Container:
     return ft.Container(
         content=ft.Column(
@@ -323,6 +345,7 @@ def _build_right_map_toolbar(
                 coord_button,
                 empty_button,
                 marker_button,
+                export_button,
                 fullscreen_button,
             ],
             spacing=4,
@@ -471,6 +494,7 @@ def build_region_tab_chrome(
     on_toggle_markers: Optional[SimpleCallback] = None,
     on_add_marker: Optional[EventCallback] = None,
     on_delete_marker: Optional[EventCallback] = None,
+    on_export: Optional[SimpleCallback] = None,
     translate: Optional[Translate] = None,
 ) -> RegionTabChrome:
     """创建地图页面，并返回 controller 需要更新的控件引用。"""
@@ -480,6 +504,7 @@ def build_region_tab_chrome(
         on_toggle_markers=on_toggle_markers,
         on_add_marker=on_add_marker,
         on_delete_marker=on_delete_marker,
+        on_export=on_export,
     )
     map_parts = _build_region_map_parts(
         t=t,
@@ -495,6 +520,7 @@ def build_region_tab_chrome(
         on_toggle_fullscreen=on_toggle_fullscreen,
         search_callback=callbacks["search_callback"],
         marker_callback=callbacks["marker_callback"],
+        export_callback=callbacks["export_callback"],
     )
     side = _build_region_side_panel(
         t=t,
@@ -528,6 +554,7 @@ def _build_region_map_parts(
     on_toggle_fullscreen: SimpleCallback,
     search_callback: EventCallback,
     marker_callback: SimpleCallback,
+    export_callback: SimpleCallback,
 ) -> dict[str, Any]:
     sync_map_size = _make_map_size_sync(map_content)
     controls = _build_region_map_controls(
@@ -543,6 +570,7 @@ def _build_region_map_parts(
         on_toggle_fullscreen=on_toggle_fullscreen,
         search_callback=search_callback,
         marker_callback=marker_callback,
+        export_callback=export_callback,
     )
     help_text, bottom_bar = _build_map_help_bar(t)
     map_host, map_card = _build_map_host_stack(
@@ -601,6 +629,7 @@ def _assemble_region_tab_chrome(
         empty_button=controls["empty_button"],
         marker_button=controls["marker_button"],
         fullscreen_button=controls["fullscreen_button"],
+        export_button=controls["export_button"],
         add_marker_button=side["add_marker_button"],
         delete_marker_button=side["delete_marker_button"],
         marker_list=side["marker_list"],
@@ -623,12 +652,14 @@ def _normalize_region_callbacks(
     on_toggle_markers: Optional[SimpleCallback],
     on_add_marker: Optional[EventCallback],
     on_delete_marker: Optional[EventCallback],
+    on_export: Optional[SimpleCallback],
 ) -> dict[str, Any]:
     return {
         "search_callback": on_search or (lambda _event: None),
         "marker_callback": on_toggle_markers or (lambda: None),
         "add_marker_callback": on_add_marker or (lambda _event: None),
         "delete_marker_callback": on_delete_marker or (lambda _event: None),
+        "export_callback": on_export or (lambda: None),
     }
 
 
@@ -663,6 +694,7 @@ def _build_region_map_controls(
     on_toggle_fullscreen: SimpleCallback,
     search_callback: EventCallback,
     marker_callback: SimpleCallback,
+    export_callback: SimpleCallback,
 ) -> dict[str, Any]:
     dimension_dropdown, display_mode_dropdown = _build_dimension_style_dropdowns(
         t,
@@ -676,8 +708,15 @@ def _build_region_map_controls(
         on_toggle_empty,
         marker_callback,
         on_toggle_fullscreen,
+        export_callback,
     )
-    coord_button, empty_button, marker_button, fullscreen_button = toggle_buttons
+    (
+        coord_button,
+        empty_button,
+        marker_button,
+        fullscreen_button,
+        export_button,
+    ) = toggle_buttons
     top_bar, left_toolbar, right_toolbar = _build_floating_toolbars(
         t,
         dimension_dropdown=dimension_dropdown,
@@ -692,6 +731,7 @@ def _build_region_map_controls(
         empty_button=empty_button,
         marker_button=marker_button,
         fullscreen_button=fullscreen_button,
+        export_button=export_button,
     )
     return {
         "dimension_dropdown": dimension_dropdown,
@@ -702,6 +742,7 @@ def _build_region_map_controls(
         "empty_button": empty_button,
         "marker_button": marker_button,
         "fullscreen_button": fullscreen_button,
+        "export_button": export_button,
         "top_bar": top_bar,
         "left_toolbar": left_toolbar,
         "right_toolbar": right_toolbar,

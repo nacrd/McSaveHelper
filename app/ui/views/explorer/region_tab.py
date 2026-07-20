@@ -11,6 +11,7 @@ from app.ui.theme import THEME
 from app.controllers.map_controller import MapController
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
+from app.ui.views.explorer.map.export_dialog import MapExportDialog, MapExportSession
 from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.ui.views.explorer.region_tab_chrome import (
@@ -32,6 +33,7 @@ class RegionTabMixin(ExplorerMixinHost):
         map_view = self._create_region_map_view()
         chrome = self._create_region_tab_chrome(map_view)
         self._bind_region_tab_chrome(chrome)
+        self._map_export_dialog = MapExportDialog(self.app)
         self._map_fullscreen_controller = (
             MapFullscreenController(
                 page=self.app.page,
@@ -84,6 +86,7 @@ class RegionTabMixin(ExplorerMixinHost):
             on_toggle_markers=self._toggle_map_markers,
             on_add_marker=self._show_add_marker_dialog,
             on_delete_marker=self._delete_selected_marker,
+            on_export=self._open_map_export_dialog,
             translate=self.app.translate,
         )
 
@@ -96,6 +99,7 @@ class RegionTabMixin(ExplorerMixinHost):
         self._map_empty_btn = chrome.empty_button
         self._map_marker_btn = chrome.marker_button
         self._map_fullscreen_btn = chrome.fullscreen_button
+        self._map_export_btn = chrome.export_button
         self._map_marker_list = chrome.marker_list
         self._map_marker_count_text = chrome.marker_count_text
         self._map_add_marker_btn = chrome.add_marker_button
@@ -132,6 +136,29 @@ class RegionTabMixin(ExplorerMixinHost):
         controller = getattr(self, "_map_fullscreen_controller", None)
         if controller is not None:
             controller.dispose()
+        export_dialog = getattr(self, "_map_export_dialog", None)
+        if export_dialog is not None:
+            export_dialog.dispose()
+
+    def _open_map_export_dialog(self) -> None:
+        """Open export dialog prefilled from the active map context."""
+        if self.world_session is None:
+            self.app.warn_dialog(
+                self.app.translate("map.notice", "提示"),
+                self.app.translate("map.select_save_first", "请先设置当前存档。"),
+            )
+            return
+        dialog = getattr(self, "_map_export_dialog", None)
+        if dialog is None:
+            dialog = MapExportDialog(self.app)
+            self._map_export_dialog = dialog
+        dialog.open(
+            MapExportSession(
+                world_path=self.world_session.world_path,
+                dimension_id=self._current_dimension or "overworld",
+                selected_region=self._selected_region_coord,
+            )
+        )
 
     def _change_region_display_mode(self) -> None:
         mode = self._region_display_mode_dropdown.value or "topview"

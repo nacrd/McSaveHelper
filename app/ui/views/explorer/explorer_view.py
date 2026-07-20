@@ -86,6 +86,10 @@ class ExplorerView(
                 lambda event: self._refresh_map(),
             ),
             ViewAction(
+                self._t("top_bar.start_export", "开始导出"),
+                self._start_map_export,
+            ),
+            ViewAction(
                 self._t("top_bar.stage_player", "暂存玩家"),
                 self._stage_player_edit_form,
             ),
@@ -268,9 +272,15 @@ class ExplorerView(
             self._entity_block_search_view.on_save_selected(path)
 
     def _start_entity_block_search(self, e: Any = None) -> None:
-        """启动实体/方块搜索"""
-        if hasattr(self, "_entity_block_search_view"):
-            self._switch_tab(4)
+        """打开实体/方块搜索标签。"""
+        self._switch_tab(4)
+
+    def _start_map_export(self, e: Any = None) -> None:
+        """打开地图标签并弹出导出对话框。"""
+        self._switch_tab(2)
+        open_export = getattr(self, "_open_map_export_dialog", None)
+        if callable(open_export):
+            open_export()
 
     def _load_world(self, path: Any = None) -> None:
         """加载世界存档"""

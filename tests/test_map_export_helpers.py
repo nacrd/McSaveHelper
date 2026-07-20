@@ -1,10 +1,14 @@
-from types import SimpleNamespace
-from typing import Any
+"""Helpers for the map-export renderer that reuses map topview tiles."""
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
 
-from core.mca.map_export_renderer import MapExportRenderer
+from core.mca.map_export_renderer import MapExportRenderer, MapRenderCancelled
+from core.mca.topview_renderer import LEAF_TILE_SIZE
 
 
 def test_map_image_spec_calculates_dimensions_and_memory() -> None:
@@ -25,39 +29,106 @@ def test_map_image_spec_rejects_oversized_dimensions() -> None:
         )
 
 
-def test_highest_block_uses_native_surface_fast_path() -> None:
-    chunk = SimpleNamespace(
-        _blocks=SimpleNamespace(surface_y=lambda _x, _z: 72),
-    )
+def _solid_tile_png(color: tuple[int, int, int] = (34, 139, 34)) -> bytes:
+    image = Image.new("RGB", (LEAF_TILE_SIZE, LEAF_TILE_SIZE), color)
+    from io import BytesIO
 
-    assert MapExportRenderer().highest_block_y(chunk, 1, 2) == 72
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    image.close()
+    return buffer.getvalue()
 
 
-def test_highest_block_falls_back_when_native_surface_is_missing(
-    monkeypatch: Any,
-) -> None:
-    class Chunk:
-        _blocks = SimpleNamespace(surface_y=lambda _x, _z: None)
-
-        @staticmethod
-        def get_block(_x: int, y: int, _z: int) -> Any:
-            block_id = "minecraft:stone" if y == 20 else "minecraft:air"
-            return SimpleNamespace(id=block_id)
-
+def test_create_map_image_uses_topview_renderer(tmp_path: Path) -> None:
+    region = tmp_path / "r.0.0.mca"
+    region.write_bytes(b"\x00" * 16)
     renderer = MapExportRenderer()
-    monkeypatch.setattr(
-        renderer,
-        "_get_non_air_sections",
-        lambda _chunk: [1],
-    )
+    logs: list[str] = []
 
-    assert renderer.highest_block_y(Chunk(), 0, 0) == 20
+    with patch(
+        "core.mca.map_export_renderer.render_region_topview",
+        return_value=_solid_tile_png(),
+    ) as render:
+        image = renderer.create_map_image(
+            [region],
+            {"min_x": 0, "max_x": 0, "min_z": 0, "max_z": 0},
+            "topview",
+            scale=16,
+            log=lambda message, _level: logs.append(message),
+            progress=lambda *_args: None,
+        )
+        try:
+            assert image.size == (32, 32)
+            assert image.getpixel((0, 0)) == (34, 139, 34)
+            assert renderer.last_rendered_chunks == 32 * 32
+            render.assert_called_once()
+            assert render.call_args.kwargs["tile_size"] == LEAF_TILE_SIZE
+            assert any("地图俯视渲染" in message for message in logs)
+        finally:
+            image.close()
 
 
-def test_fallback_grid_supports_scales_larger_than_chunk_width() -> None:
-    image = Image.new("RGB", (4, 4))
-    try:
-        MapExportRenderer.draw_fallback_grid(image, scale=32)
-        assert image.getpixel((0, 0)) == (200, 200, 200)
-    finally:
-        image.close()
+def test_create_map_image_honours_cancellation(tmp_path: Path) -> None:
+    import threading
+
+    region = tmp_path / "r.0.0.mca"
+    region.write_bytes(b"\x00" * 16)
+    cancel = threading.Event()
+    cancel.set()
+    renderer = MapExportRenderer()
+
+    with pytest.raises(MapRenderCancelled):
+        renderer.create_map_image(
+            [region],
+            {"min_x": 0, "max_x": 0, "min_z": 0, "max_z": 0},
+            "topview",
+            scale=16,
+            log=lambda *_args: None,
+            progress=lambda *_args: None,
+            cancel_event=cancel,
+        )
+
+
+def test_create_map_image_crops_block_selection(tmp_path: Path) -> None:
+    region = tmp_path / "r.0.0.mca"
+    region.write_bytes(b"\x00" * 16)
+    renderer = MapExportRenderer()
+
+    with patch(
+        "core.mca.map_export_renderer.render_region_topview",
+        return_value=_solid_tile_png((10, 20, 30)),
+    ):
+        image = renderer.create_map_image(
+            [region],
+            {"min_x": 0, "max_x": 0, "min_z": 0, "max_z": 0},
+            "topview",
+            scale=1,
+            log=lambda *_args: None,
+            progress=lambda *_args: None,
+            block_bounds=(0, 0, 15, 15),
+        )
+        try:
+            assert image.size == (16, 16)
+            assert image.getpixel((0, 0)) == (10, 20, 30)
+        finally:
+            image.close()
+
+
+def test_unreadable_regions_raise_when_nothing_renders(tmp_path: Path) -> None:
+    region = tmp_path / "r.0.0.mca"
+    region.write_bytes(b"\x00" * 16)
+    renderer = MapExportRenderer()
+
+    with patch(
+        "core.mca.map_export_renderer.render_region_topview",
+        return_value=None,
+    ):
+        with pytest.raises(ValueError, match="均不可读"):
+            renderer.create_map_image(
+                [region],
+                {"min_x": 0, "max_x": 0, "min_z": 0, "max_z": 0},
+                "topview",
+                scale=16,
+                log=lambda *_args: None,
+                progress=lambda *_args: None,
+            )
