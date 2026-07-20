@@ -3,7 +3,7 @@
 每个设置分区支持点击标题栏展开/收起，减少纵向占用。
 """
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 import flet as ft
 
@@ -37,6 +37,7 @@ class SettingsViewDependencies:
     set_performance_interval: Callable[[float], None]
     info_dialog: DialogCallback
     error_dialog: DialogCallback
+    pick_directory: Callable[[], Optional[str]]
 
 
 class SettingsView(ft.Column):
@@ -166,6 +167,42 @@ class SettingsView(ft.Column):
             content=ft.Column([
                 label(self._t("settings.ui.sidebar_mode", "侧边栏模式")),
                 self._sidebar_mode_dropdown,
+            ], spacing=4),
+            padding=ft.Padding(left=16, right=16, bottom=8),
+        ))
+
+        self._minecraft_dir_field = text_field(
+            value=cfg.minecraft_dir,
+            hint_text=self._t(
+                "settings.ui.minecraft_dir_hint",
+                r"例如 F:\Game\minecraft\.minecraft（可留空自动推断）",
+            ),
+            expand=True,
+            on_change=lambda _: self._on_minecraft_dir_change(),
+        )
+        body.controls.append(ft.Container(
+            content=ft.Column([
+                label(self._t("settings.ui.minecraft_dir", "Minecraft 目录")),
+                ft.Row(
+                    [
+                        self._minecraft_dir_field,
+                        btn_ghost(
+                            self._t("settings.ui.browse", "浏览"),
+                            height=36,
+                            on_click=self._browse_minecraft_dir,
+                        ),
+                    ],
+                    spacing=8,
+                ),
+                ft.Text(
+                    self._t(
+                        "settings.ui.minecraft_dir_help",
+                        "用于导入语言/贴图。优先此路径；留空则从当前存档向上查找 "
+                        ".minecraft，或使用系统默认目录。",
+                    ),
+                    size=11,
+                    color=THEME.text_muted,
+                ),
             ], spacing=4),
             padding=ft.Padding(left=16, right=16, bottom=8),
         ))
@@ -496,6 +533,7 @@ class SettingsView(ft.Column):
                 for item in cleanup_value.splitlines()
                 if item.strip()
             ),
+            minecraft_dir=(self._minecraft_dir_field.value or "").strip(),
         )
 
     def _persist(self) -> None:
@@ -517,6 +555,27 @@ class SettingsView(ft.Column):
     def _on_language_change(self, lang: str) -> None:
         self._persist()
         self._deps.apply_language(lang)
+
+    def _on_minecraft_dir_change(self) -> None:
+        self._persist()
+
+    def _browse_minecraft_dir(self, e: ft.ControlEvent = None) -> None:
+        del e
+        try:
+            path = self._deps.pick_directory()
+            if not path:
+                return
+            self._minecraft_dir_field.value = path
+            self._persist()
+            try:
+                self._minecraft_dir_field.update()
+            except RuntimeError:
+                pass
+        except Exception as ex:
+            self._deps.error_dialog(
+                self._t("settings.ui.minecraft_dir_error", "选择目录失败"),
+                str(ex),
+            )
 
     def _on_api_timeout_change(self) -> None:
         try:

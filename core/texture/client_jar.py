@@ -32,9 +32,12 @@ class ClientJarInfo:
     size: int
 
 
-def find_local_minecraft_jar() -> Optional[Path]:
-    """Locate the newest installed client jar under the local Minecraft dir."""
-    versions_dir = minecraft_directory() / "versions"
+def find_local_minecraft_jar(
+    minecraft_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Locate the newest installed client jar under a Minecraft data dir."""
+    root = Path(minecraft_dir) if minecraft_dir is not None else minecraft_directory()
+    versions_dir = root / "versions"
     if not versions_dir.exists():
         return None
     jars = _find_version_jars(versions_dir)
@@ -45,8 +48,110 @@ def find_local_minecraft_jar() -> Optional[Path]:
 
 
 def minecraft_directory() -> Path:
-    """Return the platform Minecraft data directory (public helper)."""
+    """Return the platform default Minecraft data directory."""
     return _minecraft_directory()
+
+
+def is_minecraft_data_dir(path: Path) -> bool:
+    """Heuristic: does ``path`` look like a Minecraft data root?"""
+    if not path.is_dir():
+        return False
+    # Custom installs may use a folder literally named ".minecraft".
+    markers = (
+        path / "assets" / "indexes",
+        path / "assets" / "objects",
+        path / "versions",
+        path / "launcher_profiles.json",
+        path / "launcher_accounts.json",
+    )
+    return any(marker.exists() for marker in markers)
+
+
+def minecraft_dir_from_client_jar(jar_path: Path) -> Optional[Path]:
+    """Infer ``.minecraft`` from ``versions/<id>/<id>.jar`` layout."""
+    try:
+        jar = Path(jar_path).resolve()
+    except OSError:
+        return None
+    # .../.minecraft/versions/1.20.1/1.20.1.jar
+    if jar.parent.name and jar.parent.parent.name == "versions":
+        candidate = jar.parent.parent.parent
+        if is_minecraft_data_dir(candidate):
+            return candidate
+    # Walk up a few levels as a looser fallback.
+    current = jar.parent
+    for _ in range(6):
+        if is_minecraft_data_dir(current):
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def discover_minecraft_directory(
+    *,
+    configured: Optional[Path] = None,
+    start_path: Optional[Path] = None,
+    jar_path: Optional[Path] = None,
+) -> Optional[Path]:
+    """Resolve a Minecraft data directory from config, save path, or jar.
+
+    Order:
+    1. Explicit configured path (if valid)
+    2. Inferred from a client jar path
+    3. Walk up from a save/world path looking for a data root
+    4. Platform default ``.minecraft`` when it looks valid
+    """
+    if configured is not None:
+        try:
+            configured_path = Path(configured).expanduser().resolve()
+        except OSError:
+            configured_path = None
+        if configured_path is not None and is_minecraft_data_dir(configured_path):
+            return configured_path
+
+    if jar_path is not None:
+        from_jar = minecraft_dir_from_client_jar(Path(jar_path))
+        if from_jar is not None:
+            return from_jar
+
+    if start_path is not None:
+        walked = minecraft_dir_from_start_path(Path(start_path))
+        if walked is not None:
+            return walked
+
+    default = minecraft_directory()
+    if is_minecraft_data_dir(default):
+        return default
+    return None
+
+
+def minecraft_dir_from_start_path(start_path: Path) -> Optional[Path]:
+    """Walk parents of a save/world path to find a Minecraft data root.
+
+    Examples that work:
+    - ``.../.minecraft/saves/World``
+    - ``F:/Game/minecraft/.minecraft/saves/World``
+    - MultiMC-style ``instances/foo/.minecraft/saves/World``
+    """
+    try:
+        current = Path(start_path).expanduser().resolve()
+    except OSError:
+        return None
+    if current.is_file():
+        current = current.parent
+    for _ in range(10):
+        if is_minecraft_data_dir(current):
+            return current
+        # Also accept a parent that *contains* `.minecraft`.
+        nested = current / ".minecraft"
+        if is_minecraft_data_dir(nested):
+            return nested
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
 
 
 def _minecraft_directory() -> Path:

@@ -26,6 +26,7 @@ def _dependencies(saved: list[ApplicationSettings]) -> SettingsViewDependencies:
         set_performance_interval=lambda interval: None,
         info_dialog=lambda title, message: None,
         error_dialog=lambda title, message: None,
+        pick_directory=lambda: None,
     )
 
 
@@ -62,12 +63,15 @@ def test_config_service_persists_typed_settings(tmp_path: Path) -> None:
         max_concurrent=8,
         preserve_structure=False,
         cleanup_patterns=("session.lock",),
+        minecraft_dir=r"F:\Game\minecraft\.minecraft",
     )
 
     config.update_settings(settings)
     stored = config.get_config_dict()
 
     assert config.get_settings() == settings
+    assert stored["minecraft_dir"] == r"F:\Game\minecraft\.minecraft"
+    assert config.get_minecraft_dir() == r"F:\Game\minecraft\.minecraft"
     assert stored["batch_processing"] == {
         "max_concurrent": 8,
         "preserve_structure": False,

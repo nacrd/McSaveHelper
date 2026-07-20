@@ -112,6 +112,7 @@ class ConfigService:
                 "*.log",
                 "cache/",
                 "logs/"],
+            "minecraft_dir": "",
         }
 
     @staticmethod
@@ -363,6 +364,7 @@ class ConfigService:
                     batch.get("preserve_structure", True)
                 ),
                 cleanup_patterns=tuple(str(item) for item in patterns),
+                minecraft_dir=str(self._config.get("minecraft_dir", "") or ""),
             )
 
     def update_settings(self, settings: ApplicationSettings) -> None:
@@ -370,6 +372,7 @@ class ConfigService:
         with self._lock:
             self._config["version_detection"] = settings.version_detection
             self._config["api_timeout"] = settings.api_timeout
+            self._config["minecraft_dir"] = str(settings.minecraft_dir or "")
 
             ui = dict(self._config.get("ui_settings", {}))
             ui.update({
@@ -397,6 +400,17 @@ class ConfigService:
                 settings.cleanup_patterns
             )
             self._migration.version_detection = settings.version_detection
+        self.save()
+
+    def get_minecraft_dir(self) -> str:
+        """Return configured Minecraft data directory (may be empty)."""
+        with self._lock:
+            return str(self._config.get("minecraft_dir", "") or "").strip()
+
+    def set_minecraft_dir(self, path: str) -> None:
+        """Persist a custom Minecraft data directory path."""
+        with self._lock:
+            self._config["minecraft_dir"] = str(path or "").strip()
         self.save()
 
     # ─── 运行时迁移配置 ────────────────────────────

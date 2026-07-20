@@ -376,7 +376,12 @@
       "theme": "主题",
       "language": "语言",
       "auto_clear_log": "自动清除旧日志",
-      "sidebar_mode": "侧边栏模式"
+      "sidebar_mode": "侧边栏模式",
+      "minecraft_dir": "Minecraft 目录",
+      "minecraft_dir_hint": "例如 F:\\Game\\minecraft\\.minecraft（可留空自动推断）",
+      "minecraft_dir_help": "用于导入语言/贴图。优先此路径；留空则从当前存档向上查找 .minecraft，或使用系统默认目录。",
+      "browse": "浏览",
+      "minecraft_dir_error": "选择目录失败"
     },
     "batch": {
       "title": "批量处理",

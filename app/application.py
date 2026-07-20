@@ -240,6 +240,7 @@ class Application:
             ),
             info_dialog=self.info_dialog,
             error_dialog=self.error_dialog,
+            pick_directory=self.pick_directory,
         ))
 
     def _apply_theme(self, theme: str) -> None:

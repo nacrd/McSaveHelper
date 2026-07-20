@@ -76,17 +76,25 @@ class ItemService:
         locale: str = "zh_cn",
         *,
         jar_path: Optional[Path] = None,
+        minecraft_dir: Optional[Path] = None,
+        start_path: Optional[Path] = None,
+        configured_dir: Optional[Path] = None,
     ) -> LanguageImportResult:
         """Load language from a local Minecraft install.
 
         Modern clients (1.8+) resolve ``assets/indexes`` + ``assets/objects``
         first; legacy jars still provide ``.lang`` embeds as a fallback.
+        The data directory can be configured, inferred from a save path, or
+        inferred from a client jar under ``versions/<id>/<id>.jar``.
         """
         return _extract_local_mc(
             self._name_map,
             self._enchantment_names,
             locale=locale,
             jar_path=jar_path,
+            minecraft_dir=minecraft_dir,
+            start_path=start_path,
+            configured_dir=configured_dir,
         )
 
     @staticmethod

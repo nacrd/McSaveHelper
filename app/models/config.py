@@ -55,6 +55,8 @@ class ApplicationSettings:
     max_concurrent: int = 2
     preserve_structure: bool = True
     cleanup_patterns: tuple[str, ...] = ("*.log", "cache/", "logs/")
+    # Custom Minecraft data root, e.g. F:/Game/minecraft/.minecraft
+    minecraft_dir: str = ""
 
 
 @dataclass

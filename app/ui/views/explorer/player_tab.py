@@ -1377,9 +1377,11 @@ class PlayerTabMixin(ExplorerMixinHost):
                 self._notify_language_import(0)
                 return
             if lang_count == 0 and texture_count == 0 and jar_files:
-                # Try local MC as additional language source when jars empty.
+                # Try discovered/local Minecraft as additional language source.
                 local = self.app.item.import_language_from_local_minecraft(
                     locale=locale,
+                    configured_dir=self._configured_minecraft_dir(),
+                    start_path=self._current_save_start_path(),
                 )
                 if local.count > 0:
                     lang_count = local.count
@@ -1482,10 +1484,12 @@ class PlayerTabMixin(ExplorerMixinHost):
             locale = self._preferred_item_locale()
             result = self.app.item.import_language_from_local_minecraft(
                 locale=locale,
+                configured_dir=self._configured_minecraft_dir(),
+                start_path=self._current_save_start_path(),
             )
             texture_count = 0
             jar_count = 0
-            if result.jar_path:
+            if result.jar_path and str(result.jar_path).lower().endswith(".jar"):
                 jar_path = Path(result.jar_path)
                 tex = self.app.texture.import_textures_from_jars([jar_path])
                 texture_count = tex.extracted
@@ -1513,6 +1517,29 @@ class PlayerTabMixin(ExplorerMixinHost):
             jar_count=0,
             lang_sources=0,
         )
+
+    def _configured_minecraft_dir(self) -> Optional[Path]:
+        try:
+            getter = getattr(self.app.config, "get_minecraft_dir", None)
+            raw = ""
+            if callable(getter):
+                raw = str(getter() or "")
+            else:
+                settings = getattr(self.app.config, "get_settings", None)
+                if callable(settings):
+                    raw = str(getattr(settings(), "minecraft_dir", "") or "")
+            text = raw.strip()
+            return Path(text) if text else None
+        except Exception:
+            return None
+
+    def _current_save_start_path(self) -> Optional[Path]:
+        try:
+            value = getattr(self.app, "current_save_path", None)
+            text = str(value or "").strip()
+            return Path(text) if text else None
+        except Exception:
+            return None
 
     def _preferred_item_locale(self) -> str:
         """Map the app UI language to a Minecraft jar lang stem.

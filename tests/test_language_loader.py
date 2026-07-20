@@ -211,6 +211,35 @@ def test_local_minecraft_prefers_assets_over_empty_jar(tmp_path: Path) -> None:
     assert "assets/objects/" in result.sources[0]
 
 
+def test_discover_from_save_relative_path(tmp_path: Path) -> None:
+    """Custom install: F:/Game/minecraft/.minecraft/saves/World."""
+    from core.texture.client_jar import (
+        discover_minecraft_directory,
+        is_minecraft_data_dir,
+        minecraft_dir_from_start_path,
+    )
+
+    root = tmp_path / "Game" / "minecraft" / ".minecraft"
+    save = root / "saves" / "World"
+    save.mkdir(parents=True)
+    (root / "assets" / "indexes").mkdir(parents=True)
+    (root / "assets" / "objects").mkdir(parents=True)
+    (root / "versions").mkdir(parents=True)
+    assert is_minecraft_data_dir(root)
+    assert minecraft_dir_from_start_path(save) == root.resolve()
+    assert discover_minecraft_directory(start_path=save) == root.resolve()
+
+
+def test_configured_dir_overrides_default(tmp_path: Path) -> None:
+    from core.texture.client_jar import discover_minecraft_directory
+
+    custom = tmp_path / "custom_mc"
+    (custom / "assets" / "indexes").mkdir(parents=True)
+    (custom / "versions").mkdir(parents=True)
+    found = discover_minecraft_directory(configured=custom)
+    assert found == custom.resolve()
+
+
 def test_legacy_lang_inside_jar(tmp_path: Path) -> None:
     jar = tmp_path / "1.7.10.jar"
     modernish = (

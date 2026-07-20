@@ -198,33 +198,44 @@ def extract_language_from_local_minecraft(
     *,
     jar_path: Optional[Path] = None,
     minecraft_dir: Optional[Path] = None,
+    start_path: Optional[Path] = None,
+    configured_dir: Optional[Path] = None,
 ) -> LanguageImportResult:
     """Load language from a local Minecraft install.
 
     Resolution order:
-    1. Modern assets: ``assets/indexes/*.json`` → ``assets/objects/<hh>/<hash>``
-       for ``minecraft/lang/<locale>.json``
-    2. Client jar embedded lang (legacy 1.7.10-style ``.lang``, or rare embeds)
-    3. If a specific ``jar_path`` is given, also try that jar (mods / old packs)
+    1. Resolve data dir from config / jar / save path / platform default
+    2. Modern assets: ``assets/indexes/*.json`` → ``assets/objects/<hh>/<hash>``
+    3. Client jar embedded lang (legacy ``.lang`` or rare embeds)
     """
-    from core.texture.client_jar import find_local_minecraft_jar, minecraft_directory
+    from core.texture.client_jar import (
+        discover_minecraft_directory,
+        find_local_minecraft_jar,
+    )
 
-    mc_dir = Path(minecraft_dir) if minecraft_dir is not None else minecraft_directory()
+    mc_dir = discover_minecraft_directory(
+        configured=configured_dir if configured_dir is not None else minecraft_dir,
+        start_path=start_path,
+        jar_path=jar_path,
+    )
     locales = locale_fallbacks(locale)
     used_locale = locales[0]
 
-    # 1) Modern asset index / objects store.
-    assets_result = extract_language_from_minecraft_assets(
-        name_map,
-        enchantment_names,
-        locale=locale,
-        minecraft_dir=mc_dir,
-    )
-    if assets_result.count > 0:
-        return assets_result
+    assets_result = LanguageImportResult(count=0, locale=used_locale)
+    if mc_dir is not None:
+        assets_result = extract_language_from_minecraft_assets(
+            name_map,
+            enchantment_names,
+            locale=locale,
+            minecraft_dir=mc_dir,
+        )
+        if assets_result.count > 0:
+            return assets_result
 
-    # 2) Client jar (legacy .lang or embedded JSON).
+    # Client jar (legacy .lang or embedded JSON).
     resolved = jar_path
+    if resolved is None and mc_dir is not None:
+        resolved = find_local_minecraft_jar(mc_dir)
     if resolved is None:
         resolved = find_local_minecraft_jar()
     jar_result = LanguageImportResult(count=0, locale=used_locale)
@@ -239,7 +250,6 @@ def extract_language_from_local_minecraft(
         if jar_result.count > 0:
             return jar_result
 
-    # Prefer reporting assets locale/source info when both failed.
     if assets_result.sources or assets_result.locale:
         return assets_result
     return jar_result

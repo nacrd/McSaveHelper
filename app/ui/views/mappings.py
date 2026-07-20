@@ -338,17 +338,22 @@ class MappingsView(ft.Column):
                     texture_count = texture.extracted
                     jar_count = max(jar_count, texture.jars)
             else:
-                # No files chosen — fall back to local Minecraft client jar.
+                # No files chosen — fall back to configured / inferred Minecraft.
                 result = self._item_service.import_language_from_local_minecraft(
                     locale=locale,
+                    configured_dir=self._configured_minecraft_dir(),
+                    start_path=self._current_save_start_path(),
                 )
                 lang_count = result.count
-                if result.jar_path:
+                if result.jar_path and str(result.jar_path).lower().endswith(".jar"):
                     jar_path = Path(result.jar_path)
                     texture = self.app.texture.import_textures_from_jars([jar_path])
                     texture_count = texture.extracted
                     jar_count = max(1, texture.jars)
                     self.app.texture.set_minecraft_jar(jar_path)
+                elif result.count > 0:
+                    # Assets path only (indexes/objects) — no jar textures.
+                    jar_count = 0
 
             if lang_count <= 0 and texture_count <= 0:
                 self._item_mapping_status.value = self._t(
@@ -416,6 +421,34 @@ class MappingsView(ft.Column):
         except Exception:
             pass
         return "zh_cn"
+
+    def _configured_minecraft_dir(self) -> Optional[Path]:
+        try:
+            getter = getattr(self.app.config, "get_minecraft_dir", None)
+            raw = ""
+            if callable(getter):
+                raw = str(getter() or "")
+            else:
+                settings = getattr(self.app.config, "get_settings", None)
+                if callable(settings):
+                    raw = str(getattr(settings(), "minecraft_dir", "") or "")
+            text = raw.strip()
+            return Path(text) if text else None
+        except Exception:
+            return None
+
+    def _current_save_start_path(self) -> Optional[Path]:
+        try:
+            value = getattr(self.app, "current_save_path", None)
+            if callable(value):
+                try:
+                    value = value()
+                except TypeError:
+                    pass
+            text = str(value or "").strip()
+            return Path(text) if text else None
+        except Exception:
+            return None
 
     def _import_json(self, e: ft.ControlEvent) -> None:
         try:
