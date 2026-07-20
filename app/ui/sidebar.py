@@ -63,6 +63,46 @@ class Sidebar(ft.Container):
         width: int = 220,
         collapsed: bool = False,
     ) -> None:
+        self._init_state(
+            tabs=tabs,
+            on_tab_select=on_tab_select,
+            on_tabs_reorder=on_tabs_reorder,
+            on_import_save=on_import_save,
+            on_set_current_save=on_set_current_save,
+            on_recent_save_select=on_recent_save_select,
+            recent_saves=recent_saves,
+            default_tab=default_tab,
+            width=width,
+            collapsed=collapsed,
+        )
+        self._rebuild_all()
+        super().__init__(
+            content=self._build_root_column(collapsed),
+            width=self.COLLAPSED_WIDTH if collapsed else self._sidebar_width,
+            bgcolor=THEME.bg_primary,
+            border=ft.Border(
+                left=_EMPTY_BORDER_SIDE,
+                top=_EMPTY_BORDER_SIDE,
+                right=ft.BorderSide(3, THEME.bg_secondary),
+                bottom=_EMPTY_BORDER_SIDE,
+            ),
+            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        )
+
+    def _init_state(
+        self,
+        *,
+        tabs: List[Dict[str, Any]],
+        on_tab_select: Callable[[str], None],
+        on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]],
+        on_import_save: Optional[Callable[[], None]],
+        on_set_current_save: Optional[Callable[[], None]],
+        on_recent_save_select: Optional[Callable[[str], None]],
+        recent_saves: Optional[List[Dict[str, Any]]],
+        default_tab: Optional[str],
+        width: int,
+        collapsed: bool,
+    ) -> None:
         self._tabs: List[Dict[str, Any]] = list(tabs)
         self._on_tab_select: Callable[[str], None] = on_tab_select
         self._on_tabs_reorder = on_tabs_reorder
@@ -83,8 +123,6 @@ class Sidebar(ft.Container):
             auto_scroll=False,
         )
         self._recent_save_col: ft.Column = ft.Column(spacing=6)
-
-        # ─── Recent saves expand/collapse state ───
         self._recent_expanded: bool = False
         self._recent_arrow: ft.Text = ft.Text(
             "▶", size=10, color=THEME.text_secondary, font_family="monospace",
@@ -93,8 +131,6 @@ class Sidebar(ft.Container):
             content=self._recent_save_col,
             visible=self._recent_expanded,
         )
-
-        # ─── Mutable sub-components ───
         self._current_save_name = ft.Text(
             "未设置当前存档",
             size=12,
@@ -103,16 +139,11 @@ class Sidebar(ft.Container):
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
-
-        # Header section (rebuilt on toggle)
         self._header_container = ft.Container(expand=False)
-        # Footer section (rebuilt on toggle)
         self._footer_container = ft.Container(expand=False)
-        # Toggle button (rebuilt on toggle)
         self._toggle_btn = ft.Container(expand=False)
 
-        self._rebuild_all()
-
+    def _build_root_column(self, collapsed: bool) -> ft.Column:
         col = ft.Column(spacing=0, expand=True)
         col.controls.append(self._header_container)
         col.controls.append(
@@ -129,20 +160,7 @@ class Sidebar(ft.Container):
         )
         col.controls.append(self._toggle_btn)
         col.controls.append(self._footer_container)
-
-        effective_width = self.COLLAPSED_WIDTH if collapsed else self._sidebar_width
-        super().__init__(
-            content=col,
-            width=effective_width,
-            bgcolor=THEME.bg_primary,
-            border=ft.Border(
-                left=_EMPTY_BORDER_SIDE,
-                top=_EMPTY_BORDER_SIDE,
-                right=ft.BorderSide(3, THEME.bg_secondary),
-                bottom=_EMPTY_BORDER_SIDE,
-            ),
-            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        )
+        return col
 
     # ════════════════════════════════════════════
     #  Rebuild helpers

@@ -61,53 +61,40 @@ def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
         "",
         size=6,
         color=DURABILITY_HIGH,
-        text_align=ft.TextAlign.CENTER)
+        text_align=ft.TextAlign.CENTER,
+    )
     enchantment_text = ft.Text(
         "",
         size=7,
         color=ENCHANTMENT_COLOR,
-        text_align=ft.TextAlign.LEFT)
-
+        text_align=ft.TextAlign.LEFT,
+    )
     stack = ft.Stack(
         [
-            ft.Container(
-                content=image,
-                alignment=ft.alignment.Alignment(0, 0),
-                width=slot_size,
-                height=slot_size,
-            ),
-            ft.Container(
-                content=icon,
-                alignment=ft.alignment.Alignment(0, 0),
-                width=slot_size,
-                height=slot_size,
-            ),
-            ft.Container(
-                content=count_text,
-                alignment=ft.alignment.Alignment(1, 1),
+            _overlay_layer(image, slot_size, ft.alignment.Alignment(0, 0)),
+            _overlay_layer(icon, slot_size, ft.alignment.Alignment(0, 0)),
+            _overlay_layer(
+                count_text,
+                slot_size,
+                ft.alignment.Alignment(1, 1),
                 padding=ft.Padding(0, 0, 2, 0),
-                width=slot_size,
-                height=slot_size,
             ),
-            ft.Container(
-                content=enchantment_text,
-                alignment=ft.alignment.Alignment(-1, -1),
+            _overlay_layer(
+                enchantment_text,
+                slot_size,
+                ft.alignment.Alignment(-1, -1),
                 padding=ft.Padding(2, 0, 0, 0),
-                width=slot_size,
-                height=slot_size,
             ),
-            ft.Container(
-                content=durability_text,
-                alignment=ft.alignment.Alignment(0, 1),
+            _overlay_layer(
+                durability_text,
+                slot_size,
+                ft.alignment.Alignment(0, 1),
                 padding=ft.Padding(0, 0, 0, 1),
-                width=slot_size,
-                height=slot_size,
             ),
         ],
         width=slot_size,
         height=slot_size,
     )
-
     container = ft.Container(
         width=slot_size,
         height=slot_size,
@@ -123,7 +110,24 @@ def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
         icon,
         count_text,
         durability_text,
-        enchantment_text)
+        enchantment_text,
+    )
+
+
+def _overlay_layer(
+    content: ft.Control,
+    slot_size: int,
+    alignment: ft.Alignment,
+    *,
+    padding: ft.Padding | None = None,
+) -> ft.Container:
+    return ft.Container(
+        content=content,
+        alignment=alignment,
+        padding=padding,
+        width=slot_size,
+        height=slot_size,
+    )
 
 
 def reset_item_slot(slot: ItemSlotControl) -> None:

@@ -130,33 +130,16 @@ def region_cell(
             )
         )
     if show_coordinates and size >= 22 and view_level != "block":
-        label = coord_label(coord, size)
-        text_color = "#FFFFFF" if tile_src else "#F5F5DC"
-        if "\n" in label:
-            for index, line in enumerate(label.split("\n")[:2]):
-                shapes.append(
-                    cv.Text(
-                        x=x + 4,
-                        y=y + 4 + index * 12,
-                        value=line,
-                        style=ft.TextStyle(
-                            size=9 if size < 70 else 10,
-                            color=text_color,
-                        ),
-                    )
-                )
-        else:
-            shapes.append(
-                cv.Text(
-                    x=x + 4,
-                    y=y + 5,
-                    value=label,
-                    style=ft.TextStyle(
-                        size=9 if size < 70 else 11,
-                        color=text_color,
-                    ),
-                )
+        shapes.extend(
+            _region_coord_labels(
+                x,
+                y,
+                size,
+                coord,
+                tile_src=tile_src,
+                coord_label=coord_label,
             )
+        )
     if value_label and size >= 56 and view_level not in {"chunk", "block"}:
         # Metadata labels live in a separate lower strip so they never cover
         # the coordinate label or change the region cell dimensions.
@@ -169,6 +152,46 @@ def region_cell(
                 style=ft.TextStyle(size=9, color="#FFF3C4"),
             )
         )
+    return shapes
+
+
+def _region_coord_labels(
+    x: float,
+    y: float,
+    size: float,
+    coord: Coord,
+    *,
+    tile_src: Optional[str],
+    coord_label: CoordLabel,
+) -> List[cv.Shape]:
+    label = coord_label(coord, size)
+    text_color = "#FFFFFF" if tile_src else "#F5F5DC"
+    shapes: List[cv.Shape] = []
+    if "\n" in label:
+        for index, line in enumerate(label.split("\n")[:2]):
+            shapes.append(
+                cv.Text(
+                    x=x + 4,
+                    y=y + 4 + index * 12,
+                    value=line,
+                    style=ft.TextStyle(
+                        size=9 if size < 70 else 10,
+                        color=text_color,
+                    ),
+                )
+            )
+        return shapes
+    shapes.append(
+        cv.Text(
+            x=x + 4,
+            y=y + 5,
+            value=label,
+            style=ft.TextStyle(
+                size=9 if size < 70 else 11,
+                color=text_color,
+            ),
+        )
+    )
     return shapes
 
 
