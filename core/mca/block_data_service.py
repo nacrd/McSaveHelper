@@ -128,6 +128,19 @@ class BlockDataService:
         block_name: str,
         properties: Optional[Dict[str, str]] = None,
     ) -> SetBlockResult:
+        """在世界坐标处写入方块状态（1.18+ ``block_states`` 格式）。
+
+        Args:
+            chunk_data: 区块 NBT 根（含 ``sections``）。
+            world_x: 世界 X。
+            world_y: 世界 Y。
+            world_z: 世界 Z。
+            block_name: 方块资源名，如 ``minecraft:stone``。
+            properties: 可选方块属性字典。
+
+        Returns:
+            SetBlockResult: 成功/失败信息、旧/新名称与是否 repack。
+        """
         local_x = world_x & 15
         local_y = world_y & 15
         local_z = world_z & 15
@@ -135,11 +148,18 @@ class BlockDataService:
         sections = self._get(chunk_data, "sections")
         if sections is None:
             return SetBlockResult(
-                False, "", block_name, -1, False, "区块无 sections 数据")
+                False, "", block_name, -1, False, "区块无 sections 数据"
+            )
         section = self._find_section(sections, section_y)
         if section is None:
             return SetBlockResult(
-                False, "", block_name, -1, False, f"未找到 section Y={section_y}")
+                False,
+                "",
+                block_name,
+                -1,
+                False,
+                f"未找到 section Y={section_y}",
+            )
         block_states = self._get(section, "block_states")
         if block_states is None:
             return SetBlockResult(
@@ -154,10 +174,13 @@ class BlockDataService:
         data = self._get(block_states, "data")
         if palette is None or len(palette) == 0:
             return SetBlockResult(
-                False, "", block_name, -1, False, "palette 为空")
+                False, "", block_name, -1, False, "palette 为空"
+            )
+
         old_palette_size = len(palette)
         old_index = self._decode_palette_index(
-            data, old_palette_size, local_x, local_y, local_z)
+            data, old_palette_size, local_x, local_y, local_z
+        )
         if old_index < 0 or old_index >= old_palette_size:
             return SetBlockResult(
                 False,
@@ -167,10 +190,12 @@ class BlockDataService:
                 False,
                 f"当前 palette_index={old_index} 越界",
             )
+
         old_state = palette[old_index]
         old_name = self._value(self._get(old_state, "Name", "unknown"))
         new_palette_index = self._find_or_add_palette_entry(
-            palette, block_name, properties or {})
+            palette, block_name, properties or {}
+        )
         if new_palette_index == old_index:
             return SetBlockResult(
                 True,
@@ -178,30 +203,48 @@ class BlockDataService:
                 block_name,
                 new_palette_index,
                 False,
-                "目标方块与当前方块相同，无需修改")
+                "目标方块与当前方块相同，无需修改",
+            )
+
         new_palette_size = len(palette)
-        old_bits = max(4, (old_palette_size - 1).bit_length()
-                       ) if old_palette_size > 1 else 4
-        new_bits = max(4, (new_palette_size - 1).bit_length()
-                       ) if new_palette_size > 1 else 4
+        old_bits = (
+            max(4, (old_palette_size - 1).bit_length())
+            if old_palette_size > 1
+            else 4
+        )
+        new_bits = (
+            max(4, (new_palette_size - 1).bit_length())
+            if new_palette_size > 1
+            else 4
+        )
         repacked = new_bits != old_bits
         # 用缓存的 decoded indices，批量编辑同一 section 时避免重复 O(4096) 解码
-        all_indices = self._get_cached_indices(data, old_palette_size, block_states)
+        all_indices = self._get_cached_indices(
+            data, old_palette_size, block_states
+        )
         target_flat = (local_y * 16 + local_z) * 16 + local_x
         all_indices[target_flat] = new_palette_index
         new_data = self._encode_all_indices(all_indices, new_palette_size)
         self._set_block_states_data(block_states, new_data)
-        # 写回后更新缓存（palette_size 可能变化；repack 时 bits 变了但 indices 仍有效）
+        # 写回后更新缓存（palette_size 可能变化）
         self._indices_cache[id(block_states)] = (
-            all_indices, new_palette_size, False)
+            all_indices,
+            new_palette_size,
+            False,
+        )
+        message = (
+            f"已将 {old_name} 替换为 {block_name}"
+            f"（palette #{new_palette_index}）"
+        )
+        if repacked:
+            message += "，数据已重打包"
         return SetBlockResult(
             success=True,
             old_name=old_name,
             new_name=block_name,
             palette_index=new_palette_index,
             repacked=repacked,
-            message=f"已将 {old_name} 替换为 {block_name}（palette #{new_palette_index}）" + (
-                "，数据已重打包" if repacked else ""),
+            message=message,
         )
 
     def _find_or_add_palette_entry(
@@ -223,7 +266,7 @@ class BlockDataService:
                 converted = list(palette)
                 converted.append(new_entry)
                 return len(converted) - 1
-            except Exception:
+            except (TypeError, ValueError):
                 return -1
         return len(palette) - 1
 
