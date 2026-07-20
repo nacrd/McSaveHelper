@@ -373,49 +373,10 @@ class RegionTabMixin(ExplorerMixinHost):
             marker_values = controller.markers() if controller is not None else []
         else:
             marker_values = markers
-        rows: list[ft.Control] = []
-        for marker in marker_values:
-            selected = marker.id == getattr(self, "_selected_marker_id", None)
-            rows.append(
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(
-                                ft.Icons.LOCATION_ON,
-                                size=15,
-                                color=marker.color,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        marker.name,
-                                        size=11,
-                                        weight=(
-                                            ft.FontWeight.BOLD if selected else None
-                                        ),
-                                        color=THEME.text_primary,
-                                        no_wrap=True,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                    ),
-                                    ft.Text(
-                                        f"X {marker.x} · Z {marker.z}",
-                                        size=9,
-                                        color=THEME.text_muted,
-                                    ),
-                                ],
-                                spacing=0,
-                                expand=True,
-                            ),
-                        ],
-                        spacing=5,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    padding=ft.Padding(left=6, right=6, top=4, bottom=4),
-                    bgcolor=THEME.bg_card_hover if selected else None,
-                    border_radius=4,
-                    on_click=lambda _event, item=marker: self._focus_map_marker(item),
-                )
-            )
+        rows = [
+            self._build_marker_list_row(marker)
+            for marker in marker_values
+        ]
         if not rows:
             rows.append(
                 ft.Text(
@@ -432,6 +393,47 @@ class RegionTabMixin(ExplorerMixinHost):
         )
         safe_update(self._map_marker_list)
         safe_update(self._map_marker_count_text)
+
+    def _build_marker_list_row(self, marker: MapMarker) -> ft.Container:
+        selected = marker.id == getattr(self, "_selected_marker_id", None)
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(
+                        ft.Icons.LOCATION_ON,
+                        size=15,
+                        color=marker.color,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                marker.name,
+                                size=11,
+                                weight=(
+                                    ft.FontWeight.BOLD if selected else None
+                                ),
+                                color=THEME.text_primary,
+                                no_wrap=True,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                f"X {marker.x} · Z {marker.z}",
+                                size=9,
+                                color=THEME.text_muted,
+                            ),
+                        ],
+                        spacing=0,
+                        expand=True,
+                    ),
+                ],
+                spacing=5,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding(left=6, right=6, top=4, bottom=4),
+            bgcolor=THEME.bg_card_hover if selected else None,
+            border_radius=4,
+            on_click=lambda _event, item=marker: self._focus_map_marker(item),
+        )
 
     def _focus_map_marker(self, marker: MapMarker) -> None:
         self._on_map_marker_selected(marker)

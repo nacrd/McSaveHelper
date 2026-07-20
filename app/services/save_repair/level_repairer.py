@@ -181,33 +181,21 @@ class LevelRepairer:
 
         level_dat = world_path / "level.dat"
         level_dat_old = world_path / "level.dat_old"
-
-        if not level_dat.exists():
-            if level_dat_old.exists():
-                log("level.dat 不存在，尝试从 level.dat_old 恢复", "WARNING")
-                self._restore_from_backup(level_dat, level_dat_old, report, log)
-            else:
-                log("level.dat 和 level.dat_old 都不存在", "ERROR")
+        if not self._ensure_level_dat_present(
+            level_dat,
+            level_dat_old,
+            report,
+            log,
+        ):
             return
-
-        try:
-            nbt_data = nbtlib.load(str(level_dat))
-        except (OSError, ValueError, TypeError, KeyError) as exc:
-            log(f"level.dat 无法解析: {exc}", "ERROR")
-            self._restore_from_backup(level_dat, level_dat_old, report, log)
+        nbt_data = self._load_level_dat(level_dat, level_dat_old, report, log)
+        if nbt_data is None:
             return
-        except Exception as exc:
-            # nbtlib 可能抛出库专属错误。
-            log(f"level.dat 无法解析: {exc}", "ERROR")
-            self._restore_from_backup(level_dat, level_dat_old, report, log)
-            return
-
+        data = nbt_data.get("Data") if hasattr(nbt_data, "get") else None
         if "Data" not in nbt_data:
             log("level.dat 缺少 Data 字段", "ERROR")
             self._restore_from_backup(level_dat, level_dat_old, report, log)
             return
-
-        data = nbt_data["Data"]
         if not isinstance(data, nbtlib.tag.Compound):
             log("level.dat 的 Data 字段类型错误", "ERROR")
             self._restore_from_backup(level_dat, level_dat_old, report, log)
@@ -217,22 +205,65 @@ class LevelRepairer:
         if not repaired_fields:
             log("level.dat 验证通过", "INFO")
             return
-
-        try:
-            self._save_atomically(nbt_data, level_dat)
-        except OSError as exc:
-            log(f"保存 level.dat 失败: {exc}", "ERROR")
+        if not self._save_level_dat(nbt_data, level_dat, log):
             return
-        except Exception as exc:
-            log(f"保存 level.dat 失败: {exc}", "ERROR")
-            return
-
         report.level_dat_fixed = True
         report.level_dat_repaired_fields = repaired_fields
         log(
             f"level.dat 已保存修复 ({', '.join(repaired_fields)})",
             "SUCCESS",
         )
+
+    def _ensure_level_dat_present(
+        self,
+        level_dat: Path,
+        level_dat_old: Path,
+        report: RepairReport,
+        log: LogFn,
+    ) -> bool:
+        if level_dat.exists():
+            return True
+        if level_dat_old.exists():
+            log("level.dat 不存在，尝试从 level.dat_old 恢复", "WARNING")
+            self._restore_from_backup(level_dat, level_dat_old, report, log)
+            return False
+        log("level.dat 和 level.dat_old 都不存在", "ERROR")
+        return False
+
+    def _load_level_dat(
+        self,
+        level_dat: Path,
+        level_dat_old: Path,
+        report: RepairReport,
+        log: LogFn,
+    ) -> Any | None:
+        try:
+            return nbtlib.load(str(level_dat))
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            log(f"level.dat 无法解析: {exc}", "ERROR")
+            self._restore_from_backup(level_dat, level_dat_old, report, log)
+            return None
+        except Exception as exc:
+            # nbtlib 可能抛出库专属错误。
+            log(f"level.dat 无法解析: {exc}", "ERROR")
+            self._restore_from_backup(level_dat, level_dat_old, report, log)
+            return None
+
+    def _save_level_dat(
+        self,
+        nbt_data: Any,
+        level_dat: Path,
+        log: LogFn,
+    ) -> bool:
+        try:
+            self._save_atomically(nbt_data, level_dat)
+            return True
+        except OSError as exc:
+            log(f"保存 level.dat 失败: {exc}", "ERROR")
+            return False
+        except Exception as exc:
+            log(f"保存 level.dat 失败: {exc}", "ERROR")
+            return False
 
     def _restore_from_backup(
         self,

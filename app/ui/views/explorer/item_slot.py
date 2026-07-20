@@ -41,33 +41,8 @@ def make_slot_border() -> ft.Border:
 
 
 def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
-    img_size = int(slot_size * 0.7)
-    image = ft.Image(
-        src="",
-        width=img_size,
-        height=img_size,
-        fit=ft.BoxFit.CONTAIN,
-        visible=False,
-    )
-    icon = ft.Text("", size=24, text_align=ft.TextAlign.CENTER, visible=True)
-    count_text = ft.Text(
-        "",
-        size=count_size,
-        color="#ddd",
-        text_align=ft.TextAlign.RIGHT,
-        weight=ft.FontWeight.BOLD,
-    )
-    durability_text = ft.Text(
-        "",
-        size=6,
-        color=DURABILITY_HIGH,
-        text_align=ft.TextAlign.CENTER,
-    )
-    enchantment_text = ft.Text(
-        "",
-        size=7,
-        color=ENCHANTMENT_COLOR,
-        text_align=ft.TextAlign.LEFT,
+    image, icon, count_text, durability_text, enchantment_text = (
+        _create_slot_layers(slot_size, count_size)
     )
     stack = ft.Stack(
         [
@@ -112,6 +87,41 @@ def create_item_slot(slot_size: int, count_size: int = 9) -> ItemSlotControl:
         durability_text,
         enchantment_text,
     )
+
+
+def _create_slot_layers(
+    slot_size: int,
+    count_size: int,
+) -> tuple[ft.Image, ft.Text, ft.Text, ft.Text, ft.Text]:
+    img_size = int(slot_size * 0.7)
+    image = ft.Image(
+        src="",
+        width=img_size,
+        height=img_size,
+        fit=ft.BoxFit.CONTAIN,
+        visible=False,
+    )
+    icon = ft.Text("", size=24, text_align=ft.TextAlign.CENTER, visible=True)
+    count_text = ft.Text(
+        "",
+        size=count_size,
+        color="#ddd",
+        text_align=ft.TextAlign.RIGHT,
+        weight=ft.FontWeight.BOLD,
+    )
+    durability_text = ft.Text(
+        "",
+        size=6,
+        color=DURABILITY_HIGH,
+        text_align=ft.TextAlign.CENTER,
+    )
+    enchantment_text = ft.Text(
+        "",
+        size=7,
+        color=ENCHANTMENT_COLOR,
+        text_align=ft.TextAlign.LEFT,
+    )
+    return image, icon, count_text, durability_text, enchantment_text
 
 
 def _overlay_layer(
