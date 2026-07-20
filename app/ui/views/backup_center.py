@@ -53,6 +53,54 @@ class BackupCenterView(ft.Column):
         ]
 
     def _build_ui(self) -> None:
+        self._build_backup_fields()
+        header = page_header(
+            self._t("title", "备份与恢复"),
+            ft.Text(
+                self._t("subtitle", "管理完整世界快照和恢复点"),
+                size=12,
+                color=THEME.text_muted,
+            ),
+            icon=IconSet.HISTORY,
+            actions=ft.IconButton(
+                icon=IconSet.REFRESH,
+                tooltip=self._t("refresh", "刷新备份列表"),
+                icon_color=THEME.text_primary,
+                on_click=self._refresh,
+            ),
+        )
+        create_panel = card(
+            ft.Column(
+                [
+                    self._world_path_field,
+                    self._label_field,
+                    ft.Row(
+                        [self._create_button, self._cancel_button],
+                        spacing=10,
+                    ),
+                    ft.Row(
+                        [self._retention_dropdown, self._prune_button],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ],
+                spacing=12,
+            ),
+            padding=16,
+        )
+        list_heading = ft.Row(
+            [
+                section_header(self._t("snapshots", "恢复点")),
+                self._summary,
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.controls = [header, create_panel, list_heading, self._backup_list]
+        self._show_empty_state()
+
+    def _build_backup_fields(self) -> None:
+        """Create form controls used by the create/prune panels."""
         self._world_path_field = current_save_field(
             label=self._t("current_save", "当前存档"),
         )
@@ -90,58 +138,12 @@ class BackupCenterView(ft.Column):
             icon_color=THEME.warning,
             on_click=self._confirm_prune,
         )
-        refresh_button = ft.IconButton(
-            icon=IconSet.REFRESH,
-            tooltip=self._t("refresh", "刷新备份列表"),
-            icon_color=THEME.text_primary,
-            on_click=self._refresh,
-        )
         self._summary = ft.Text(
             self._t("no_save", "尚未选择存档"),
             size=12,
             color=THEME.text_muted,
         )
         self._backup_list = ft.Column(spacing=10)
-
-        header = page_header(
-            self._t("title", "备份与恢复"),
-            ft.Text(
-                self._t("subtitle", "管理完整世界快照和恢复点"),
-                size=12,
-                color=THEME.text_muted,
-            ),
-            icon=IconSet.HISTORY,
-            actions=refresh_button,
-        )
-        create_panel = card(
-            ft.Column(
-                [
-                    self._world_path_field,
-                    self._label_field,
-                    ft.Row(
-                        [self._create_button, self._cancel_button],
-                        spacing=10,
-                    ),
-                    ft.Row(
-                        [self._retention_dropdown, self._prune_button],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                ],
-                spacing=12,
-            ),
-            padding=16,
-        )
-        list_heading = ft.Row(
-            [
-                section_header(self._t("snapshots", "恢复点")),
-                self._summary,
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        self.controls = [header, create_panel, list_heading, self._backup_list]
-        self._show_empty_state()
 
     def _selected_world(self) -> Path:
         value = str(self._world_path_field.value or "").strip()

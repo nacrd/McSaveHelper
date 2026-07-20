@@ -90,6 +90,111 @@ def _icon_button(
     )
 
 
+def _build_dimension_style_dropdowns(
+    t: Translate,
+    on_dimension_changed: EventCallback,
+    on_display_mode_changed: SimpleCallback,
+) -> tuple[ft.Dropdown, ft.Dropdown]:
+    """Top-bar dimension and map-style selectors."""
+    dimension_dropdown = ft.Dropdown(
+        label=t("map.dimension", "维度"),
+        options=[],
+        on_select=on_dimension_changed,
+        border_color=THEME.border_standard,
+        focused_border_color=THEME.mc_diamond,
+        bgcolor="#101810EE",
+        color=THEME.text_primary,
+        text_size=12,
+        width=190,
+        height=48,
+    )
+    display_mode_dropdown = ft.Dropdown(
+        label=t("map.style", "地图样式"),
+        value="topview",
+        width=150,
+        height=48,
+        options=[
+            ft.dropdown.Option("topview", t("map.style_topview", "地表")),
+            ft.dropdown.Option("activity", t("map.style_region", "区域")),
+            ft.dropdown.Option("biome", t("map.style_biome", "群系")),
+            ft.dropdown.Option("structure", t("map.style_structure", "结构")),
+        ],
+        on_select=lambda _event: on_display_mode_changed(),
+        border_color=THEME.border_standard,
+        focused_border_color=THEME.mc_diamond,
+        color=THEME.text_primary,
+        bgcolor="#101810EE",
+        text_size=12,
+    )
+    return dimension_dropdown, display_mode_dropdown
+
+
+def _build_search_controls(
+    t: Translate,
+    search_callback: EventCallback,
+) -> tuple[ft.TextField, ft.IconButton]:
+    """Map search field and submit button."""
+    search_field = ft.TextField(
+        hint_text=t(
+            "map.search_hint",
+            "坐标 x,z / x y z / r.x.z / c.x.z / 标记名",
+        ),
+        width=300,
+        height=42,
+        text_size=12,
+        color=THEME.text_primary,
+        bgcolor="#101810EE",
+        border_color=THEME.border_standard,
+        focused_border_color=THEME.mc_diamond,
+        content_padding=ft.Padding(left=12, right=8, top=8, bottom=8),
+        on_submit=search_callback,
+    )
+    search_button = ft.IconButton(
+        icon=ft.Icons.SEARCH,
+        icon_color=THEME.text_primary,
+        bgcolor="#101810EE",
+        hover_color=THEME.bg_card_hover,
+        tooltip=t("map.search", "搜索地图"),
+        width=40,
+        height=40,
+        on_click=search_callback,
+    )
+    return search_field, search_button
+
+
+def _build_map_toggle_buttons(
+    t: Translate,
+    on_toggle_coordinates: SimpleCallback,
+    on_toggle_empty: SimpleCallback,
+    marker_callback: SimpleCallback,
+    on_toggle_fullscreen: SimpleCallback,
+) -> tuple[ft.IconButton, ft.IconButton, ft.IconButton, ft.IconButton]:
+    """Coordinate/empty/marker/fullscreen toggle buttons."""
+    coord_button = _icon_button(
+        ft.Icons.LABEL_OUTLINE,
+        t("map.show_coordinates", "显示坐标"),
+        on_toggle_coordinates,
+        selected=False,
+    )
+    empty_button = _icon_button(
+        ft.Icons.GRID_ON,
+        t("map.show_empty", "显示空区域"),
+        on_toggle_empty,
+    )
+    marker_button = _icon_button(
+        ft.Icons.LOCATION_ON,
+        t("map.hide_markers", "隐藏标记"),
+        marker_callback,
+        selected=True,
+    )
+    fullscreen_button = _icon_button(
+        ft.Icons.FULLSCREEN,
+        t("map.fullscreen", "全屏地图"),
+        on_toggle_fullscreen,
+    )
+    return coord_button, empty_button, marker_button, fullscreen_button
+
+
 def build_region_legend_content(
     translate: Optional[Translate] = None,
 ) -> ft.Column:
@@ -200,82 +305,22 @@ def build_region_tab_chrome(
         if width >= 80 and height >= 80:
             resize(width, height)
 
-    dimension_dropdown = ft.Dropdown(
-        label=t("map.dimension", "维度"),
-        options=[],
-        on_select=on_dimension_changed,
-        border_color=THEME.border_standard,
-        focused_border_color=THEME.mc_diamond,
-        bgcolor="#101810EE",
-        color=THEME.text_primary,
-        text_size=12,
-        width=190,
-        height=48,
+    dimension_dropdown, display_mode_dropdown = _build_dimension_style_dropdowns(
+        t,
+        on_dimension_changed,
+        on_display_mode_changed,
     )
-    display_mode_dropdown = ft.Dropdown(
-        label=t("map.style", "地图样式"),
-        value="topview",
-        width=150,
-        height=48,
-        options=[
-            ft.dropdown.Option("topview", t("map.style_topview", "地表")),
-            ft.dropdown.Option("activity", t("map.style_region", "区域")),
-            ft.dropdown.Option("biome", t("map.style_biome", "群系")),
-            ft.dropdown.Option("structure", t("map.style_structure", "结构")),
-        ],
-        on_select=lambda _event: on_display_mode_changed(),
-        border_color=THEME.border_standard,
-        focused_border_color=THEME.mc_diamond,
-        color=THEME.text_primary,
-        bgcolor="#101810EE",
-        text_size=12,
-    )
-    search_field = ft.TextField(
-        hint_text=t(
-            "map.search_hint",
-            "坐标 x,z / x y z / r.x.z / c.x.z / 标记名",
-        ),
-        width=300,
-        height=42,
-        text_size=12,
-        color=THEME.text_primary,
-        bgcolor="#101810EE",
-        border_color=THEME.border_standard,
-        focused_border_color=THEME.mc_diamond,
-        content_padding=ft.Padding(left=12, right=8, top=8, bottom=8),
-        on_submit=search_callback,
-    )
-    search_button = ft.IconButton(
-        icon=ft.Icons.SEARCH,
-        icon_color=THEME.text_primary,
-        bgcolor="#101810EE",
-        hover_color=THEME.bg_card_hover,
-        tooltip=t("map.search", "搜索地图"),
-        width=40,
-        height=40,
-        on_click=search_callback,
-    )
-
-    coord_button = _icon_button(
-        ft.Icons.LABEL_OUTLINE,
-        t("map.show_coordinates", "显示坐标"),
+    search_field, search_button = _build_search_controls(t, search_callback)
+    (
+        coord_button,
+        empty_button,
+        marker_button,
+        fullscreen_button,
+    ) = _build_map_toggle_buttons(
+        t,
         on_toggle_coordinates,
-        selected=False,
-    )
-    empty_button = _icon_button(
-        ft.Icons.GRID_ON,
-        t("map.show_empty", "显示空区域"),
         on_toggle_empty,
-    )
-    marker_button = _icon_button(
-        ft.Icons.LOCATION_ON,
-        t("map.hide_markers", "隐藏标记"),
         marker_callback,
-        selected=True,
-    )
-    fullscreen_button = _icon_button(
-        ft.Icons.FULLSCREEN,
-        t("map.fullscreen", "全屏地图"),
         on_toggle_fullscreen,
     )
 

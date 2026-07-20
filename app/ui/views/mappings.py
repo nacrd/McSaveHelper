@@ -188,37 +188,7 @@ class MappingsView(ft.Column):
             )
             return
 
-        rows = []
-        filter_lower = filter_text.lower()
-        for item_id, display_name in sorted(mappings.items()):
-            if filter_lower and filter_lower not in item_id.lower(
-            ) and filter_lower not in display_name.lower():
-                continue
-            rows.append(
-                ft.DataRow(
-                    cells=[
-                        ft.DataCell(
-                            ft.Text(
-                                item_id,
-                                size=12,
-                                color=THEME.text_secondary,
-                                font_family="monospace")),
-                        ft.DataCell(
-                            ft.Text(
-                                display_name,
-                                size=12,
-                                color=THEME.text_primary)),
-                        ft.DataCell(
-                            ft.IconButton(
-                                icon=ft.Icons.DELETE_OUTLINE,
-                                icon_color=THEME.mc_redstone,
-                                icon_size=18,
-                                tooltip="删除",
-                                on_click=lambda e,
-                                iid=item_id: self._delete_item_mapping(iid),
-                            )),
-                    ]))
-
+        rows = self._build_item_mapping_rows(mappings, filter_text)
         if not rows:
             self._item_table_container.content = placeholder(
                 icon=IconSet.SEARCH,
@@ -228,7 +198,60 @@ class MappingsView(ft.Column):
             )
             return
 
-        self._item_table_container.content = ft.Container(
+        self._item_table_container.content = self._build_item_mapping_table(rows)
+
+    def _build_item_mapping_rows(
+        self,
+        mappings: dict[str, str],
+        filter_text: str,
+    ) -> list[ft.DataRow]:
+        """Filter custom mappings into table rows."""
+        rows: list[ft.DataRow] = []
+        filter_lower = filter_text.lower()
+        for item_id, display_name in sorted(mappings.items()):
+            if (
+                filter_lower
+                and filter_lower not in item_id.lower()
+                and filter_lower not in display_name.lower()
+            ):
+                continue
+            rows.append(
+                ft.DataRow(
+                    cells=[
+                        ft.DataCell(
+                            ft.Text(
+                                item_id,
+                                size=12,
+                                color=THEME.text_secondary,
+                                font_family="monospace",
+                            )
+                        ),
+                        ft.DataCell(
+                            ft.Text(
+                                display_name,
+                                size=12,
+                                color=THEME.text_primary,
+                            )
+                        ),
+                        ft.DataCell(
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE_OUTLINE,
+                                icon_color=THEME.mc_redstone,
+                                icon_size=18,
+                                tooltip="删除",
+                                on_click=lambda e, iid=item_id: (
+                                    self._delete_item_mapping(iid)
+                                ),
+                            )
+                        ),
+                    ]
+                )
+            )
+        return rows
+
+    def _build_item_mapping_table(self, rows: list[ft.DataRow]) -> ft.Container:
+        """Wrap mapping rows in a fixed-height DataTable container."""
+        return ft.Container(
             content=ft.DataTable(
                 columns=[
                     ft.DataColumn(
@@ -236,42 +259,38 @@ class MappingsView(ft.Column):
                             "物品 ID",
                             size=12,
                             weight=ft.FontWeight.BOLD,
-                            color=THEME.mc_gold)),
+                            color=THEME.mc_gold,
+                        )
+                    ),
                     ft.DataColumn(
                         label=ft.Text(
                             "显示名称",
                             size=12,
                             weight=ft.FontWeight.BOLD,
-                            color=THEME.mc_gold)),
+                            color=THEME.mc_gold,
+                        )
+                    ),
                     ft.DataColumn(
                         label=ft.Text(
                             "操作",
                             size=12,
                             weight=ft.FontWeight.BOLD,
-                            color=THEME.mc_gold)),
+                            color=THEME.mc_gold,
+                        )
+                    ),
                 ],
                 rows=rows,
                 heading_row_color=THEME.bg_secondary,
                 data_row_color=THEME.bg_card,
                 border=ft.Border(
-                    left=ft.BorderSide(
-                        1,
-                        THEME.border_subtle),
-                    top=ft.BorderSide(
-                        1,
-                        THEME.border_subtle),
-                    right=ft.BorderSide(
-                        1,
-                        THEME.border_subtle),
-                    bottom=ft.BorderSide(
-                        1,
-                        THEME.border_subtle),
+                    left=ft.BorderSide(1, THEME.border_subtle),
+                    top=ft.BorderSide(1, THEME.border_subtle),
+                    right=ft.BorderSide(1, THEME.border_subtle),
+                    bottom=ft.BorderSide(1, THEME.border_subtle),
                 ),
                 column_spacing=20,
             ),
-            height=min(
-                350,
-                40 + len(rows) * 42),
+            height=min(350, 40 + len(rows) * 42),
         )
 
     def _on_item_search(self) -> None:
