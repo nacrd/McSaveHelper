@@ -140,7 +140,27 @@ def _build_save_repair_cards(fields: dict[str, Any]) -> dict[str, Any]:
         ),
         icon=IconSet.BUILD,
     )
-    config_card = card(
+    return {
+        "header": header,
+        "config_card": _build_save_repair_config_card(fields),
+        "world_info_card": _result_card(
+            "世界信息",
+            fields["world_info_text"],
+            visible=False,
+        ),
+        "detect_result_card": _result_card(
+            "检测结果",
+            fields["detect_result_text"],
+            visible=False,
+        ),
+        "result_card": _result_card("修复结果", fields["result_text"]),
+        "log_card": _build_save_repair_log_card(fields),
+        "info_card": _build_save_repair_info_card(),
+    }
+
+
+def _build_save_repair_config_card(fields: dict[str, Any]) -> ft.Control:
+    return card(
         ft.Column(
             [
                 section_title("当前存档"),
@@ -170,18 +190,10 @@ def _build_save_repair_cards(fields: dict[str, Any]) -> dict[str, Any]:
             spacing=12,
         )
     )
-    world_info_card = _result_card(
-        "世界信息",
-        fields["world_info_text"],
-        visible=False,
-    )
-    detect_result_card = _result_card(
-        "检测结果",
-        fields["detect_result_text"],
-        visible=False,
-    )
-    result_card = _result_card("修复结果", fields["result_text"])
-    log_card = card(
+
+
+def _build_save_repair_log_card(fields: dict[str, Any]) -> ft.Control:
+    return card(
         ft.Column(
             [
                 section_title("执行日志"),
@@ -196,7 +208,10 @@ def _build_save_repair_cards(fields: dict[str, Any]) -> dict[str, Any]:
             spacing=12,
         )
     )
-    info_card = card(
+
+
+def _build_save_repair_info_card() -> ft.Control:
+    return card(
         ft.Column(
             [
                 section_title("使用说明"),
@@ -213,15 +228,6 @@ def _build_save_repair_cards(fields: dict[str, Any]) -> dict[str, Any]:
             spacing=12,
         )
     )
-    return {
-        "header": header,
-        "config_card": config_card,
-        "world_info_card": world_info_card,
-        "detect_result_card": detect_result_card,
-        "result_card": result_card,
-        "log_card": log_card,
-        "info_card": info_card,
-    }
 
 
 def _result_card(

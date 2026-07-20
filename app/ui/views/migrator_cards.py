@@ -114,6 +114,14 @@ def build_directory_card(
     on_browse_dest: SimpleCallback,
 ) -> DirectoryCardControls:
     """Build the source/destination directory configuration card."""
+    src_field, dest_field, name_field = _build_directory_fields(
+        translate=translate,
+        src_path=src_path,
+        dest_path=dest_path,
+        world_name=world_name,
+        on_field_change=on_field_change,
+        on_browse_dest=on_browse_dest,
+    )
     section = ft.Column(spacing=0)
     section.controls.append(
         section_title(translate("left_panel.archive_config", "📁 存档配置"))
@@ -128,28 +136,11 @@ def build_directory_card(
             padding=ft.Padding(left=20, right=20, bottom=12),
         )
     )
-
-    src_field = current_save_field(
-        label="当前源存档",
-        hint_text="请通过侧边栏「设置当前存档」设置世界文件夹 (包含 level.dat)",
-    )
-    src_field.value = src_path
-    src_field.on_change = lambda _e: on_field_change()
     section.controls.append(
         ft.Container(
             content=src_field,
             padding=ft.Padding(left=20, right=20, bottom=12),
         )
-    )
-
-    dest_field = text_field(
-        label=translate("left_panel.server_root", "输出目录"),
-        hint_text=translate(
-            "left_panel.placeholder_default_dir",
-            "默认为程序当前目录",
-        ),
-        value=dest_path,
-        on_change=lambda _e: on_field_change(),
     )
     section.controls.append(
         ft.Container(
@@ -168,20 +159,12 @@ def build_directory_card(
             padding=ft.Padding(left=20, right=20, bottom=12),
         )
     )
-
-    name_field = text_field(
-        label=translate("left_panel.world_folder_name", "世界文件夹名"),
-        hint_text=translate("left_panel.placeholder_world_name", "例如: world"),
-        value=world_name or "world",
-        on_change=lambda _e: on_field_change(),
-    )
     section.controls.append(
         ft.Container(
             content=name_field,
             padding=ft.Padding(left=20, right=20, bottom=20),
         )
     )
-
     container = card(ft.Column(spacing=0), padding=0)
     container.content = section
     return DirectoryCardControls(
@@ -190,6 +173,40 @@ def build_directory_card(
         dest_field=dest_field,
         name_field=name_field,
     )
+
+
+def _build_directory_fields(
+    *,
+    translate: Translate,
+    src_path: str,
+    dest_path: str,
+    world_name: str,
+    on_field_change: SimpleCallback,
+    on_browse_dest: SimpleCallback,
+) -> tuple[ft.Control, ft.Control, ft.Control]:
+    del on_browse_dest  # used by caller for the browse button
+    src_field = current_save_field(
+        label="当前源存档",
+        hint_text="请通过侧边栏「设置当前存档」设置世界文件夹 (包含 level.dat)",
+    )
+    src_field.value = src_path
+    src_field.on_change = lambda _e: on_field_change()
+    dest_field = text_field(
+        label=translate("left_panel.server_root", "输出目录"),
+        hint_text=translate(
+            "left_panel.placeholder_default_dir",
+            "默认为程序当前目录",
+        ),
+        value=dest_path,
+        on_change=lambda _e: on_field_change(),
+    )
+    name_field = text_field(
+        label=translate("left_panel.world_folder_name", "世界文件夹名"),
+        hint_text=translate("left_panel.placeholder_world_name", "例如: world"),
+        value=world_name or "world",
+        on_change=lambda _e: on_field_change(),
+    )
+    return src_field, dest_field, name_field
 
 
 def build_version_card(

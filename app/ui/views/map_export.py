@@ -506,43 +506,12 @@ class MapExportView(ft.Column):
             )
             return
 
-        world_path = self._world_path_field.value
-        if not world_path:
-            self.app.warn_dialog(
-                self.app.translate("map_export.notice", "提示"),
-                self.app.translate(
-                    "map_export.select_save_first",
-                    "请先通过侧边栏设置当前存档目录",
-                ),
-            )
+        world_path, output_path = self._require_export_paths()
+        if world_path is None or output_path is None:
             return
 
-        output_path = self._output_path_field.value
-        if not output_path:
-            self.app.warn_dialog(
-                self.app.translate("map_export.notice", "提示"),
-                self.app.translate(
-                    "map_export.select_output_first",
-                    "请先选择输出文件",
-                ),
-            )
-            return
-
-        # 启动导出线程
         map_type = self._map_type_dropdown.value or "topview"
-        try:
-            scale = int(self._scale_dropdown.value or "4")
-            if scale not in [1, 2, 4, 8, 16, 32]:
-                scale = 4
-        except (ValueError, TypeError):
-            scale = 4
-            self.app.warn_dialog(
-                self.app.translate("map_export.notice", "提示"),
-                self.app.translate(
-                    "map_export.invalid_scale",
-                    "缩放比例无效，使用默认值 1:4",
-                ),
-            )
+        scale = self._resolve_export_scale()
         try:
             spec = self._build_export_spec(map_type, scale)
         except (TypeError, ValueError) as exc:
@@ -557,7 +526,7 @@ class MapExportView(ft.Column):
         self._cancel_event = threading.Event()
         self._set_export_controls_enabled(False)
         self._result_text.value = ""
-        self._result_text.update()
+        safe_update(self._result_text)
 
         thread = threading.Thread(
             target=self._export_thread,
@@ -571,6 +540,47 @@ class MapExportView(ft.Column):
             daemon=True,
         )
         thread.start()
+
+    def _require_export_paths(self) -> tuple[str | None, str | None]:
+        """Validate world/output paths and warn when missing."""
+        world_path = self._world_path_field.value
+        if not world_path:
+            self.app.warn_dialog(
+                self.app.translate("map_export.notice", "提示"),
+                self.app.translate(
+                    "map_export.select_save_first",
+                    "请先通过侧边栏设置当前存档目录",
+                ),
+            )
+            return None, None
+        output_path = self._output_path_field.value
+        if not output_path:
+            self.app.warn_dialog(
+                self.app.translate("map_export.notice", "提示"),
+                self.app.translate(
+                    "map_export.select_output_first",
+                    "请先选择输出文件",
+                ),
+            )
+            return None, None
+        return str(world_path), str(output_path)
+
+    def _resolve_export_scale(self) -> int:
+        """Parse the scale dropdown, falling back to 1:4."""
+        try:
+            scale = int(self._scale_dropdown.value or "4")
+            if scale not in [1, 2, 4, 8, 16, 32]:
+                scale = 4
+        except (ValueError, TypeError):
+            scale = 4
+            self.app.warn_dialog(
+                self.app.translate("map_export.notice", "提示"),
+                self.app.translate(
+                    "map_export.invalid_scale",
+                    "缩放比例无效，使用默认值 1:4",
+                ),
+            )
+        return scale
 
     def _set_export_controls_enabled(self, enabled: bool) -> None:
         controls = (
