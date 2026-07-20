@@ -210,12 +210,12 @@ def _count_legacy_blocks(legacy_blocks: List[int]) -> Counter[str]:
     counter: Counter[str] = Counter()
     try:
         valid_count = min(len(legacy_blocks), _SECTION_BLOCK_COUNT)
-    except Exception:
+    except (TypeError, ValueError):
         valid_count = 0
     for index in range(valid_count):
         try:
             block_id = f"legacy:{legacy_blocks[index]}"
-        except Exception:
+        except (TypeError, ValueError, IndexError, KeyError):
             block_id = _AIR_BLOCK_ID
         counter[block_id] += 1
     missing_count = _SECTION_BLOCK_COUNT - valid_count
@@ -299,7 +299,7 @@ def _count_packed_blocks(section: _SectionData) -> Counter[str]:
     palette_len = len(palette)
     try:
         words = [int(word) & ((1 << 64) - 1) for word in data]
-    except Exception:
+    except (TypeError, ValueError):
         words = []
 
     if not words or section.bits <= 0:
@@ -398,7 +398,7 @@ class ChunkBlocks:
             if blocks is not None:
                 try:
                     legacy = [int(tag_value(b)) for b in iter_sequence(blocks)]
-                except Exception:
+                except (TypeError, ValueError):
                     legacy = None
         palette, data = _palette_and_data(section)
         sec = _SectionData(palette, data, self._stretch, legacy)
@@ -445,7 +445,7 @@ class ChunkBlocks:
             index = z * 16 + x
             try:
                 value = int(self.heightmap[index])
-            except Exception:
+            except (TypeError, ValueError, IndexError, KeyError):
                 value = 0
             y = heightmap_value_to_block_y(value, self.version)
             if y is not None:

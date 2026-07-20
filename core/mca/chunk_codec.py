@@ -56,6 +56,8 @@ def decompress_chunk(compression: int, payload: bytes) -> bytes:
         raise UnsupportedCompression(f"Unknown compression type: {compression}")
     except UnsupportedCompression:
         raise
+    except (OSError, ValueError, TypeError, RuntimeError, zlib.error) as exc:
+        raise CorruptChunk(f"Failed to decompress chunk: {exc}") from exc
     except Exception as exc:
         raise CorruptChunk(f"Failed to decompress chunk: {exc}") from exc
 

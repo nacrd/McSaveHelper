@@ -1,4 +1,6 @@
 """UI 公共工具函数"""
+from __future__ import annotations
+
 import asyncio
 import threading
 from concurrent.futures import Future as ConcurrentFuture
@@ -22,21 +24,52 @@ def set_app_closing(closing: bool) -> None:
     _app_closing = closing
 
 
-def safe_update(control: ft.Control) -> None:
-    """安全更新控件，若控件未挂载到页面或正在关闭则静默跳过"""
+def is_control_update_error(exc: BaseException) -> bool:
+    """Whether *exc* is a known Flet unmounted/teardown update failure."""
+    if isinstance(exc, RuntimeError):
+        return True
+    # Flet/desktop hosts occasionally raise AssertionError or AttributeError
+    # when a control is disposed mid-update.
+    if isinstance(exc, (AssertionError, AttributeError)):
+        return True
+    text = str(exc).lower()
+    markers = (
+        "must be added to the page first",
+        "control must be added",
+        "not on page",
+        "has no attribute",
+        "closed",
+        "disposed",
+    )
+    return any(marker in text for marker in markers)
+
+
+def safe_update(control: ft.Control) -> bool:
+    """安全更新控件。
+
+    若应用正在关闭，或控件未挂载/已卸载，静默跳过。
+
+    Returns:
+        bool: 是否成功调用 ``control.update()``。
+    """
     if _app_closing:
-        return
+        return False
     try:
         control.update()
-    except RuntimeError:
-        pass
+        return True
+    except Exception as exc:
+        if is_control_update_error(exc):
+            return False
+        # Unexpected errors still should not crash UI event handlers.
+        return False
 
 
-def run_on_ui(page: ft.Page | None,
-              func: Callable[...,
-                             Any],
-              *args: Any,
-              **kwargs: Any) -> None:
+def run_on_ui(
+    page: ft.Page | None,
+    func: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> None:
     """在 Flet UI 线程上执行回调；页面不可用时安全跳过。
 
     Flet 控件更新必须尽量在 UI 线程中完成。后台线程、Timer 或服务回调
@@ -48,12 +81,20 @@ def run_on_ui(page: ft.Page | None,
     async def _runner() -> None:
         if _app_closing:
             return
-        func(*args, **kwargs)
+        try:
+            func(*args, **kwargs)
+        except Exception as exc:
+            # Callback itself may touch unmounted controls.
+            if not is_control_update_error(exc):
+                # Keep silent for UI best-effort; callers that need logging
+                # should wrap their own logic.
+                return
 
     try:
         page.run_task(_runner)
-    except Exception:
-        pass
+    except Exception as exc:
+        if not is_control_update_error(exc):
+            return
 
 
 def schedule_coroutine(
@@ -73,8 +114,9 @@ def schedule_coroutine(
                 return await coroutine
 
             return page.run_task(_runner)
-        except Exception:
-            pass
+        except Exception as exc:
+            if not is_control_update_error(exc):
+                pass
 
     def _run_in_thread() -> None:
         loop = asyncio.new_event_loop()

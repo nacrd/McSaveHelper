@@ -55,6 +55,10 @@ class ApplicationSettings:
     max_concurrent: int = 2
     preserve_structure: bool = True
     cleanup_patterns: tuple[str, ...] = ("*.log", "cache/", "logs/")
+    # Custom Minecraft data root, e.g. F:/Game/minecraft/.minecraft
+    minecraft_dir: str = ""
+    # 选择存档后是否后台自动导入原版语言（物品/方块名称）
+    auto_import_mc_lang: bool = True
 
 
 @dataclass

@@ -22,27 +22,37 @@ def _process_one_region(
     """处理单个区域文件（线程池 worker）。
 
     Returns:
-        (文件名, 扫描区块数, 替换方块数, 移除实体数, 错误信息|None)
+        tuple: ``(文件名, 扫描区块数, 替换方块数, 移除实体数, 错误|None)``。
     """
     try:
         from core.mca import WritableRegion
+
         region = WritableRegion.open(region_file)
         region_changes = 0
         chunks = 0
         blocks_replaced = 0
         entities_removed = 0
-        for x, z, data in region.iter_chunks():
+        for _x, _z, data in region.iter_chunks():
             chunks += 1
-            br, er = _purge_mod_data_in_chunk(data)
-            blocks_replaced += br
-            entities_removed += er
-            if br > 0 or er > 0:
+            block_count, entity_count = _purge_mod_data_in_chunk(data)
+            blocks_replaced += block_count
+            entities_removed += entity_count
+            if block_count > 0 or entity_count > 0:
                 region_changes += 1
         if region_changes > 0:
             region.save(region_file, backup=True)
-        return region_file.name, chunks, blocks_replaced, entities_removed, None
-    except Exception as e:
-        return region_file.name, 0, 0, 0, str(e)
+        return (
+            region_file.name,
+            chunks,
+            blocks_replaced,
+            entities_removed,
+            None,
+        )
+    except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+        return region_file.name, 0, 0, 0, str(exc)
+    except Exception as exc:
+        # Worker boundary: keep purging other regions.
+        return region_file.name, 0, 0, 0, str(exc)
 
 
 def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> bool:

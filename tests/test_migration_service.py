@@ -6,7 +6,23 @@ import pytest
 
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
-from app.services.migration_service import MigrationService
+from app.services.migration_service import MigrationOptions, MigrationService
+
+
+def test_migration_options_parses_manual_names() -> None:
+    options = MigrationOptions.from_manual_names_str(
+        mode="fast",
+        offline=True,
+        clean=False,
+        pure_clean=True,
+        target_platform="java",
+        target_version="",
+        manual_names_str=" Alice, Bob , ,Carol ",
+    )
+    assert options.mode == "fast"
+    assert options.offline is True
+    assert options.pure_clean is True
+    assert options.manual_names == ("Alice", "Bob", "Carol")
 
 
 def _service(tmp_path: Path) -> tuple[MigrationService, BackupService]:

@@ -3,30 +3,32 @@
 重构后的主服务，使用门面模式协调各个修复器。
 保持向后兼容的 API。
 """
-import time
+from __future__ import annotations
+
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from core.logger import logger
 from app.services.backup_service import (
     BackupCancelledError,
     BackupError,
     BackupService,
 )
 from app.services.world_write_coordinator import WorldOperationBusyError
+from core.logger import logger
 
+from .save_repair.chunk_repairer import ChunkRepairer
+from .save_repair.detector import WorldDetector
+from .save_repair.level_repairer import LevelRepairer
 from .save_repair.models import (
+    DetectReport,
     IssueLevel,
     RepairIssue,
     RepairReport,
-    DetectReport,
 )
-from .save_repair.detector import WorldDetector
-from .save_repair.chunk_repairer import ChunkRepairer
 from .save_repair.player_repairer import PlayerRepairer
-from .save_repair.level_repairer import LevelRepairer
 
 
 _ISSUE_LEVELS = {
@@ -39,18 +41,26 @@ _ISSUE_LEVELS = {
 
 @dataclass(frozen=True)
 class _RepairCallbacks:
-    report: RepairReport
+    """Log/progress helpers shared by repair and detect flows.
+
+    ``report`` is either ``RepairReport`` or ``DetectReport`` — both expose
+    an ``issues: list[RepairIssue]`` bag that ``log`` appends into.
+    """
+
+    report: RepairReport | DetectReport
     progress_callback: Optional[Callable[[float, str], None]]
     log_callback: Optional[Callable[[str, str], None]]
+    module: str = "SaveRepair"
+    category: str = "general"
 
     def log(self, message: str, level: str = "INFO") -> None:
-        getattr(logger, level.lower(), logger.info)(message, module="SaveRepair")
+        getattr(logger, level.lower(), logger.info)(message, module=self.module)
         if self.log_callback:
             self.log_callback(message, level)
         issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
         self.report.issues.append(RepairIssue(
             level=issue_level,
-            category="general",
+            category=self.category,
             message=message,
         ))
 
@@ -60,22 +70,29 @@ class _RepairCallbacks:
 
 
 class SaveRepairService:
-    """存档修复服务（重构版）
+    """存档修复服务门面。
 
-    门面模式，协调各个修复器，保持原有 API 不变。
+    协调检测器与各修复器，保持向后兼容 API。
+    写路径通过 ``BackupService.exclusive_operation`` 与备份/恢复互斥。
     """
 
     def __init__(self, backup_service: Optional[BackupService] = None) -> None:
+        """初始化服务。
+
+        Args:
+            backup_service: 可选共享备份服务；默认新建实例。
+        """
         self._cancel_event = threading.Event()
         self._backup_service = backup_service or BackupService()
 
     def cancel(self) -> None:
-        """请求取消正在进行的修复操作"""
+        """请求取消正在进行的修复/检测操作。"""
         self._cancel_event.set()
         self._backup_service.cancel()
 
     @property
     def is_cancelled(self) -> bool:
+        """是否已请求取消。"""
         return self._cancel_event.is_set()
 
     # ── 存档检测（只读）────────────────────────────────────
@@ -86,58 +103,58 @@ class SaveRepairService:
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> DetectReport:
-        """检测存档状态（只读，不修改任何文件）
+        """检测存档状态（只读，不修改任何文件）。
 
         Args:
-            world_path: 存档路径
-            progress_callback: 进度回调
-            log_callback: 日志回调
+            world_path: 存档路径。
+            progress_callback: 进度回调 ``(0..1, message)``。
+            log_callback: 日志回调 ``(message, level)``。
 
         Returns:
-            DetectReport 检测报告
+            DetectReport: 检测报告（含耗时与问题列表）。
         """
         self._cancel_event.clear()
         report = DetectReport()
         start_time = time.monotonic()
-
-        def log(msg: str, level: str = "INFO") -> None:
-            getattr(logger, level.lower(), logger.info)(msg, module="SaveDetect")
-            if log_callback:
-                log_callback(msg, level)
-            issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
-            report.issues.append(RepairIssue(
-                level=issue_level,
-                category="detect",
-                message=msg,
-            ))
-
-        def progress(value: float, msg: str) -> None:
-            if progress_callback:
-                progress_callback(min(value, 1.0), msg)
+        callbacks = _RepairCallbacks(
+            report,
+            progress_callback,
+            log_callback,
+            module="SaveDetect",
+            category="detect",
+        )
 
         try:
             if not world_path.exists():
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
-            log(f"开始检测存档: {world_path}")
-
-            # 使用 WorldDetector 进行检测
+            callbacks.log(f"开始检测存档: {world_path}")
             detector = WorldDetector(self._cancel_event)
-            detector.detect_world(world_path, report, log, progress)
+            detector.detect_world(
+                world_path,
+                report,
+                callbacks.log,
+                callbacks.progress,
+            )
 
             if self.is_cancelled:
                 report.cancelled = True
-                log("检测操作已取消", "WARNING")
+                callbacks.log("检测操作已取消", "WARNING")
 
-            progress(1.0, "检测完成")
+            callbacks.progress(1.0, "检测完成")
             if report.has_problems:
-                log(f"检测完成，发现 {len(report.issues)} 个问题", "WARNING")
+                callbacks.log(
+                    f"检测完成，发现 {len(report.issues)} 个问题",
+                    "WARNING",
+                )
             else:
-                log("检测完成，存档状态良好", "SUCCESS")
-
-        except Exception as e:
-            log(f"检测失败: {e}", "ERROR")
-            logger.error(str(e), module="SaveDetect")
+                callbacks.log("检测完成，存档状态良好", "SUCCESS")
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            callbacks.log(f"检测失败: {exc}", "ERROR")
+            logger.error(str(exc), module="SaveDetect")
+        except Exception as exc:
+            callbacks.log(f"检测失败: {exc}", "ERROR")
+            logger.error(str(exc), module="SaveDetect")
 
         report.elapsed_seconds = time.monotonic() - start_time
         return report
@@ -227,6 +244,10 @@ class SaveRepairService:
         except BackupCancelledError:
             report.cancelled = True
             callbacks.log("修复操作已取消", "WARNING")
+        except (OSError, ValueError, TypeError, RuntimeError, BackupError) as exc:
+            report.success = False
+            callbacks.log(f"修复失败: {exc}", "ERROR")
+            logger.error(str(exc), module="SaveRepair")
         except Exception as exc:
             report.success = False
             callbacks.log(f"修复失败: {exc}", "ERROR")
@@ -306,6 +327,10 @@ class SaveRepairService:
             )
         except BackupCancelledError:
             raise
+        except BackupError as exc:
+            raise BackupError(f"安全备份失败，已中止修复: {exc}") from exc
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            raise BackupError(f"安全备份失败，已中止修复: {exc}") from exc
         except Exception as exc:
             raise BackupError(f"安全备份失败，已中止修复: {exc}") from exc
         report.backup_path = str(backup_record.backup_path)

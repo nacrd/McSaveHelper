@@ -114,11 +114,46 @@ def build_directory_card(
     on_browse_dest: SimpleCallback,
 ) -> DirectoryCardControls:
     """Build the source/destination directory configuration card."""
+    src_field, dest_field, name_field = _build_directory_fields(
+        translate=translate,
+        src_path=src_path,
+        dest_path=dest_path,
+        world_name=world_name,
+        on_field_change=on_field_change,
+        on_browse_dest=on_browse_dest,
+    )
     section = ft.Column(spacing=0)
     section.controls.append(
         section_title(translate("left_panel.archive_config", "📁 存档配置"))
     )
-    section.controls.append(
+    section.controls.extend(
+        _directory_card_body_controls(
+            translate=translate,
+            src_field=src_field,
+            dest_field=dest_field,
+            name_field=name_field,
+            on_browse_dest=on_browse_dest,
+        )
+    )
+    container = card(ft.Column(spacing=0), padding=0)
+    container.content = section
+    return DirectoryCardControls(
+        container=container,
+        src_field=src_field,
+        dest_field=dest_field,
+        name_field=name_field,
+    )
+
+
+def _directory_card_body_controls(
+    *,
+    translate: Translate,
+    src_field: ft.Control,
+    dest_field: ft.Control,
+    name_field: ft.Control,
+    on_browse_dest: SimpleCallback,
+) -> list[ft.Control]:
+    return [
         ft.Container(
             content=ft.Text(
                 "设置要转换的源存档和输出位置",
@@ -126,32 +161,11 @@ def build_directory_card(
                 color=THEME.text_muted,
             ),
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-
-    src_field = current_save_field(
-        label="当前源存档",
-        hint_text="请通过侧边栏「设置当前存档」设置世界文件夹 (包含 level.dat)",
-    )
-    src_field.value = src_path
-    src_field.on_change = lambda _e: on_field_change()
-    section.controls.append(
+        ),
         ft.Container(
             content=src_field,
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-
-    dest_field = text_field(
-        label=translate("left_panel.server_root", "输出目录"),
-        hint_text=translate(
-            "left_panel.placeholder_default_dir",
-            "默认为程序当前目录",
         ),
-        value=dest_path,
-        on_change=lambda _e: on_field_change(),
-    )
-    section.controls.append(
         ft.Container(
             content=ft.Row(
                 [
@@ -166,30 +180,46 @@ def build_directory_card(
                 spacing=10,
             ),
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
+        ),
+        ft.Container(
+            content=name_field,
+            padding=ft.Padding(left=20, right=20, bottom=20),
+        ),
+    ]
 
+
+def _build_directory_fields(
+    *,
+    translate: Translate,
+    src_path: str,
+    dest_path: str,
+    world_name: str,
+    on_field_change: SimpleCallback,
+    on_browse_dest: SimpleCallback,
+) -> tuple[ft.Control, ft.Control, ft.Control]:
+    del on_browse_dest  # used by caller for the browse button
+    src_field = current_save_field(
+        label="当前源存档",
+        hint_text="请通过侧边栏「设置当前存档」设置世界文件夹 (包含 level.dat)",
+    )
+    src_field.value = src_path
+    src_field.on_change = lambda _e: on_field_change()
+    dest_field = text_field(
+        label=translate("left_panel.server_root", "输出目录"),
+        hint_text=translate(
+            "left_panel.placeholder_default_dir",
+            "默认为程序当前目录",
+        ),
+        value=dest_path,
+        on_change=lambda _e: on_field_change(),
+    )
     name_field = text_field(
         label=translate("left_panel.world_folder_name", "世界文件夹名"),
         hint_text=translate("left_panel.placeholder_world_name", "例如: world"),
         value=world_name or "world",
         on_change=lambda _e: on_field_change(),
     )
-    section.controls.append(
-        ft.Container(
-            content=name_field,
-            padding=ft.Padding(left=20, right=20, bottom=20),
-        )
-    )
-
-    container = card(ft.Column(spacing=0), padding=0)
-    container.content = section
-    return DirectoryCardControls(
-        container=container,
-        src_field=src_field,
-        dest_field=dest_field,
-        name_field=name_field,
-    )
+    return src_field, dest_field, name_field
 
 
 def build_version_card(
@@ -200,6 +230,13 @@ def build_version_card(
     on_version_change: SimpleCallback,
 ) -> VersionCardControls:
     """Build the target platform/version conversion card."""
+    del target_platform, target_version  # reserved for future defaults
+    platform_dd, version_dd = _build_version_dropdowns(
+        on_platform_change,
+        on_version_change,
+    )
+    strip_cb, replace_cb, advanced = _build_version_advanced_options()
+    warn_box = ft.Text("", size=11, color=THEME.warning, visible=False)
     section = ft.Column(spacing=0)
     section.controls.append(section_title("🔄 版本转换"))
     section.controls.append(
@@ -212,7 +249,41 @@ def build_version_card(
             padding=ft.Padding(left=20, right=20, bottom=12),
         )
     )
+    section.controls.append(
+        ft.Container(
+            content=ft.Row(
+                [
+                    ft.Column([label("目标平台"), platform_dd], spacing=4),
+                    ft.Column([label("目标版本"), version_dd], spacing=4),
+                ],
+                spacing=16,
+            ),
+            padding=ft.Padding(left=20, right=20, top=12, bottom=12),
+        )
+    )
+    section.controls.append(advanced)
+    section.controls.append(
+        ft.Container(
+            content=warn_box,
+            padding=ft.Padding(left=20, right=20, bottom=20),
+        )
+    )
+    container = card(ft.Column(spacing=0), padding=0)
+    container.content = section
+    return VersionCardControls(
+        container=container,
+        platform_dd=platform_dd,
+        version_dd=version_dd,
+        strip_cb=strip_cb,
+        replace_cb=replace_cb,
+        warn_box=warn_box,
+    )
 
+
+def _build_version_dropdowns(
+    on_platform_change: ValueCallback,
+    on_version_change: SimpleCallback,
+) -> tuple[ft.Dropdown, ft.Dropdown]:
     platform_dd = ft.Dropdown(
         options=[ft.dropdown.Option(k, v) for k, v in PLATFORM_OPTIONS],
         value="java",
@@ -229,19 +300,11 @@ def build_version_card(
         text_size=13,
         on_select=lambda _e: on_version_change(),
     )
-    section.controls.append(
-        ft.Container(
-            content=ft.Row(
-                [
-                    ft.Column([label("目标平台"), platform_dd], spacing=4),
-                    ft.Column([label("目标版本"), version_dd], spacing=4),
-                ],
-                spacing=16,
-            ),
-            padding=ft.Padding(left=20, right=20, top=12, bottom=12),
-        )
-    )
+    return platform_dd, version_dd
 
+
+def _build_version_advanced_options(
+) -> tuple[ft.Checkbox, ft.Checkbox, ft.Container]:
     strip_cb = ft.Checkbox(
         label="剥离 1.20.5+ 数据组件（降级到旧版时推荐）",
         value=True,
@@ -252,53 +315,33 @@ def build_version_card(
         value=True,
         label_style=ft.TextStyle(color=THEME.text_secondary),
     )
-    section.controls.append(
-        ft.Container(
-            content=ft.Column(
-                [
-                    ft.Text(
-                        "高级选项",
-                        size=12,
-                        weight=ft.FontWeight.W_600,
-                        color=THEME.text_secondary,
-                    ),
-                    ft.Container(height=8),
-                    strip_cb,
-                    replace_cb,
-                    ft.Container(height=8),
-                    ft.Text(
-                        "💡 降级到旧版本时，建议启用这些选项以避免兼容性问题",
-                        size=11,
-                        color=THEME.text_muted,
-                    ),
-                ],
-                spacing=8,
-            ),
-            padding=ft.Padding(left=12, right=12, top=12, bottom=12),
-            bgcolor=THEME.bg_secondary,
-            border_radius=6,
-            margin=ft.Margin(left=12, right=12, top=0, bottom=0),
-        )
+    advanced = ft.Container(
+        content=ft.Column(
+            [
+                ft.Text(
+                    "高级选项",
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=THEME.text_secondary,
+                ),
+                ft.Container(height=8),
+                strip_cb,
+                replace_cb,
+                ft.Container(height=8),
+                ft.Text(
+                    "💡 降级到旧版本时，建议启用这些选项以避免兼容性问题",
+                    size=11,
+                    color=THEME.text_muted,
+                ),
+            ],
+            spacing=8,
+        ),
+        padding=ft.Padding(left=12, right=12, top=12, bottom=12),
+        bgcolor=THEME.bg_secondary,
+        border_radius=6,
+        margin=ft.Margin(left=12, right=12, top=0, bottom=0),
     )
-
-    warn_box = ft.Text("", size=11, color=THEME.warning, visible=False)
-    section.controls.append(
-        ft.Container(
-            content=warn_box,
-            padding=ft.Padding(left=20, right=20, bottom=20),
-        )
-    )
-
-    container = card(ft.Column(spacing=0), padding=0)
-    container.content = section
-    return VersionCardControls(
-        container=container,
-        platform_dd=platform_dd,
-        version_dd=version_dd,
-        strip_cb=strip_cb,
-        replace_cb=replace_cb,
-        warn_box=warn_box,
-    )
+    return strip_cb, replace_cb, advanced
 
 
 def build_player_card(
@@ -309,21 +352,6 @@ def build_player_card(
     on_query_uuid: SimpleCallback,
 ) -> PlayerCardControls:
     """Build the player configuration and UUID query card."""
-    section = ft.Column(spacing=0)
-    section.controls.append(
-        section_title(translate("left_panel.player_config", "👥 玩家配置"))
-    )
-    section.controls.append(
-        ft.Container(
-            content=ft.Text(
-                "配置玩家数据转换和 UUID 映射",
-                size=12,
-                color=THEME.text_muted,
-            ),
-            padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-
     manual_field = text_field(
         label="手动指定玩家 (选填)",
         hint_text=translate(
@@ -333,19 +361,55 @@ def build_player_card(
         value=manual_names,
         on_change=lambda _e: on_field_change(),
     )
+    query_field = text_field(hint_text="输入玩家名查询 UUID", expand=True)
+    query_result = ft.Text("在此显示查询结果", size=11, color=THEME.text_muted)
+    section = ft.Column(spacing=0)
     section.controls.append(
+        section_title(translate("left_panel.player_config", "👥 玩家配置"))
+    )
+    section.controls.extend(
+        _player_intro_controls(manual_field)
+    )
+    section.controls.extend(
+        _player_uuid_query_controls(query_field, query_result, on_query_uuid)
+    )
+    container = card(ft.Column(spacing=0), padding=0)
+    container.content = section
+    return PlayerCardControls(
+        container=container,
+        manual_field=manual_field,
+        query_field=query_field,
+        query_result=query_result,
+    )
+
+
+def _player_intro_controls(manual_field: ft.Control) -> list[ft.Control]:
+    return [
+        ft.Container(
+            content=ft.Text(
+                "配置玩家数据转换和 UUID 映射",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=20, right=20, bottom=12),
+        ),
         ft.Container(
             content=manual_field,
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-    section.controls.append(
+        ),
         ft.Container(
             content=ft.Divider(height=1, color=THEME.border_subtle),
             padding=ft.Padding(left=20, right=20, top=8, bottom=8),
-        )
-    )
-    section.controls.append(
+        ),
+    ]
+
+
+def _player_uuid_query_controls(
+    query_field: ft.Control,
+    query_result: ft.Text,
+    on_query_uuid: SimpleCallback,
+) -> list[ft.Control]:
+    return [
         ft.Container(
             content=ft.Text(
                 "UUID 查询",
@@ -354,9 +418,7 @@ def build_player_card(
                 color=THEME.text_secondary,
             ),
             padding=ft.Padding(left=20, right=20, bottom=8),
-        )
-    )
-    section.controls.append(
+        ),
         ft.Container(
             content=ft.Text(
                 "输入玩家名查询对应的 UUID，用于离线模式玩家数据转换",
@@ -364,11 +426,7 @@ def build_player_card(
                 color=THEME.text_muted,
             ),
             padding=ft.Padding(left=20, right=20, bottom=8),
-        )
-    )
-
-    query_field = text_field(hint_text="输入玩家名查询 UUID", expand=True)
-    section.controls.append(
+        ),
         ft.Container(
             content=ft.Row(
                 [
@@ -383,11 +441,7 @@ def build_player_card(
                 spacing=10,
             ),
             padding=ft.Padding(left=20, right=20, bottom=12),
-        )
-    )
-
-    query_result = ft.Text("在此显示查询结果", size=11, color=THEME.text_muted)
-    section.controls.append(
+        ),
         ft.Container(
             content=ft.Container(
                 content=query_result,
@@ -398,17 +452,8 @@ def build_player_card(
                 height=120,
             ),
             padding=ft.Padding(left=20, right=20, bottom=20),
-        )
-    )
-
-    container = card(ft.Column(spacing=0), padding=0)
-    container.content = section
-    return PlayerCardControls(
-        container=container,
-        manual_field=manual_field,
-        query_field=query_field,
-        query_result=query_result,
-    )
+        ),
+    ]
 
 
 def build_mode_card(
@@ -545,6 +590,45 @@ def build_batch_card(
         )
     )
 
+    (
+        batch_dir_field,
+        batch_scan_btn,
+        batch_result,
+        batch_detail_col,
+    ) = _build_batch_detail_controls(
+        batch_dir_path=batch_dir_path,
+        batch_mode=batch_mode,
+        on_field_change=on_field_change,
+        on_browse_batch=on_browse_batch,
+        on_scan_batch=on_scan_batch,
+    )
+    section.controls.append(
+        ft.Container(
+            content=batch_detail_col,
+            padding=ft.Padding(left=20, right=20, bottom=18),
+        )
+    )
+
+    container = card(ft.Column(spacing=0), padding=0)
+    container.content = section
+    return BatchCardControls(
+        container=container,
+        batch_mode_cb=batch_mode_cb,
+        batch_dir_field=batch_dir_field,
+        batch_scan_btn=batch_scan_btn,
+        batch_result=batch_result,
+        batch_detail_col=batch_detail_col,
+    )
+
+
+def _build_batch_detail_controls(
+    *,
+    batch_dir_path: str,
+    batch_mode: bool,
+    on_field_change: SimpleCallback,
+    on_browse_batch: SimpleCallback,
+    on_scan_batch: SimpleCallback,
+) -> tuple[ft.Control, ft.Control, ft.Text, ft.Column]:
     batch_dir_field = text_field(
         label="批量存档目录",
         hint_text="包含多个世界存档的目录",
@@ -578,20 +662,4 @@ def build_batch_card(
         spacing=8,
     )
     batch_detail_col.visible = batch_mode
-    section.controls.append(
-        ft.Container(
-            content=batch_detail_col,
-            padding=ft.Padding(left=20, right=20, bottom=18),
-        )
-    )
-
-    container = card(ft.Column(spacing=0), padding=0)
-    container.content = section
-    return BatchCardControls(
-        container=container,
-        batch_mode_cb=batch_mode_cb,
-        batch_dir_field=batch_dir_field,
-        batch_scan_btn=batch_scan_btn,
-        batch_result=batch_result,
-        batch_detail_col=batch_detail_col,
-    )
+    return batch_dir_field, batch_scan_btn, batch_result, batch_detail_col

@@ -33,7 +33,12 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.ui.utils import ScheduledTask, run_on_ui, safe_update, schedule_coroutine
+from app.ui.utils import (
+    ScheduledTask,
+    run_on_ui,
+    safe_update,
+    schedule_coroutine,
+)
 from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,
@@ -114,11 +119,17 @@ class McaMapView(ft.Container):
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-
         self._service = map_service
         self._on_selection_changed = on_selection_changed
         self._on_marker_selected = on_marker_selected
+        self._init_viewport_state()
+        self._init_interaction_state()
+        self._init_layers_and_content(width, height)
+        # Progressive topview: service notifies when a tile finishes rendering.
+        self._service.set_tile_ready_callback(self._tile_ready_callback)
 
+    def _init_viewport_state(self) -> None:
+        """Viewport, selection, and static map display flags."""
         self._viewport = McaViewport(
             cell_size=float(self.CELL_SIZE),
             cell_gap=float(self.CELL_GAP),
@@ -135,9 +146,15 @@ class McaMapView(ft.Container):
         self._selection = McaMapSelection()
         self._navigator = McaMapNavigator(self._selection)
         self._current_data: Dict[Tuple[int, int], int] = {}
-        self._cell_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
-        self._chunk_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
-        self._block_bounds: Dict[Tuple[int, int], Tuple[float, float, float, float]] = {}
+        self._cell_bounds: Dict[
+            Tuple[int, int], Tuple[float, float, float, float]
+        ] = {}
+        self._chunk_bounds: Dict[
+            Tuple[int, int], Tuple[float, float, float, float]
+        ] = {}
+        self._block_bounds: Dict[
+            Tuple[int, int], Tuple[float, float, float, float]
+        ] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         self._tile_sources = TileSourceCache()
         self._metadata_pending: set[Tuple[int, int]] = set()
@@ -145,6 +162,8 @@ class McaMapView(ft.Container):
         self._tile_ready_callback = self._on_tile_ready
         self._tile_requests = TopviewTileRequestCoordinator(self._service)
 
+    def _init_interaction_state(self) -> None:
+        """Pointer tracking, camera, and rebuild scheduling."""
         self._last_x = 0.0
         self._last_y = 0.0
         self._needs_initial_draw = True
@@ -174,6 +193,8 @@ class McaMapView(ft.Container):
             min_interval=1.0 / 30.0,
         )
 
+    def _init_layers_and_content(self, width: int, height: int) -> None:
+        """Surface/canvas/gesture stack and host geometry."""
         self.width = width
         self.height = height
         self.bgcolor = self.BACKGROUND_COLOR
@@ -218,9 +239,6 @@ class McaMapView(ft.Container):
             expand=True,
             fit=ft.StackFit.EXPAND,
         )
-
-        # Progressive topview: service notifies when a tile finishes rendering.
-        self._service.set_tile_ready_callback(self._tile_ready_callback)
 
     @property
     def _scale(self) -> float:
@@ -296,6 +314,7 @@ class McaMapView(ft.Container):
                 return
             self._rebuild_scheduler.schedule()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _tile_src(self, coord: Tuple[int, int]) -> Optional[str]:
@@ -346,6 +365,7 @@ class McaMapView(ft.Container):
         try:
             self._rebuild_canvas()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         finally:
             with self._rebuild_state_lock:
@@ -356,8 +376,6 @@ class McaMapView(ft.Container):
                     self._rebuild_enqueued = False
             if schedule_tail and self.page is not None:
                 run_on_ui(cast(ft.Page, self.page), self._rebuild_canvas_safe)
-
-
 
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
@@ -1001,6 +1019,7 @@ class McaMapView(ft.Container):
         except asyncio.CancelledError:
             raise
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         finally:
             for coord in coords:
@@ -1162,6 +1181,7 @@ class McaMapView(ft.Container):
                 try:
                     self._on_selection_changed(None, None, None)
                 except Exception:
+                    # UI best-effort: control may already be unmounted.
                     pass
 
     def did_mount(self) -> None:
@@ -1187,6 +1207,7 @@ class McaMapView(ft.Container):
             ):
                 self._service.set_tile_ready_callback(None)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         super_did_unmount = getattr(super(), "did_unmount", None)
         if super_did_unmount:
@@ -1274,7 +1295,7 @@ class McaMapView(ft.Container):
         try:
             w = int(getattr(e, "width", 0) or 0)
             h = int(getattr(e, "height", 0) or 0)
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             return
         if w < 80 or h < 80:
             return
@@ -1425,6 +1446,7 @@ class McaMapView(ft.Container):
         try:
             self._sync_view_level_from_scale(notify=False)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         self._rebuild_scheduler.schedule()
 
@@ -1432,6 +1454,7 @@ class McaMapView(ft.Container):
         try:
             self._sync_view_level_from_scale(notify=True)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
         self._request_rebuild()
 

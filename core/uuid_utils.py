@@ -24,6 +24,33 @@ def _ensure_requests():
     return requests
 
 
+def normalize_uuid(uuid_str: str) -> str:
+    """Normalize a UUID to 32 lowercase hex chars without hyphens.
+
+    Non-string or empty values return ``""`` so callers can guard once.
+    """
+    if not uuid_str or not isinstance(uuid_str, str):
+        return ""
+    return uuid_str.replace("-", "").lower()
+
+
+def format_uuid_with_hyphens(uuid_str: str) -> str:
+    """Format a UUID as 8-4-4-4-12 lowercase hex.
+
+    Returns the normalized 32-char form when length is not 32, or ``""`` when
+    empty after normalization.
+    """
+    normalized = normalize_uuid(uuid_str)
+    if not normalized:
+        return ""
+    if len(normalized) != 32:
+        return normalized
+    return (
+        f"{normalized[:8]}-{normalized[8:12]}-{normalized[12:16]}-"
+        f"{normalized[16:20]}-{normalized[20:]}"
+    )
+
+
 def get_offline_uuid_str(name: str) -> str:
     """生成离线 UUID 字符串
 
@@ -80,36 +107,47 @@ def get_online_uuid(
     name: str,
     log_callback: Optional[LogCallback] = None
 ) -> Tuple[Optional[str], Optional[str]]:
-    """
-    联网获取正版 UUID 和官方大小写玩家名。
+    """联网获取正版 UUID 和官方大小写玩家名。
 
     Args:
-        name: 玩家名
-        log_callback: 可选的日志回调函数
+        name: 玩家名。
+        log_callback: 可选日志回调。
 
     Returns:
-        (uuid_str, official_name) 或 (None, None)
+        tuple: ``(uuid_str, official_name)``；失败为 ``(None, None)``。
     """
     if log_callback:
         log_callback(f"正在查询正版UUID: {name} ...", "API")
     try:
         url = f"{MinecraftConstants.MOJANG_PROFILE_URL}{name}"
-        r = _ensure_requests().get(url, timeout=5)
-        if r.status_code == 200:
-            data = r.json()
-            raw = data['id']
-            official_name = data.get('name', name)  # Mojang 返回的官方大小写
-            uuid_str = f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-{raw[16:20]}-{raw[20:32]}"
+        response = _ensure_requests().get(url, timeout=5)
+        if response.status_code != 200:
             if log_callback:
                 log_callback(
-                    f"正版UUID获取成功: {uuid_str} (官方名称: {official_name})", "API")
-            return uuid_str, official_name
-        else:
-            if log_callback:
-                log_callback(f"API返回非200状态码: {r.status_code}", "WARN")
-    except Exception as e:
+                    f"API返回非200状态码: {response.status_code}",
+                    "WARN",
+                )
+            return None, None
+        data = response.json()
+        raw = str(data["id"])
+        official_name = str(data.get("name", name))
+        uuid_str = (
+            f"{raw[:8]}-{raw[8:12]}-{raw[12:16]}-"
+            f"{raw[16:20]}-{raw[20:32]}"
+        )
         if log_callback:
-            log_callback(f"API请求失败: {e}", "ERROR")
+            log_callback(
+                f"正版UUID获取成功: {uuid_str} (官方名称: {official_name})",
+                "API",
+            )
+        return uuid_str, official_name
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
+    except Exception as exc:
+        # requests 可能抛出 RequestException 等网络错误。
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
     return None, None
 
 
@@ -117,35 +155,42 @@ def get_name_from_uuid(
     uuid: str,
     log_callback: Optional[LogCallback] = None
 ) -> Optional[str]:
-    """通过 UUID 查询官方玩家名
+    """通过 UUID 查询官方玩家名。
 
     Args:
-        uuid: UUID 字符串
-        log_callback: 可选的日志回调函数
+        uuid: UUID 字符串。
+        log_callback: 可选日志回调。
 
     Returns:
-        玩家名或 None
+        str | None: 官方玩家名；失败为 None。
     """
     if log_callback:
         log_callback(f"正在通过UUID查询玩家名: {uuid} ...", "API")
     try:
-        url = f"https://sessionserver.mojang.com/session/minecraft/profile/{
-            uuid.replace(
-                '-',
-                '')}"
-        r = _ensure_requests().get(url, timeout=5)
+        clean = uuid.replace("-", "")
+        url = (
+            "https://sessionserver.mojang.com/session/minecraft/profile/"
+            f"{clean}"
+        )
+        response = _ensure_requests().get(url, timeout=5)
         time.sleep(0.3)
-        if r.status_code == 200:
-            name = r.json().get("name")
+        if response.status_code != 200:
             if log_callback:
-                log_callback(f"查询到玩家名: {name}", "API")
-            return name
-        else:
-            if log_callback:
-                log_callback(f"API返回非200状态码: {r.status_code}", "WARN")
-    except Exception as e:
+                log_callback(
+                    f"API返回非200状态码: {response.status_code}",
+                    "WARN",
+                )
+            return None
+        name = response.json().get("name")
         if log_callback:
-            log_callback(f"API请求失败: {e}", "ERROR")
+            log_callback(f"查询到玩家名: {name}", "API")
+        return name
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
+    except Exception as exc:
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
     return None
 
 

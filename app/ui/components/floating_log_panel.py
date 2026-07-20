@@ -1,11 +1,13 @@
 """Floating log panel component — 可拖拽移动的悬浮球日志面板"""
 import threading
 from collections import deque
+from typing import Any, Callable
+
 import flet as ft
 
 from app.ui.theme import THEME, mc_border, mc_shadow
 from app.ui.icons import IconSet
-from app.ui.utils import run_on_ui
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.components.floating_position import (
     DragTracker,
     FloatingBounds,
@@ -15,11 +17,12 @@ from app.ui.components.floating_position import (
 
 
 def _is_app_closing() -> bool:
-    """检查应用是否正在关闭"""
+    """检查应用是否正在关闭。"""
     try:
         from app.ui.utils import is_app_closing
         return is_app_closing()
     except Exception:
+        # Import/state lookup best-effort during teardown.
         return False
 
 
@@ -56,7 +59,6 @@ class FloatingLogPanel(ft.Container):
         self._log_flush_scheduled = False
         self._flush_generation = 0
 
-        # 创建日志列表（使用ListView以获得更好的滚动体验）
         self._log_col = ft.ListView(
             spacing=2,
             padding=0,
@@ -64,97 +66,18 @@ class FloatingLogPanel(ft.Container):
             auto_scroll=True,
             on_scroll=self._on_scroll,
         )
-
-        # 状态文本
         self._status_text = ft.Text(
             "",
             size=10,
             color=THEME.text_secondary,
         )
-
-        # 自动滚动开关
-        self._auto_scroll_btn = ft.Container(
-            content=ft.Icon(
-                ft.Icons.VERTICAL_ALIGN_BOTTOM,
-                size=14,
-                color=THEME.terminal_green if self._auto_scroll else THEME.text_secondary,
-            ),
-            on_click=self._toggle_auto_scroll,
-            padding=4,
-            border_radius=4,
-            tooltip="自动滚动" if self._auto_scroll else "已暂停自动滚动",
-        )
-
-        # 清除按钮
-        self._clear_btn = ft.Container(
-            content=ft.Icon(
-                ft.Icons.DELETE_OUTLINE,
-                size=14,
-                color=THEME.text_secondary),
-            on_click=self._clear,
-            padding=4,
-            border_radius=4,
-            tooltip="清除日志",
-        )
-
-        # 关闭按钮 — Material Icon 代替 "×" 文字
-        self._close_btn = ft.Container(
-            content=ft.Icon(IconSet.CLOSE, size=16, color=THEME.text_secondary),
-            on_click=self._collapse,
-            padding=4,
-            border_radius=4,
-            tooltip="收起",
-        )
-
-        # 标题栏（可拖拽）- Modernized
-        header_content = ft.Row(
-            [
-                ft.Icon(
-                    ft.Icons.ARTICLE_OUTLINED,
-                    size=16,
-                    color=THEME.mc_gold,
-                ),
-                ft.Text(
-                    title,
-                    size=12,
-                    color=THEME.mc_gold,
-                    weight=ft.FontWeight.BOLD,
-                ),
-                self._status_text,
-                ft.Container(
-                    expand=True),
-                self._auto_scroll_btn,
-                self._clear_btn,
-                self._close_btn,
-            ],
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        header = ft.Container(
-            content=header_content,
-            height=38,
-            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
-            bgcolor=THEME.mc_coal,
-            border_radius=ft.BorderRadius(top_left=8, top_right=8, bottom_left=0, bottom_right=0),
-        )
-
-        # 用手势检测器包装标题栏
-        self._header_detector = ft.GestureDetector(
-            content=header,
-            on_pan_start=self._on_pan_start,
-            on_pan_update=self._on_pan_update,
-            on_pan_end=self._on_pan_end,
-        )
-
-        # 日志容器（带内边距）- Modernized
+        self._build_header_controls(title)
         log_container = ft.Container(
             content=self._log_col,
             padding=ft.Padding(left=12, right=12, top=8, bottom=12),
             bgcolor=THEME.bg_primary,
             expand=True,
         )
-
-        # 整体面板 - Modernized with border_radius
         super().__init__(
             content=ft.Column(
                 [
@@ -176,6 +99,94 @@ class FloatingLogPanel(ft.Container):
         )
         self._load_position()
 
+    def _build_header_controls(self, title: str) -> None:
+        """Build title-bar buttons and drag detector."""
+        self._build_header_buttons()
+        header = ft.Container(
+            content=self._build_header_row(title),
+            height=38,
+            padding=ft.Padding(left=12, right=8, top=4, bottom=4),
+            bgcolor=THEME.mc_coal,
+            border_radius=ft.BorderRadius(
+                top_left=8,
+                top_right=8,
+                bottom_left=0,
+                bottom_right=0,
+            ),
+        )
+        self._header_detector = ft.GestureDetector(
+            content=header,
+            on_pan_start=self._on_pan_start,
+            on_pan_update=self._on_pan_update,
+            on_pan_end=self._on_pan_end,
+        )
+
+    def _build_header_buttons(self) -> None:
+        self._auto_scroll_btn = self._header_icon_button(
+            icon=ft.Icons.VERTICAL_ALIGN_BOTTOM,
+            color=(
+                THEME.terminal_green
+                if self._auto_scroll
+                else THEME.text_secondary
+            ),
+            on_click=self._toggle_auto_scroll,
+            tooltip="自动滚动" if self._auto_scroll else "已暂停自动滚动",
+        )
+        self._clear_btn = self._header_icon_button(
+            icon=ft.Icons.DELETE_OUTLINE,
+            color=THEME.text_secondary,
+            on_click=self._clear,
+            tooltip="清除日志",
+        )
+        self._close_btn = self._header_icon_button(
+            icon=IconSet.CLOSE,
+            color=THEME.text_secondary,
+            on_click=self._collapse,
+            tooltip="收起",
+            size=16,
+        )
+
+    def _build_header_row(self, title: str) -> ft.Row:
+        return ft.Row(
+            [
+                ft.Icon(
+                    ft.Icons.ARTICLE_OUTLINED,
+                    size=16,
+                    color=THEME.mc_gold,
+                ),
+                ft.Text(
+                    title,
+                    size=12,
+                    color=THEME.mc_gold,
+                    weight=ft.FontWeight.BOLD,
+                ),
+                self._status_text,
+                ft.Container(expand=True),
+                self._auto_scroll_btn,
+                self._clear_btn,
+                self._close_btn,
+            ],
+            spacing=6,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    @staticmethod
+    def _header_icon_button(
+        *,
+        icon: Any,
+        color: str,
+        on_click: Callable[..., Any],
+        tooltip: str,
+        size: int = 14,
+    ) -> ft.Container:
+        return ft.Container(
+            content=ft.Icon(icon, size=size, color=color),
+            on_click=on_click,
+            padding=4,
+            border_radius=4,
+            tooltip=tooltip,
+        )
+
     def _load_position(self) -> None:
         """从共享偏好加载保存的位置。"""
         self._position_store.load(self._apply_position)
@@ -194,6 +205,7 @@ class FloatingLogPanel(ft.Container):
         try:
             self._page.run_task(self._log_col.scroll_to, offset=-1)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
@@ -201,6 +213,7 @@ class FloatingLogPanel(ft.Container):
         try:
             self._drag.start(e.local_position.x, e.local_position.y)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
@@ -225,6 +238,7 @@ class FloatingLogPanel(ft.Container):
                 self._apply_position(left, top)
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_end(self, e: ft.DragEndEvent) -> None:
@@ -233,6 +247,7 @@ class FloatingLogPanel(ft.Container):
             self._drag.end()
             self._save_position()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_scroll(self, e: ft.OnScrollEvent) -> None:
@@ -247,9 +262,10 @@ class FloatingLogPanel(ft.Container):
                     color=THEME.text_muted,
                 )
                 self._auto_scroll_btn.tooltip = "已暂停自动滚动"
-                self._auto_scroll_btn.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._auto_scroll_btn)
 
     def _toggle_auto_scroll(self) -> None:
         """切换自动滚动"""
@@ -258,16 +274,22 @@ class FloatingLogPanel(ft.Container):
             self._auto_scroll_btn.content = ft.Icon(
                 ft.Icons.VERTICAL_ALIGN_BOTTOM,
                 size=14,
-                color=THEME.terminal_green if self._auto_scroll else THEME.text_muted,
+                color=(
+                    THEME.terminal_green
+                    if self._auto_scroll
+                    else THEME.text_muted
+                ),
             )
-            self._auto_scroll_btn.tooltip = "自动滚动" if self._auto_scroll else "已暂停自动滚动"
-            self._auto_scroll_btn.update()
-
+            self._auto_scroll_btn.tooltip = (
+                "自动滚动" if self._auto_scroll else "已暂停自动滚动"
+            )
             if self._auto_scroll and self._log_col.controls:
                 self._scroll_to_end()
-                self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._auto_scroll_btn)
+        safe_update(self)
 
     def _expand(self) -> None:
         """展开面板"""
@@ -275,9 +297,10 @@ class FloatingLogPanel(ft.Container):
             self.visible = True
             self._expanded = True
             self._flush_pending_ui(refresh=False)
-            self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def _collapse(self) -> None:
         """收起面板"""
@@ -298,6 +321,7 @@ class FloatingLogPanel(ft.Container):
             self._save_position()
             self._page.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _clear(self) -> None:
@@ -307,9 +331,10 @@ class FloatingLogPanel(ft.Container):
                 self._pending_logs.clear()
             self._log_col.controls.clear()
             self._status_text.value = ""
-            self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def log(self, message: str, level: str = "info") -> None:
         """添加日志消息（批量刷新，避免每行触发 UI 更新）"""
@@ -418,9 +443,10 @@ class FloatingLogPanel(ft.Container):
             if visible:
                 self._expanded = True
                 self._flush_pending_ui(refresh=False)
-            self._page.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._page)
 
     @property
     def is_visible(self) -> bool:
@@ -495,6 +521,7 @@ class FloatingLogButton(ft.Container):
         try:
             self._drag.start(e.local_position.x, e.local_position.y)
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_update(self, e: ft.DragUpdateEvent) -> None:
@@ -519,6 +546,7 @@ class FloatingLogButton(ft.Container):
                 self._apply_position(right, bottom)
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _on_pan_end(self, e: ft.DragEndEvent) -> None:
@@ -527,6 +555,7 @@ class FloatingLogButton(ft.Container):
             self._drag.end()
             self._save_position()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _click(self) -> None:
@@ -546,15 +575,17 @@ class FloatingLogButton(ft.Container):
             if self._on_click_handler:
                 self._on_click_handler()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def set_visible(self, visible: bool) -> None:
         """设置可见性"""
         try:
             self.visible = visible
-            self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def update_icon(self, expanded: bool) -> None:
         """更新图标"""
@@ -565,6 +596,7 @@ class FloatingLogButton(ft.Container):
             else:
                 self._button.content = ft.Icon(
                     IconSet.DOCUMENT, size=22, color=THEME.mc_gold)
-            self._button.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._button)

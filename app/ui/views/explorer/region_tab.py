@@ -15,7 +15,6 @@ from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.ui.views.explorer.region_tab_chrome import (
     REGION_DISPLAY_HELP,
-    REGION_LEGEND,
     build_map_fallback,
     build_region_legend_content,
     build_region_tab_chrome,
@@ -30,6 +29,29 @@ class RegionTabMixin(ExplorerMixinHost):
     """Build and handle the Explorer region / map tab."""
 
     def _build_region_tab(self) -> None:
+        map_view = self._create_region_map_view()
+        chrome = self._create_region_tab_chrome(map_view)
+        self._bind_region_tab_chrome(chrome)
+        self._map_fullscreen_controller = (
+            MapFullscreenController(
+                page=self.app.page,
+                map_view=self._map_view,
+                inline_host=self._map_host,
+                side_panel=self._region_side_panel,
+                set_toggle_state=self._set_map_fullscreen_state,
+                refresh=self._refresh_map,
+                zoom_in=self._map_zoom_in,
+                zoom_out=self._map_zoom_out,
+                reset=self._map_reset_view,
+                translate=self.app.translate,
+            )
+            if self._map_view is not None
+            else None
+        )
+        self._selected_marker_id: Optional[str] = None
+        self._refresh_map_markers()
+
+    def _create_region_map_view(self) -> ft.Control:
         try:
             self._map_view = McaMapView(
                 map_service=self._map_service,
@@ -38,12 +60,14 @@ class RegionTabMixin(ExplorerMixinHost):
                 width=900,
                 height=560,
             )
-            map_view = self._map_view
+            return self._map_view
         except Exception:
+            # Map canvas may fail to construct without optional deps; fall back.
             self._map_view = None
-            map_view = build_map_fallback(self.app.translate)
+            return build_map_fallback(self.app.translate)
 
-        chrome = build_region_tab_chrome(
+    def _create_region_tab_chrome(self, map_view: ft.Control) -> Any:
+        return build_region_tab_chrome(
             map_content=map_view,
             on_dimension_changed=self._on_dimension_changed,
             on_display_mode_changed=self._change_region_display_mode,
@@ -62,6 +86,8 @@ class RegionTabMixin(ExplorerMixinHost):
             on_delete_marker=self._delete_selected_marker,
             translate=self.app.translate,
         )
+
+    def _bind_region_tab_chrome(self, chrome: Any) -> None:
         self._region_display_mode = "topview"
         self._dimension_dropdown = chrome.dimension_dropdown
         self._region_display_mode_dropdown = chrome.display_mode_dropdown
@@ -86,24 +112,6 @@ class RegionTabMixin(ExplorerMixinHost):
         self._region_layout = chrome.layout
         self._tab_region.content = self._region_layout
         self._tab_region.expand = True
-        self._map_fullscreen_controller = (
-            MapFullscreenController(
-                page=self.app.page,
-                map_view=self._map_view,
-                inline_host=self._map_host,
-                side_panel=self._region_side_panel,
-                set_toggle_state=self._set_map_fullscreen_state,
-                refresh=self._refresh_map,
-                zoom_in=self._map_zoom_in,
-                zoom_out=self._map_zoom_out,
-                reset=self._map_reset_view,
-                translate=self.app.translate,
-            )
-            if self._map_view is not None
-            else None
-        )
-        self._selected_marker_id: Optional[str] = None
-        self._refresh_map_markers()
 
     def _toggle_map_fullscreen(self) -> None:
         if self._map_fullscreen_controller is not None:
@@ -125,21 +133,6 @@ class RegionTabMixin(ExplorerMixinHost):
         if controller is not None:
             controller.dispose()
 
-    def _enter_map_fullscreen(self) -> None:
-        if self._map_fullscreen_controller is not None:
-            self._map_fullscreen_controller.enter()
-
-    def _exit_map_fullscreen(self) -> None:
-        if self._map_fullscreen_controller is not None:
-            self._map_fullscreen_controller.exit()
-
-    def _create_region_legend_content(self) -> ft.Column:
-        return build_region_legend_content(self.app.translate)
-
-    def _get_region_display_legend(
-            self) -> tuple[str, list[tuple[str, str, str]]]:
-        return self.app.translate("map.legend", "地图图例"), list(REGION_LEGEND)
-
     def _change_region_display_mode(self) -> None:
         mode = self._region_display_mode_dropdown.value or "topview"
         self._region_display_mode = mode
@@ -149,7 +142,9 @@ class RegionTabMixin(ExplorerMixinHost):
         if self._map_view is not None and hasattr(self._map_view, "set_display_mode"):
             self._map_view.set_display_mode(mode)
         self._region_help_text.value = self._get_region_display_help(mode)
-        self._region_legend_container.content = self._create_region_legend_content()
+        self._region_legend_container.content = build_region_legend_content(
+            self.app.translate
+        )
         safe_update(self._region_help_text)
         safe_update(self._region_legend_container)
         if self._selected_region_coord is not None:
@@ -341,6 +336,7 @@ class RegionTabMixin(ExplorerMixinHost):
             try:
                 markers = controller.markers()
             except Exception:
+                # Marker store failures should not break the map UI.
                 markers = []
         marker_ids = {marker.id for marker in markers}
         if self._selected_marker_id not in marker_ids:
@@ -363,49 +359,10 @@ class RegionTabMixin(ExplorerMixinHost):
             marker_values = controller.markers() if controller is not None else []
         else:
             marker_values = markers
-        rows: list[ft.Control] = []
-        for marker in marker_values:
-            selected = marker.id == getattr(self, "_selected_marker_id", None)
-            rows.append(
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(
-                                ft.Icons.LOCATION_ON,
-                                size=15,
-                                color=marker.color,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        marker.name,
-                                        size=11,
-                                        weight=(
-                                            ft.FontWeight.BOLD if selected else None
-                                        ),
-                                        color=THEME.text_primary,
-                                        no_wrap=True,
-                                        overflow=ft.TextOverflow.ELLIPSIS,
-                                    ),
-                                    ft.Text(
-                                        f"X {marker.x} · Z {marker.z}",
-                                        size=9,
-                                        color=THEME.text_muted,
-                                    ),
-                                ],
-                                spacing=0,
-                                expand=True,
-                            ),
-                        ],
-                        spacing=5,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    padding=ft.Padding(left=6, right=6, top=4, bottom=4),
-                    bgcolor=THEME.bg_card_hover if selected else None,
-                    border_radius=4,
-                    on_click=lambda _event, item=marker: self._focus_map_marker(item),
-                )
-            )
+        rows = [
+            self._build_marker_list_row(marker)
+            for marker in marker_values
+        ]
         if not rows:
             rows.append(
                 ft.Text(
@@ -423,6 +380,47 @@ class RegionTabMixin(ExplorerMixinHost):
         safe_update(self._map_marker_list)
         safe_update(self._map_marker_count_text)
 
+    def _build_marker_list_row(self, marker: MapMarker) -> ft.Container:
+        selected = marker.id == getattr(self, "_selected_marker_id", None)
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(
+                        ft.Icons.LOCATION_ON,
+                        size=15,
+                        color=marker.color,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                marker.name,
+                                size=11,
+                                weight=(
+                                    ft.FontWeight.BOLD if selected else None
+                                ),
+                                color=THEME.text_primary,
+                                no_wrap=True,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                f"X {marker.x} · Z {marker.z}",
+                                size=9,
+                                color=THEME.text_muted,
+                            ),
+                        ],
+                        spacing=0,
+                        expand=True,
+                    ),
+                ],
+                spacing=5,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding(left=6, right=6, top=4, bottom=4),
+            bgcolor=THEME.bg_card_hover if selected else None,
+            border_radius=4,
+            on_click=lambda _event, item=marker: self._focus_map_marker(item),
+        )
+
     def _focus_map_marker(self, marker: MapMarker) -> None:
         self._on_map_marker_selected(marker)
         if self._map_view is not None:
@@ -436,66 +434,69 @@ class RegionTabMixin(ExplorerMixinHost):
                 self.app.translate("map.select_save_first", "请先设置当前存档。"),
             )
             return
-        block_x, block_z = self._default_marker_coordinates()
-        name_field = ft.TextField(
-            label=self.app.translate("map.marker_name", "名称"),
-            autofocus=True,
-            width=300,
-        )
-        x_field = ft.TextField(label="X", value=str(block_x), width=100)
-        y_field = ft.TextField(label="Y", value="64", width=100)
-        z_field = ft.TextField(label="Z", value=str(block_z), width=100)
-        color_field = ft.Dropdown(
-            label=self.app.translate("map.marker_color", "颜色"),
-            value="#FFD54F",
-            width=180,
-            options=[
-                ft.dropdown.Option(
-                    "#FFD54F", self.app.translate("map.color_gold", "金色")
-                ),
-                ft.dropdown.Option(
-                    "#55FF55", self.app.translate("map.color_green", "绿色")
-                ),
-                ft.dropdown.Option(
-                    "#55AAFF", self.app.translate("map.color_blue", "蓝色")
-                ),
-                ft.dropdown.Option(
-                    "#FF6B6B", self.app.translate("map.color_red", "红色")
-                ),
-                ft.dropdown.Option(
-                    "#FFFFFF", self.app.translate("map.color_white", "白色")
-                ),
-            ],
-        )
+        fields = self._build_add_marker_fields()
         error_text = ft.Text(size=11, color=THEME.error)
+        dialog_holder: dict[str, Any] = {}
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text(self.app.translate("map.add_marker_title", "添加地图标记")),
-            content=ft.Column(
-                [
-                    name_field,
-                    ft.Row([x_field, y_field, z_field], spacing=6),
-                    color_field,
-                    error_text,
-                ],
-                spacing=8,
-                tight=True,
+            title=ft.Text(
+                self.app.translate("map.add_marker_title", "添加地图标记")
             ),
-            actions=[],
+            content=self._build_add_marker_dialog_content(fields, error_text),
+            actions=self._build_add_marker_dialog_actions(
+                controller,
+                fields,
+                error_text,
+                dialog_holder,
+            ),
+        )
+        dialog_holder["dialog"] = dialog
+        self.app.page.show_dialog(dialog)
+
+    def _build_add_marker_dialog_content(
+        self,
+        fields: dict[str, Any],
+        error_text: ft.Text,
+    ) -> ft.Column:
+        return ft.Column(
+            [
+                fields["name_field"],
+                ft.Row(
+                    [
+                        fields["x_field"],
+                        fields["y_field"],
+                        fields["z_field"],
+                    ],
+                    spacing=6,
+                ),
+                fields["color_field"],
+                error_text,
+            ],
+            spacing=8,
+            tight=True,
         )
 
+    def _build_add_marker_dialog_actions(
+        self,
+        controller: Any,
+        fields: dict[str, Any],
+        error_text: ft.Text,
+        dialog_holder: dict[str, Any],
+    ) -> list[ft.Control]:
         def close(_click: Any = None) -> None:
-            dialog.open = False
+            dialog = dialog_holder.get("dialog")
+            if dialog is not None:
+                dialog.open = False
             self.app.page.update()
 
         def save(_click: Any = None) -> None:
             try:
                 marker = controller.upsert_marker(
-                    name_field.value or "",
-                    int((x_field.value or "0").strip()),
-                    int((z_field.value or "0").strip()),
-                    y=int((y_field.value or "64").strip()),
-                    color=color_field.value or "#FFD54F",
+                    fields["name_field"].value or "",
+                    int((fields["x_field"].value or "0").strip()),
+                    int((fields["z_field"].value or "0").strip()),
+                    y=int((fields["y_field"].value or "64").strip()),
+                    color=fields["color_field"].value or "#FFD54F",
                 )
                 close()
                 self._refresh_map_markers()
@@ -504,15 +505,57 @@ class RegionTabMixin(ExplorerMixinHost):
                 error_text.value = str(exc)
                 safe_update(error_text)
 
-        dialog.actions = [
+        return [
             ft.TextButton(
                 self.app.translate("map.add", "添加"),
                 icon=ft.Icons.ADD_LOCATION_ALT,
                 on_click=save,
             ),
-            ft.TextButton(self.app.translate("map.cancel", "取消"), on_click=close),
+            ft.TextButton(
+                self.app.translate("map.cancel", "取消"),
+                on_click=close,
+            ),
         ]
-        self.app.page.show_dialog(dialog)
+
+    def _build_add_marker_fields(self) -> dict[str, Any]:
+        block_x, block_z = self._default_marker_coordinates()
+        return {
+            "name_field": ft.TextField(
+                label=self.app.translate("map.marker_name", "名称"),
+                autofocus=True,
+                width=300,
+            ),
+            "x_field": ft.TextField(label="X", value=str(block_x), width=100),
+            "y_field": ft.TextField(label="Y", value="64", width=100),
+            "z_field": ft.TextField(label="Z", value=str(block_z), width=100),
+            "color_field": ft.Dropdown(
+                label=self.app.translate("map.marker_color", "颜色"),
+                value="#FFD54F",
+                width=180,
+                options=[
+                    ft.dropdown.Option(
+                        "#FFD54F",
+                        self.app.translate("map.color_gold", "金色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#55FF55",
+                        self.app.translate("map.color_green", "绿色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#55AAFF",
+                        self.app.translate("map.color_blue", "蓝色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#FF6B6B",
+                        self.app.translate("map.color_red", "红色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#FFFFFF",
+                        self.app.translate("map.color_white", "白色"),
+                    ),
+                ],
+            ),
+        }
 
     def _default_marker_coordinates(self) -> Tuple[int, int]:
         if self._map_view is not None:

@@ -97,7 +97,21 @@ class BackupService:
         label: str = "",
         progress_callback: Optional[ProgressCallback] = None,
     ) -> BackupRecord:
-        """Create a complete snapshot and publish it atomically."""
+        """创建完整世界快照并以目录替换原子发布。
+
+        Args:
+            world_path: 有效世界路径（含 ``level.dat``）。
+            label: 可选用户标签。
+            progress_callback: 可选进度回调 ``(0..1, message)``。
+
+        Returns:
+            BackupRecord: 已发布备份的元数据。
+
+        Raises:
+            BackupError: 路径无效、标签非法或快照校验失败。
+            BackupCancelledError: 复制过程中被取消。
+            OSError: 复制或发布时的 I/O 错误。
+        """
         world = self._validate_world(world_path)
         clean_label = self._validate_label(label)
         with self.exclusive_operation(world):
@@ -107,45 +121,62 @@ class BackupService:
             final_dir = repository / backup_id
             temp_dir = Path(tempfile.mkdtemp(prefix=".creating-", dir=repository))
             try:
-                files = list(self._iter_source_files(world))
-                total_size = sum(size for _, _, size, _ in files)
-                snapshot = temp_dir / _SNAPSHOT_DIR
-                snapshot.mkdir()
-                copied_size = self._copy_files(
-                    files,
-                    snapshot,
-                    total_size,
-                    progress_callback,
-                    0.0,
-                    0.92,
-                )
-                self._check_cancelled()
-                manifest_sha256 = self._write_manifest(
-                    temp_dir,
-                    snapshot,
-                    files,
-                )
-                record = BackupRecord(
+                return self._build_and_publish_backup(
+                    world=world,
                     backup_id=backup_id,
                     label=clean_label,
-                    world_name=world.name,
-                    source_path=str(world),
-                    created_at=datetime.now(timezone.utc),
-                    size_bytes=copied_size,
-                    file_count=len(files),
-                    backup_path=final_dir,
-                    manifest_sha256=manifest_sha256,
+                    temp_dir=temp_dir,
+                    final_dir=final_dir,
+                    progress_callback=progress_callback,
                 )
-                self._write_metadata(temp_dir, record)
-                self._progress(progress_callback, 0.96, "正在验证备份...")
-                self._validate_snapshot(snapshot)
-                os.replace(temp_dir, final_dir)
-                self._progress(progress_callback, 1.0, "备份创建完成")
-                logger.info(f"已创建存档备份: {final_dir}", module="Backup")
-                return record
             except Exception:
+                # 失败时清理暂存目录；取消/校验/I/O 均需保留原始异常。
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 raise
+
+    def _build_and_publish_backup(
+        self,
+        *,
+        world: Path,
+        backup_id: str,
+        label: str,
+        temp_dir: Path,
+        final_dir: Path,
+        progress_callback: Optional[ProgressCallback],
+    ) -> BackupRecord:
+        """在 temp_dir 中组装快照、写清单并原子发布到 final_dir。"""
+        files = list(self._iter_source_files(world))
+        total_size = sum(size for _, _, size, _ in files)
+        snapshot = temp_dir / _SNAPSHOT_DIR
+        snapshot.mkdir()
+        copied_size = self._copy_files(
+            files,
+            snapshot,
+            total_size,
+            progress_callback,
+            0.0,
+            0.92,
+        )
+        self._check_cancelled()
+        manifest_sha256 = self._write_manifest(temp_dir, snapshot, files)
+        record = BackupRecord(
+            backup_id=backup_id,
+            label=label,
+            world_name=world.name,
+            source_path=str(world),
+            created_at=datetime.now(timezone.utc),
+            size_bytes=copied_size,
+            file_count=len(files),
+            backup_path=final_dir,
+            manifest_sha256=manifest_sha256,
+        )
+        self._write_metadata(temp_dir, record)
+        self._progress(progress_callback, 0.96, "正在验证备份...")
+        self._validate_snapshot(snapshot)
+        os.replace(temp_dir, final_dir)
+        self._progress(progress_callback, 1.0, "备份创建完成")
+        logger.info(f"已创建存档备份: {final_dir}", module="Backup")
+        return record
 
     def list_backups(self, world_path: Path | str) -> list[BackupRecord]:
         """List managed backups, including damaged entries with an error state."""
@@ -189,78 +220,31 @@ class BackupService:
         backup_id: str,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> BackupRecord:
-        """Restore a snapshot with a rollback directory exchange."""
+        """从托管快照恢复世界（目录交换 + 失败回滚）。
+
+        Args:
+            world_path: 当前世界路径。
+            backup_id: 备份 ID。
+            progress_callback: 可选进度回调 ``(0..1, message)``。
+
+        Returns:
+            BackupRecord: 已用于恢复的备份元数据。
+
+        Raises:
+            BackupError: 备份无效或完整性校验失败。
+            BackupCancelledError: 用户在安全检查点取消。
+            OSError: 复制或目录交换失败（原世界应保持可用）。
+        """
         world = self._validate_world(world_path)
         with self.exclusive_operation(world):
             self._cancel_event.clear()
-            record = self._get_record(world, backup_id)
-            if not record.valid:
-                raise BackupError(f"备份不可用: {record.validation_error}")
-
-            verification = self._verify_record(
+            record = self._require_valid_record(world, backup_id)
+            self._ensure_restore_integrity(record, progress_callback)
+            return self._restore_record_transaction(
+                world,
                 record,
-                lambda value, message: self._progress(
-                    progress_callback,
-                    value * 0.25,
-                    message,
-                ),
+                progress_callback,
             )
-            if verification.complete and not verification.valid:
-                details = "; ".join(verification.issues[:3])
-                raise BackupError(f"备份完整性校验失败: {details}")
-
-            snapshot = record.backup_path / _SNAPSHOT_DIR
-            files = list(self._iter_source_files(snapshot))
-            total_size = sum(size for _, _, size, _ in files)
-            staging_root = Path(tempfile.mkdtemp(
-                prefix=f".{world.name}.restore-",
-                dir=world.parent,
-            ))
-            prepared = staging_root / world.name
-            prepared.mkdir()
-            rollback = world.parent / f".{world.name}.rollback-{secrets.token_hex(4)}"
-            published = False
-            try:
-                self._copy_files(
-                    files,
-                    prepared,
-                    total_size,
-                    progress_callback,
-                    0.25,
-                    0.63,
-                )
-                self._check_cancelled()
-                self._progress(progress_callback, 0.92, "正在验证恢复数据...")
-                self._validate_snapshot(prepared)
-
-                os.replace(world, rollback)
-                try:
-                    os.replace(prepared, world)
-                    published = True
-                except Exception:
-                    os.replace(rollback, world)
-                    raise
-
-                self._progress(progress_callback, 0.98, "正在清理旧数据...")
-                try:
-                    shutil.rmtree(rollback)
-                except OSError as exc:
-                    logger.warning(
-                        f"备份恢复完成，但旧目录清理失败: {rollback}: {exc}",
-                        module="Backup",
-                    )
-                self._progress(progress_callback, 1.0, "备份恢复完成")
-                logger.info(
-                    f"已恢复存档备份 {backup_id}: {world}",
-                    module="Backup",
-                )
-                return record
-            except Exception:
-                if not published and rollback.exists() and not world.exists():
-                    os.replace(rollback, world)
-                raise
-            finally:
-                shutil.rmtree(staging_root, ignore_errors=True)
 
     def verify_backup(
         self,
@@ -268,11 +252,135 @@ class BackupService:
         backup_id: str,
         progress_callback: Optional[ProgressCallback] = None,
     ) -> BackupVerification:
-        """Verify one managed snapshot without modifying world data."""
+        """校验托管快照完整性，不修改世界数据。
+
+        Args:
+            world_path: 世界路径。
+            backup_id: 备份 ID。
+            progress_callback: 可选进度回调。
+
+        Returns:
+            BackupVerification: 校验结果。
+        """
         world = self._validate_world(world_path)
         with self.exclusive_operation(world):
             record = self._get_record(world, backup_id)
             return self._verify_record(record, progress_callback)
+
+    def _require_valid_record(
+        self,
+        world: Path,
+        backup_id: str,
+    ) -> BackupRecord:
+        """加载备份记录并要求 ``valid``。"""
+        record = self._get_record(world, backup_id)
+        if not record.valid:
+            raise BackupError(f"备份不可用: {record.validation_error}")
+        return record
+
+    def _ensure_restore_integrity(
+        self,
+        record: BackupRecord,
+        progress_callback: Optional[ProgressCallback],
+    ) -> None:
+        """恢复前执行完整性校验；失败则拒绝恢复。"""
+        verification = self._verify_record(
+            record,
+            lambda value, message: self._progress(
+                progress_callback,
+                value * 0.25,
+                message,
+            ),
+        )
+        if verification.complete and not verification.valid:
+            details = "; ".join(verification.issues[:3])
+            raise BackupError(f"备份完整性校验失败: {details}")
+
+    def _restore_record_transaction(
+        self,
+        world: Path,
+        record: BackupRecord,
+        progress_callback: Optional[ProgressCallback],
+    ) -> BackupRecord:
+        """在暂存目录准备快照并以目录交换发布。"""
+        snapshot = record.backup_path / _SNAPSHOT_DIR
+        files = list(self._iter_source_files(snapshot))
+        total_size = sum(size for _, _, size, _ in files)
+        staging_root = Path(tempfile.mkdtemp(
+            prefix=f".{world.name}.restore-",
+            dir=world.parent,
+        ))
+        prepared = staging_root / world.name
+        prepared.mkdir()
+        rollback = world.parent / (
+            f".{world.name}.rollback-{secrets.token_hex(4)}"
+        )
+        published = False
+        try:
+            self._copy_files(
+                files,
+                prepared,
+                total_size,
+                progress_callback,
+                0.25,
+                0.63,
+            )
+            self._check_cancelled()
+            self._progress(progress_callback, 0.92, "正在验证恢复数据...")
+            self._validate_snapshot(prepared)
+
+            published = self._exchange_world_directories(
+                world,
+                prepared,
+                rollback,
+            )
+            self._cleanup_rollback_dir(rollback, progress_callback)
+            self._progress(progress_callback, 1.0, "备份恢复完成")
+            logger.info(
+                f"已恢复存档备份 {record.backup_id}: {world}",
+                module="Backup",
+            )
+            return record
+        except Exception:
+            if not published and rollback.exists() and not world.exists():
+                os.replace(rollback, world)
+            raise
+        finally:
+            shutil.rmtree(staging_root, ignore_errors=True)
+
+    @staticmethod
+    def _exchange_world_directories(
+        world: Path,
+        prepared: Path,
+        rollback: Path,
+    ) -> bool:
+        """将 ``prepared`` 原子替换为 ``world``，失败时恢复 rollback。
+
+        Returns:
+            bool: 发布成功为 True。
+        """
+        os.replace(world, rollback)
+        try:
+            os.replace(prepared, world)
+            return True
+        except OSError:
+            os.replace(rollback, world)
+            raise
+
+    def _cleanup_rollback_dir(
+        self,
+        rollback: Path,
+        progress_callback: Optional[ProgressCallback],
+    ) -> None:
+        """发布成功后尽力删除旧世界目录。"""
+        self._progress(progress_callback, 0.98, "正在清理旧数据...")
+        try:
+            shutil.rmtree(rollback)
+        except OSError as exc:
+            logger.warning(
+                f"备份恢复完成，但旧目录清理失败: {rollback}: {exc}",
+                module="Backup",
+            )
 
     def prune_backups(
         self,

@@ -87,35 +87,41 @@ class MapSurfaceLayer:
         self._offset_x = 0.0
         self._offset_y = 0.0
 
-        self.enabled = hasattr(ft, "RawImage")
+        self.enabled = False
         self.image: Optional[object] = None
         self.control: Optional[ft.Container] = None
-        if self.enabled:
-            try:
-                self.image = ft.RawImage(
-                    fit=ft.BoxFit.FILL,
-                    # The whole buffered surface is one image, so linear
-                    # filtering can preserve coastlines while shrinking LODs
-                    # without reopening the old per-tile seam problem.
-                    filter_quality=ft.FilterQuality.MEDIUM,
-                    ready_timeout=3.0,
-                    ack_timeout=8.0,
-                    expand=True,
-                )
-                self.control = ft.Container(
-                    content=self.image,
-                    left=0,
-                    top=0,
-                    width=1,
-                    height=1,
-                    padding=0,
-                    bgcolor=background_color,
-                    visible=False,
-                )
-            except Exception:
-                self.enabled = False
-                self.image = None
-                self.control = None
+        self._init_raw_image(background_color)
+
+    def _init_raw_image(self, background_color: str) -> None:
+        if not hasattr(ft, "RawImage"):
+            return
+        try:
+            self.image = ft.RawImage(
+                fit=ft.BoxFit.FILL,
+                # The whole buffered surface is one image, so linear
+                # filtering can preserve coastlines while shrinking LODs
+                # without reopening the old per-tile seam problem.
+                filter_quality=ft.FilterQuality.MEDIUM,
+                ready_timeout=3.0,
+                ack_timeout=8.0,
+                expand=True,
+            )
+            self.control = ft.Container(
+                content=self.image,
+                left=0,
+                top=0,
+                width=1,
+                height=1,
+                padding=0,
+                bgcolor=background_color,
+                visible=False,
+            )
+            self.enabled = True
+        except Exception:
+            # Optional Flet RawImage may be unavailable or fail construction.
+            self.enabled = False
+            self.image = None
+            self.control = None
 
     @property
     def frame(self) -> Optional[MapSurfaceFrame]:
@@ -381,6 +387,26 @@ class MapSurfaceLayer:
             self._max_regions,
             center_z,
         )
+        return self._shrink_bounds_to_pixel_budget(
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+            center_x,
+            center_z,
+            pixels_per_region,
+        )
+
+    def _shrink_bounds_to_pixel_budget(
+        self,
+        min_x: int,
+        max_x: int,
+        min_z: int,
+        max_z: int,
+        center_x: int,
+        center_z: int,
+        pixels_per_region: int,
+    ) -> Tuple[int, int, int, int]:
         while (
             (max_x - min_x + 1)
             * (max_z - min_z + 1)

@@ -269,4 +269,6 @@ class ActionQueue:
     @staticmethod
     def _normalize_uuid(uuid: str) -> str:
         """规范化 UUID：移除连字符并转为小写"""
-        return uuid.replace("-", "").lower()
+        from core.uuid_utils import normalize_uuid
+
+        return normalize_uuid(uuid)

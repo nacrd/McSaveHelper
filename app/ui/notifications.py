@@ -18,6 +18,7 @@ def _is_closing() -> bool:
         from app.ui.utils import is_app_closing
         return is_app_closing()
     except Exception:
+        # Import/state lookup best-effort during teardown.
         return False
 
 
@@ -85,6 +86,7 @@ class NotificationManager:
             )
             self.page.show_dialog(snackbar)
         except Exception:
+            # UI best-effort: page/dialog host may already be closing.
             pass
 
     def show_success(self, message: str, duration_ms: int = 3000) -> None:
@@ -420,20 +422,25 @@ def show_destructive_confirmation(
         label=f"输入 '{item_name}' 以确认",
         hint_text=item_name,
     )
+    dialog_holder: dict[str, ft.AlertDialog] = {}
 
     def handle_confirm(e):
+        dialog = dialog_holder.get("dialog")
         if confirm_field.value == item_name:
-            dialog.open = False
+            if dialog is not None:
+                dialog.open = False
             page.update()
             on_confirm(e)
-        else:
-            page.show_dialog(ft.SnackBar(
-                content=ft.Text("确认文本不匹配"),
-                bgcolor=THEME.error,
-            ))
+            return
+        page.show_dialog(ft.SnackBar(
+            content=ft.Text("确认文本不匹配"),
+            bgcolor=THEME.error,
+        ))
 
     def handle_cancel(e):
-        dialog.open = False
+        dialog = dialog_holder.get("dialog")
+        if dialog is not None:
+            dialog.open = False
         page.update()
 
     dialog = ft.AlertDialog(
@@ -441,20 +448,7 @@ def show_destructive_confirmation(
             ft.Icon(ft.Icons.WARNING, color=THEME.error, size=24),
             ft.Text(title, size=18, weight=ft.FontWeight.BOLD),
         ], spacing=10),
-        content=ft.Container(
-            content=ft.Column([
-                ft.Text(message, size=14),
-                ft.Divider(),
-                ft.Text(
-                    "此操作不可撤销！",
-                    size=12,
-                    color=THEME.error,
-                    weight=ft.FontWeight.BOLD,
-                ),
-                confirm_field,
-            ], spacing=10),
-            width=400,
-        ),
+        content=_destructive_content(message, confirm_field),
         actions=[
             ft.TextButton("取消", on_click=handle_cancel),
             ft.ElevatedButton(
@@ -465,5 +459,25 @@ def show_destructive_confirmation(
             ),
         ],
     )
-
+    dialog_holder["dialog"] = dialog
     page.show_dialog(dialog)
+
+
+def _destructive_content(
+    message: str,
+    confirm_field: ft.TextField,
+) -> ft.Container:
+    return ft.Container(
+        content=ft.Column([
+            ft.Text(message, size=14),
+            ft.Divider(),
+            ft.Text(
+                "此操作不可撤销！",
+                size=12,
+                color=THEME.error,
+                weight=ft.FontWeight.BOLD,
+            ),
+            confirm_field,
+        ], spacing=10),
+        width=400,
+    )

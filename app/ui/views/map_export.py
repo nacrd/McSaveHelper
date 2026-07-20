@@ -45,8 +45,18 @@ class MapExportView(ft.Column):
 
         self.service = MapExportService()
         self.expand = True
+        self._build_export_fields()
+        self._build_export_actions()
+        self._build_ui()
 
-        # 配置选项
+    def _build_export_fields(self) -> None:
+        """Create path/type/range form fields."""
+        self._build_path_fields()
+        self._build_map_option_fields()
+        self._build_selection_fields()
+        self._build_scale_and_result_fields()
+
+    def _build_path_fields(self) -> None:
         self._world_path_field = current_save_field(
             label=self.app.translate("map_export.current_save", "当前存档"),
             hint_text=self.app.translate(
@@ -54,13 +64,16 @@ class MapExportView(ft.Column):
                 "请通过侧边栏设置要导出的当前存档目录",
             ),
         )
-
         self._output_path_field = text_field(
             label=self.app.translate("map_export.output_file", "输出文件"),
-            hint_text=self.app.translate("map_export.output_hint", "选择保存位置"),
+            hint_text=self.app.translate(
+                "map_export.output_hint",
+                "选择保存位置",
+            ),
         )
         self._output_path_field.read_only = True
 
+    def _build_map_option_fields(self) -> None:
         self._map_type_dropdown = dropdown(
             label=self.app.translate("map_export.map_type", "地图类型"),
             options=[
@@ -78,14 +91,12 @@ class MapExportView(ft.Column):
             ],
             value="topview",
         )
-
         self._dimension_dropdown = dropdown(
             label=self.app.translate("map_export.dimension", "维度"),
             options=[],
             value="overworld",
             on_change=self._on_dimension_changed,
         )
-
         self._range_mode_dropdown = dropdown(
             label=self.app.translate("map_export.range", "导出范围"),
             options=[
@@ -95,20 +106,31 @@ class MapExportView(ft.Column):
                 ),
                 ft.dropdown.Option(
                     "region",
-                    self.app.translate("map_export.range_region", "区域坐标矩形"),
+                    self.app.translate(
+                        "map_export.range_region",
+                        "区域坐标矩形",
+                    ),
                 ),
                 ft.dropdown.Option(
                     "chunk",
-                    self.app.translate("map_export.range_chunk", "区块坐标矩形"),
+                    self.app.translate(
+                        "map_export.range_chunk",
+                        "区块坐标矩形",
+                    ),
                 ),
                 ft.dropdown.Option(
                     "block",
-                    self.app.translate("map_export.range_block", "方块坐标矩形"),
+                    self.app.translate(
+                        "map_export.range_block",
+                        "方块坐标矩形",
+                    ),
                 ),
             ],
             value="full",
             on_change=self._on_range_mode_changed,
         )
+
+    def _build_selection_fields(self) -> None:
         self._selection_start_x = text_field(
             label=self.app.translate("map_export.start_x", "起点 X"),
             value="0",
@@ -142,16 +164,23 @@ class MapExportView(ft.Column):
             visible=False,
         )
 
+    def _build_scale_and_result_fields(self) -> None:
         self._scale_dropdown = dropdown(
             label=self.app.translate("map_export.scale", "缩放比例"),
             options=[
                 ft.dropdown.Option(
                     "1",
-                    self.app.translate("map_export.scale_original", "1:1（原始大小）"),
+                    self.app.translate(
+                        "map_export.scale_original",
+                        "1:1（原始大小）",
+                    ),
                 ),
                 ft.dropdown.Option(
                     "2",
-                    self.app.translate("map_export.scale_half", "1:2（缩小一半）"),
+                    self.app.translate(
+                        "map_export.scale_half",
+                        "1:2（缩小一半）",
+                    ),
                 ),
                 ft.dropdown.Option(
                     "4",
@@ -162,15 +191,16 @@ class MapExportView(ft.Column):
                 ),
                 ft.dropdown.Option(
                     "8",
-                    self.app.translate("map_export.scale_eighth", "1:8（缩小八分之一）"),
+                    self.app.translate(
+                        "map_export.scale_eighth",
+                        "1:8（缩小八分之一）",
+                    ),
                 ),
                 ft.dropdown.Option("16", "1:16"),
                 ft.dropdown.Option("32", "1:32"),
             ],
             value="4",
         )
-
-        # 结果显示
         self._result_text = ft.Text(
             "",
             size=13,
@@ -178,7 +208,8 @@ class MapExportView(ft.Column):
             selectable=True,
         )
 
-        # 按钮
+    def _build_export_actions(self) -> None:
+        """Create output/export/cancel buttons."""
         self._select_output_btn = btn_ghost(
             self.app.translate("map_export.choose_output", "选择输出"),
             on_click=self._select_output,
@@ -195,9 +226,6 @@ class MapExportView(ft.Column):
             on_click=self._cancel_export,
         )
 
-        # 构建 UI
-        self._build_ui()
-
     def get_top_actions(self) -> list[ViewAction]:
         if not PIL_AVAILABLE:
             return []
@@ -212,65 +240,74 @@ class MapExportView(ft.Column):
         """构建缺少依赖时的 UI"""
         self.spacing = 20
         self.expand = True
-
         error_card = card(
             ft.Column(
                 [
-                    ft.Row(
-                        [
-                            ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
-                            ft.Column(
-                                [
-                                    ft.Text(
-                                        self.app.translate(
-                                            "map_export.missing_dependency",
-                                            "缺少依赖库",
-                                        ),
-                                        size=20,
-                                        weight=ft.FontWeight.BOLD,
-                                        color=THEME.text_primary,
-                                    ),
-                                    ft.Text(
-                                        self.app.translate(
-                                            "map_export.pillow_required",
-                                            "地图导出功能需要 Pillow 库支持",
-                                        ),
-                                        size=13,
-                                        color=THEME.text_secondary,
-                                    ),
-                                ],
-                                spacing=4,
-                            ),
-                        ],
-                        spacing=16,
-                    ),
+                    self._missing_dependency_header(),
                     ft.Divider(height=20, color=THEME.border_subtle),
-                    ft.Text(
-                        self.app.translate(
-                            "map_export.install_hint",
-                            "请在命令行运行以下命令安装依赖：",
-                        ),
-                        size=13,
-                        color=THEME.text_secondary,
-                    ),
-                    ft.Container(
-                        content=ft.Text(
-                            "pip install Pillow",
-                            size=13,
-                            color=THEME.mc_grass,
-                            font_family="monospace",
-                            selectable=True,
-                        ),
-                        padding=12,
-                        bgcolor=THEME.bg_secondary,
-                        border_radius=8,
-                    ),
+                    self._missing_dependency_install_hint(),
                 ],
                 spacing=12,
             )
         )
-
         self.controls = [error_card]
+
+    def _missing_dependency_header(self) -> ft.Row:
+        return ft.Row(
+            [
+                ft.Icon(ft.Icons.ERROR_OUTLINE, size=48, color=THEME.error),
+                ft.Column(
+                    [
+                        ft.Text(
+                            self.app.translate(
+                                "map_export.missing_dependency",
+                                "缺少依赖库",
+                            ),
+                            size=20,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.text_primary,
+                        ),
+                        ft.Text(
+                            self.app.translate(
+                                "map_export.pillow_required",
+                                "地图导出功能需要 Pillow 库支持",
+                            ),
+                            size=13,
+                            color=THEME.text_secondary,
+                        ),
+                    ],
+                    spacing=4,
+                ),
+            ],
+            spacing=16,
+        )
+
+    def _missing_dependency_install_hint(self) -> ft.Column:
+        return ft.Column(
+            [
+                ft.Text(
+                    self.app.translate(
+                        "map_export.install_hint",
+                        "请在命令行运行以下命令安装依赖：",
+                    ),
+                    size=13,
+                    color=THEME.text_secondary,
+                ),
+                ft.Container(
+                    content=ft.Text(
+                        "pip install Pillow",
+                        size=13,
+                        color=THEME.mc_grass,
+                        font_family="monospace",
+                        selectable=True,
+                    ),
+                    padding=12,
+                    bgcolor=THEME.bg_secondary,
+                    border_radius=8,
+                ),
+            ],
+            spacing=12,
+        )
 
     def _build_ui(self) -> None:
         """构建 UI"""
@@ -282,21 +319,36 @@ class MapExportView(ft.Column):
                     "将存档地图导出为 PNG 图片（俯视图/地形图）",
                 ),
                 size=12,
-                color=THEME.text_muted),
+                color=THEME.text_muted,
+            ),
             icon=IconSet.EXPORT,
         )
+        self.controls = [
+            header,
+            ft.Container(height=8),
+            self._build_export_config_card(),
+            self._build_export_result_card(),
+        ]
+        self._expand_export_fields()
 
-        # 配置卡片
-        config_card = card(
+    def _build_export_config_card(self) -> ft.Control:
+        """World/output/options card."""
+        return card(
             ft.Column(
                 [
                     section_title(
-                        self.app.translate("map_export.current_save_section", "当前存档")
+                        self.app.translate(
+                            "map_export.current_save_section",
+                            "当前存档",
+                        )
                     ),
                     self._world_path_field,
                     ft.Container(height=12),
                     section_title(
-                        self.app.translate("map_export.output_section", "输出设置")
+                        self.app.translate(
+                            "map_export.output_section",
+                            "输出设置",
+                        )
                     ),
                     ft.Row(
                         [self._output_path_field, self._select_output_btn],
@@ -305,7 +357,10 @@ class MapExportView(ft.Column):
                     ),
                     ft.Container(height=12),
                     section_title(
-                        self.app.translate("map_export.options_section", "导出选项")
+                        self.app.translate(
+                            "map_export.options_section",
+                            "导出选项",
+                        )
                     ),
                     ft.Row(
                         [
@@ -327,12 +382,16 @@ class MapExportView(ft.Column):
             )
         )
 
-        # 结果卡片
-        result_card = card(
+    def _build_export_result_card(self) -> ft.Control:
+        """Result summary card."""
+        return card(
             ft.Column(
                 [
                     section_title(
-                        self.app.translate("map_export.result_section", "导出结果")
+                        self.app.translate(
+                            "map_export.result_section",
+                            "导出结果",
+                        )
                     ),
                     ft.Container(
                         content=self._result_text,
@@ -345,13 +404,8 @@ class MapExportView(ft.Column):
             )
         )
 
-        self.controls = [
-            header,
-            ft.Container(height=8),
-            config_card,
-            result_card,
-        ]
-
+    def _expand_export_fields(self) -> None:
+        """Let path/option fields fill horizontal space."""
         self._world_path_field.expand = True
         self._output_path_field.expand = True
         self._map_type_dropdown.expand = True
@@ -461,43 +515,12 @@ class MapExportView(ft.Column):
             )
             return
 
-        world_path = self._world_path_field.value
-        if not world_path:
-            self.app.warn_dialog(
-                self.app.translate("map_export.notice", "提示"),
-                self.app.translate(
-                    "map_export.select_save_first",
-                    "请先通过侧边栏设置当前存档目录",
-                ),
-            )
+        world_path, output_path = self._require_export_paths()
+        if world_path is None or output_path is None:
             return
 
-        output_path = self._output_path_field.value
-        if not output_path:
-            self.app.warn_dialog(
-                self.app.translate("map_export.notice", "提示"),
-                self.app.translate(
-                    "map_export.select_output_first",
-                    "请先选择输出文件",
-                ),
-            )
-            return
-
-        # 启动导出线程
         map_type = self._map_type_dropdown.value or "topview"
-        try:
-            scale = int(self._scale_dropdown.value or "4")
-            if scale not in [1, 2, 4, 8, 16, 32]:
-                scale = 4
-        except (ValueError, TypeError):
-            scale = 4
-            self.app.warn_dialog(
-                self.app.translate("map_export.notice", "提示"),
-                self.app.translate(
-                    "map_export.invalid_scale",
-                    "缩放比例无效，使用默认值 1:4",
-                ),
-            )
+        scale = self._resolve_export_scale()
         try:
             spec = self._build_export_spec(map_type, scale)
         except (TypeError, ValueError) as exc:
@@ -512,7 +535,7 @@ class MapExportView(ft.Column):
         self._cancel_event = threading.Event()
         self._set_export_controls_enabled(False)
         self._result_text.value = ""
-        self._result_text.update()
+        safe_update(self._result_text)
 
         thread = threading.Thread(
             target=self._export_thread,
@@ -526,6 +549,47 @@ class MapExportView(ft.Column):
             daemon=True,
         )
         thread.start()
+
+    def _require_export_paths(self) -> tuple[str | None, str | None]:
+        """Validate world/output paths and warn when missing."""
+        world_path = self._world_path_field.value
+        if not world_path:
+            self.app.warn_dialog(
+                self.app.translate("map_export.notice", "提示"),
+                self.app.translate(
+                    "map_export.select_save_first",
+                    "请先通过侧边栏设置当前存档目录",
+                ),
+            )
+            return None, None
+        output_path = self._output_path_field.value
+        if not output_path:
+            self.app.warn_dialog(
+                self.app.translate("map_export.notice", "提示"),
+                self.app.translate(
+                    "map_export.select_output_first",
+                    "请先选择输出文件",
+                ),
+            )
+            return None, None
+        return str(world_path), str(output_path)
+
+    def _resolve_export_scale(self) -> int:
+        """Parse the scale dropdown, falling back to 1:4."""
+        try:
+            scale = int(self._scale_dropdown.value or "4")
+            if scale not in [1, 2, 4, 8, 16, 32]:
+                scale = 4
+        except (ValueError, TypeError):
+            scale = 4
+            self.app.warn_dialog(
+                self.app.translate("map_export.notice", "提示"),
+                self.app.translate(
+                    "map_export.invalid_scale",
+                    "缩放比例无效，使用默认值 1:4",
+                ),
+            )
+        return scale
 
     def _set_export_controls_enabled(self, enabled: bool) -> None:
         controls = (

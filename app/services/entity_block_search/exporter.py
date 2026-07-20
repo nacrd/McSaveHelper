@@ -1,9 +1,11 @@
 """Result export for entity/block/container search."""
+from __future__ import annotations
 
 from pathlib import Path
 from typing import List, Optional, TextIO
 
 from core.logger import logger
+
 from .models import SearchResult, SearchSummary
 
 
@@ -13,32 +15,39 @@ def export_results_to_text(
     stored_results: List[SearchResult],
     results: Optional[List[SearchResult]] = None,
 ) -> None:
-    """将搜索结果导出为文本文件。"""
+    """将搜索结果导出为文本文件。
+
+    Args:
+        output_path: 目标文本路径。
+        summary: 扫描统计。
+        stored_results: 服务内部缓存结果。
+        results: 可选覆盖导出列表。
+    """
     try:
         export_results = results if results is not None else stored_results
-        with open(output_path, "w", encoding="utf-8") as f:
-            _write_header(f, summary, len(export_results))
+        with open(output_path, "w", encoding="utf-8") as handle:
+            _write_header(handle, summary, len(export_results))
             for idx, result in enumerate(export_results, 1):
-                _write_result(f, idx, result)
-    except Exception as e:
-        logger.error(f"导出结果失败: {e}", module="EntityBlockSearch")
+                _write_result(handle, idx, result)
+    except OSError as exc:
+        logger.error(f"导出结果失败: {exc}", module="EntityBlockSearch")
 
 
-def _write_header(f: TextIO, summary: SearchSummary, total: int) -> None:
-    f.write(f"搜索结果 - 共 {total} 个\n")
-    f.write(f"扫描区域: {summary.scanned_regions}\n")
-    f.write(f"扫描区块: {summary.scanned_chunks}\n")
-    f.write(f"跳过区块: {summary.skipped_chunks}\n")
-    f.write("=" * 80 + "\n\n")
+def _write_header(handle: TextIO[str], summary: SearchSummary, total: int) -> None:
+    handle.write(f"搜索结果 - 共 {total} 个\n")
+    handle.write(f"扫描区域: {summary.scanned_regions}\n")
+    handle.write(f"扫描区块: {summary.scanned_chunks}\n")
+    handle.write(f"跳过区块: {summary.skipped_chunks}\n")
+    handle.write("=" * 80 + "\n\n")
 
 
-def _write_result(f: TextIO, idx: int, result: SearchResult) -> None:
-    f.write(f"{idx}. {result.name}\n")
-    f.write(f"   类型: {result.result_type}\n")
-    f.write(f"   位置: X={result.x}, Y={result.y}, Z={result.z}\n")
-    f.write(f"   维度: {result.dimension}\n")
+def _write_result(handle: TextIO[str], idx: int, result: SearchResult) -> None:
+    handle.write(f"{idx}. {result.name}\n")
+    handle.write(f"   类型: {result.result_type}\n")
+    handle.write(f"   位置: X={result.x}, Y={result.y}, Z={result.z}\n")
+    handle.write(f"   维度: {result.dimension}\n")
     if result.extra_info:
-        f.write("   额外信息:\n")
+        handle.write("   额外信息:\n")
         for key, value in result.extra_info.items():
-            f.write(f"      {key}: {value}\n")
-    f.write("\n")
+            handle.write(f"      {key}: {value}\n")
+    handle.write("\n")

@@ -37,6 +37,85 @@ class Language(str, Enum):
         return member
 
 
+# Minimal bootstrap catalog written when a language file is missing.
+_DEFAULT_TRANSLATION_TEMPLATE: Dict[str, Any] = {
+    "app": {
+        "title": "MCSaveHelper · 存档管理工具",
+        "subtitle": "存档管理工具",
+    },
+    "top_bar": {
+        "ready": "就绪",
+        "start_conversion": "🚀 开始转换",
+    },
+    "left_panel": {
+        "archive_config": "📁 存档目录配置",
+        "client_archive": "客户端存档",
+        "server_root": "服务端根目录",
+        "world_folder_name": "世界文件夹名",
+        "batch_archive_dir": "批量存档目录",
+        "browse": "📂 浏览",
+        "scan": "🔍 扫描",
+        "placeholder_select_world": "选择世界文件夹（包含 level.dat）",
+        "placeholder_default_dir": "默认为程序当前目录",
+        "placeholder_world_name": "例如: world",
+        "placeholder_batch_dir": "选择包含多个世界存档的目录",
+    },
+    "right_panel": {
+        "mode_settings": "⚙️ 模式设置",
+        "fast_mode": "快速模式",
+        "full_mode": "完整模式",
+        "offline_mode": "离线模式",
+        "clean_mode": "清理模式",
+        "version_detection": "版本检测",
+        "advanced_settings": "⚙️ 高级设置",
+        "max_concurrent": "最大并发数",
+        "uuid_mapping": "UUID映射管理",
+        "player_name": "玩家名称",
+        "uuid": "UUID",
+        "add": "添加",
+        "remove": "移除",
+        "manual_names": "手动指定玩家名（逗号分隔）",
+        "placeholder_player_name": "输入玩家名",
+        "placeholder_uuid": "输入UUID",
+        "placeholder_manual_names": "player1,player2,player3",
+    },
+    "common": {
+        "select": "选择",
+        "confirm": "确认",
+        "cancel": "取消",
+        "save": "保存",
+        "reset": "重置",
+        "clear_log": "🗑️ 清空日志",
+    },
+    "dialogs": {
+        "select_client_archive": "选择客户端存档目录",
+        "select_server_root": "选择服务端根目录",
+        "select_batch_dir": "选择包含多个世界存档的目录",
+        "warning": "提示",
+        "error": "错误",
+        "success": "成功",
+    },
+    "messages": {
+        "please_select_batch_dir": "请先选择批量存档目录",
+        "batch_dir_not_exist": "批量存档目录不存在",
+        "scanned_worlds": "扫描到 {count} 个世界存档: {names}",
+        "no_valid_worlds": "未找到有效的世界存档（需要包含level.dat）",
+        "batch_scan_complete": "批量扫描完成: 找到 {count} 个世界存档",
+        "batch_scan_no_worlds": "批量扫描: 未找到有效的世界存档",
+        "conversion_started": "转换开始...",
+        "conversion_completed": "转换完成!",
+        "conversion_failed": "转换失败: {error}",
+    },
+    "log_levels": {
+        "INFO": "信息",
+        "SUCCESS": "成功",
+        "WARN": "警告",
+        "ERROR": "错误",
+        "API": "API",
+    },
+}
+
+
 class TranslationManager:
     """翻译管理器
 
@@ -84,7 +163,7 @@ class TranslationManager:
         self._load_translations()
 
     def _ensure_config_loaded(self) -> None:
-        """延迟加载语言配置"""
+        """延迟加载语言配置。"""
         if self._config_loaded:
             return
         self._config_loaded = True
@@ -96,11 +175,11 @@ class TranslationManager:
                 self._current_language = Language(lang_str)
             except ValueError:
                 print(f"警告: 配置中的语言 '{lang_str}' 无效，使用默认语言")
-        except Exception as e:
-            print(f"加载语言配置时出错: {e}")
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            print(f"加载语言配置时出错: {exc}")
 
     def _load_translations(self) -> None:
-        """加载当前语言的翻译文件"""
+        """加载当前语言的翻译文件。"""
         lang_code = self._current_language
         lang_str = lang_code.value
 
@@ -109,23 +188,25 @@ class TranslationManager:
         self._translations.clear()
         self._loaded_files.clear()
 
-        if translation_file.exists():
-            try:
-                with open(translation_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        if "__meta__" in data:
-                            data.pop("__meta__")
-                        self._translations = data
-                        self._loaded_files.add(str(translation_file))
-                        print(f"已加载翻译文件: {translation_file}")
-                    else:
-                        print(f"警告: 翻译文件格式无效，应为字典: {translation_file}")
-            except Exception as e:
-                print(f"加载翻译文件时出错 {translation_file}: {e}")
-        else:
+        if not translation_file.exists():
             print(f"警告: 翻译文件不存在: {translation_file}")
             self._create_template_file(translation_file)
+            return
+
+        try:
+            with open(translation_file, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if not isinstance(data, dict):
+                print(
+                    f"警告: 翻译文件格式无效，应为字典: {translation_file}"
+                )
+                return
+            data.pop("__meta__", None)
+            self._translations = data
+            self._loaded_files.add(str(translation_file))
+            print(f"已加载翻译文件: {translation_file}")
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            print(f"加载翻译文件时出错 {translation_file}: {exc}")
 
     def _scan_available_languages(self) -> List[str]:
         """扫描 translations 目录下的所有可用语言文件
@@ -161,107 +242,37 @@ class TranslationManager:
         lang_code = file_path.stem
         display_name = lang_code
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if "__meta__" in data and isinstance(data["__meta__"], dict):
-                    meta = data["__meta__"]
+            with open(file_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                meta = data.get("__meta__")
+                if isinstance(meta, dict):
                     if "language" in meta:
-                        lang_code = meta["language"]
+                        lang_code = str(meta["language"])
                     if "display_name" in meta:
-                        display_name = meta["display_name"]
-        except Exception:
+                        display_name = str(meta["display_name"])
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            # 元数据损坏时退回文件名 stem，不阻断语言扫描。
             pass
         return lang_code, display_name
 
     def _create_template_file(self, file_path: Path) -> None:
-        """创建翻译文件模板
+        """将默认翻译模板写入缺失的语言文件。
 
         Args:
-            file_path: 模板文件路径
+            file_path: 目标 JSON 路径。
         """
-        template: Dict[str, Any] = {
-            "app": {
-                "title": "MCSaveHelper · 存档管理工具",
-                "subtitle": "存档管理工具"
-            },
-            "top_bar": {
-                "ready": "就绪",
-                "start_conversion": "🚀 开始转换"
-            },
-            "left_panel": {
-                "archive_config": "📁 存档目录配置",
-                "client_archive": "客户端存档",
-                "server_root": "服务端根目录",
-                "world_folder_name": "世界文件夹名",
-                "batch_archive_dir": "批量存档目录",
-                "browse": "📂 浏览",
-                "scan": "🔍 扫描",
-                "placeholder_select_world": "选择世界文件夹（包含 level.dat）",
-                "placeholder_default_dir": "默认为程序当前目录",
-                "placeholder_world_name": "例如: world",
-                "placeholder_batch_dir": "选择包含多个世界存档的目录"
-            },
-            "right_panel": {
-                "mode_settings": "⚙️ 模式设置",
-                "fast_mode": "快速模式",
-                "full_mode": "完整模式",
-                "offline_mode": "离线模式",
-                "clean_mode": "清理模式",
-                "version_detection": "版本检测",
-                "advanced_settings": "⚙️ 高级设置",
-                "max_concurrent": "最大并发数",
-                "uuid_mapping": "UUID映射管理",
-                "player_name": "玩家名称",
-                "uuid": "UUID",
-                "add": "添加",
-                "remove": "移除",
-                "manual_names": "手动指定玩家名（逗号分隔）",
-                "placeholder_player_name": "输入玩家名",
-                "placeholder_uuid": "输入UUID",
-                "placeholder_manual_names": "player1,player2,player3"
-            },
-            "common": {
-                "select": "选择",
-                "confirm": "确认",
-                "cancel": "取消",
-                "save": "保存",
-                "reset": "重置",
-                "clear_log": "🗑️ 清空日志"
-            },
-            "dialogs": {
-                "select_client_archive": "选择客户端存档目录",
-                "select_server_root": "选择服务端根目录",
-                "select_batch_dir": "选择包含多个世界存档的目录",
-                "warning": "提示",
-                "error": "错误",
-                "success": "成功"
-            },
-            "messages": {
-                "please_select_batch_dir": "请先选择批量存档目录",
-                "batch_dir_not_exist": "批量存档目录不存在",
-                "scanned_worlds": "扫描到 {count} 个世界存档: {names}",
-                "no_valid_worlds": "未找到有效的世界存档（需要包含level.dat）",
-                "batch_scan_complete": "批量扫描完成: 找到 {count} 个世界存档",
-                "batch_scan_no_worlds": "批量扫描: 未找到有效的世界存档",
-                "conversion_started": "转换开始...",
-                "conversion_completed": "转换完成!",
-                "conversion_failed": "转换失败: {error}"
-            },
-            "log_levels": {
-                "INFO": "信息",
-                "SUCCESS": "成功",
-                "WARN": "警告",
-                "ERROR": "错误",
-                "API": "API"
-            }
-        }
-
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(template, f, ensure_ascii=False, indent=2)
+            with open(file_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    _DEFAULT_TRANSLATION_TEMPLATE,
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
             print(f"已创建翻译模板文件: {file_path}")
-        except Exception as e:
-            print(f"创建翻译模板文件时出错: {e}")
+        except OSError as exc:
+            print(f"创建翻译模板文件时出错: {exc}")
 
     def set_language(self, language: Language) -> None:
         """设置当前语言
@@ -280,8 +291,8 @@ class TranslationManager:
             return
         try:
             self._language_saver(self._current_language.value)
-        except Exception as e:
-            print(f"保存语言配置时出错: {e}")
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            print(f"保存语言配置时出错: {exc}")
 
     def get(
             self,

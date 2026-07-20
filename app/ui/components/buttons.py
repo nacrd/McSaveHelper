@@ -4,6 +4,8 @@ from typing import Optional, Callable, Any, cast
 
 import flet as ft
 
+from app.ui.utils import safe_update
+
 from app.ui.theme import THEME
 
 
@@ -67,7 +69,7 @@ class McButton(ft.Container):
         """
         try:
             # Remove # prefix
-            hex_color = color.lstrip('#')
+            hex_color = color.lstrip("#")
             # Parse RGB values
             r = int(hex_color[0:2], 16)
             g = int(hex_color[2:4], 16)
@@ -77,7 +79,7 @@ class McButton(ft.Container):
             g = min(255, max(0, int(g * factor)))
             b = min(255, max(0, int(b * factor)))
             return f"#{r:02X}{g:02X}{b:02X}"
-        except Exception:
+        except (ValueError, TypeError, IndexError):
             return color
 
     def _handle_hover(self, e: ft.ControlEvent) -> None:
@@ -100,9 +102,10 @@ class McButton(ft.Container):
                 self.bgcolor = self._bgcolor
                 if not self._is_pressed:
                     self.shadow = None
-            self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def _handle_click(self, e: Any = None) -> None:
         """Handle click event with pressed animation"""
@@ -120,10 +123,7 @@ class McButton(ft.Container):
                 right=ft.BorderSide(2, THEME.border_light),
                 bottom=ft.BorderSide(2, THEME.border_light),
             )
-            try:
-                self.update()
-            except Exception:
-                pass
+            safe_update(self)
 
             # Execute click handler even if the visual update failed because the
             # button is not mounted yet (common in unit tests and rebuilds).
@@ -135,6 +135,7 @@ class McButton(ft.Container):
             # loop.
             self._schedule_reset_pressed_state()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _schedule_reset_pressed_state(self) -> None:
@@ -147,39 +148,38 @@ class McButton(ft.Container):
         except RuntimeError:
             self._reset_pressed_state_sync()
         except Exception:
+            # Page/task scheduler may be unavailable during teardown.
             pass
 
     async def _reset_pressed_state(self) -> None:
         """Reset button to normal state after pressed animation"""
         try:
             await asyncio.sleep(0.15)
-            self._is_pressed = False
-            self.bgcolor = self._bgcolor
-            self.border = ft.Border(
-                left=ft.BorderSide(2, THEME.border_light),
-                top=ft.BorderSide(2, THEME.border_light),
-                right=ft.BorderSide(2, THEME.border_dark),
-                bottom=ft.BorderSide(2, THEME.border_dark),
-            )
-            self.shadow = None  # Ensure shadow is removed when resetting
-            if self.page:
-                self.update()
+            self._apply_normal_visual_state()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
 
     def _reset_pressed_state_sync(self) -> None:
         try:
-            self._is_pressed = False
-            self.bgcolor = self._bgcolor
-            self.border = ft.Border(
-                left=ft.BorderSide(2, THEME.border_light),
-                top=ft.BorderSide(2, THEME.border_light),
-                right=ft.BorderSide(2, THEME.border_dark),
-                bottom=ft.BorderSide(2, THEME.border_dark),
-            )
-            self.shadow = None
+            self._apply_normal_visual_state()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self)
+
+    def _apply_normal_visual_state(self) -> None:
+        """Restore default colors/borders after press animation."""
+        self._is_pressed = False
+        self.bgcolor = self._bgcolor
+        self.border = ft.Border(
+            left=ft.BorderSide(2, THEME.border_light),
+            top=ft.BorderSide(2, THEME.border_light),
+            right=ft.BorderSide(2, THEME.border_dark),
+            bottom=ft.BorderSide(2, THEME.border_dark),
+        )
+        self.shadow = None
 
     def _build_content(self) -> ft.Row:
         icon_color = THEME.text_muted if self._disabled else self._text_color

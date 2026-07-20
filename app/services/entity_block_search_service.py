@@ -42,16 +42,36 @@ class EntityBlockSearchService:
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> List[SearchResult]:
-        """搜索实体、方块或容器。"""
+        """搜索实体、方块或容器。
+
+        Args:
+            world_path: 世界根目录。
+            search_type: ``entity`` / ``block`` / ``container`` 等合法类型。
+            target: 目标 ID 或名称片段。
+            dimensions: 可选维度过滤列表。
+            progress_callback: 进度回调。
+            log_callback: 日志回调。
+
+        Returns:
+            list[SearchResult]: 本次搜索结果（失败时可能为空，错误写入日志）。
+        """
         self.results = []
         self.summary = SearchSummary()
         log = self._make_logger(log_callback)
         progress = self._make_progress(progress_callback)
         try:
-            dimensions = self._validate_request(world_path, search_type, target, dimensions)
-            self._run_search(world_path, search_type, target, dimensions, log, progress)
-        except Exception as e:
-            log(f"搜索失败: {e}", "ERROR")
+            dimensions = self._validate_request(
+                world_path, search_type, target, dimensions
+            )
+            self._run_search(
+                world_path, search_type, target, dimensions, log, progress
+            )
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            log(f"搜索失败: {exc}", "ERROR")
+            logger.error(traceback.format_exc(), module="EntityBlockSearch")
+        except Exception as exc:
+            # MCA/NBT 遍历边界：保留结果列表，错误记入日志。
+            log(f"搜索失败: {exc}", "ERROR")
             logger.error(traceback.format_exc(), module="EntityBlockSearch")
         return self.results
 

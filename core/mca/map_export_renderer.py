@@ -124,6 +124,39 @@ class MapExportRenderer:
             block_bounds,
             bounds,
         )
+        image = self._create_blank_map_image(bounds, scale, block_bounds, log)
+        self.last_rendered_chunks = 0
+        try:
+            self.last_rendered_chunks = self._render_or_fallback(
+                image,
+                region_files,
+                bounds,
+                map_type,
+                scale,
+                log,
+                progress,
+                normalized_block_bounds,
+                cancel_event,
+            )
+            if self.last_rendered_chunks == 0:
+                raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
+            self._raise_if_cancelled(cancel_event)
+        except Exception:
+            try:
+                image.close()
+            except Exception:
+                # best-effort: never mask the original render error
+                pass
+            raise
+        return image
+
+    def _create_blank_map_image(
+        self,
+        bounds: Dict[str, int],
+        scale: int,
+        block_bounds: Optional[Tuple[int, int, int, int]],
+        log: Callable[[str, str], None],
+    ) -> Any:
         spec = self.calculate_image_spec(
             bounds,
             scale,
@@ -134,35 +167,40 @@ class MapExportRenderer:
             f"(预计 {spec.estimated_mb:.0f} MB)",
             "INFO",
         )
-        image = Image.new(
+        return Image.new(
             "RGB",
             (spec.width, spec.height),
             color=(135, 206, 235),
         )
-        self.last_rendered_chunks = 0
+
+    def _render_or_fallback(
+        self,
+        image: Any,
+        region_files: List[Path],
+        bounds: Dict[str, int],
+        map_type: str,
+        scale: int,
+        log: Callable[[str, str], None],
+        progress: Callable[[float, str], None],
+        block_bounds: Tuple[int, int, int, int],
+        cancel_event: Optional[threading.Event],
+    ) -> int:
         try:
-            try:
-                self.last_rendered_chunks = self._render_regions(
-                    image,
-                    region_files,
-                    bounds,
-                    map_type,
-                    scale,
-                    log,
-                    progress,
-                    block_bounds=normalized_block_bounds,
-                    cancel_event=cancel_event,
-                )
-            except ImportError:
-                log("地图渲染后端不可用，使用简化渲染", "WARNING")
-                self.draw_fallback_grid(image, scale)
-            if self.last_rendered_chunks == 0:
-                raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
-            self._raise_if_cancelled(cancel_event)
-        except Exception:
-            image.close()
-            raise
-        return image
+            return self._render_regions(
+                image,
+                region_files,
+                bounds,
+                map_type,
+                scale,
+                log,
+                progress,
+                block_bounds=block_bounds,
+                cancel_event=cancel_event,
+            )
+        except ImportError:
+            log("地图渲染后端不可用，使用简化渲染", "WARNING")
+            self.draw_fallback_grid(image, scale)
+            return 0
 
     @staticmethod
     def calculate_image_spec(
@@ -171,6 +209,19 @@ class MapExportRenderer:
         *,
         block_bounds: Optional[Tuple[int, int, int, int]] = None,
     ) -> MapImageSpec:
+        """计算导出图像尺寸与预估内存。
+
+        Args:
+            bounds: inclusive region 坐标范围。
+            scale: 正整数缩放比例（方块像素合并）。
+            block_bounds: 可选 inclusive 方块裁剪范围。
+
+        Returns:
+            MapImageSpec: 宽高与预估 MB。
+
+        Raises:
+            ValueError: 缩放/范围非法，或尺寸/内存超限。
+        """
         if not isinstance(scale, int) or isinstance(scale, bool) or scale <= 0:
             raise ValueError("缩放比例必须是正整数")
         if block_bounds is None:
@@ -195,8 +246,8 @@ class MapExportRenderer:
                 full_height // max_dimension + 1,
             )
             raise ValueError(
-                f"图像尺寸过大 ({width}x{height})，超出限制 ({max_dimension}px)。"
-                f"请将缩放比例调整为至少 1:{needed_scale}"
+                f"图像尺寸过大 ({width}x{height})，超出限制 "
+                f"({max_dimension}px)。请将缩放比例调整为至少 1:{needed_scale}"
             )
         estimated_mb = width * height * 3 / (1024 * 1024)
         if estimated_mb > 2048:
@@ -250,8 +301,17 @@ class MapExportRenderer:
                     )
             except MapRenderCancelled:
                 raise
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+                log(
+                    f"处理区块文件 {region_file.name} 失败: {exc}",
+                    "WARNING",
+                )
             except Exception as exc:
-                log(f"处理区块文件 {region_file.name} 失败: {exc}", "WARNING")
+                # Region/MCA libraries may raise package-specific errors.
+                log(
+                    f"处理区块文件 {region_file.name} 失败: {exc}",
+                    "WARNING",
+                )
         return rendered_chunks
 
     def _render_region_chunks(
@@ -309,7 +369,7 @@ class MapExportRenderer:
                     rendered_chunks += 1
             except MapRenderCancelled:
                 raise
-            except Exception:
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
                 continue
         return rendered_chunks
 
@@ -381,8 +441,9 @@ class MapExportRenderer:
 
         except MapRenderCancelled:
             raise
-        except Exception:
-            pass  # 跳过损坏的区块数据
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, IndexError):
+            # 跳过损坏的区块数据
+            return
 
     def _render_chunk_columns(
         self,
@@ -421,8 +482,16 @@ class MapExportRenderer:
                         and 0 <= pixel_z < context.image.height
                     ):
                         context.pixels[pixel_x, pixel_z] = color
-                except Exception:
-                    pass
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    RuntimeError,
+                    KeyError,
+                    IndexError,
+                    AttributeError,
+                ):
+                    continue
 
     @staticmethod
     def _raise_if_cancelled(
@@ -455,6 +524,7 @@ class MapExportRenderer:
         return min_x, min_z, max_x, max_z
 
     def highest_block_y(self, chunk: Any, x: int, z: int) -> Optional[int]:
+        """Return the highest non-air block Y for column ``(x, z)``."""
         try:
             surface_y = self._native_surface_y(chunk, x, z)
             if surface_y is not None:
@@ -465,7 +535,7 @@ class MapExportRenderer:
                 x,
                 z,
             )
-        except Exception:
+        except (OSError, ValueError, TypeError, RuntimeError, AttributeError):
             return None
 
     @staticmethod
@@ -478,6 +548,7 @@ class MapExportRenderer:
 
     @staticmethod
     def _get_non_air_sections(chunk: Any) -> List[int]:
+        """List section indices that contain at least one non-air palette entry."""
         cache_attr = "_mcsh_non_air_sections"
         cached = getattr(chunk, cache_attr, None)
         if isinstance(cached, list):
@@ -485,7 +556,7 @@ class MapExportRenderer:
         try:
             from core.mca import section_range_for_chunk
             section_range = section_range_for_chunk(chunk)
-        except Exception:
+        except (ImportError, TypeError, ValueError, AttributeError):
             section_range = range(-4, 20)
         sections = []
         for section_y in reversed(list(section_range)):
@@ -497,11 +568,11 @@ class MapExportRenderer:
                     for block in palette
                 ):
                     sections.append(section_y)
-            except Exception:
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
                 continue
         try:
             setattr(chunk, cache_attr, sections)
-        except Exception:
+        except (AttributeError, TypeError):
             pass
         return sections
 
@@ -512,6 +583,7 @@ class MapExportRenderer:
         x: int,
         z: int,
     ) -> Optional[int]:
+        """Scan section columns from top to bottom for the first solid block."""
         for section_y in sections:
             y_start = section_y * 16
             for y in range(y_start + 15, y_start - 1, -1):
@@ -520,25 +592,35 @@ class MapExportRenderer:
                     block_id = str(getattr(block, "id", ""))
                     if block and not block_id.endswith("air"):
                         return y
-                except Exception:
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    IndexError,
+                    AttributeError,
+                ):
                     continue
         return None
 
-    def _get_block_color(self, block: Any, y: int,
-                         map_type: str) -> Tuple[int, int, int]:
-        """获取方块颜色
+    def _get_block_color(
+        self,
+        block: Any,
+        y: int,
+        map_type: str,
+    ) -> Tuple[int, int, int]:
+        """获取方块颜色。
 
         Args:
-            block: 方块对象
-            y: Y 坐标
-            map_type: 地图类型
+            block: 方块对象。
+            y: Y 坐标。
+            map_type: 地图类型（``terrain`` 时按高度调亮度）。
 
         Returns:
-            RGB 颜色元组
+            RGB 颜色元组；失败时返回中性灰。
         """
         try:
             block_name = block.name()
-
             if block_name in self.BLOCK_COLORS:
                 color: Tuple[int, int, int] = self.BLOCK_COLORS[block_name]
             else:
@@ -553,13 +635,14 @@ class MapExportRenderer:
                     int(color[1] * scale_factor),
                     int(color[2] * scale_factor),
                 )
-
             return color
-
-        except Exception:
-            return (128, 128, 128)  # 默认灰色
+        except (AttributeError, TypeError, ValueError, KeyError):
+            return (128, 128, 128)
 
     def _generate_color_from_name(
-            self, block_name: str) -> Tuple[int, int, int]:
-        h = hashlib.md5(block_name.encode("utf-8")).digest()
-        return (h[0], h[1], h[2])
+        self,
+        block_name: str,
+    ) -> Tuple[int, int, int]:
+        """Derive a stable pseudo-random RGB color from a block name."""
+        digest = hashlib.md5(block_name.encode("utf-8")).digest()
+        return (digest[0], digest[1], digest[2])

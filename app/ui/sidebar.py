@@ -9,6 +9,8 @@ from typing import Callable, List, Dict, Any, Optional
 
 import flet as ft
 
+from app.ui.utils import safe_update
+
 from app.ui.theme import THEME, mc_border
 from app.ui.sidebar_tabs import (
     apply_style_collapsed,
@@ -61,6 +63,46 @@ class Sidebar(ft.Container):
         width: int = 220,
         collapsed: bool = False,
     ) -> None:
+        self._init_state(
+            tabs=tabs,
+            on_tab_select=on_tab_select,
+            on_tabs_reorder=on_tabs_reorder,
+            on_import_save=on_import_save,
+            on_set_current_save=on_set_current_save,
+            on_recent_save_select=on_recent_save_select,
+            recent_saves=recent_saves,
+            default_tab=default_tab,
+            width=width,
+            collapsed=collapsed,
+        )
+        self._rebuild_all()
+        super().__init__(
+            content=self._build_root_column(collapsed),
+            width=self.COLLAPSED_WIDTH if collapsed else self._sidebar_width,
+            bgcolor=THEME.bg_primary,
+            border=ft.Border(
+                left=_EMPTY_BORDER_SIDE,
+                top=_EMPTY_BORDER_SIDE,
+                right=ft.BorderSide(3, THEME.bg_secondary),
+                bottom=_EMPTY_BORDER_SIDE,
+            ),
+            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        )
+
+    def _init_state(
+        self,
+        *,
+        tabs: List[Dict[str, Any]],
+        on_tab_select: Callable[[str], None],
+        on_tabs_reorder: Optional[Callable[[List[Dict[str, Any]]], None]],
+        on_import_save: Optional[Callable[[], None]],
+        on_set_current_save: Optional[Callable[[], None]],
+        on_recent_save_select: Optional[Callable[[str], None]],
+        recent_saves: Optional[List[Dict[str, Any]]],
+        default_tab: Optional[str],
+        width: int,
+        collapsed: bool,
+    ) -> None:
         self._tabs: List[Dict[str, Any]] = list(tabs)
         self._on_tab_select: Callable[[str], None] = on_tab_select
         self._on_tabs_reorder = on_tabs_reorder
@@ -81,8 +123,6 @@ class Sidebar(ft.Container):
             auto_scroll=False,
         )
         self._recent_save_col: ft.Column = ft.Column(spacing=6)
-
-        # ─── Recent saves expand/collapse state ───
         self._recent_expanded: bool = False
         self._recent_arrow: ft.Text = ft.Text(
             "▶", size=10, color=THEME.text_secondary, font_family="monospace",
@@ -91,8 +131,6 @@ class Sidebar(ft.Container):
             content=self._recent_save_col,
             visible=self._recent_expanded,
         )
-
-        # ─── Mutable sub-components ───
         self._current_save_name = ft.Text(
             "未设置当前存档",
             size=12,
@@ -101,16 +139,11 @@ class Sidebar(ft.Container):
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
-
-        # Header section (rebuilt on toggle)
         self._header_container = ft.Container(expand=False)
-        # Footer section (rebuilt on toggle)
         self._footer_container = ft.Container(expand=False)
-        # Toggle button (rebuilt on toggle)
         self._toggle_btn = ft.Container(expand=False)
 
-        self._rebuild_all()
-
+    def _build_root_column(self, collapsed: bool) -> ft.Column:
         col = ft.Column(spacing=0, expand=True)
         col.controls.append(self._header_container)
         col.controls.append(
@@ -127,20 +160,7 @@ class Sidebar(ft.Container):
         )
         col.controls.append(self._toggle_btn)
         col.controls.append(self._footer_container)
-
-        effective_width = self.COLLAPSED_WIDTH if collapsed else self._sidebar_width
-        super().__init__(
-            content=col,
-            width=effective_width,
-            bgcolor=THEME.bg_primary,
-            border=ft.Border(
-                left=_EMPTY_BORDER_SIDE,
-                top=_EMPTY_BORDER_SIDE,
-                right=ft.BorderSide(3, THEME.bg_secondary),
-                bottom=_EMPTY_BORDER_SIDE,
-            ),
-            animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        )
+        return col
 
     # ════════════════════════════════════════════
     #  Rebuild helpers
@@ -206,18 +226,19 @@ class Sidebar(ft.Container):
 
     def _handle_hover(self, e: ft.Event[ft.Container], tab_id: str) -> None:
         """Hover handler for expanded tab buttons."""
+        if tab_id not in self._buttons:
+            return
+        container = self._buttons[tab_id]
         try:
-            if tab_id not in self._buttons:
-                return
-            container = self._buttons[tab_id]
             handle_hover_expanded(
                 container,
                 selected=tab_id == self._selected_id,
                 hovering=e.data == "true",
             )
-            container.update()
         except Exception:
+            # UI best-effort: style helpers may fail after dispose.
             pass
+        safe_update(container)
 
     def _handle_hover_collapsed(
         self,
@@ -225,24 +246,26 @@ class Sidebar(ft.Container):
         tab_id: str,
     ) -> None:
         """Hover handler for collapsed tab buttons."""
+        if tab_id not in self._buttons:
+            return
+        container = self._buttons[tab_id]
         try:
-            if tab_id not in self._buttons:
-                return
-            container = self._buttons[tab_id]
             handle_hover_collapsed(
                 container,
                 selected=tab_id == self._selected_id,
                 hovering=e.data == "true",
             )
-            container.update()
         except Exception:
+            # UI best-effort: style helpers may fail after dispose.
             pass
+        safe_update(container)
 
     def _safe_select(self, tab_id: str) -> None:
         """Safe tab selection with exception guard."""
         try:
             self._select(tab_id)
         except Exception:
+            # Keep selection state even if a view switch callback fails.
             traceback.print_exc()
             self._selected_id = tab_id
 
@@ -255,10 +278,7 @@ class Sidebar(ft.Container):
         self._selected_id = tab_id
         if tab_id in self._buttons:
             self._apply_style(self._buttons[tab_id], True)
-        try:
-            self.update()
-        except Exception:
-            pass
+        safe_update(self)
         self._on_tab_select(tab_id)
 
     def _apply_style(self, container: ft.Container, selected: bool) -> None:
@@ -301,11 +321,9 @@ class Sidebar(ft.Container):
                     top=10, bottom=8,
                 )
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
-        try:
-            self.update()
-        except Exception:
-            pass
+        safe_update(self)
 
     @property
     def is_collapsed(self) -> bool:
@@ -376,11 +394,8 @@ class Sidebar(ft.Container):
         self._recent_expanded = not self._recent_expanded
         self._recent_body.visible = self._recent_expanded
         self._recent_arrow.value = "▼" if self._recent_expanded else "▶"
-        try:
-            self._recent_body.update()
-            self._recent_arrow.update()
-        except Exception:
-            pass
+        safe_update(self._recent_body)
+        safe_update(self._recent_arrow)
 
     def _expand_recent(self) -> None:
         """Expand the recent saves section if currently collapsed."""
@@ -389,11 +404,8 @@ class Sidebar(ft.Container):
         self._recent_expanded = True
         self._recent_body.visible = True
         self._recent_arrow.value = "▼"
-        try:
-            self._recent_body.update()
-            self._recent_arrow.update()
-        except Exception:
-            pass
+        safe_update(self._recent_body)
+        safe_update(self._recent_arrow)
 
     def _safe_select_recent_save(self, save_id: str) -> None:
         """Safe callback for recent save click."""
@@ -404,6 +416,7 @@ class Sidebar(ft.Container):
             if self._on_recent_save_select:
                 self._on_recent_save_select(save_id)
         except Exception:
+            # Caller callback failures should not break the sidebar.
             traceback.print_exc()
 
     # ════════════════════════════════════════════
@@ -418,6 +431,7 @@ class Sidebar(ft.Container):
             elif self._on_import_save:
                 self._on_import_save()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     def _handle_import_save(self) -> None:
@@ -432,10 +446,7 @@ class Sidebar(ft.Container):
         """Update the recent saves list."""
         self._recent_saves = list(saves or [])
         self._rebuild_recent_saves()
-        try:
-            self._recent_save_col.update()
-        except Exception:
-            pass
+        safe_update(self._recent_save_col)
 
     def set_current_save_name(
         self, name: Optional[str], path: Optional[str] = None,
@@ -451,9 +462,10 @@ class Sidebar(ft.Container):
                 self._current_save_name.value = "未设置当前存档"
                 self._current_save_name.color = THEME.text_muted
                 self._current_save_name.tooltip = None
-            self._current_save_name.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._current_save_name)
 
     @property
     def selected_id(self) -> Optional[str]:
@@ -473,14 +485,12 @@ class Sidebar(ft.Container):
                 new_tabs.append(t)
         self._tabs = new_tabs
         self._rebuild_tab_buttons()
-        try:
-            self._tab_col.update()
-        except Exception:
-            pass
+        safe_update(self._tab_col)
         if self._on_tabs_reorder:
             try:
                 self._on_tabs_reorder(self._tabs)
             except Exception:
+                # Reorder callback failures should not corrupt local order.
                 traceback.print_exc()
 
     def get_tab_order(self) -> List[str]:
@@ -499,6 +509,7 @@ class Sidebar(ft.Container):
                 self.width = self._sidebar_width
                 self.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
 
     @property

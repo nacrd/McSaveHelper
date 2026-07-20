@@ -1,186 +1,217 @@
+"""NbtLoader - NBT 数据延迟加载器。
+
+按需加载并缓存 level.dat、玩家数据与区块 NBT。
 """
-NbtLoader - NBT 数据延迟加载器
-负责按需加载和缓存 NBT 文件（玩家数据、level.dat 等）
-"""
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Dict, Optional, Callable, Any, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
+
 import nbtlib
 from nbtlib import Compound, File
-from .models import WorldInfo
+
 from .mod_metadata import detect_mod_metadata
+from .models import WorldInfo
+
+LogFn = Callable[[str, str], None]
+
+
+def _tag_get(container: Any, key: str, default: Any = None) -> Any:
+    """安全读取类映射 NBT 容器字段。"""
+    if container is None or not hasattr(container, "get"):
+        return default
+    try:
+        value = container.get(key, default)
+    except (TypeError, KeyError, AttributeError):
+        return default
+    return default if value is None else value
+
+
+def _string_list(value: Any) -> Optional[list[str]]:
+    """将 NBT 列表投影为 Python 字符串列表。"""
+    if not value:
+        return None
+    try:
+        return [str(item) for item in value]
+    except TypeError:
+        return None
+
+
+def _extract_data_packs(data: Any) -> Optional[Dict[str, list[str]]]:
+    """从 Data.DataPacks 提取启用/禁用列表。"""
+    packs = _tag_get(data, "DataPacks")
+    if packs is None:
+        return None
+    enabled = _string_list(_tag_get(packs, "Enabled", [])) or []
+    disabled = _string_list(_tag_get(packs, "Disabled", [])) or []
+    if not enabled and not disabled:
+        return None
+    return {"enabled": enabled, "disabled": disabled}
+
+
+def _extract_world_gen(data: Any) -> tuple[Any, Any, Any]:
+    """返回 ``(seed, generate_features, bonus_chest)``。"""
+    settings = _tag_get(data, "WorldGenSettings")
+    if settings is None:
+        return None, None, None
+    return (
+        _tag_get(settings, "seed"),
+        _tag_get(settings, "generate_features"),
+        _tag_get(settings, "bonus_chest"),
+    )
+
+
+def build_world_info_from_level_root(root: Any) -> WorldInfo:
+    """从已加载的 level.dat 根节点构造 :class:`WorldInfo`。
+
+    Args:
+        root: ``nbtlib.load`` 返回的文件/根标签。
+
+    Returns:
+        WorldInfo: 世界展示用快照。
+    """
+    data = _tag_get(root, "Data") or {}
+    version_tag = _tag_get(data, "Version") or {}
+    seed, generate_features, bonus_chest = _extract_world_gen(data)
+    data_packs = _extract_data_packs(data)
+    server_brands = _string_list(_tag_get(data, "ServerBrands"))
+    mod_metadata = detect_mod_metadata(
+        root,
+        data,
+        data_packs=data_packs,
+        server_brands=server_brands,
+    )
+    return WorldInfo(
+        version=_tag_get(version_tag, "Id", 0) or 0,
+        version_name=_tag_get(version_tag, "Name"),
+        game_type=_tag_get(data, "GameType"),
+        last_played=_tag_get(data, "LastPlayed"),
+        spawn_x=_tag_get(data, "SpawnX"),
+        spawn_y=_tag_get(data, "SpawnY"),
+        spawn_z=_tag_get(data, "SpawnZ"),
+        level_name=_tag_get(data, "LevelName"),
+        difficulty=_tag_get(data, "Difficulty"),
+        hardcore=_tag_get(data, "hardcore"),
+        allow_commands=_tag_get(data, "allowCommands"),
+        seed=seed,
+        day_time=_tag_get(data, "DayTime"),
+        time=_tag_get(data, "Time"),
+        rain_time=_tag_get(data, "rainTime"),
+        raining=_tag_get(data, "raining"),
+        thunder_time=_tag_get(data, "thunderTime"),
+        thundering=_tag_get(data, "thundering"),
+        version_series=_tag_get(version_tag, "Series"),
+        version_snapshot=_tag_get(version_tag, "Snapshot"),
+        data_packs=data_packs,
+        server_brands=server_brands,
+        was_modded=_tag_get(data, "WasModded"),
+        clear_weather_time=_tag_get(data, "clearWeatherTime"),
+        initialized=_tag_get(data, "initialized"),
+        difficulty_locked=_tag_get(data, "DifficultyLocked"),
+        spawn_angle=_tag_get(data, "SpawnAngle"),
+        generate_features=generate_features,
+        bonus_chest=bonus_chest,
+        border_center_x=_tag_get(data, "BorderCenterX"),
+        border_center_z=_tag_get(data, "BorderCenterZ"),
+        border_size=_tag_get(data, "BorderSize"),
+        border_warning_blocks=_tag_get(data, "BorderWarningBlocks"),
+        mods=list(mod_metadata.mods),
+        mod_loaders=list(mod_metadata.loaders),
+        mod_list_complete=mod_metadata.list_complete,
+    )
 
 
 class NbtLoader:
-    """NBT 数据延迟加载器"""
+    """NBT 数据延迟加载器。"""
 
-    def __init__(self, world_path: Path, log_callback: Optional[Callable] = None):
+    def __init__(
+        self,
+        world_path: Path,
+        log_callback: Optional[LogFn] = None,
+    ) -> None:
+        """初始化加载器。
+
+        Args:
+            world_path: 世界根目录。
+            log_callback: 可选日志回调 ``(message, level)``。
+        """
         self.world_path = world_path
-        self._log = log_callback or (lambda msg, lvl="INFO": None)
-
-        # 缓存
+        self._log: LogFn = log_callback or (lambda msg, lvl="INFO": None)
         self._level_data: Optional[File] = None
         self._world_info: Optional[WorldInfo] = None
         self._loaded_player_data: Dict[str, Compound] = {}
         self._loaded_regions: Dict[Tuple[int, int], Path] = {}
 
     def load_level_info(self) -> WorldInfo:
-        """读取 level.dat 并提取完整信息
+        """读取 level.dat 并提取完整信息。
 
         Returns:
-            WorldInfo 对象
+            WorldInfo: 缓存的世界信息快照。
 
         Raises:
-            FileNotFoundError: level.dat 不存在
-            RuntimeError: NBT 解析失败
+            FileNotFoundError: ``level.dat`` 不存在。
+            RuntimeError: NBT 解析失败。
         """
         if self._world_info is not None:
             return self._world_info
 
         level_path = self.world_path / "level.dat"
         if not level_path.exists():
-            self._log("未找到 level.dat，这可能不是有效的 Minecraft 存档目录", "WARNING")
+            self._log(
+                "未找到 level.dat，这可能不是有效的 Minecraft 存档目录",
+                "WARNING",
+            )
             raise FileNotFoundError(f"未找到 level.dat: {level_path}")
 
         try:
             self._level_data = nbtlib.load(level_path)
-            root = self._level_data
-            data = root.get("Data") or {}
-
-            # 提取版本信息
-            version_tag = data.get("Version", {})
-            version = version_tag.get("Id", 0) if version_tag else 0
-            version_name = version_tag.get("Name", None) if version_tag else None
-            version_series = version_tag.get("Series", None) if version_tag else None
-            version_snapshot = version_tag.get("Snapshot", None) if version_tag else None
-
-            # 提取世界基本信息
-            game_type = data.get("GameType", None)
-            last_played = data.get("LastPlayed", None)
-            spawn_x = data.get("SpawnX", None)
-            spawn_y = data.get("SpawnY", None)
-            spawn_z = data.get("SpawnZ", None)
-            level_name = data.get("LevelName", None)
-            difficulty = data.get("Difficulty", None)
-            hardcore = data.get("hardcore", None)
-            allow_commands = data.get("allowCommands", None)
-            difficulty_locked = data.get("DifficultyLocked", None)
-            spawn_angle = data.get("SpawnAngle", None)
-
-            # 提取时间和天气信息
-            day_time = data.get("DayTime", None)
-            time = data.get("Time", None)
-            rain_time = data.get("rainTime", None)
-            raining = data.get("raining", None)
-            thunder_time = data.get("thunderTime", None)
-            thundering = data.get("thundering", None)
-            clear_weather_time = data.get("clearWeatherTime", None)
-
-            # 提取种子
-            seed = None
-            generate_features = None
-            bonus_chest = None
-            wgs = data.get("WorldGenSettings")
-            if wgs:
-                seed = wgs.get("seed", None)
-                generate_features = wgs.get("generate_features", None)
-                bonus_chest = wgs.get("bonus_chest", None)
-
-            # 提取数据包信息
-            data_packs = None
-            dp = data.get("DataPacks")
-            if dp:
-                enabled = dp.get("Enabled", [])
-                disabled = dp.get("Disabled", [])
-                if enabled or disabled:
-                    data_packs = {
-                        "enabled": [str(e) for e in enabled] if enabled else [],
-                        "disabled": [str(d) for d in disabled] if disabled else [],
-                    }
-
-            # 提取其他信息
-            server_brand_tags = data.get("ServerBrands", None)
-            server_brands = (
-                [str(brand) for brand in server_brand_tags]
-                if server_brand_tags else None
+            self._world_info = build_world_info_from_level_root(self._level_data)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self._log(
+                f"解析 level.dat 失败: {type(exc).__name__}: {exc}",
+                "ERROR",
             )
-            was_modded = data.get("WasModded", None)
-            initialized = data.get("initialized", None)
-            mod_metadata = detect_mod_metadata(
-                root,
-                data,
-                data_packs=data_packs,
-                server_brands=server_brands,
+            raise RuntimeError(
+                f"NBT 解析失败 ({level_path.name}): "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        except Exception as exc:
+            self._log(
+                f"解析 level.dat 失败: {type(exc).__name__}: {exc}",
+                "ERROR",
             )
+            raise RuntimeError(
+                f"NBT 解析失败 ({level_path.name}): "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
 
-            # 世界边界
-            border_center_x = data.get("BorderCenterX", None)
-            border_center_z = data.get("BorderCenterZ", None)
-            border_size = data.get("BorderSize", None)
-            border_warning_blocks = data.get("BorderWarningBlocks", None)
-
-            self._world_info = WorldInfo(
-                version=version,
-                version_name=version_name,
-                game_type=game_type,
-                last_played=last_played,
-                spawn_x=spawn_x,
-                spawn_y=spawn_y,
-                spawn_z=spawn_z,
-                level_name=level_name,
-                difficulty=difficulty,
-                hardcore=hardcore,
-                allow_commands=allow_commands,
-                seed=seed,
-                day_time=day_time,
-                time=time,
-                rain_time=rain_time,
-                raining=raining,
-                thunder_time=thunder_time,
-                thundering=thundering,
-                version_series=version_series,
-                version_snapshot=version_snapshot,
-                data_packs=data_packs,
-                server_brands=server_brands,
-                was_modded=was_modded,
-                clear_weather_time=clear_weather_time,
-                initialized=initialized,
-                difficulty_locked=difficulty_locked,
-                spawn_angle=spawn_angle,
-                generate_features=generate_features,
-                bonus_chest=bonus_chest,
-                border_center_x=border_center_x,
-                border_center_z=border_center_z,
-                border_size=border_size,
-                border_warning_blocks=border_warning_blocks,
-                mods=list(mod_metadata.mods),
-                mod_loaders=list(mod_metadata.loaders),
-                mod_list_complete=mod_metadata.list_complete,
-            )
-
-            self._log(f"已加载存档信息：版本 {version} ({version_name})", "INFO")
-            return self._world_info
-
-        except Exception as e:
-            self._log(f"解析 level.dat 失败: {type(e).__name__}: {e}", "ERROR")
-            raise RuntimeError(f"NBT 解析失败 ({level_path.name}): {type(e).__name__}: {e}") from e
+        self._log(
+            f"已加载存档信息：版本 {self._world_info.version} "
+            f"({self._world_info.version_name})",
+            "INFO",
+        )
+        return self._world_info
 
     def get_level_data(self) -> Optional[File]:
-        """获取已加载的 level.dat 数据"""
+        """获取已加载的 level.dat 数据。"""
         return self._level_data
 
-    def load_player_data(self, uuid: str, player_files: Dict[str, Path]) -> Optional[Compound]:
-        """延迟加载指定 UUID 的玩家数据文件
+    def load_player_data(
+        self,
+        uuid: str,
+        player_files: Dict[str, Path],
+    ) -> Optional[Compound]:
+        """延迟加载指定 UUID 的玩家数据文件。
 
         Args:
-            uuid: 玩家 UUID（规范化后）
-            player_files: UUID -> 文件路径的映射
+            uuid: 玩家 UUID（规范化后）。
+            player_files: UUID → 文件路径映射。
 
         Returns:
-            玩家数据的 NBT 标签，若加载失败则返回 None
+            Compound | None: 玩家 NBT；加载失败为 None。
         """
         if uuid in self._loaded_player_data:
             return self._loaded_player_data[uuid]
-
         if uuid not in player_files:
             self._log(f"玩家 UUID 不存在: {uuid}", "WARNING")
             return None
@@ -190,8 +221,11 @@ class NbtLoader:
             data = nbtlib.load(path)
             self._loaded_player_data[uuid] = data
             return data
-        except Exception as e:
-            self._log(f"加载玩家数据 {uuid} 失败: {e}", "ERROR")
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            self._log(f"加载玩家数据 {uuid} 失败: {exc}", "ERROR")
+            return None
+        except Exception as exc:
+            self._log(f"加载玩家数据 {uuid} 失败: {exc}", "ERROR")
             return None
 
     def load_chunk_nbt(
@@ -200,15 +234,15 @@ class NbtLoader:
         chunk_x: int,
         chunk_z: int,
     ) -> Optional[Tuple[Any, Path]]:
-        """加载指定区块的 NBT 数据
+        """加载指定区块的 NBT 数据。
 
         Args:
-            region_path: 相对存档根目录的区域文件路径
-            chunk_x: 区块在区域内的 X 坐标 (0-31)
-            chunk_z: 区块在区域内的 Z 坐标 (0-31)
+            region_path: 相对存档根目录的区域文件路径。
+            chunk_x: 区域内区块 X（0–31）。
+            chunk_z: 区域内区块 Z（0–31）。
 
         Returns:
-            (区块数据, 绝对路径) 或 None
+            tuple | None: ``(区块数据, 绝对路径)``；失败为 None。
         """
         try:
             abs_region_path = self.world_path / region_path
@@ -217,6 +251,7 @@ class NbtLoader:
                 return None
 
             from core.mca import NativeRegion
+
             with NativeRegion.from_file(abs_region_path) as region:
                 chunk = region.get_chunk(chunk_x, chunk_z)
                 if chunk is None or chunk.data is None:
@@ -225,13 +260,24 @@ class NbtLoader:
                         "WARNING",
                     )
                     return None
-                self._log(f"已加载区块: {region_path} [{chunk_x}, {chunk_z}]", "INFO")
+                self._log(
+                    f"已加载区块: {region_path} [{chunk_x}, {chunk_z}]",
+                    "INFO",
+                )
                 return chunk.data, abs_region_path
-
-        except Exception as e:
-            self._log(f"加载区块失败: {e}", "ERROR")
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            self._log(f"加载区块失败: {exc}", "ERROR")
+            return None
+        except Exception as exc:
+            self._log(f"加载区块失败: {exc}", "ERROR")
             return None
 
     def cache_region(self, x: int, z: int, path: Path) -> None:
-        """缓存区域文件路径"""
+        """缓存区域文件路径。
+
+        Args:
+            x: 区域 X。
+            z: 区域 Z。
+            path: 区域文件路径。
+        """
         self._loaded_regions[(x, z)] = path

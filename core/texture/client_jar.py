@@ -32,9 +32,12 @@ class ClientJarInfo:
     size: int
 
 
-def find_local_minecraft_jar() -> Optional[Path]:
-    """Locate the newest installed client jar under the local Minecraft dir."""
-    versions_dir = _minecraft_directory() / "versions"
+def find_local_minecraft_jar(
+    minecraft_dir: Optional[Path] = None,
+) -> Optional[Path]:
+    """Locate the newest installed client jar under a Minecraft data dir."""
+    root = Path(minecraft_dir) if minecraft_dir is not None else minecraft_directory()
+    versions_dir = root / "versions"
     if not versions_dir.exists():
         return None
     jars = _find_version_jars(versions_dir)
@@ -42,6 +45,113 @@ def find_local_minecraft_jar() -> Optional[Path]:
         return None
     jars.sort(key=lambda item: item[0], reverse=True)
     return jars[0][1]
+
+
+def minecraft_directory() -> Path:
+    """Return the platform default Minecraft data directory."""
+    return _minecraft_directory()
+
+
+def is_minecraft_data_dir(path: Path) -> bool:
+    """Heuristic: does ``path`` look like a Minecraft data root?"""
+    if not path.is_dir():
+        return False
+    # Custom installs may use a folder literally named ".minecraft".
+    markers = (
+        path / "assets" / "indexes",
+        path / "assets" / "objects",
+        path / "versions",
+        path / "launcher_profiles.json",
+        path / "launcher_accounts.json",
+    )
+    return any(marker.exists() for marker in markers)
+
+
+def minecraft_dir_from_client_jar(jar_path: Path) -> Optional[Path]:
+    """Infer ``.minecraft`` from ``versions/<id>/<id>.jar`` layout."""
+    try:
+        jar = Path(jar_path).resolve()
+    except OSError:
+        return None
+    # .../.minecraft/versions/1.20.1/1.20.1.jar
+    if jar.parent.name and jar.parent.parent.name == "versions":
+        candidate = jar.parent.parent.parent
+        if is_minecraft_data_dir(candidate):
+            return candidate
+    # Walk up a few levels as a looser fallback.
+    current = jar.parent
+    for _ in range(6):
+        if is_minecraft_data_dir(current):
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
+
+
+def discover_minecraft_directory(
+    *,
+    configured: Optional[Path] = None,
+    start_path: Optional[Path] = None,
+    jar_path: Optional[Path] = None,
+) -> Optional[Path]:
+    """Resolve a Minecraft data directory from config, save path, or jar.
+
+    Order:
+    1. Explicit configured path (if valid)
+    2. Inferred from a client jar path
+    3. Walk up from a save/world path looking for a data root
+    4. Platform default ``.minecraft`` when it looks valid
+    """
+    if configured is not None:
+        try:
+            configured_path = Path(configured).expanduser().resolve()
+        except OSError:
+            configured_path = None
+        if configured_path is not None and is_minecraft_data_dir(configured_path):
+            return configured_path
+
+    if jar_path is not None:
+        from_jar = minecraft_dir_from_client_jar(Path(jar_path))
+        if from_jar is not None:
+            return from_jar
+
+    if start_path is not None:
+        walked = minecraft_dir_from_start_path(Path(start_path))
+        if walked is not None:
+            return walked
+
+    default = minecraft_directory()
+    if is_minecraft_data_dir(default):
+        return default
+    return None
+
+
+def minecraft_dir_from_start_path(start_path: Path) -> Optional[Path]:
+    """Walk parents of a save/world path to find a Minecraft data root.
+
+    Examples that work:
+    - ``.../.minecraft/saves/World``
+    - ``F:/Game/minecraft/.minecraft/saves/World``
+    - MultiMC-style ``instances/foo/.minecraft/saves/World``
+    """
+    try:
+        current = Path(start_path).expanduser().resolve()
+    except OSError:
+        return None
+    if current.is_file():
+        current = current.parent
+    for _ in range(10):
+        if is_minecraft_data_dir(current):
+            return current
+        # Also accept a parent that *contains* `.minecraft`.
+        nested = current / ".minecraft"
+        if is_minecraft_data_dir(nested):
+            return nested
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
 
 
 def _minecraft_directory() -> Path:
@@ -225,7 +335,12 @@ def _is_valid_jar(path: Path) -> bool:
 
 
 def cleanup_old_jars(jar_cache_dir: Path, keep_count: int = 1) -> None:
-    """Keep only the newest N cached minecraft-*-client.jar files."""
+    """Keep only the newest N cached ``minecraft-*-client.jar`` files.
+
+    Args:
+        jar_cache_dir: Directory holding downloaded client jars.
+        keep_count: Number of newest jars to retain.
+    """
     try:
         if not jar_cache_dir.exists():
             return
@@ -240,14 +355,21 @@ def cleanup_old_jars(jar_cache_dir: Path, keep_count: int = 1) -> None:
                 logger.info(
                     f"已清理旧版本 JAR: {old_jar.name} ({size_mb:.1f} MB)"
                 )
-            except Exception as exc:
+            except OSError as exc:
                 logger.warning(f"清理 JAR 失败 {old_jar.name}: {exc}")
-    except Exception as exc:
+    except OSError as exc:
         logger.warning(f"清理旧 JAR 文件时出错: {exc}")
 
 
 def download_client_jar(jar_cache_dir: Path) -> Optional[Path]:
-    """Download the latest client jar into jar_cache_dir when needed."""
+    """Download the latest client jar into *jar_cache_dir* when needed.
+
+    Args:
+        jar_cache_dir: Target cache directory.
+
+    Returns:
+        Path | None: Local jar path on success, otherwise ``None``.
+    """
     try:
         logger.info("开始下载 Minecraft 客户端 JAR...")
         cleanup_old_jars(jar_cache_dir, keep_count=1)
@@ -261,6 +383,9 @@ def download_client_jar(jar_cache_dir: Path) -> Optional[Path]:
         if stream_client_jar(info, jar_path):
             logger.info(f"JAR 下载完成: {jar_path}")
             return jar_path
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        logger.error(f"下载 JAR 失败: {exc}")
     except Exception as exc:
+        # Network libraries may raise RequestException subclasses.
         logger.error(f"下载 JAR 失败: {exc}")
     return None

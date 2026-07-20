@@ -1,10 +1,142 @@
 """
 PlayerManager - 玩家数据管理器
-负责玩家 UUID 规范化、名称解析、背包物品提取等
+负责玩家 UUID 规范化、名称解析、状态/容器提取等
 """
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+
 from nbtlib import Compound
+
+from core.uuid_utils import format_uuid_with_hyphens, normalize_uuid
+
+
+# Inventory slot ranges used by Java Edition player.dat
+MAIN_INVENTORY_SLOTS = frozenset(range(0, 36))
+EQUIPMENT_SLOTS = frozenset({100, 101, 102, 103, -106})
+ENDER_CHEST_SLOTS = frozenset(range(0, 27))
+
+_NAME_KEYS = (
+    "LastKnownName",
+    "Name",
+    "bukkit.lastKnownName",
+    "CustomName",
+    "display.Name",
+    "lastKnownName",
+    "name",
+)
+
+
+@dataclass(frozen=True)
+class PlayerItemStack:
+    """One inventory / ender / equipment stack with a stable dict shape."""
+
+    slot: int
+    id: str
+    count: int
+    tag: Any = None
+    components: Any = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "slot": self.slot,
+            "id": self.id,
+            "count": self.count,
+        }
+        if self.tag is not None:
+            payload["tag"] = self.tag
+        if self.components is not None:
+            payload["components"] = self.components
+        return payload
+
+
+@dataclass(frozen=True)
+class PlayerIdentity:
+    uuid_norm: str
+    uuid_hyphen: str
+    name: Optional[str]
+
+
+@dataclass(frozen=True)
+class PlayerState:
+    health: Optional[float]
+    food_level: Optional[int]
+    food_saturation: Optional[float]
+    xp_level: Optional[int]
+    xp_total: Optional[int]
+    xp_p: Optional[float]
+    air: Optional[int]
+    dimension: Optional[str]
+    game_type: Optional[int]
+    selected_slot: Optional[int]
+    score: Optional[int]
+
+
+@dataclass(frozen=True)
+class PlayerPose:
+    x: Optional[float]
+    y: Optional[float]
+    z: Optional[float]
+    yaw: Optional[float]
+    pitch: Optional[float]
+
+
+@dataclass(frozen=True)
+class PlayerSpawn:
+    x: Optional[int]
+    y: Optional[int]
+    z: Optional[int]
+    dimension: Optional[str]
+    forced: Optional[bool]
+
+
+@dataclass(frozen=True)
+class PlayerDeathLocation:
+    dimension: Optional[str]
+    x: Optional[float]
+    y: Optional[float]
+    z: Optional[float]
+
+
+@dataclass(frozen=True)
+class PlayerAbilities:
+    flying: Optional[bool]
+    may_fly: Optional[bool]
+    instabuild: Optional[bool]
+    invulnerable: Optional[bool]
+    may_build: Optional[bool]
+    walk_speed: Optional[float]
+    fly_speed: Optional[float]
+
+
+@dataclass(frozen=True)
+class PlayerAttribute:
+    """One entry from the player Attributes list."""
+
+    name: str
+    base: Optional[float]
+    modifiers: int = 0
+
+
+@dataclass(frozen=True)
+class PlayerEffect:
+    """One potion / status effect on the player."""
+
+    id: str
+    amplifier: int
+    duration: int
+    ambient: bool = False
+    show_particles: bool = True
+    show_icon: bool = True
+
+
+@dataclass(frozen=True)
+class PlayerContainers:
+    inventory: tuple[PlayerItemStack, ...]
+    equipment: tuple[PlayerItemStack, ...]
+    ender_items: tuple[PlayerItemStack, ...]
 
 
 class PlayerManager:
@@ -15,158 +147,613 @@ class PlayerManager:
         self._player_names: Dict[str, Optional[str]] = {}
         self._usercache: Dict[str, str] = {}
 
-    def initialize_names(self, player_files: Dict[str, Path], usercache: Dict[str, str]) -> None:
+    def initialize_names(
+        self,
+        player_files: Dict[str, Path],
+        usercache: Dict[str, str],
+    ) -> None:
         """初始化玩家名称映射
 
         Args:
             player_files: UUID -> 文件路径的映射
             usercache: 从 usercache.json 加载的 UUID -> 名称映射
         """
-        self._usercache = usercache
+        # Merge rather than replace so seeded/imported names survive.
+        for uuid, name in usercache.items():
+            norm = normalize_uuid(uuid)
+            if not norm or not name:
+                continue
+            cleaned = str(name).strip()
+            if not cleaned:
+                continue
+            self._usercache[norm] = cleaned
 
-        # 初始化所有玩家的名称（先用 usercache 填充）
         for uuid in player_files:
-            self._player_names[uuid] = usercache.get(uuid)
+            norm = normalize_uuid(uuid)
+            if not norm:
+                continue
+            if norm not in self._player_names or not self._player_names[norm]:
+                self._player_names[norm] = self._usercache.get(norm)
 
-    def get_player_names(self, player_uuids: List[str]) -> Dict[str, Optional[str]]:
-        """返回 UUID 到玩家名称的映射
-
-        Args:
-            player_uuids: 玩家 UUID 列表
-
-        Returns:
-            UUID -> 名称的映射（未知名称为 None）
-        """
+    def get_player_names(
+        self,
+        player_uuids: List[str],
+    ) -> Dict[str, Optional[str]]:
+        """返回 UUID 到玩家名称的映射（未知名称为 None）"""
         result: Dict[str, Optional[str]] = {}
         for uuid in player_uuids:
-            result[uuid] = self._player_names.get(uuid)
+            result[uuid] = self.get_known_name(uuid)
         return result
 
-    def resolve_player_name(self, uuid: str, player_data: Optional[Compound]) -> Optional[str]:
-        """按需解析单个玩家名称（从 NBT 加载）
+    def get_known_name(self, uuid: str) -> Optional[str]:
+        """Return a cached display name without loading player NBT.
 
-        Args:
-            uuid: 玩家 UUID（规范化后）
-            player_data: 玩家 NBT 数据
-
-        Returns:
-            玩家名称，若无法解析则返回 None
+        Looks up both the per-player cache and the full usercache map so
+        stats-only UUIDs can still resolve to a name.
         """
-        # 如果已缓存，直接返回
-        if uuid in self._player_names and self._player_names[uuid] is not None:
-            return self._player_names[uuid]
+        norm = normalize_uuid(uuid)
+        if not norm:
+            return None
+        cached = self._player_names.get(norm)
+        if cached:
+            return cached
+        return self._usercache.get(norm)
 
-        # 从 NBT 数据中提取
+    def seed_names(self, names: Dict[str, Optional[str]]) -> None:
+        """Merge an external UUID -> name mapping into the cache."""
+        for uuid, name in names.items():
+            if not name:
+                continue
+            norm = normalize_uuid(uuid)
+            if not norm:
+                continue
+            cleaned = str(name).strip()
+            if not cleaned:
+                continue
+            self._player_names[norm] = cleaned
+            self._usercache[norm] = cleaned
+
+    def resolve_player_name(
+        self,
+        uuid: str,
+        player_data: Optional[Compound],
+    ) -> Optional[str]:
+        """按需解析单个玩家名称（从 NBT 加载）"""
+        norm = normalize_uuid(uuid)
+        known = self.get_known_name(norm)
+        if known:
+            return known
+
         if player_data is None:
             return None
 
-        name_keys = [
-            "LastKnownName", "Name", "bukkit.lastKnownName",
-            "CustomName", "display.Name", "lastKnownName", "name"
-        ]
-
-        for key in name_keys:
+        for key in _NAME_KEYS:
             tag = player_data.get(key)
-            if tag is not None:
-                name = str(tag.value) if hasattr(tag, 'value') else str(tag)
-                name = name.strip("'\"")
-                self._player_names[uuid] = name
+            if tag is None:
+                continue
+            name = str(tag.value) if hasattr(tag, "value") else str(tag)
+            name = name.strip("'\"")
+            if name:
+                self._player_names[norm] = name
+                self._usercache[norm] = name
                 return name
 
         return None
 
-    def get_player_inventory(self, player_data: Optional[Compound]) -> List[Dict[str, Any]]:
-        """提取指定玩家的背包物品列表
+    def extract_identity(
+        self,
+        uuid: str,
+        player_data: Optional[Compound] = None,
+    ) -> PlayerIdentity:
+        """Build identity for a UUID, optionally resolving name from NBT."""
+        norm = normalize_uuid(uuid)
+        if player_data is not None:
+            name = self.resolve_player_name(norm, player_data)
+        else:
+            name = self.get_known_name(norm)
+        return PlayerIdentity(
+            uuid_norm=norm,
+            uuid_hyphen=format_uuid_with_hyphens(norm),
+            name=name,
+        )
 
-        Args:
-            player_data: 玩家 NBT 数据
+    def extract_state(self, player_data: Optional[Compound]) -> PlayerState:
+        if player_data is None:
+            return PlayerState(
+                health=None,
+                food_level=None,
+                food_saturation=None,
+                xp_level=None,
+                xp_total=None,
+                xp_p=None,
+                air=None,
+                dimension=None,
+                game_type=None,
+                selected_slot=None,
+                score=None,
+            )
+        return PlayerState(
+            health=_as_float(player_data.get("Health")),
+            food_level=_as_int(player_data.get("foodLevel")),
+            food_saturation=_as_float(player_data.get("foodSaturationLevel")),
+            xp_level=_as_int(player_data.get("XpLevel")),
+            xp_total=_as_int(player_data.get("XpTotal")),
+            xp_p=_as_float(player_data.get("XpP")),
+            air=_as_int(player_data.get("Air")),
+            dimension=_as_str(player_data.get("Dimension")),
+            game_type=_as_int(
+                player_data.get("playerGameType", player_data.get("GameType"))
+            ),
+            selected_slot=_as_int(player_data.get("SelectedItemSlot")),
+            score=_as_int(player_data.get("Score")),
+        )
+
+    def extract_pose(self, player_data: Optional[Compound]) -> PlayerPose:
+        if player_data is None:
+            return PlayerPose(x=None, y=None, z=None, yaw=None, pitch=None)
+        pos = player_data.get("Pos")
+        rot = player_data.get("Rotation")
+        return PlayerPose(
+            x=_sequence_float(pos, 0),
+            y=_sequence_float(pos, 1),
+            z=_sequence_float(pos, 2),
+            yaw=_sequence_float(rot, 0),
+            pitch=_sequence_float(rot, 1),
+        )
+
+    def extract_spawn(self, player_data: Optional[Compound]) -> PlayerSpawn:
+        if player_data is None:
+            return PlayerSpawn(
+                x=None, y=None, z=None, dimension=None, forced=None
+            )
+        return PlayerSpawn(
+            x=_as_int(player_data.get("SpawnX")),
+            y=_as_int(player_data.get("SpawnY")),
+            z=_as_int(player_data.get("SpawnZ")),
+            dimension=_as_str(player_data.get("SpawnDimension")),
+            forced=_as_bool(player_data.get("SpawnForced")),
+        )
+
+    def extract_death(
+        self,
+        player_data: Optional[Compound],
+    ) -> Optional[PlayerDeathLocation]:
+        if player_data is None:
+            return None
+        death = player_data.get("LastDeathLocation")
+        if death is None:
+            return None
+        if not hasattr(death, "get"):
+            return None
+        pos = death.get("pos")
+        return PlayerDeathLocation(
+            dimension=_as_str(death.get("dimension")),
+            x=_sequence_float(pos, 0),
+            y=_sequence_float(pos, 1),
+            z=_sequence_float(pos, 2),
+        )
+
+    def extract_abilities(
+        self,
+        player_data: Optional[Compound],
+    ) -> PlayerAbilities:
+        empty = PlayerAbilities(
+            flying=None,
+            may_fly=None,
+            instabuild=None,
+            invulnerable=None,
+            may_build=None,
+            walk_speed=None,
+            fly_speed=None,
+        )
+        if player_data is None:
+            return empty
+        abilities = player_data.get("abilities")
+        if abilities is None or not hasattr(abilities, "get"):
+            return empty
+        return PlayerAbilities(
+            flying=_as_bool(abilities.get("flying")),
+            may_fly=_as_bool(abilities.get("mayfly")),
+            instabuild=_as_bool(abilities.get("instabuild")),
+            invulnerable=_as_bool(abilities.get("invulnerable")),
+            may_build=_as_bool(abilities.get("mayBuild")),
+            walk_speed=_as_float(abilities.get("walkSpeed")),
+            fly_speed=_as_float(abilities.get("flySpeed")),
+        )
+
+    def extract_containers(
+        self,
+        player_data: Optional[Compound],
+    ) -> PlayerContainers:
+        if player_data is None:
+            return PlayerContainers(inventory=(), equipment=(), ender_items=())
+
+        inventory_items = _parse_item_list(player_data.get("Inventory"))
+        ender_items = _parse_item_list(player_data.get("EnderItems"))
+
+        main = tuple(
+            item for item in inventory_items if item.slot in MAIN_INVENTORY_SLOTS
+        )
+        equipment = tuple(
+            item for item in inventory_items if item.slot in EQUIPMENT_SLOTS
+        )
+        ender = tuple(
+            item for item in ender_items if item.slot in ENDER_CHEST_SLOTS
+        )
+        return PlayerContainers(
+            inventory=main,
+            equipment=equipment,
+            ender_items=ender,
+        )
+
+    def extract_attributes(
+        self,
+        player_data: Optional[Compound],
+    ) -> tuple[PlayerAttribute, ...]:
+        if player_data is None:
+            return ()
+        raw = player_data.get("Attributes")
+        if raw is None:
+            return ()
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            return ()
+        results: List[PlayerAttribute] = []
+        for entry in raw:
+            if not hasattr(entry, "get"):
+                continue
+            name = _as_str(entry.get("Name", entry.get("name")))
+            if not name:
+                continue
+            base = _as_float(entry.get("Base", entry.get("base")))
+            modifiers = entry.get("Modifiers", entry.get("modifiers"))
+            mod_count = 0
+            if modifiers is not None and hasattr(modifiers, "__len__"):
+                try:
+                    mod_count = len(modifiers)
+                except TypeError:
+                    mod_count = 0
+            results.append(
+                PlayerAttribute(name=name, base=base, modifiers=mod_count)
+            )
+        return tuple(results)
+
+    def extract_effects(
+        self,
+        player_data: Optional[Compound],
+    ) -> tuple[PlayerEffect, ...]:
+        if player_data is None:
+            return ()
+        raw = player_data.get("active_effects")
+        if raw is None:
+            raw = player_data.get("ActiveEffects")
+        if raw is None:
+            return ()
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            return ()
+        results: List[PlayerEffect] = []
+        for entry in raw:
+            if not hasattr(entry, "get"):
+                continue
+            effect_id = _as_str(
+                entry.get("id", entry.get("Id", entry.get("effect")))
+            )
+            if not effect_id:
+                # Pre-1.20 numeric potion id
+                numeric = _as_int(entry.get("Id", entry.get("id")))
+                if numeric is None:
+                    continue
+                effect_id = f"effect:{numeric}"
+            amplifier = _as_int(entry.get("amplifier", entry.get("Amplifier", 0)))
+            duration = _as_int(entry.get("duration", entry.get("Duration", 0)))
+            ambient = _as_bool(entry.get("ambient", entry.get("Ambient")))
+            show_particles = _as_bool(
+                entry.get("show_particles", entry.get("ShowParticles"))
+            )
+            show_icon = _as_bool(entry.get("show_icon", entry.get("ShowIcon")))
+            results.append(
+                PlayerEffect(
+                    id=effect_id,
+                    amplifier=amplifier if amplifier is not None else 0,
+                    duration=duration if duration is not None else 0,
+                    ambient=bool(ambient) if ambient is not None else False,
+                    show_particles=(
+                        bool(show_particles)
+                        if show_particles is not None
+                        else True
+                    ),
+                    show_icon=bool(show_icon) if show_icon is not None else True,
+                )
+            )
+        return tuple(results)
+
+    @staticmethod
+    def extract_nested_container_items(
+        item: Mapping[str, Any] | PlayerItemStack,
+    ) -> List[Dict[str, Any]]:
+        """Extract items stored inside a shulker / bundle-like stack.
+
+        Supports:
+        - legacy ``tag.BlockEntityTag.Items``
+        - 1.20.5+ ``components['minecraft:container']`` list of
+          ``{slot, item: {id, count, ...}}``
+        """
+        if isinstance(item, PlayerItemStack):
+            tag = item.tag
+            components = item.components
+            item_id = item.id
+        else:
+            tag = item.get("tag")
+            components = item.get("components")
+            item_id = str(item.get("id", "") or "")
+
+        # Modern components container
+        if components is not None:
+            modern = _extract_component_container(components)
+            if modern:
+                return modern
+
+        # Legacy BlockEntityTag
+        if tag is not None and hasattr(tag, "get"):
+            block_entity = tag.get("BlockEntityTag")
+            if block_entity is not None and hasattr(block_entity, "get"):
+                nested = _parse_item_list(block_entity.get("Items"))
+                if nested:
+                    return [entry.to_dict() for entry in nested]
+
+        # Bundles etc. may use tag.Items directly
+        if tag is not None and hasattr(tag, "get"):
+            nested = _parse_item_list(tag.get("Items"))
+            if nested:
+                return [entry.to_dict() for entry in nested]
+
+        # No nested payload — empty shulker still counts as openable.
+        if "shulker_box" in item_id:
+            return []
+        return []
+
+    @staticmethod
+    def is_container_item(item_id: str) -> bool:
+        """Return True if the item id is a known openable container."""
+        text = (item_id or "").lower()
+        return (
+            "shulker_box" in text
+            or text.endswith(":bundle")
+            or text.endswith(":bundle_of")
+            or "bundle" in text
+        )
+
+    def get_player_inventory(
+        self,
+        player_data: Optional[Compound],
+    ) -> List[Dict[str, Any]]:
+        """提取指定玩家的背包物品列表（含装备槽，兼容旧调用方）
 
         Returns:
-            物品字典列表，每项包含 slot, id, count, tag
+            物品字典列表，每项包含 slot, id, count, 以及可选 tag/components
         """
         if player_data is None:
             return []
+        items = _parse_item_list(player_data.get("Inventory"))
+        return [item.to_dict() for item in items]
 
-        items: List[Dict[str, Any]] = []
-        inventory = player_data.get("Inventory")
+    def get_player_ender_items(
+        self,
+        player_data: Optional[Compound],
+    ) -> List[Dict[str, Any]]:
+        """提取末影箱物品列表（字典形式，供 UI 复用）。"""
+        if player_data is None:
+            return []
+        items = _parse_item_list(player_data.get("EnderItems"))
+        return [
+            item.to_dict()
+            for item in items
+            if item.slot in ENDER_CHEST_SLOTS
+        ]
 
-        if inventory is not None and isinstance(inventory, list):
-            for slot in inventory:
-                try:
-                    si = slot.get("Slot", -1)
-                    iid = slot.get("id", "")
-                    cnt = slot.get("Count", 1)
-                    tag = slot.get("tag")
-
-                    if iid:
-                        items.append({
-                            "slot": int(si),
-                            "id": str(iid),
-                            "count": int(cnt),
-                            "tag": tag,
-                        })
-                except Exception:
-                    pass
-
-        return items
-
-    def import_usercache(self, path: Path, player_files: Dict[str, Path]) -> int:
-        """从指定的 usercache.json 文件导入玩家名称映射
-
-        Args:
-            path: usercache.json 文件路径
-            player_files: UUID -> 文件路径的映射
-
-        Returns:
-            成功导入的条目数量
-        """
+    def import_usercache(
+        self,
+        path: Path,
+        player_files: Dict[str, Path],
+    ) -> int:
+        """从指定的 usercache.json 文件导入玩家名称映射"""
         try:
             import json
-            with open(path, "r", encoding="utf-8") as f:
-                entries = json.load(f)
+
+            with open(path, "r", encoding="utf-8") as handle:
+                entries = json.load(handle)
 
             imported = 0
             for entry in entries:
-                uuid = self.normalize_uuid(entry.get("uuid", ""))
-                name = entry.get("name", "")
+                if not isinstance(entry, Mapping):
+                    continue
+                uuid = normalize_uuid(str(entry.get("uuid", "") or ""))
+                name = str(entry.get("name", "") or "").strip()
                 if uuid and name:
                     self._usercache[uuid] = name
                     imported += 1
 
             self._log(f"从 {path.name} 导入了 {imported} 个玩家名称", "IMPORT")
 
-            # 为所有在 player_files 中的 UUID 更新 player_names
             updated = 0
             for uuid in player_files.keys():
-                if uuid in self._usercache:
-                    old = self._player_names.get(uuid)
-                    self._player_names[uuid] = self._usercache[uuid]
+                norm = normalize_uuid(uuid)
+                if norm and norm in self._usercache:
+                    old = self._player_names.get(norm)
+                    self._player_names[norm] = self._usercache[norm]
                     updated += 1
-                    self._log(f"更新玩家名称: {uuid} -> {self._usercache[uuid]} (之前: {old})", "IMPORT")
+                    self._log(
+                        f"更新玩家名称: {norm} -> {self._usercache[norm]} "
+                        f"(之前: {old})",
+                        "IMPORT",
+                    )
 
             self._log(f"更新了 {updated} 个玩家名称", "IMPORT")
             return imported
 
-        except Exception as e:
-            self._log(f"导入 usercache.json 失败: {e}", "ERROR")
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            self._log(f"导入 usercache.json 失败: {exc}", "ERROR")
+            return 0
+        except Exception as exc:
+            self._log(f"导入 usercache.json 失败: {exc}", "ERROR")
             return 0
 
     @staticmethod
     def normalize_uuid(uuid: str) -> str:
         """规范化 UUID：移除连字符并转为小写"""
-        return uuid.replace("-", "").lower()
+        return normalize_uuid(uuid)
 
     @staticmethod
     def format_uuid_with_hyphens(uuid: str) -> str:
-        """将规范化 UUID（32 字符）格式化为带连字符的标准形式 (8-4-4-4-12)
+        """将规范化 UUID（32 字符）格式化为带连字符的标准形式 (8-4-4-4-12)"""
+        return format_uuid_with_hyphens(uuid)
 
-        Args:
-            uuid: UUID 字符串
 
-        Returns:
-            格式化后的 UUID，若长度不是 32 则返回原字符串
-        """
-        uuid = uuid.replace("-", "").lower()
-        if len(uuid) != 32:
-            return uuid
-        return f"{uuid[:8]}-{uuid[8:12]}-{uuid[12:16]}-{uuid[16:20]}-{uuid[20:]}"
+def _parse_item_list(raw: Any) -> List[PlayerItemStack]:
+    if raw is None:
+        return []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+
+    items: List[PlayerItemStack] = []
+    for slot in raw:
+        try:
+            if not hasattr(slot, "get"):
+                continue
+            item_id = _as_str(slot.get("id"))
+            if not item_id:
+                continue
+            slot_index = _as_int(slot.get("Slot", slot.get("slot", -1)))
+            if slot_index is None:
+                slot_index = -1
+            count = _as_int(slot.get("Count", slot.get("count", 1)))
+            if count is None:
+                count = 1
+            tag = slot.get("tag")
+            components = slot.get("components")
+            items.append(
+                PlayerItemStack(
+                    slot=slot_index,
+                    id=item_id,
+                    count=count,
+                    tag=tag,
+                    components=components,
+                )
+            )
+        except (TypeError, ValueError, AttributeError, KeyError):
+            continue
+    return items
+
+
+def _mapping_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    try:
+        if hasattr(obj, "get"):
+            return obj.get(key, default)
+        if isinstance(obj, Mapping):
+            return obj.get(key, default)
+    except (TypeError, KeyError):
+        return default
+    return default
+
+
+def _extract_component_container(components: Any) -> List[Dict[str, Any]]:
+    """Parse ``minecraft:container`` component into item dicts."""
+    raw = _mapping_get(components, "minecraft:container")
+    if raw is None:
+        raw = _mapping_get(components, "container")
+    if raw is None:
+        return []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for entry in raw:
+        parsed = _parse_container_entry(entry)
+        if parsed is not None:
+            results.append(parsed)
+    return results
+
+
+def _parse_container_entry(entry: Any) -> Optional[Dict[str, Any]]:
+    if not hasattr(entry, "get"):
+        return None
+    slot_index = _as_int(entry.get("slot", -1))
+    if slot_index is None:
+        slot_index = -1
+    nested_item = entry.get("item")
+    if nested_item is None or not hasattr(nested_item, "get"):
+        nested_item = entry
+    item_id = _as_str(nested_item.get("id"))
+    if not item_id:
+        return None
+    count = _as_int(nested_item.get("count", nested_item.get("Count", 1)))
+    if count is None:
+        count = 1
+    payload: Dict[str, Any] = {
+        "slot": slot_index,
+        "id": item_id,
+        "count": count,
+    }
+    tag = nested_item.get("tag")
+    comps = nested_item.get("components")
+    if tag is not None:
+        payload["tag"] = tag
+    if comps is not None:
+        payload["components"] = comps
+    return payload
+
+
+def _as_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if hasattr(value, "value") and not isinstance(value, (str, bytes)):
+        try:
+            text = str(value.value)
+        except (AttributeError, TypeError, ValueError):
+            text = str(value)
+    else:
+        text = str(value)
+    text = text.strip().strip("'\"")
+    return text or None
+
+
+def _as_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    try:
+        # nbtlib Byte tags often act as 0/1
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _sequence_float(sequence: Any, index: int) -> Optional[float]:
+    if sequence is None:
+        return None
+    try:
+        if len(sequence) <= index:
+            return None
+        return float(sequence[index])
+    except (TypeError, ValueError, IndexError):
+        return None

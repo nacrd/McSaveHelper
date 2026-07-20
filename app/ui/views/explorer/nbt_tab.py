@@ -26,11 +26,17 @@ class NbtTabMixin(ExplorerMixinHost):
 
     def _build_nbt_tab(self) -> None:
         """构建 NBT 页签 UI - 三栏布局"""
-        # 初始化折叠状态
         self._nbt_left_collapsed = False
         self._nbt_right_collapsed = False
+        chrome = self._create_nbt_chrome()
+        self._bind_nbt_chrome(chrome)
+        self._wire_nbt_coordinators()
+        self._stage_manager.update_stage_status()
+        self._chunk_ops.render_chunk_object_rows([])
 
-        chrome = build_nbt_tab_chrome(
+    def _create_nbt_chrome(self) -> Any:
+        """Build static chrome controls for the NBT tab."""
+        return build_nbt_tab_chrome(
             current_label=self._current_nbt_label,
             callbacks=NbtTabCallbacks(
                 load_target=self._load_selected_nbt_target,
@@ -51,6 +57,9 @@ class NbtTabMixin(ExplorerMixinHost):
                 discard=self._discard_nbt_changes,
             ),
         )
+
+    def _bind_nbt_chrome(self, chrome: Any) -> None:
+        """Attach chrome controls to mixin state."""
         self._nbt_left_panel = chrome.left_panel
         self._nbt_center_panel = chrome.center_panel
         self._nbt_right_panel = chrome.right_panel
@@ -70,8 +79,15 @@ class NbtTabMixin(ExplorerMixinHost):
         self._nbt_stage_list = chrome.stage_list
         self._tab_nbt.content = chrome.root
 
-        # 控件构建完成后再装配交互协调器，依赖关系保持显式。
-        self._stage_manager = NbtStageManager(
+    def _wire_nbt_coordinators(self) -> None:
+        """Create stage/chunk/data/commit coordinators after chrome exists."""
+        self._stage_manager = self._create_nbt_stage_manager()
+        self._chunk_ops = self._create_nbt_chunk_ops()
+        self._data_loader = self._create_nbt_data_loader()
+        self._commit_handler = self._create_nbt_commit_handler()
+
+    def _create_nbt_stage_manager(self) -> NbtStageManager:
+        return NbtStageManager(
             store=self._nbt_stage_store,
             status_control=self._nbt_stage_status,
             list_control=self._nbt_stage_list,
@@ -86,7 +102,9 @@ class NbtTabMixin(ExplorerMixinHost):
             ),
             log=self.app.log,
         )
-        self._chunk_ops = ChunkOperations(
+
+    def _create_nbt_chunk_ops(self) -> ChunkOperations:
+        return ChunkOperations(
             objects_list=self._chunk_objects_list,
             nbt_tree=self._nbt_tree,
             target_label=self._nbt_target_label,
@@ -104,7 +122,9 @@ class NbtTabMixin(ExplorerMixinHost):
                 ex, title=title
             ),
         )
-        self._data_loader = NbtDataLoader(
+
+    def _create_nbt_data_loader(self) -> NbtDataLoader:
+        return NbtDataLoader(
             get_world_session=lambda: self.world_session,
             get_current_uuid=lambda: self.current_uuid,
             get_current_target=lambda: self._current_nbt_target,
@@ -131,7 +151,9 @@ class NbtTabMixin(ExplorerMixinHost):
             ),
             save_file=self.app.save_file,
         )
-        self._commit_handler = NbtCommitHandler(
+
+    def _create_nbt_commit_handler(self) -> NbtCommitHandler:
+        return NbtCommitHandler(
             store=self._nbt_stage_store,
             get_world_session=lambda: self.world_session,
             replace_world_session=self._replace_world_session,
@@ -146,8 +168,6 @@ class NbtTabMixin(ExplorerMixinHost):
             ),
             log=self.app.log,
         )
-        self._stage_manager.update_stage_status()
-        self._chunk_ops.render_chunk_object_rows([])
 
     def _replace_world_session(self, session: WorldSession) -> None:
         self.world_session = session

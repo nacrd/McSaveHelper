@@ -112,18 +112,25 @@ class ConfigService:
                 "*.log",
                 "cache/",
                 "logs/"],
+            "minecraft_dir": "",
+            "auto_import_mc_lang": True,
         }
 
     @staticmethod
-    def _merge(defaults: Dict, user: Dict) -> Dict:
-        """合并默认配置和用户配置
+    def _merge(
+        defaults: Dict[str, Any],
+        user: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """递归合并默认配置与用户配置。
+
+        仅接受与默认值同类型的用户字段；嵌套 dict 递归合并。
 
         Args:
-            defaults: 默认配置字典
-            user: 用户配置字典
+            defaults: 默认配置字典。
+            user: 用户配置字典。
 
         Returns:
-            Dict: 合并后的配置字典
+            Dict[str, Any]: 合并后的新字典（不修改入参）。
         """
         merged = deepcopy(defaults)
         for key, default_value in defaults.items():
@@ -138,16 +145,26 @@ class ConfigService:
         return merged
 
     def _auto_fix(self) -> None:
-        """自动修复无效配置字段，用默认值替换"""
+        """自动修复缺失或类型错误的配置字段。
+
+        用默认值补齐缺失键；嵌套 dict 中类型不匹配的子键也会被替换。
+        """
         defaults = self._defaults()
         for key, default_val in defaults.items():
             if key not in self._config:
                 self._config[key] = default_val
-            elif isinstance(default_val, dict) and isinstance(self._config[key], dict):
-                for sub_key, sub_default in default_val.items():
-                    if sub_key not in self._config[key] or type(
-                            self._config[key][sub_key]) is not type(sub_default):
-                        self._config[key][sub_key] = sub_default
+                continue
+            if not (
+                isinstance(default_val, dict)
+                and isinstance(self._config[key], dict)
+            ):
+                continue
+            for sub_key, sub_default in default_val.items():
+                current = self._config[key]
+                if sub_key not in current or type(
+                    current[sub_key]
+                ) is not type(sub_default):
+                    current[sub_key] = sub_default
 
     # ─── 快捷访问 ──────────────────────────────────
 
@@ -363,6 +380,10 @@ class ConfigService:
                     batch.get("preserve_structure", True)
                 ),
                 cleanup_patterns=tuple(str(item) for item in patterns),
+                minecraft_dir=str(self._config.get("minecraft_dir", "") or ""),
+                auto_import_mc_lang=bool(
+                    self._config.get("auto_import_mc_lang", True)
+                ),
             )
 
     def update_settings(self, settings: ApplicationSettings) -> None:
@@ -370,6 +391,10 @@ class ConfigService:
         with self._lock:
             self._config["version_detection"] = settings.version_detection
             self._config["api_timeout"] = settings.api_timeout
+            self._config["minecraft_dir"] = str(settings.minecraft_dir or "")
+            self._config["auto_import_mc_lang"] = bool(
+                settings.auto_import_mc_lang
+            )
 
             ui = dict(self._config.get("ui_settings", {}))
             ui.update({
@@ -398,6 +423,34 @@ class ConfigService:
             )
             self._migration.version_detection = settings.version_detection
         self.save()
+
+    def get_minecraft_dir(self) -> str:
+        """返回配置的 Minecraft 数据目录。
+
+        Returns:
+            str: 已配置路径；未设置时为空字符串。
+        """
+        with self._lock:
+            return str(self._config.get("minecraft_dir", "") or "").strip()
+
+    def set_minecraft_dir(self, path: str) -> None:
+        """持久化自定义 Minecraft 数据目录。
+
+        Args:
+            path: 目录路径；空白值会保存为空字符串表示自动推断。
+        """
+        with self._lock:
+            self._config["minecraft_dir"] = str(path or "").strip()
+        self.save()
+
+    def is_auto_import_mc_lang_enabled(self) -> bool:
+        """是否在选择存档后自动导入 Minecraft 原版语言。
+
+        Returns:
+            bool: 配置开启时为 True；缺省键视为开启。
+        """
+        with self._lock:
+            return bool(self._config.get("auto_import_mc_lang", True))
 
     # ─── 运行时迁移配置 ────────────────────────────
 

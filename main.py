@@ -55,9 +55,13 @@ def _get_log_path() -> Path:
 
 
 def main() -> None:
-    """应用主入口"""
-    if '--console' in sys.argv:
-        sys.argv.remove('--console')
+    """应用主入口。
+
+    解析 ``--console``、配置线程公平性并启动 Flet 应用。
+    启动失败时写入 ``startup_error.log`` 并以非零状态退出。
+    """
+    if "--console" in sys.argv:
+        sys.argv.remove("--console")
         _setup_console()
 
     try:
@@ -71,12 +75,16 @@ def main() -> None:
 
         ft.run(Application)
 
-    except ImportError as e:
-        msg = f"[FATAL] 缺少依赖: {e}\n请运行: pip install -r requirements.txt"
+    except ImportError as exc:
+        msg = (
+            f"[FATAL] 缺少依赖: {exc}\n"
+            "请运行: pip install -r requirements.txt"
+        )
         print(msg)
         _write_error_log(msg)
         sys.exit(1)
     except Exception:
+        # 进程入口边界：记录完整栈并退出，避免 GUI 子系统静默失败。
         msg = "[FATAL] 应用启动失败:\n" + traceback.format_exc()
         print(msg)
         _write_error_log(msg)
@@ -84,13 +92,18 @@ def main() -> None:
 
 
 def _write_error_log(msg: str) -> None:
-    """将错误写入日志文件，便于排查打包后的问题"""
+    """将错误写入启动日志，便于排查打包后的问题。
+
+    Args:
+        msg: 要写入的错误文本。
+    """
     try:
         log_path = _get_log_path()
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(msg)
+        with open(log_path, "w", encoding="utf-8") as handle:
+            handle.write(msg)
         print(f"错误日志已保存到: {log_path}")
-    except Exception:
+    except OSError:
+        # best-effort：日志本身失败不应再抛出。
         pass
 
 

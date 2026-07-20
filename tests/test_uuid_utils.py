@@ -5,7 +5,14 @@ import nbtlib
 import pytest
 
 from core.nbt_utils import patch_nbt
-from core.uuid_utils import build_mappings, get_offline_uuid_str, uuid_to_ints, uuid_to_most_least
+from core.uuid_utils import (
+    build_mappings,
+    format_uuid_with_hyphens,
+    get_offline_uuid_str,
+    normalize_uuid,
+    uuid_to_ints,
+    uuid_to_most_least,
+)
 
 
 def minecraft_offline_uuid(name: str) -> str:
@@ -19,6 +26,16 @@ def minecraft_offline_uuid(name: str) -> str:
 def test_offline_uuid_matches_minecraft_algorithm():
     assert get_offline_uuid_str("Steve") == minecraft_offline_uuid("Steve")
     assert uuid.UUID(get_offline_uuid_str("Steve")).version == 3
+
+
+def test_normalize_uuid_and_format_helpers():
+    raw = "AABBCCDD-EEFF-0011-2233-445566778899"
+    assert normalize_uuid(raw) == "aabbccddeeff00112233445566778899"
+    assert format_uuid_with_hyphens(raw) == (
+        "aabbccdd-eeff-0011-2233-445566778899"
+    )
+    assert normalize_uuid("") == ""
+    assert format_uuid_with_hyphens("") == ""
 
 
 def test_uuid_to_ints_uses_signed_32_bit_values():

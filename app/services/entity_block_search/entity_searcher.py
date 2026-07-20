@@ -1,9 +1,11 @@
 """Entity search implementation."""
+from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 from .base_searcher import BaseSearcher
+from .models import SearchResult
 from .utils import (
     get_dimension_entity_files,
     get_dimension_region_files,
@@ -12,6 +14,9 @@ from .utils import (
     tag_to_str,
     tag_value,
 )
+
+LogFn = Callable[[str, str], None]
+ProgressFn = Callable[[float, str], None]
 
 
 class EntitySearcher(BaseSearcher):
@@ -24,8 +29,8 @@ class EntitySearcher(BaseSearcher):
         world_path: Path,
         dimension: str,
         target: str,
-        log: Callable[[str, str], None],
-        progress: Callable[[float, str], None],
+        log: LogFn,
+        progress: ProgressFn,
     ) -> None:
         """Scan modern entity regions and legacy chunk-embedded entities."""
         entity_files = get_dimension_entity_files(world_path, dimension)
@@ -47,10 +52,24 @@ class EntitySearcher(BaseSearcher):
                 if self._limit_reached():
                     return
                 self._handle_entity(entity, target, dimension)
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+            KeyError,
+            AttributeError,
+        ):
+            return
         except Exception:
-            pass
+            return
 
-    def _handle_entity(self, entity: Any, target: str, dimension: str) -> None:
+    def _handle_entity(
+        self,
+        entity: Any,
+        target: str,
+        dimension: str,
+    ) -> None:
         try:
             entity_id = tag_to_str(entity.get("id", ""))
             if not matches_target(entity_id, target):
@@ -58,7 +77,6 @@ class EntitySearcher(BaseSearcher):
             pos = entity.get("Pos", [])
             if len(pos) < 3:
                 return
-            from .models import SearchResult
             result = SearchResult(
                 "entity",
                 entity_id,
@@ -67,19 +85,30 @@ class EntitySearcher(BaseSearcher):
                 self._entity_info(entity, entity_id),
             )
             self.results.append(result)
+        except (
+            TypeError,
+            ValueError,
+            KeyError,
+            AttributeError,
+            IndexError,
+        ):
+            return
         except Exception:
-            pass
+            return
 
     @staticmethod
-    def _entity_pos(pos: Any) -> tuple:
-        return tuple(int(float(tag_value(value))) for value in pos[:3])
+    def _entity_pos(pos: Any) -> tuple[int, int, int]:
+        values = [int(float(tag_value(value))) for value in pos[:3]]
+        return values[0], values[1], values[2]
 
-    def _entity_info(self, entity: Any, entity_id: str) -> dict:
-        extra_info = {}
+    def _entity_info(self, entity: Any, entity_id: str) -> Dict[str, Any]:
+        extra_info: Dict[str, Any] = {}
         if "villager" in entity_id:
             villager_data = entity.get("VillagerData", {})
             if hasattr(villager_data, "get"):
-                extra_info["profession"] = tag_to_str(villager_data.get("profession", "unknown"))
+                extra_info["profession"] = tag_to_str(
+                    villager_data.get("profession", "unknown")
+                )
         self._add_optional_health(entity, extra_info)
         custom_name = entity.get("CustomName", None)
         if custom_name:
@@ -87,10 +116,11 @@ class EntitySearcher(BaseSearcher):
         return extra_info
 
     @staticmethod
-    def _add_optional_health(entity: Any, extra_info: dict) -> None:
+    def _add_optional_health(entity: Any, extra_info: Dict[str, Any]) -> None:
         health = entity.get("Health", None)
-        if health is not None:
-            try:
-                extra_info["health"] = float(tag_value(health))
-            except (ValueError, TypeError):
-                pass
+        if health is None:
+            return
+        try:
+            extra_info["health"] = float(tag_value(health))
+        except (ValueError, TypeError):
+            pass

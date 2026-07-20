@@ -4,6 +4,7 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui.theme import THEME, mc_border
+from app.ui.utils import safe_update
 
 
 def collapsible_section(
@@ -17,6 +18,42 @@ def collapsible_section(
         size=18,
         color=THEME.text_secondary,
     )
+    title_bar = _build_section_title_bar(title, arrow)
+    body_wrapper = ft.Container(
+        content=content,
+        padding=ft.Padding(left=4, right=4, top=0, bottom=4),
+        animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        animate_size=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        clip_behavior=ft.ClipBehavior.HARD_EDGE,
+    )
+    body_wrapper.visible = expanded
+    body_wrapper.opacity = 1.0 if expanded else 0.0
+
+    def _toggle() -> None:
+        is_visible = body_wrapper.visible
+        body_wrapper.visible = not is_visible
+        body_wrapper.opacity = 0.0 if is_visible else 1.0
+        arrow.icon = (
+            ft.Icons.KEYBOARD_ARROW_DOWN if not is_visible
+            else ft.Icons.KEYBOARD_ARROW_RIGHT
+        )
+        safe_update(body_wrapper)
+        safe_update(arrow)
+
+    title_bar.on_click = _toggle
+    card_container = ft.Container(
+        content=ft.Column([title_bar, body_wrapper], spacing=0),
+        bgcolor=THEME.bg_card,
+        border=mc_border(),
+        border_radius=8,
+    )
+    return ft.Container(
+        content=card_container,
+        padding=ft.Padding(bottom=12),
+    )
+
+
+def _build_section_title_bar(title: str, arrow: ft.Icon) -> ft.Container:
     title_row = ft.Row(
         [
             ft.Container(
@@ -41,41 +78,9 @@ def collapsible_section(
         spacing=10,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
-    title_bar = ft.Container(
+    return ft.Container(
         content=title_row,
         padding=ft.Padding(left=16, right=16, top=12, bottom=12),
         ink=True,
         border_radius=6,
-    )
-    body_wrapper = ft.Container(
-        content=content,
-        padding=ft.Padding(left=4, right=4, top=0, bottom=4),
-        animate_opacity=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        animate_size=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
-        clip_behavior=ft.ClipBehavior.HARD_EDGE,
-    )
-    body_wrapper.visible = expanded
-    body_wrapper.opacity = 1.0 if expanded else 0.0
-
-    def _toggle() -> None:
-        is_visible = body_wrapper.visible
-        body_wrapper.visible = not is_visible
-        body_wrapper.opacity = 0.0 if is_visible else 1.0
-        arrow.icon = (
-            ft.Icons.KEYBOARD_ARROW_DOWN if not is_visible
-            else ft.Icons.KEYBOARD_ARROW_RIGHT
-        )
-        body_wrapper.update()
-        arrow.update()
-
-    title_bar.on_click = _toggle
-    card_container = ft.Container(
-        content=ft.Column([title_bar, body_wrapper], spacing=0),
-        bgcolor=THEME.bg_card,
-        border=mc_border(),
-        border_radius=8,
-    )
-    return ft.Container(
-        content=card_container,
-        padding=ft.Padding(bottom=12),
     )

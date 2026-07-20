@@ -59,7 +59,8 @@ def flush_startup() -> None:
             prev = ts
         with open(path, "w", encoding="utf-8") as f:
             f.writelines(lines)
-    except Exception:
+    except OSError:
+        # Best-effort diagnostic output only.
         pass
 
 
@@ -73,7 +74,8 @@ def runtime_log(message: str) -> None:
         with _runtime_lock:
             with open(_runtime_log_path(), "a", encoding="utf-8") as f:
                 f.write(f"[{time.strftime('%H:%M:%S')}] {message}\n")
-    except Exception:
+    except OSError:
+        # Best-effort diagnostic output only.
         pass
 
 

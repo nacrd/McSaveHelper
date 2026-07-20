@@ -42,6 +42,42 @@ def build_save_repair_chrome(
     on_cancel: EventCallback,
 ) -> SaveRepairChrome:
     """Build save repair controls and return their stable references."""
+    fields = _build_save_repair_fields(on_detect, on_repair, on_cancel)
+    cards = _build_save_repair_cards(fields)
+    return SaveRepairChrome(
+        controls=[
+            cards["header"],
+            ft.Container(height=8),
+            cards["config_card"],
+            cards["world_info_card"],
+            cards["detect_result_card"],
+            cards["result_card"],
+            cards["log_card"],
+            cards["info_card"],
+        ],
+        world_path_field=fields["world_path_field"],
+        fix_chunks_checkbox=fields["fix_chunks_checkbox"],
+        fix_players_checkbox=fields["fix_players_checkbox"],
+        fix_level_dat_checkbox=fields["fix_level_dat_checkbox"],
+        backup_checkbox=fields["backup_checkbox"],
+        log_column=fields["log_column"],
+        world_info_text=fields["world_info_text"],
+        world_info_card=cards["world_info_card"],
+        detect_result_text=fields["detect_result_text"],
+        detect_result_card=cards["detect_result_card"],
+        result_text=fields["result_text"],
+        detect_button=fields["detect_button"],
+        repair_button=fields["repair_button"],
+        cancel_button=fields["cancel_button"],
+    )
+
+
+def _build_save_repair_fields(
+    on_detect: EventCallback,
+    on_repair: EventCallback,
+    on_cancel: EventCallback,
+) -> dict[str, Any]:
+    """Create form controls for the save-repair view."""
     world_path_field = current_save_field(
         hint_text="请通过侧边栏「设置当前存档」设置要修复的当前存档目录",
     )
@@ -77,7 +113,24 @@ def build_save_repair_chrome(
     repair_button = btn_primary("开始修复", on_click=on_repair)
     cancel_button = btn_ghost("取消", on_click=on_cancel)
     cancel_button.visible = False
+    return {
+        "world_path_field": world_path_field,
+        "fix_chunks_checkbox": fix_chunks_checkbox,
+        "fix_players_checkbox": fix_players_checkbox,
+        "fix_level_dat_checkbox": fix_level_dat_checkbox,
+        "backup_checkbox": backup_checkbox,
+        "log_column": log_column,
+        "world_info_text": world_info_text,
+        "detect_result_text": detect_result_text,
+        "result_text": result_text,
+        "detect_button": detect_button,
+        "repair_button": repair_button,
+        "cancel_button": cancel_button,
+    }
 
+
+def _build_save_repair_cards(fields: dict[str, Any]) -> dict[str, Any]:
+    """Assemble cards used by the save-repair layout."""
     header = page_header(
         "存档修复",
         ft.Text(
@@ -87,25 +140,49 @@ def build_save_repair_chrome(
         ),
         icon=IconSet.BUILD,
     )
-    config_card = card(
+    return {
+        "header": header,
+        "config_card": _build_save_repair_config_card(fields),
+        "world_info_card": _result_card(
+            "世界信息",
+            fields["world_info_text"],
+            visible=False,
+        ),
+        "detect_result_card": _result_card(
+            "检测结果",
+            fields["detect_result_text"],
+            visible=False,
+        ),
+        "result_card": _result_card("修复结果", fields["result_text"]),
+        "log_card": _build_save_repair_log_card(fields),
+        "info_card": _build_save_repair_info_card(),
+    }
+
+
+def _build_save_repair_config_card(fields: dict[str, Any]) -> ft.Control:
+    return card(
         ft.Column(
             [
                 section_title("当前存档"),
-                world_path_field,
+                fields["world_path_field"],
                 ft.Container(height=12),
                 section_title("操作"),
                 ft.Row(
-                    [detect_button, repair_button, cancel_button],
+                    [
+                        fields["detect_button"],
+                        fields["repair_button"],
+                        fields["cancel_button"],
+                    ],
                     spacing=12,
                 ),
                 ft.Container(height=12),
                 section_title("修复选项"),
                 ft.Column(
                     [
-                        fix_chunks_checkbox,
-                        fix_players_checkbox,
-                        fix_level_dat_checkbox,
-                        backup_checkbox,
+                        fields["fix_chunks_checkbox"],
+                        fields["fix_players_checkbox"],
+                        fields["fix_level_dat_checkbox"],
+                        fields["backup_checkbox"],
                     ],
                     spacing=8,
                 ),
@@ -113,19 +190,15 @@ def build_save_repair_chrome(
             spacing=12,
         )
     )
-    world_info_card = _result_card("世界信息", world_info_text, visible=False)
-    detect_result_card = _result_card(
-        "检测结果",
-        detect_result_text,
-        visible=False,
-    )
-    result_card = _result_card("修复结果", result_text)
-    log_card = card(
+
+
+def _build_save_repair_log_card(fields: dict[str, Any]) -> ft.Control:
+    return card(
         ft.Column(
             [
                 section_title("执行日志"),
                 ft.Container(
-                    content=log_column,
+                    content=fields["log_column"],
                     padding=8,
                     bgcolor=THEME.bg_secondary,
                     border_radius=4,
@@ -135,7 +208,10 @@ def build_save_repair_chrome(
             spacing=12,
         )
     )
-    info_card = card(
+
+
+def _build_save_repair_info_card() -> ft.Control:
+    return card(
         ft.Column(
             [
                 section_title("使用说明"),
@@ -151,32 +227,6 @@ def build_save_repair_chrome(
             ],
             spacing=12,
         )
-    )
-    return SaveRepairChrome(
-        controls=[
-            header,
-            ft.Container(height=8),
-            config_card,
-            world_info_card,
-            detect_result_card,
-            result_card,
-            log_card,
-            info_card,
-        ],
-        world_path_field=world_path_field,
-        fix_chunks_checkbox=fix_chunks_checkbox,
-        fix_players_checkbox=fix_players_checkbox,
-        fix_level_dat_checkbox=fix_level_dat_checkbox,
-        backup_checkbox=backup_checkbox,
-        log_column=log_column,
-        world_info_text=world_info_text,
-        world_info_card=world_info_card,
-        detect_result_text=detect_result_text,
-        detect_result_card=detect_result_card,
-        result_text=result_text,
-        detect_button=detect_button,
-        repair_button=repair_button,
-        cancel_button=cancel_button,
     )
 
 

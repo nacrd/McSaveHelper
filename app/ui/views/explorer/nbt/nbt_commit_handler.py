@@ -71,45 +71,9 @@ class NbtCommitHandler:
             return
 
         changes = self._store.changes
-        summary_controls: List[ft.Control] = []
-        for index, change in enumerate(changes[:80]):
-            summary_controls.append(ft.Container(
-                content=ft.Text(
-                    format_change_summary(index, change),
-                    size=12,
-                    color=THEME.text_secondary,
-                    font_family="Consolas",
-                ),
-                padding=ft.Padding(left=8, right=8, top=6, bottom=6),
-                bgcolor=THEME.bg_card,
-            ))
-
-        if len(changes) > 80:
-            summary_controls.append(ft.Text(
-                f"还有 {len(changes) - 80} 个变更未展示，提交时会一并写入。",
-                size=12,
-                color=THEME.warning,
-            ))
-
         dialog = ft.AlertDialog(
             title=ft.Text("提交变更预览", color=THEME.text_primary),
-            content=ft.Column(
-                [
-                    ft.Text(
-                        f"即将提交 {len(changes)} 个变更。提交前会自动备份当前存档。",
-                        size=13,
-                        color=THEME.text_primary,
-                    ),
-                    ft.Column(
-                        summary_controls,
-                        spacing=6,
-                        scroll=ft.ScrollMode.AUTO,
-                        height=360,
-                    ),
-                ],
-                tight=True,
-                spacing=10,
-            ),
+            content=self._build_commit_preview_content(changes),
             actions=[],
         )
 
@@ -129,6 +93,46 @@ class NbtCommitHandler:
         page.overlay.append(dialog)
         dialog.open = True
         page.update()
+
+    def _build_commit_preview_content(
+        self,
+        changes: List[Any],
+    ) -> ft.Column:
+        summary_controls: List[ft.Control] = []
+        for index, change in enumerate(changes[:80]):
+            summary_controls.append(ft.Container(
+                content=ft.Text(
+                    format_change_summary(index, change),
+                    size=12,
+                    color=THEME.text_secondary,
+                    font_family="Consolas",
+                ),
+                padding=ft.Padding(left=8, right=8, top=6, bottom=6),
+                bgcolor=THEME.bg_card,
+            ))
+        if len(changes) > 80:
+            summary_controls.append(ft.Text(
+                f"还有 {len(changes) - 80} 个变更未展示，提交时会一并写入。",
+                size=12,
+                color=THEME.warning,
+            ))
+        return ft.Column(
+            [
+                ft.Text(
+                    f"即将提交 {len(changes)} 个变更。提交前会自动备份当前存档。",
+                    size=13,
+                    color=THEME.text_primary,
+                ),
+                ft.Column(
+                    summary_controls,
+                    spacing=6,
+                    scroll=ft.ScrollMode.AUTO,
+                    height=360,
+                ),
+            ],
+            tight=True,
+            spacing=10,
+        )
 
     def execute_commit(self) -> None:
         """将暂存变更转换为 WorldSession 队列并原子提交。"""

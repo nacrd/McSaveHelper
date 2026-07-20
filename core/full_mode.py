@@ -28,19 +28,25 @@ def run_full(
     progress: ProgressCallback,
     custom_mappings: Optional[Dict[str, str]] = None,
 ) -> None:
-    """执行完整模式迁移
+    """执行完整模式迁移。
+
+    克隆世界后构建 UUID 映射，并行修补区域与玩家相关 NBT，并更新
+    ``server.properties``。
 
     Args:
-        src_world: 源世界路径
-        dest_dir: 目标目录
-        world_name: 世界名称
-        offline_mode: 是否离线模式
-        do_clean: 是否清理
-        pure_clean: 是否进行纯净扫描（移除模组方块/实体）
-        manual_names: 手动玩家名列表
-        log: 日志回调函数
-        progress: 进度回调函数
-        custom_mappings: 玩家名称到自定义 UUID 的映射
+        src_world: 源世界路径。
+        dest_dir: 目标输出父目录。
+        world_name: 目标世界文件夹名。
+        offline_mode: 是否离线模式。
+        do_clean: 是否常规清理。
+        pure_clean: 是否纯净清理。
+        manual_names: 手动玩家名列表。
+        log: 日志回调。
+        progress: 进度回调 ``(0..1)`` 或带消息的实现。
+        custom_mappings: 玩家名 → 自定义 UUID 覆盖。
+
+    Raises:
+        ValueError / OSError: 路径或 I/O 失败时由底层工具抛出。
     """
     dest_world = safe_destination_world(src_world, dest_dir, world_name)
 
@@ -49,20 +55,14 @@ def run_full(
     log(f"存档已克隆到 {dest_world}", "FILE")
 
     # 2. 加载缓存与构建映射
-    cache = load_usercache(src_world)
-    log(f"本地缓存: {len(cache)} 条", "CACHE")
-    mappings = build_mappings(
+    mappings = _build_full_mode_mappings(
+        src_world,
         dest_world,
-        cache,
         offline_mode,
         manual_names,
         log,
-        custom_mappings)
-    if not mappings:
-        log("未生成任何 UUID 映射，终止", "ERROR")
-        raise RuntimeError("未生成任何 UUID 映射，完整迁移已中止")
-    log(f"生成 {len(mappings)} 条映射", "INFO")
-
+        custom_mappings,
+    )
     _process_core_nbt(dest_world, mappings, log)
     _rename_player_files(dest_world, mappings, log)
     _process_regions(dest_world, mappings, progress, log)
@@ -75,6 +75,31 @@ def run_full(
 
     # 8. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
+
+
+def _build_full_mode_mappings(
+    src_world: Path,
+    dest_world: Path,
+    offline_mode: bool,
+    manual_names: Optional[List[str]],
+    log: LogCallback,
+    custom_mappings: Optional[Dict[str, str]],
+) -> List[UUIDMapping]:
+    cache = load_usercache(src_world)
+    log(f"本地缓存: {len(cache)} 条", "CACHE")
+    mappings = build_mappings(
+        dest_world,
+        cache,
+        offline_mode,
+        manual_names,
+        log,
+        custom_mappings,
+    )
+    if not mappings:
+        log("未生成任何 UUID 映射，终止", "ERROR")
+        raise RuntimeError("未生成任何 UUID 映射，完整迁移已中止")
+    log(f"生成 {len(mappings)} 条映射", "INFO")
+    return mappings
 
 
 def _process_core_nbt(

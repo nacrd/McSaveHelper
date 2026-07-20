@@ -119,7 +119,8 @@ class FileHandler(LogHandler):
                 if self._file:
                     self._file.write(log_line)
                     self._file.flush()
-            except Exception:
+            except (OSError, IOError):
+                # Logging must not raise into application code.
                 pass
 
     def flush(self) -> None:
@@ -154,4 +155,5 @@ class UIHandler(LogHandler):
         try:
             self.log_callback(" ".join(parts), tag)
         except Exception:
+            # UI log sinks may be disposed during teardown.
             pass

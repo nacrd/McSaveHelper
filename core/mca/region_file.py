@@ -333,6 +333,10 @@ class RegionFile:
         try:
             # nbtlib 2.x: File.parse(fileobj) for in-memory bytes
             nbt_file = nbtlib.File.parse(io.BytesIO(raw))
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            raise CorruptChunk(
+                f"Chunk ({local_cx}, {local_cz}) NBT parse failed: {exc}"
+            ) from exc
         except Exception as exc:
             raise CorruptChunk(
                 f"Chunk ({local_cx}, {local_cz}) NBT parse failed: {exc}"

@@ -189,7 +189,10 @@ class GUIOptimizer:
             logger.info("GUI 优化模块初始化完成", module="GUIOptimizer")
 
         except Exception as e:
-            logger.error(f"GUI 优化模块初始化失败: {e}", module="GUIOptimizer")
+            logger.error(
+                f"GUI 优化模块初始化失败: {e}",
+                module="GUIOptimizer",
+            )
             # 降级：不使用优化功能
             self.notification_manager = None
 
@@ -215,7 +218,10 @@ class GUIOptimizer:
         try:
             self._shortcut_manager.handle_event(e)
         except Exception as ex:
-            logger.error(f"键盘事件处理失败: {ex}", module="GUIOptimizer")
+            logger.error(
+                f"键盘事件处理失败: {ex}",
+                module="GUIOptimizer",
+            )
 
     def _shortcut_save_config(self, e: Any) -> None:
         """快捷键：保存配置 (Ctrl+S)
@@ -271,7 +277,10 @@ class GUIOptimizer:
             feedback_dialog = FeedbackDialog(self.page)
             feedback_dialog.show()
         except Exception as ex:
-            logger.error(f"显示反馈对话框失败: {ex}", module="GUIOptimizer")
+            logger.error(
+                f"显示反馈对话框失败: {ex}",
+                module="GUIOptimizer",
+            )
 
     def _on_health_alert(self, alert: Any) -> None:
         """健康告警回调
@@ -285,6 +294,7 @@ class GUIOptimizer:
             if is_app_closing():
                 return
         except Exception:
+            # Import/state lookup best-effort during teardown.
             pass
 
         notification_manager = self.notification_manager
@@ -294,13 +304,20 @@ class GUIOptimizer:
         try:
             if alert.level == AlertLevel.CRITICAL:
                 async def _show_error(message: str) -> None:
-                    notification_manager.show_error(message, duration_ms=8000)
+                    notification_manager.show_error(
+                        message,
+                        duration_ms=8000,
+                    )
                 self.page.run_task(_show_error, alert.message)
             else:
                 async def _show_warning(message: str) -> None:
-                    notification_manager.show_warning(message, duration_ms=5000)
+                    notification_manager.show_warning(
+                        message,
+                        duration_ms=5000,
+                    )
                 self.page.run_task(_show_warning, alert.message)
         except Exception:
+            # Page may already be closed; never crash health monitoring.
             pass
 
     def configure_performance_monitor(

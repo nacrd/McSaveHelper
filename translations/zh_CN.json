@@ -353,7 +353,17 @@
     "add_row": "添加一行",
     "import_list": "导入名单",
     "export_list": "导出名单",
-    "clear_all": "清空"
+    "clear_all": "清空",
+    "import_mc_jar": "从本地 Minecraft 导入",
+    "import_jar": "选择 JAR 导入",
+    "jar_hint": "可从本机 .minecraft/versions 客户端 jar 或模组 jar 提取 assets/*/lang/zh_cn.json。",
+    "local_mc_missing": "未找到本机 Minecraft 客户端 jar，请改用「选择 JAR 导入」。",
+    "pick_jar_title": "选择 Minecraft 客户端或模组 JAR",
+    "jar_empty": "JAR 中未找到可用语言文件（尝试 zh_cn / en_us）。",
+    "import_assets": "导入语言/贴图",
+    "assets_hint": "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。优先使用当前 UI 语言。",
+    "import_assets_title": "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+    "import_assets_empty": "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。"
   },
   "settings": {
     "general": {
@@ -366,7 +376,14 @@
       "theme": "主题",
       "language": "语言",
       "auto_clear_log": "自动清除旧日志",
-      "sidebar_mode": "侧边栏模式"
+      "sidebar_mode": "侧边栏模式",
+      "minecraft_dir": "Minecraft 目录",
+      "minecraft_dir_hint": "例如 F:\\Game\\minecraft\\.minecraft（可留空自动推断）",
+      "minecraft_dir_help": "用于导入语言/贴图。优先此路径；留空则从当前存档向上查找 .minecraft，或使用系统默认目录。",
+      "browse": "浏览",
+      "minecraft_dir_error": "选择目录失败",
+      "auto_import_mc_lang": "设置存档后自动导入 Minecraft 语言",
+      "auto_import_mc_lang_help": "选择当前存档后，后台按 UI 语言自动导入原版物品/方块名称。"
     },
     "batch": {
       "title": "批量处理",
@@ -386,7 +403,8 @@
       "save": "保存设置",
       "reset": "重置为默认",
       "cancel": "取消"
-    }
+    },
+    "auto_import_mc_lang_ok": "已自动导入 {count} 个 Minecraft 名称（{locale}）"
   },
   "dialogs": {
     "load": "选择 usercache.json 文件",
@@ -399,7 +417,8 @@
     "confirm": "确认",
     "ok": "确定",
     "yes": "是",
-    "no": "否"
+    "no": "否",
+    "hint": "提示"
   },
   "messages": {
     "please_select_batch_dir": "请先选择批量存档目录",
@@ -476,5 +495,211 @@
   "__meta__": {
     "language": "zh_CN",
     "display_name": "简体中文"
+  },
+  "stats": {
+    "hint_ready": "设置当前存档后可通过顶栏「开始统计」分析世界数据。",
+    "summary_placeholder": "通过顶栏统计快捷操作分析世界数据。",
+    "section_summary": "汇总",
+    "section_dimensions": "维度大小",
+    "section_playtime": "玩家统计",
+    "section_blocks": "方块分布 Top 10",
+    "section_entities": "实体数量 Top 10",
+    "section_region_sizes": "区域文件大小分布",
+    "section_block_pie": "方块占比分析（已排除空气）",
+    "pie_empty": "暂无方块数据",
+    "pie_center": "方块",
+    "no_data": "暂无数据",
+    "dimension_regions": "{count} 个区域文件",
+    "no_player_stats": "未找到玩家 stats 文件",
+    "player_detail": "游玩 {duration} · 死亡 {deaths} · 击杀 {kills} · 挖掘 {mined} · 放置 {placed}",
+    "need_save": "请先通过侧边栏设置当前存档。",
+    "analyzing": "正在分析，较大存档可能需要较长时间...",
+    "done": "统计完成。",
+    "error_title": "统计存档失败",
+    "summary_body": "区域: {regions}\n已加载区块: {loaded}，空/未加载槽位: {empty}，加载比例: {ratio:.1f}%\n区域文件总大小: {size}\n维度: {dim_count}（合计 {dim_size}）\n玩家统计文件: {players}\n方块条目: {blocks}，实体/方块实体: {entities}",
+    "progress_task": "统计存档",
+    "stage_start": "准备分析...",
+    "stage_dimensions": "统计维度大小",
+    "stage_players": "读取玩家游玩时间",
+    "stage_scanning": "扫描区域文件",
+    "stage_regions": "分析区域 {done}/{total}",
+    "stage_finalizing": "汇总结果",
+    "stage_done": "完成",
+    "error_status": "统计失败。",
+    "sort_by": "排序",
+    "sort_play_time": "游玩时间",
+    "sort_world_time": "世界时间",
+    "sort_deaths": "死亡",
+    "sort_mob_kills": "生物击杀",
+    "sort_player_kills": "玩家击杀",
+    "sort_mined": "挖掘",
+    "sort_placed": "使用/放置",
+    "sort_jumps": "跳跃",
+    "sort_damage": "造成伤害",
+    "sort_distance": "移动距离",
+    "sort_name": "名称",
+    "metric_distance": "{meters:.1f} m"
+  },
+  "common": {
+    "tip": "提示",
+    "close": "关闭"
+  },
+  "player": {
+    "filter": "搜索玩家",
+    "summary_placeholder": "选择玩家后显示摘要",
+    "import_language": "导入语言文件",
+    "export_action": "导出摘要",
+    "teleport_death": "传送到死亡点",
+    "teleport_death_staged": "已暂存传送到死亡点的坐标修改。",
+    "no_death_location": "当前玩家没有可用的死亡位置。",
+    "need_select": "请先选择玩家。",
+    "nbt_label": "玩家 NBT",
+    "export_dialog": "导出玩家摘要",
+    "export_failed": "无法导出玩家摘要。",
+    "export_ok_title": "导出成功",
+    "export_ok_body": "已导出玩家摘要到：\n{path}",
+    "import_usercache_title": "选择 usercache.json",
+    "import_empty": "未能导入任何玩家名称。",
+    "import_language_title": "选择语言文件 (zh_cn.json 等)",
+    "import_language_ok": "成功导入 {count} 个物品/附魔名称。\n物品栏和装备预览将使用新名称。",
+    "import_language_empty": "未能从文件中解析出有效的物品名称。\n\n支持的格式：\n- Minecraft 语言文件 (item.minecraft.xxx)\n- 直接 ID 映射 (minecraft:xxx)",
+    "tab": {
+      "inventory": "主背包",
+      "ender": "末影箱"
+    },
+    "inventory": {
+      "main": "主物品栏",
+      "hotbar": "快捷栏",
+      "ender": "末影箱",
+      "shulker": "潜影盒内容",
+      "click_hint": "点击查看详情"
+    },
+    "equip": {
+      "title": "装备栏",
+      "helmet": "头盔",
+      "chest": "胸甲",
+      "legs": "护腿",
+      "boots": "靴子",
+      "offhand": "副手"
+    },
+    "hud": {
+      "game_type": "游戏模式",
+      "spawn": "出生点",
+      "death": "死亡位置",
+      "selected_slot": "选中槽"
+    },
+    "game_type": {
+      "survival": "生存",
+      "creative": "创造",
+      "adventure": "冒险",
+      "spectator": "旁观"
+    },
+    "dim": {
+      "overworld": "主世界",
+      "nether": "下界",
+      "end": "末地"
+    },
+    "edit": {
+      "title": "玩家数据编辑",
+      "health": "生命值",
+      "food": "饥饿值",
+      "saturation": "饱和度",
+      "xp_level": "经验等级",
+      "xp_total": "总经验",
+      "xp_p": "经验进度",
+      "air": "氧气",
+      "pos_x": "X",
+      "pos_y": "Y",
+      "pos_z": "Z",
+      "dimension": "维度",
+      "game_type": "游戏模式",
+      "selected_slot": "选中槽",
+      "spawn_x": "出生 X",
+      "spawn_y": "出生 Y",
+      "spawn_z": "出生 Z",
+      "spawn_dimension": "出生维度",
+      "spawn_forced": "强制出生",
+      "flying": "飞行中",
+      "mayfly": "可飞行",
+      "instabuild": "瞬间建造",
+      "invulnerable": "无敌",
+      "may_build": "可建造",
+      "walk_speed": "行走速度",
+      "fly_speed": "飞行速度",
+      "section_pos": "坐标与维度",
+      "section_spawn": "出生点",
+      "section_abilities": "能力",
+      "refresh": "刷新表单",
+      "stage": "暂存修改",
+      "staged_title": "已暂存",
+      "staged_body": "已暂存 {count} 个玩家数据修改，可到 NBT 页查看并提交。",
+      "no_changes": "没有检测到需要暂存的玩家数据修改。",
+      "validation_errors": "部分字段未暂存：{errors}",
+      "section_vitals": "生命 / 饥饿 / 经验"
+    },
+    "export": {
+      "title": "玩家摘要",
+      "name": "名称",
+      "health": "生命",
+      "food": "饥饿",
+      "xp": "经验等级",
+      "dimension": "维度",
+      "game_type": "游戏模式",
+      "position": "坐标",
+      "inventory_count": "背包物品数",
+      "ender_count": "末影箱物品数",
+      "equipment_count": "装备数",
+      "death": "死亡位置",
+      "issues": "问题",
+      "inventory": "背包:",
+      "equipment": "装备:",
+      "ender": "末影箱:"
+    },
+    "error": {
+      "filter": "过滤玩家失败",
+      "select": "选择玩家失败",
+      "load": "加载玩家数据失败",
+      "refresh_form": "刷新玩家编辑表单失败",
+      "stage": "暂存玩家数据失败",
+      "teleport": "暂存传送失败",
+      "export": "导出玩家摘要失败",
+      "import_usercache": "导入 usercache 失败",
+      "import_language": "导入语言文件失败",
+      "shulker": "打开潜影盒失败",
+      "import_mc_jar": "从 Minecraft jar 导入语言失败",
+      "import_assets": "导入语言/贴图失败"
+    },
+    "list_empty": "没有匹配的玩家",
+    "attributes": {
+      "title": "属性 Attributes",
+      "empty": "无属性数据"
+    },
+    "effects": {
+      "title": "状态效果",
+      "empty": "无状态效果"
+    },
+    "shulker": {
+      "title": "容器内容"
+    },
+    "import_mc_jar": "从 MC jar 导入语言",
+    "import_mc_jar_ok": "已从本地 Minecraft 导入 {count} 个物品/附魔名称{jar_info}。\n物品栏和装备预览将使用新名称。",
+    "import_mc_jar_title": "选择 Minecraft 客户端 JAR",
+    "import_mc_jar_missing": "未找到本机 Minecraft 客户端 jar。\n请选择 versions/<版本>/<版本>.jar 后重试。",
+    "section": {
+      "vitals": "生命/经验",
+      "world": "坐标/出生",
+      "abilities": "能力",
+      "advanced": "属性/效果"
+    },
+    "resize_columns": "拖拽调节列宽",
+    "container": {
+      "preview_title": "容器内容"
+    },
+    "import_assets": "导入语言/贴图",
+    "import_assets_title": "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+    "import_assets_empty": "未导入任何语言名称或贴图。\n\n支持：\n- 语言 JSON（item.minecraft.xxx）\n- 客户端/模组 JAR 内 lang 与 textures\n- 可一次多选多个 JAR 批量导入贴图",
+    "import_assets_lang": "语言名称 {count} 个",
+    "import_assets_tex": "贴图 {count} 张（来自 {jars} 个 JAR）",
+    "import_assets_ok": "导入完成：{detail}。\n物品栏名称与贴图将立即生效。"
   }
 }

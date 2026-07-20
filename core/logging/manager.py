@@ -56,8 +56,9 @@ class LogManager:
                     self._queue.task_done()
             except Empty:
                 continue
-            except Exception as e:
-                print(f"日志处理器异常: {e}", file=sys.stderr)
+            except Exception as exc:
+                # Worker boundary: logging must not crash the process.
+                print(f"日志处理器异常: {exc}", file=sys.stderr)
 
     def _dispatch(self, record: LogRecord) -> None:
         module_level = self._module_levels.get(record.module)
@@ -68,8 +69,11 @@ class LogManager:
         for handler in self.handlers:
             try:
                 handler.handle(record)
-            except Exception as e:
-                print(f"日志处理器 {handler.__class__.__name__} 失败: {e}", file=sys.stderr)
+            except Exception as exc:
+                print(
+                    f"日志处理器 {handler.__class__.__name__} 失败: {exc}",
+                    file=sys.stderr,
+                )
 
     def add_handler(self, handler: LogHandler) -> None:
         self.handlers.append(handler)
@@ -135,18 +139,23 @@ class LogManager:
         for handler in self.handlers:
             try:
                 handler.flush()
-            except Exception:
+            except (OSError, IOError, RuntimeError, ValueError):
+                # Best-effort flush on shutdown/teardown.
                 pass
 
-    def shutdown(self) -> None:
+    def close(self) -> None:
         self._running = False
-        if self._worker_thread:
-            self._queue.put(self._STOP)
+        self._queue.put(self._STOP)
+        if self._worker_thread is not None:
             self._worker_thread.join(timeout=2.0)
         self.flush()
         for handler in self.handlers:
             try:
                 handler.close()
-            except Exception:
+            except (OSError, IOError, RuntimeError, ValueError):
+                # Best-effort close; handlers may already be torn down.
                 pass
         self.handlers.clear()
+
+    def shutdown(self) -> None:
+        self.close()

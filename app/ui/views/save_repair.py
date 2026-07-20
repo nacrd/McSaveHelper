@@ -13,7 +13,7 @@ from app.presenters.save_repair_presenter import (
     format_repair_report,
 )
 from app.ui.theme import THEME
-from app.ui.utils import run_on_ui
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 from app.ui.views.save_repair_chrome import build_save_repair_chrome
 from app.services.save_repair_service import (
@@ -85,12 +85,9 @@ class SaveRepairView(ft.Column):
         self._repair_btn.disabled = busy
         self._cancel_btn.visible = busy
         self._cancel_btn.disabled = False
-        try:
-            self._detect_btn.update()
-            self._repair_btn.update()
-            self._cancel_btn.update()
-        except Exception:
-            pass
+        safe_update(self._detect_btn)
+        safe_update(self._repair_btn)
+        safe_update(self._cancel_btn)
 
     def _start_detect(self, e: ft.ControlEvent) -> None:
         if self._busy:
@@ -104,11 +101,11 @@ class SaveRepairView(ft.Column):
 
         self._set_busy(True)
         self._log_column.controls.clear()
-        self._log_column.update()
+        safe_update(self._log_column)
         self._detect_result_card.visible = False
-        self._detect_result_card.update()
+        safe_update(self._detect_result_card)
         self._world_info_card.visible = False
-        self._world_info_card.update()
+        safe_update(self._world_info_card)
 
         threading.Thread(
             target=self._detect_thread,
@@ -128,9 +125,9 @@ class SaveRepairView(ft.Column):
 
         self._set_busy(True)
         self._result_text.value = ""
-        self._result_text.update()
+        safe_update(self._result_text)
         self._log_column.controls.clear()
-        self._log_column.update()
+        safe_update(self._log_column)
 
         repair_options = {
             "fix_chunks": bool(self._fix_chunks_checkbox.value),
@@ -148,7 +145,7 @@ class SaveRepairView(ft.Column):
     def _cancel(self, e: ft.ControlEvent) -> None:
         self.service.cancel()
         self._cancel_btn.disabled = True
-        self._cancel_btn.update()
+        safe_update(self._cancel_btn)
 
     # ── 检测线程 ──────────────────────────────────────────
 
@@ -177,9 +174,9 @@ class SaveRepairView(ft.Column):
         except Exception as ex:
             def _show_error(error: Exception) -> None:
                 self._detect_result_text.value = f"检测失败: {error}"
-                self._detect_result_text.update()
+                safe_update(self._detect_result_text)
                 self._detect_result_card.visible = True
-                self._detect_result_card.update()
+                safe_update(self._detect_result_card)
                 self.app.error_dialog("错误", f"检测失败: {error}")
             run_on_ui(self.app.page, _show_error, ex)
 
@@ -192,13 +189,13 @@ class SaveRepairView(ft.Column):
     def _show_detect_report(self, report: DetectReport) -> None:
         text = format_detect_report(report)
         self._world_info_text.value = text.world_info
-        self._world_info_text.update()
+        safe_update(self._world_info_text)
         self._world_info_card.visible = True
-        self._world_info_card.update()
+        safe_update(self._world_info_card)
         self._detect_result_text.value = text.result
-        self._detect_result_text.update()
+        safe_update(self._detect_result_text)
         self._detect_result_card.visible = True
-        self._detect_result_card.update()
+        safe_update(self._detect_result_card)
 
     # ── 修复线程 ──────────────────────────────────────────
 
@@ -231,7 +228,7 @@ class SaveRepairView(ft.Column):
         except Exception as ex:
             def _show_error(error: Exception) -> None:
                 self._result_text.value = f"修复失败: {error}"
-                self._result_text.update()
+                safe_update(self._result_text)
                 self.app.error_dialog("错误", f"修复失败: {error}")
             run_on_ui(self.app.page, _show_error, ex)
 
@@ -245,7 +242,7 @@ class SaveRepairView(ft.Column):
 
     def _show_repair_report(self, report: RepairReport) -> None:
         self._result_text.value = format_repair_report(report)
-        self._result_text.update()
+        safe_update(self._result_text)
         if report.success:
             self.app.info_dialog("完成", "存档修复完成！")
         elif not report.cancelled:
@@ -275,20 +272,18 @@ class SaveRepairView(ft.Column):
             font_family="monospace",
         )
         self._log_column.controls.append(log_entry)
-        try:
-            self._log_column.update()
-        except Exception:
-            pass
+        safe_update(self._log_column)
 
     def on_save_selected(self, path: str) -> None:
         """统一入口设置当前存档回调"""
         try:
             self._world_path_field.value = path
-            self._world_path_field.update()
             # 隐藏之前的结果
             self._world_info_card.visible = False
-            self._world_info_card.update()
             self._detect_result_card.visible = False
-            self._detect_result_card.update()
         except Exception:
+            # UI best-effort: fields may be unmounted during teardown.
             pass
+        safe_update(self._world_path_field)
+        safe_update(self._world_info_card)
+        safe_update(self._detect_result_card)

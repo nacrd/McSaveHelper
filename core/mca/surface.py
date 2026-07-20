@@ -413,58 +413,56 @@ def _load_chunk_views(
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
 ) -> Dict[Tuple[int, int], Optional[Any]]:
     views: Dict[Tuple[int, int], Optional[Any]] = {}
-    jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
-    if jobs is not None:
-        for _, _, chunk_x, chunk_z, local_x, local_z in jobs:
-            jobs_by_chunk.setdefault((chunk_x, chunk_z), []).append(
-                (local_x, local_z)
-            )
-    misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
-    requested_edge = 0
-    if jobs:
-        requested_edge = max(
-            max(int(job[0]), int(job[1])) + 1
-            for job in jobs
-        )
+    jobs_by_chunk = _jobs_by_chunk(jobs)
+    requested_edge = _requested_edge(jobs)
     # Preview LODs should only decode the points they display.  Once a focused
     # tile reaches 64px, preload the higher-detail positions for that chunk so
     # subsequent 128/256/512 upgrades reuse one NBT decode.
     preload_detail_positions = requested_edge >= 64
     external_signatures = external_signatures or {}
     cache_epoch = _lru_epoch()
-    for chunk_x, chunk_z in needed:
-        external_signature = external_signatures.get((chunk_x, chunk_z), "")
-        hit, view = _lru_get(
-            (
-                path_key,
-                mtime_ns,
-                file_size,
-                chunk_x,
-                chunk_z,
-                external_signature,
-            )
-        )
-        requested = jobs_by_chunk.get((chunk_x, chunk_z), [])
-        if hit and all(position in view for position in requested):
-            views[(chunk_x, chunk_z)] = _SurfaceView(view)
-        else:
-            if preload_detail_positions:
-                source_samples = (
-                    _ALL_LOD_SAMPLES
-                    if requested_edge >= 512
-                    else _FOCUSED_LOD_SAMPLES
-                )
-                all_lod_positions = source_samples.get(
-                    (chunk_x, chunk_z),
-                    requested,
-                )
-            else:
-                all_lod_positions = requested
-            missing_positions = [
-                position for position in all_lod_positions if position not in view
-            ]
-            misses.append((chunk_x, chunk_z, missing_positions))
+    misses = _collect_chunk_cache_misses(
+        needed=needed,
+        path_key=path_key,
+        mtime_ns=mtime_ns,
+        file_size=file_size,
+        external_signatures=external_signatures,
+        jobs_by_chunk=jobs_by_chunk,
+        preload_detail_positions=preload_detail_positions,
+        requested_edge=requested_edge,
+        views=views,
+    )
 
+    _decode_chunk_view_misses(
+        region=region,
+        misses=misses,
+        path_key=path_key,
+        mtime_ns=mtime_ns,
+        file_size=file_size,
+        views=views,
+        cache_epoch=cache_epoch,
+        cancel_check=cancel_check,
+        decode_workers=decode_workers,
+        failed_chunks=failed_chunks,
+        external_signatures=external_signatures,
+    )
+    return views
+
+
+def _decode_chunk_view_misses(
+    *,
+    region: RegionFile,
+    misses: List[Tuple[int, int, List[Tuple[int, int]]]],
+    path_key: str,
+    mtime_ns: int,
+    file_size: int,
+    views: Dict[Tuple[int, int], Optional[Any]],
+    cache_epoch: int,
+    cancel_check: Optional[Callable[[], bool]],
+    decode_workers: Optional[int],
+    failed_chunks: Optional[Set[Tuple[int, int]]],
+    external_signatures: Dict[Tuple[int, int], str],
+) -> None:
     requested_workers = (
         _DECODE_WORKERS if decode_workers is None else max(1, int(decode_workers))
     )
@@ -489,20 +487,86 @@ def _load_chunk_views(
             failed_chunks=failed_chunks,
             external_signatures=external_signatures,
         )
-    else:
-        _decode_misses_parallel(
-            region,
-            misses,
-            path_key,
-            mtime_ns,
-            file_size,
-            views,
-            cache_epoch,
-            workers=workers,
-            failed_chunks=failed_chunks,
-            external_signatures=external_signatures,
+        return
+    _decode_misses_parallel(
+        region,
+        misses,
+        path_key,
+        mtime_ns,
+        file_size,
+        views,
+        cache_epoch,
+        workers=workers,
+        failed_chunks=failed_chunks,
+        external_signatures=external_signatures,
+    )
+
+
+def _jobs_by_chunk(
+    jobs: Optional[List[SampleJob]],
+) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
+    jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+    if jobs is None:
+        return jobs_by_chunk
+    for _, _, chunk_x, chunk_z, local_x, local_z in jobs:
+        jobs_by_chunk.setdefault((chunk_x, chunk_z), []).append(
+            (local_x, local_z)
         )
-    return views
+    return jobs_by_chunk
+
+
+def _requested_edge(jobs: Optional[List[SampleJob]]) -> int:
+    if not jobs:
+        return 0
+    return max(max(int(job[0]), int(job[1])) + 1 for job in jobs)
+
+
+def _collect_chunk_cache_misses(
+    *,
+    needed: Set[Tuple[int, int]],
+    path_key: str,
+    mtime_ns: int,
+    file_size: int,
+    external_signatures: Dict[Tuple[int, int], str],
+    jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]],
+    preload_detail_positions: bool,
+    requested_edge: int,
+    views: Dict[Tuple[int, int], Optional[Any]],
+) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
+    misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
+    for chunk_x, chunk_z in needed:
+        external_signature = external_signatures.get((chunk_x, chunk_z), "")
+        hit, view = _lru_get(
+            (
+                path_key,
+                mtime_ns,
+                file_size,
+                chunk_x,
+                chunk_z,
+                external_signature,
+            )
+        )
+        requested = jobs_by_chunk.get((chunk_x, chunk_z), [])
+        if hit and all(position in view for position in requested):
+            views[(chunk_x, chunk_z)] = _SurfaceView(view)
+            continue
+        if preload_detail_positions:
+            source_samples = (
+                _ALL_LOD_SAMPLES
+                if requested_edge >= 512
+                else _FOCUSED_LOD_SAMPLES
+            )
+            all_lod_positions = source_samples.get(
+                (chunk_x, chunk_z),
+                requested,
+            )
+        else:
+            all_lod_positions = requested
+        missing_positions = [
+            position for position in all_lod_positions if position not in view
+        ]
+        misses.append((chunk_x, chunk_z, missing_positions))
+    return misses
 
 
 def _decode_misses_sequential(
@@ -524,6 +588,10 @@ def _decode_misses_sequential(
             return
         try:
             key, sampled = _decode_one(region, chunk_x, chunk_z, samples)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+            if failed_chunks is not None:
+                failed_chunks.add((chunk_x, chunk_z))
+            continue
         except Exception:
             if failed_chunks is not None:
                 failed_chunks.add((chunk_x, chunk_z))
@@ -566,6 +634,10 @@ def _decode_misses_parallel(
         for future in as_completed(future_coords):
             try:
                 key, sampled = future.result()
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+                if failed_chunks is not None:
+                    failed_chunks.add(future_coords[future])
+                continue
             except Exception:
                 if failed_chunks is not None:
                     failed_chunks.add(future_coords[future])
@@ -625,6 +697,8 @@ def _sample_coarse_grid(
                 )
             else:
                 grid[row][column] = view.surface_block_id(local_x, local_z)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, IndexError):
+            grid[row][column] = None
         except Exception:
             grid[row][column] = None
     return grid
@@ -868,6 +942,8 @@ def _resolve_surface_color(
             return color_for_surface(name, biome)
         if color_for_block is not None:
             return color_for_block(name)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        return DEFAULT_UNKNOWN
     except Exception:
         return DEFAULT_UNKNOWN
     return DEFAULT_UNKNOWN
@@ -901,54 +977,72 @@ def sample_region_surface_colors(
     previous_heights: Optional[List[Optional[int]]] = None
     processed = 0
     for row in samples:
-        color_row: List[Color] = []
-        current_heights: List[Optional[int]] = []
-        north_source = (
-            current_heights if previous_heights is None else previous_heights
+        color_row, current_heights = _colorize_surface_row(
+            row,
+            previous_heights=previous_heights,
+            spacing_scale=spacing_scale,
+            color_for_block=color_for_block,
+            color_for_surface=color_for_surface,
         )
-        for x, value in enumerate(row):
-            parts = _surface_parts(value)
-            name, height, water_depth, biome, overlay, overlay_alpha = parts
-            current_heights.append(height)
-            if name is None:
-                base = DEFAULT_EMPTY
-            elif is_air_name(name):
-                base = DEFAULT_WATERISH
-            else:
-                base = _resolve_surface_color(
-                    name,
-                    biome,
-                    color_for_block,
-                    color_for_surface,
-                )
-            if overlay and overlay_alpha > 0.0:
-                overlay_color = _resolve_surface_color(
-                    overlay,
-                    biome,
-                    color_for_block,
-                    color_for_surface,
-                )
-                base = _blend_surface_color(base, overlay_color, overlay_alpha)
-            factor = _relief_factor_from_neighbors(
-                height,
-                _height_from_row(north_source, x, height or 0),
-                _height_from_row(current_heights, x - 1, height or 0),
-                _height_from_row(north_source, x - 1, height or 0),
-                name,
-                water_depth,
-                spacing_scale,
-            )
-            color_row.append(_shade_color(base, factor))
-            processed += 1
-            if (
-                cancel_check is not None
-                and processed % 4096 == 0
-                and cancel_check()
-            ):
-                return None
         colors.append(color_row)
         previous_heights = current_heights
+        processed += len(row)
+        if (
+            cancel_check is not None
+            and processed % 4096 == 0
+            and cancel_check()
+        ):
+            return None
     return colors
+
+
+def _colorize_surface_row(
+    row: List[Any],
+    *,
+    previous_heights: Optional[List[Optional[int]]],
+    spacing_scale: float,
+    color_for_block: Optional[ColorFunc],
+    color_for_surface: Optional[SurfaceColorFunc],
+) -> tuple[List[Color], List[Optional[int]]]:
+    color_row: List[Color] = []
+    current_heights: List[Optional[int]] = []
+    north_source = (
+        current_heights if previous_heights is None else previous_heights
+    )
+    for x, value in enumerate(row):
+        parts = _surface_parts(value)
+        name, height, water_depth, biome, overlay, overlay_alpha = parts
+        current_heights.append(height)
+        if name is None:
+            base = DEFAULT_EMPTY
+        elif is_air_name(name):
+            base = DEFAULT_WATERISH
+        else:
+            base = _resolve_surface_color(
+                name,
+                biome,
+                color_for_block,
+                color_for_surface,
+            )
+        if overlay and overlay_alpha > 0.0:
+            overlay_color = _resolve_surface_color(
+                overlay,
+                biome,
+                color_for_block,
+                color_for_surface,
+            )
+            base = _blend_surface_color(base, overlay_color, overlay_alpha)
+        factor = _relief_factor_from_neighbors(
+            height,
+            _height_from_row(north_source, x, height or 0),
+            _height_from_row(current_heights, x - 1, height or 0),
+            _height_from_row(north_source, x - 1, height or 0),
+            name,
+            water_depth,
+            spacing_scale,
+        )
+        color_row.append(_shade_color(base, factor))
+    return color_row, current_heights
 
 
 def clear_chunk_decode_cache() -> None:

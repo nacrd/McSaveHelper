@@ -12,7 +12,7 @@ from app.ui.components.fields import text_field, current_save_field
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
-from app.ui.utils import run_on_ui
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
@@ -174,6 +174,7 @@ class CompareView(ft.Column):
         """统一入口设置当前存档回调"""
         try:
             self._left_field.value = path
-            self._left_field.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._left_field)

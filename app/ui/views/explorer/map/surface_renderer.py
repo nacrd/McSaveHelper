@@ -116,44 +116,22 @@ class MapSurfaceRenderer:
                 (spec.pixel_width, spec.pixel_height),
                 (11, 18, 11, 255),
             )
-            draw = ImageDraw.Draw(image)
-            index = 0
-            for region_z in range(min_z, spec.max_region_z + 1):
-                for region_x in range(min_x, spec.max_region_x + 1):
-                    index += 1
-                    if (
-                        cancel_check is not None
-                        and index % 64 == 0
-                        and cancel_check()
-                    ):
-                        image.close()
-                        raise _SurfaceCancelled
-                    coord = (region_x, region_z)
-                    if coord not in data:
-                        continue
-                    x0 = (region_x - min_x) * pixels_per_region
-                    y0 = (region_z - min_z) * pixels_per_region
-                    x1 = x0 + pixels_per_region
-                    y1 = y0 + pixels_per_region
-                    raw = tile_bytes.get(coord)
-                    if spec.use_topview and raw:
-                        tile = self._decoded_tile(
-                            spec.source_generation,
-                            coord,
-                            int(tile_revisions.get(coord, 0) or 0),
-                            pixels_per_region,
-                            raw,
-                        )
-                        if tile is not None:
-                            image.paste(tile, (x0, y0))
-                            continue
-                    draw.rectangle(
-                        (x0, y0, max(x0, x1 - 1), max(y0, y1 - 1)),
-                        fill=_rgb(colors.get(coord, (42, 58, 46))),
-                    )
-
-            pixels = image.tobytes()
-            image.close()
+            try:
+                self._paint_surface_regions(
+                    image=image,
+                    spec=spec,
+                    data=data,
+                    tile_bytes=tile_bytes,
+                    tile_revisions=tile_revisions,
+                    colors=colors,
+                    pixels_per_region=pixels_per_region,
+                    min_x=min_x,
+                    min_z=min_z,
+                    cancel_check=cancel_check,
+                )
+                pixels = image.tobytes()
+            finally:
+                image.close()
         return MapSurfaceFrame(
             pixels=pixels,
             width=spec.pixel_width,
@@ -163,6 +141,55 @@ class MapSurfaceRenderer:
             pixels_per_region=pixels_per_region,
             spec=spec,
         )
+
+    def _paint_surface_regions(
+        self,
+        *,
+        image: Image.Image,
+        spec: MapSurfaceSpec,
+        data: Mapping[RegionCoord, int],
+        tile_bytes: Mapping[RegionCoord, Optional[bytes]],
+        tile_revisions: Mapping[RegionCoord, int],
+        colors: Mapping[RegionCoord, Color],
+        pixels_per_region: int,
+        min_x: int,
+        min_z: int,
+        cancel_check: Optional[CancelCheck],
+    ) -> None:
+        draw = ImageDraw.Draw(image)
+        index = 0
+        for region_z in range(min_z, spec.max_region_z + 1):
+            for region_x in range(min_x, spec.max_region_x + 1):
+                index += 1
+                if (
+                    cancel_check is not None
+                    and index % 64 == 0
+                    and cancel_check()
+                ):
+                    raise _SurfaceCancelled
+                coord = (region_x, region_z)
+                if coord not in data:
+                    continue
+                x0 = (region_x - min_x) * pixels_per_region
+                y0 = (region_z - min_z) * pixels_per_region
+                x1 = x0 + pixels_per_region
+                y1 = y0 + pixels_per_region
+                raw = tile_bytes.get(coord)
+                if spec.use_topview and raw:
+                    tile = self._decoded_tile(
+                        spec.source_generation,
+                        coord,
+                        int(tile_revisions.get(coord, 0) or 0),
+                        pixels_per_region,
+                        raw,
+                    )
+                    if tile is not None:
+                        image.paste(tile, (x0, y0))
+                        continue
+                draw.rectangle(
+                    (x0, y0, max(x0, x1 - 1), max(y0, y1 - 1)),
+                    fill=_rgb(colors.get(coord, (42, 58, 46))),
+                )
 
     def _decoded_tile(
         self,

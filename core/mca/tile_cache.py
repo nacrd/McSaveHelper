@@ -43,6 +43,8 @@ def _cache_key(region_path: Path, tile_size: int) -> str:
         from core.mca.texture_palette import texture_palette_signature
 
         texture_signature = texture_palette_signature()
+    except (ImportError, RuntimeError, AttributeError, TypeError, ValueError):
+        texture_signature = "fallback"
     except Exception:
         texture_signature = "fallback"
     raw = (
@@ -107,6 +109,8 @@ def upscale_cached_tile(region_path: PathLike, tile_size: int) -> Optional[bytes
             buf = io.BytesIO()
             out.save(buf, format="PNG", optimize=False, compress_level=1)
             return buf.getvalue()
+    except (OSError, ValueError, TypeError, ImportError):
+        return None
     except Exception:
         return None
 
@@ -117,11 +121,11 @@ def get_cache_stats() -> Dict[str, Any]:
     file_count = 0
     total_bytes = 0
     try:
-        for p in root.glob("*.png"):
-            if not p.is_file():
+        for path in root.glob("*.png"):
+            if not path.is_file():
                 continue
             try:
-                total_bytes += p.stat().st_size
+                total_bytes += path.stat().st_size
                 file_count += 1
             except OSError:
                 continue
@@ -132,6 +136,8 @@ def get_cache_stats() -> Dict[str, Any]:
     try:
         from core.mca.surface import chunk_decode_cache_size
         mem_entries = int(chunk_decode_cache_size())
+    except (ImportError, TypeError, ValueError, AttributeError, RuntimeError):
+        mem_entries = 0
     except Exception:
         mem_entries = 0
 
@@ -173,6 +179,8 @@ def clear_all_caches() -> Dict[str, Any]:
         from core.mca.surface import clear_chunk_decode_cache, chunk_decode_cache_size
         mem_cleared = int(chunk_decode_cache_size())
         clear_chunk_decode_cache()
+    except (ImportError, TypeError, ValueError, AttributeError, RuntimeError):
+        pass
     except Exception:
         pass
     return {**disk, "memory_chunks_cleared": mem_cleared}

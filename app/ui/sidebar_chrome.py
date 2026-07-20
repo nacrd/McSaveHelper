@@ -43,141 +43,27 @@ def build_header_expanded(
     on_set_current_save: Callable[..., None],
     on_toggle_recent: Callable[..., None],
 ) -> ft.Container:
+    """Expanded sidebar header: brand, current save, and recent list."""
     return ft.Container(
         content=ft.Column(
-            cast(List[ft.Control], [
-                ft.Row(
-                    [
-                        ft.Container(
-                            content=ft.Icon(
-                                IconSet.PICKAXE, size=20, color=THEME.mc_gold,
-                            ),
-                            width=36,
-                            height=36,
-                            alignment=ft.alignment.Alignment(0, 0),
-                            bgcolor=THEME.bg_secondary,
-                            border=mc_border(2),
-                            border_radius=6,
-                        ),
-                        ft.Column(
-                            [
-                                ft.Text(
-                                    "MCSaveHelper",
-                                    size=15,
-                                    weight=ft.FontWeight.BOLD,
-                                    color=THEME.mc_gold,
-                                    font_family="monospace",
-                                ),
-                                ft.Text(
-                                    "Minecraft Save Toolkit",
-                                    size=10,
-                                    color=THEME.text_muted,
-                                    font_family="monospace",
-                                ),
-                            ],
-                            spacing=2,
-                            expand=True,
-                        ),
-                    ],
-                    spacing=10,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Container(
-                    height=1,
-                    bgcolor=THEME.border_subtle,
-                    margin=ft.Margin(top=12, bottom=12, left=0, right=0),
-                ),
-                ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Row(
-                                [
-                                    ft.Icon(
-                                        IconSet.SAVE, size=14, color=THEME.mc_grass,
-                                    ),
-                                    ft.Text(
-                                        "当前存档",
-                                        size=11,
-                                        weight=ft.FontWeight.W_600,
-                                        color=THEME.text_secondary,
-                                        font_family="monospace",
-                                    ),
-                                ],
-                                spacing=6,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                            ),
-                            current_save_name,
-                        ],
-                        spacing=6,
+            cast(
+                List[ft.Control],
+                [
+                    _build_brand_row(),
+                    ft.Container(
+                        height=1,
+                        bgcolor=THEME.border_subtle,
+                        margin=ft.Margin(top=12, bottom=12, left=0, right=0),
                     ),
-                    padding=8,
-                    bgcolor=THEME.bg_secondary,
-                    border_radius=6,
-                    border=mc_border(1),
-                ),
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(
-                                IconSet.FOLDER_OPEN,
-                                size=16,
-                                color=THEME.text_primary,
-                            ),
-                            ft.Text(
-                                "设置当前存档",
-                                size=12,
-                                weight=ft.FontWeight.W_600,
-                                color=THEME.text_primary,
-                            ),
-                        ],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        alignment=ft.MainAxisAlignment.CENTER,
+                    _build_current_save_block(current_save_name),
+                    _build_set_current_save_button(on_set_current_save),
+                    _build_recent_saves_block(
+                        recent_arrow,
+                        recent_body,
+                        on_toggle_recent,
                     ),
-                    padding=ft.Padding(left=12, right=12, top=10, bottom=10),
-                    bgcolor=THEME.mc_grass,
-                    border_radius=6,
-                    border=mc_border(2),
-                    ink=True,
-                    on_click=on_set_current_save,
-                    margin=ft.Margin(top=10, bottom=0, left=0, right=0),
-                    shadow=mc_shadow_glow(THEME.shadow_accent, 6),
-                ),
-                ft.Container(
-                    content=ft.Column(
-                        [
-                            ft.Container(
-                                content=ft.Row(
-                                    [
-                                        ft.Icon(
-                                            IconSet.CLOCK,
-                                            size=12,
-                                            color=THEME.text_secondary,
-                                        ),
-                                        ft.Text(
-                                            "最近存档",
-                                            size=11,
-                                            weight=ft.FontWeight.W_600,
-                                            color=THEME.text_primary,
-                                            font_family="monospace",
-                                        ),
-                                        ft.Container(expand=True),
-                                        recent_arrow,
-                                    ],
-                                    spacing=6,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                ),
-                                ink=True,
-                                border_radius=4,
-                                on_click=on_toggle_recent,
-                            ),
-                            recent_body,
-                        ],
-                        spacing=8,
-                    ),
-                    padding=ft.Padding(left=0, right=0, top=12, bottom=0),
-                ),
-            ]),
+                ],
+            ),
             spacing=0,
         ),
         padding=ft.Padding(left=16, right=16, top=16, bottom=16),
@@ -188,6 +74,150 @@ def build_header_expanded(
             right=_EMPTY_BORDER_SIDE,
             bottom=ft.BorderSide(3, THEME.mc_grass),
         ),
+    )
+
+
+def _build_brand_row() -> ft.Row:
+    return ft.Row(
+        [
+            ft.Container(
+                content=ft.Icon(
+                    IconSet.PICKAXE, size=20, color=THEME.mc_gold,
+                ),
+                width=36,
+                height=36,
+                alignment=ft.alignment.Alignment(0, 0),
+                bgcolor=THEME.bg_secondary,
+                border=mc_border(2),
+                border_radius=6,
+            ),
+            ft.Column(
+                [
+                    ft.Text(
+                        "MCSaveHelper",
+                        size=15,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.mc_gold,
+                        font_family="monospace",
+                    ),
+                    ft.Text(
+                        "Minecraft Save Toolkit",
+                        size=10,
+                        color=THEME.text_muted,
+                        font_family="monospace",
+                    ),
+                ],
+                spacing=2,
+                expand=True,
+            ),
+        ],
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
+def _build_current_save_block(current_save_name: ft.Text) -> ft.Container:
+    return ft.Container(
+        content=ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Icon(
+                            IconSet.SAVE, size=14, color=THEME.mc_grass,
+                        ),
+                        ft.Text(
+                            "当前存档",
+                            size=11,
+                            weight=ft.FontWeight.W_600,
+                            color=THEME.text_secondary,
+                            font_family="monospace",
+                        ),
+                    ],
+                    spacing=6,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                ),
+                current_save_name,
+            ],
+            spacing=6,
+        ),
+        padding=8,
+        bgcolor=THEME.bg_secondary,
+        border_radius=6,
+        border=mc_border(1),
+    )
+
+
+def _build_set_current_save_button(
+    on_set_current_save: Callable[..., None],
+) -> ft.Container:
+    return ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(
+                    IconSet.FOLDER_OPEN,
+                    size=16,
+                    color=THEME.text_primary,
+                ),
+                ft.Text(
+                    "设置当前存档",
+                    size=12,
+                    weight=ft.FontWeight.W_600,
+                    color=THEME.text_primary,
+                ),
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding(left=12, right=12, top=10, bottom=10),
+        bgcolor=THEME.mc_grass,
+        border_radius=6,
+        border=mc_border(2),
+        ink=True,
+        on_click=on_set_current_save,
+        margin=ft.Margin(top=10, bottom=0, left=0, right=0),
+        shadow=mc_shadow_glow(THEME.shadow_accent, 6),
+    )
+
+
+def _build_recent_saves_block(
+    recent_arrow: ft.Text,
+    recent_body: ft.Container,
+    on_toggle_recent: Callable[..., None],
+) -> ft.Container:
+    return ft.Container(
+        content=ft.Column(
+            [
+                ft.Container(
+                    content=ft.Row(
+                        [
+                            ft.Icon(
+                                IconSet.CLOCK,
+                                size=12,
+                                color=THEME.text_secondary,
+                            ),
+                            ft.Text(
+                                "最近存档",
+                                size=11,
+                                weight=ft.FontWeight.W_600,
+                                color=THEME.text_primary,
+                                font_family="monospace",
+                            ),
+                            ft.Container(expand=True),
+                            recent_arrow,
+                        ],
+                        spacing=6,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ink=True,
+                    border_radius=4,
+                    on_click=on_toggle_recent,
+                ),
+                recent_body,
+            ],
+            spacing=8,
+        ),
+        padding=ft.Padding(left=0, right=0, top=12, bottom=0),
     )
 
 

@@ -256,49 +256,22 @@ def register_default_shortcuts(
         on_refresh: 刷新回调 (F5)
         on_quit: 退出回调 (Ctrl+Q)
     """
-    if on_save:
+    bindings = (
+        ("save", "s", on_save, "保存当前配置", [ModifierKey.CTRL]),
+        ("open", "o", on_open, "打开文件", [ModifierKey.CTRL]),
+        ("help", "F1", on_help, "显示帮助", []),
+        ("refresh", "F5", on_refresh, "刷新页面", []),
+        ("quit", "q", on_quit, "退出应用", [ModifierKey.CTRL]),
+    )
+    for key_id, key, handler, description, modifiers in bindings:
+        if handler is None:
+            continue
         shortcut_manager.register(
-            "save",
-            "s",
-            on_save,
-            "保存当前配置",
-            [ModifierKey.CTRL]
-        )
-
-    if on_open:
-        shortcut_manager.register(
-            "open",
-            "o",
-            on_open,
-            "打开文件",
-            [ModifierKey.CTRL]
-        )
-
-    if on_help:
-        shortcut_manager.register(
-            "help",
-            "F1",
-            on_help,
-            "显示帮助",
-            []
-        )
-
-    if on_refresh:
-        shortcut_manager.register(
-            "refresh",
-            "F5",
-            on_refresh,
-            "刷新页面",
-            []
-        )
-
-    if on_quit:
-        shortcut_manager.register(
-            "quit",
-            "q",
-            on_quit,
-            "退出应用",
-            [ModifierKey.CTRL]
+            key_id,
+            key,
+            handler,
+            description,
+            modifiers,
         )
 
     # 显示快捷键帮助
@@ -307,7 +280,7 @@ def register_default_shortcuts(
         "/",
         lambda e: print("[INFO] 快捷键帮助：请查看菜单"),
         "显示快捷键列表",
-        [ModifierKey.CTRL]
+        [ModifierKey.CTRL],
     )
 
 

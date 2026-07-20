@@ -232,7 +232,12 @@ class DialogManager:
             self._deps.copy_to_clipboard(text)
             self._show_snackbar("错误信息已复制到剪贴板", THEME.mc_grass, 2000)
         except Exception:
-            self._show_snackbar("复制失败，错误信息可手动选择复制", THEME.warning, 3000)
+            # Clipboard backends differ by platform/host.
+            self._show_snackbar(
+                "复制失败，错误信息可手动选择复制",
+                THEME.warning,
+                3000,
+            )
 
     def _show_snackbar(self, message: str, bgcolor: str, duration: int) -> None:
         """显示提示消息
@@ -460,6 +465,7 @@ class DialogManager:
         try:
             self._deps.switch_view(view_id)
         except Exception:
+            # View switch may fail if host is unmounted; ignore.
             pass
 
     # ════════════════════════════════════════════
@@ -495,6 +501,19 @@ class DialogManager:
         ]
         dialog_title = title or self._translate("common.select", "选择文件")
         return self._deps.file_dialogs.pick_file(
+            dialog_title,
+            selected_types,
+        )
+
+    def pick_files(
+        self,
+        title: str = "",
+        file_types: Optional[List[FileType]] = None,
+    ) -> Optional[List[str]]:
+        """Multi-select file dialog."""
+        dialog_title = title or self._translate("common.select_file", "选择文件")
+        selected_types = file_types or [("所有文件", "*.*")]
+        return self._deps.file_dialogs.pick_files(
             dialog_title,
             selected_types,
         )

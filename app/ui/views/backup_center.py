@@ -53,6 +53,54 @@ class BackupCenterView(ft.Column):
         ]
 
     def _build_ui(self) -> None:
+        self._build_backup_fields()
+        header = page_header(
+            self._t("title", "备份与恢复"),
+            ft.Text(
+                self._t("subtitle", "管理完整世界快照和恢复点"),
+                size=12,
+                color=THEME.text_muted,
+            ),
+            icon=IconSet.HISTORY,
+            actions=ft.IconButton(
+                icon=IconSet.REFRESH,
+                tooltip=self._t("refresh", "刷新备份列表"),
+                icon_color=THEME.text_primary,
+                on_click=self._refresh,
+            ),
+        )
+        create_panel = card(
+            ft.Column(
+                [
+                    self._world_path_field,
+                    self._label_field,
+                    ft.Row(
+                        [self._create_button, self._cancel_button],
+                        spacing=10,
+                    ),
+                    ft.Row(
+                        [self._retention_dropdown, self._prune_button],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                ],
+                spacing=12,
+            ),
+            padding=16,
+        )
+        list_heading = ft.Row(
+            [
+                section_header(self._t("snapshots", "恢复点")),
+                self._summary,
+            ],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.controls = [header, create_panel, list_heading, self._backup_list]
+        self._show_empty_state()
+
+    def _build_backup_fields(self) -> None:
+        """Create form controls used by the create/prune panels."""
         self._world_path_field = current_save_field(
             label=self._t("current_save", "当前存档"),
         )
@@ -90,58 +138,12 @@ class BackupCenterView(ft.Column):
             icon_color=THEME.warning,
             on_click=self._confirm_prune,
         )
-        refresh_button = ft.IconButton(
-            icon=IconSet.REFRESH,
-            tooltip=self._t("refresh", "刷新备份列表"),
-            icon_color=THEME.text_primary,
-            on_click=self._refresh,
-        )
         self._summary = ft.Text(
             self._t("no_save", "尚未选择存档"),
             size=12,
             color=THEME.text_muted,
         )
         self._backup_list = ft.Column(spacing=10)
-
-        header = page_header(
-            self._t("title", "备份与恢复"),
-            ft.Text(
-                self._t("subtitle", "管理完整世界快照和恢复点"),
-                size=12,
-                color=THEME.text_muted,
-            ),
-            icon=IconSet.HISTORY,
-            actions=refresh_button,
-        )
-        create_panel = card(
-            ft.Column(
-                [
-                    self._world_path_field,
-                    self._label_field,
-                    ft.Row(
-                        [self._create_button, self._cancel_button],
-                        spacing=10,
-                    ),
-                    ft.Row(
-                        [self._retention_dropdown, self._prune_button],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                ],
-                spacing=12,
-            ),
-            padding=16,
-        )
-        list_heading = ft.Row(
-            [
-                section_header(self._t("snapshots", "恢复点")),
-                self._summary,
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        self.controls = [header, create_panel, list_heading, self._backup_list]
-        self._show_empty_state()
 
     def _selected_world(self) -> Path:
         value = str(self._world_path_field.value or "").strip()
@@ -194,6 +196,35 @@ class BackupCenterView(ft.Column):
         ]
 
     def _backup_row(self, record: BackupRecord) -> ft.Container:
+        status_color = THEME.success if record.valid else THEME.error
+        status_icon = IconSet.SUCCESS if record.valid else IconSet.ERROR
+        return ft.Container(
+            content=ft.Row(
+                [
+                    ft.Icon(status_icon, size=24, color=status_color),
+                    ft.Column(
+                        self._backup_description_controls(record),
+                        spacing=3,
+                        expand=True,
+                    ),
+                    ft.Row(
+                        self._backup_action_buttons(record),
+                        spacing=2,
+                    ),
+                ],
+                spacing=12,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
+            padding=ft.Padding(left=14, right=8, top=12, bottom=12),
+            bgcolor=THEME.bg_card,
+            border=mc_border(2),
+            border_radius=8,
+        )
+
+    def _backup_description_controls(
+        self,
+        record: BackupRecord,
+    ) -> list[ft.Control]:
         title = record.label or self._t("untitled", "未命名恢复点")
         created = record.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
         details = self._t(
@@ -209,65 +240,53 @@ class BackupCenterView(ft.Column):
             if record.integrity_available
             else self._t("integrity_legacy", "旧版无清单")
         )
-        details = f"{details} · {integrity}"
-        status_color = THEME.success if record.valid else THEME.error
-        status_icon = IconSet.SUCCESS if record.valid else IconSet.ERROR
-        verify_button = ft.IconButton(
-            icon=IconSet.VERIFY,
-            tooltip=self._t("verify", "验证完整性"),
-            icon_color=THEME.mc_emerald,
-            disabled=not record.valid or self._busy,
-            on_click=lambda e, item=record: self._start_verify(item),
-        )
-        restore_button = ft.IconButton(
-            icon=IconSet.RESTORE,
-            tooltip=self._t("restore", "恢复此备份"),
-            icon_color=THEME.mc_diamond,
-            disabled=not record.valid or self._busy,
-            on_click=lambda e, item=record: self._confirm_restore(item),
-        )
-        delete_button = ft.IconButton(
-            icon=IconSet.DELETE,
-            tooltip=self._t("delete", "删除此备份"),
-            icon_color=THEME.error,
-            disabled=self._busy,
-            on_click=lambda e, item=record: self._confirm_delete(item),
-        )
-        description_controls: list[ft.Control] = [
+        controls: list[ft.Control] = [
             ft.Text(
                 title,
                 size=14,
                 weight=ft.FontWeight.BOLD,
                 color=THEME.text_primary,
             ),
-            ft.Text(details, size=11, color=THEME.text_secondary),
+            ft.Text(
+                f"{details} · {integrity}",
+                size=11,
+                color=THEME.text_secondary,
+            ),
         ]
         if not record.valid:
-            description_controls.append(
+            controls.append(
                 ft.Text(
                     record.validation_error,
                     size=11,
                     color=THEME.error,
                 )
             )
-        return ft.Container(
-            content=ft.Row(
-                [
-                    ft.Icon(status_icon, size=24, color=status_color),
-                    ft.Column(description_controls, spacing=3, expand=True),
-                    ft.Row(
-                        [verify_button, restore_button, delete_button],
-                        spacing=2,
-                    ),
-                ],
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        return controls
+
+    def _backup_action_buttons(self, record: BackupRecord) -> list[ft.Control]:
+        return [
+            ft.IconButton(
+                icon=IconSet.VERIFY,
+                tooltip=self._t("verify", "验证完整性"),
+                icon_color=THEME.mc_emerald,
+                disabled=not record.valid or self._busy,
+                on_click=lambda e, item=record: self._start_verify(item),
             ),
-            padding=ft.Padding(left=14, right=8, top=12, bottom=12),
-            bgcolor=THEME.bg_card,
-            border=mc_border(2),
-            border_radius=8,
-        )
+            ft.IconButton(
+                icon=IconSet.RESTORE,
+                tooltip=self._t("restore", "恢复此备份"),
+                icon_color=THEME.mc_diamond,
+                disabled=not record.valid or self._busy,
+                on_click=lambda e, item=record: self._confirm_restore(item),
+            ),
+            ft.IconButton(
+                icon=IconSet.DELETE,
+                tooltip=self._t("delete", "删除此备份"),
+                icon_color=THEME.error,
+                disabled=self._busy,
+                on_click=lambda e, item=record: self._confirm_delete(item),
+            ),
+        ]
 
     def _start_create(self, event: ft.ControlEvent) -> None:
         del event

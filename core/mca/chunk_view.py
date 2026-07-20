@@ -49,7 +49,7 @@ class ChunkView:
                 self.x = xpos
             if zpos is not None:
                 self.z = zpos
-        except Exception:
+        except (TypeError, ValueError, AttributeError, KeyError):
             pass
 
     def get_block(self, x: int, y: int, z: int) -> NamedBlock:
@@ -85,6 +85,8 @@ def get_chunk(
     try:
         nbt = region.read_chunk(local_cx, local_cz)
     except ChunkMissing:
+        return None
+    except (OSError, ValueError, TypeError, RuntimeError, KeyError):
         return None
     except Exception:
         return None
@@ -142,5 +144,5 @@ def section_range_for_chunk(chunk: Any) -> range:
     version = getattr(chunk, "version", None)
     try:
         return section_y_range(int(version) if version is not None else None)
-    except Exception:
+    except (TypeError, ValueError):
         return range(-4, 20)

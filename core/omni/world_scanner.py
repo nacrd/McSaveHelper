@@ -29,10 +29,10 @@ class WorldScanner:
         Returns:
             包含 player_files, region_files, data_files, usercache 的字典
         """
-        player_files = self._scan_players()
+        player_files = self.scan_player_files()
         region_files = self._scan_regions()
         data_files = self._scan_data()
-        usercache = self._scan_usercache(set(player_files.keys()))
+        usercache = self.scan_usercache(set(player_files.keys()))
 
         return {
             'player_files': player_files,
@@ -40,6 +40,18 @@ class WorldScanner:
             'data_files': data_files,
             'usercache': usercache,
         }
+
+    def scan_player_files(self) -> Dict[str, Path]:
+        """Public: discover player ``*.dat`` files (26.1 + legacy)."""
+        return self._scan_players()
+
+    def scan_usercache(self, player_set: Optional[Set[str]] = None) -> Dict[str, str]:
+        """Public: load best-matching usercache entries.
+
+        When ``player_set`` is omitted, match counts use an empty set (still
+        returns the richest candidate cache found).
+        """
+        return self._scan_usercache(player_set or set())
 
     def _scan_players(self) -> Dict[str, Path]:
         """扫描玩家数据文件（兼容 Minecraft 26.1 新旧路径）
@@ -213,7 +225,9 @@ class WorldScanner:
     @staticmethod
     def _normalize_uuid(uuid: str) -> str:
         """规范化 UUID：移除连字符并转为小写"""
-        return uuid.replace("-", "").lower()
+        from core.uuid_utils import normalize_uuid
+
+        return normalize_uuid(uuid)
 
 
 def _load_usercache_candidate(
@@ -236,11 +250,14 @@ def _load_usercache_candidate(
 
 
 def _parse_usercache_entry(entry: Mapping[str, Any]) -> Optional[tuple[str, str]]:
+    from core.uuid_utils import normalize_uuid
+
     uuid_value = entry.get("uuid", "")
     name_value = entry.get("name", "")
     if not isinstance(uuid_value, str) or not isinstance(name_value, str):
         return None
-    uuid = uuid_value.replace("-", "")
-    if not uuid or not name_value:
+    uuid = normalize_uuid(uuid_value)
+    name = name_value.strip()
+    if not uuid or not name:
         return None
-    return uuid, name_value
+    return uuid, name

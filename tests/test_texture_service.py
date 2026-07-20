@@ -80,6 +80,38 @@ def test_cached_jar_validation_accepts_match_and_removes_mismatch(
     assert not jar_path.exists()
 
 
+def test_import_textures_from_jars_bulk_extracts_pngs(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    cache_dir = tmp_path / "cache"
+    jar_dir = tmp_path / "jars"
+    cache_dir.mkdir()
+    jar_dir.mkdir()
+
+    # Minimal valid-looking PNG signature payload.
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    jar_path = jar_dir / "pack.jar"
+    with zipfile.ZipFile(jar_path, "w") as archive:
+        archive.writestr("assets/minecraft/textures/item/apple.png", png)
+        archive.writestr("assets/examplemod/textures/item/widget.png", png)
+        archive.writestr("assets/minecraft/lang/zh_cn.json", "{}")
+
+    service = TextureService()
+    monkeypatch.setattr(service, "_cache_dir", cache_dir)
+    # Avoid network / local MC discovery side effects.
+    monkeypatch.setattr(service, "find_minecraft_jar", lambda: None)
+    monkeypatch.setattr(service, "_download_client_jar", lambda: None)
+
+    result = service.import_textures_from_jars([jar_path])
+    assert result.extracted == 2
+    assert result.jars == 1
+    assert (cache_dir / "item" / "apple.png").is_file()
+    assert (cache_dir / "item" / "widget.png").is_file()
+    # Registered jar remains available for later lookups.
+    assert service._minecraft_jar == jar_path or jar_path in service._extra_jars
+
+
 def test_stream_client_jar_commits_temp_file_atomically(
     monkeypatch: Any,
     tmp_path: Path,

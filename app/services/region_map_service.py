@@ -15,6 +15,7 @@ from typing import Any, Deque, Dict, Tuple, Optional
 from dataclasses import dataclass
 
 from core.region_utils import parse_region_coords, scan_region_dir
+from core.mca.errors import McaError
 from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
 from core.mca.region_meta import scan_region_meta
 from core.mca.region_file import RegionFile
@@ -65,6 +66,11 @@ class RegionMapService:
 
     def __init__(self) -> None:
         """初始化内部状态"""
+        self._init_scan_state()
+        self._init_topview_state()
+        self._init_topview_workers()
+
+    def _init_scan_state(self) -> None:
         self._mca_data: Dict[Tuple[int, int], int] = {}
         self._region_meta: Dict[Tuple[int, int], Dict[str, Any]] = {}
         # Metadata is intentionally loaded on demand.  Keep in-flight loads
@@ -72,9 +78,6 @@ class RegionMapService:
         self._region_meta_tasks: Dict[Tuple[int, int], asyncio.Task] = {}
         # region 坐标 → mca 文件路径（俯视图渲染用）
         self._region_paths: Dict[Tuple[int, int], str] = {}
-        # region 坐标 → PNG bytes（顶视瓦片缓存）
-        self._topview_tiles: OrderedDict[Tuple[int, int], bytes] = OrderedDict()
-        self._topview_memory_bytes = 0
         self._is_scanning: bool = False
         self._scan_progress: float = 0.0
         self._scan_task: Optional[asyncio.Task] = None
@@ -91,6 +94,11 @@ class RegionMapService:
         self._cached_snapshot_count: int = -1
         # 扫描线程与 UI 查询之间的共享数据保护。
         self._data_lock = threading.Lock()
+
+    def _init_topview_state(self) -> None:
+        # region 坐标 → PNG bytes（顶视瓦片缓存）
+        self._topview_tiles: OrderedDict[Tuple[int, int], bytes] = OrderedDict()
+        self._topview_memory_bytes = 0
         # 俯视图生成代数：clear/start 时递增，丢弃过期回调
         self._topview_generation: int = 0
         # coord -> generation.  The generation check prevents an old worker
@@ -116,6 +124,8 @@ class RegionMapService:
         ] = {}
         # 瓦片变更回调（由 UI 注册，在 UI 线程调度）
         self._tile_ready_callback: Optional[Any] = None
+
+    def _init_topview_workers(self) -> None:
         # Bounded topview queue: rendering also performs limited parallel chunk
         # decoding, so keep the outer pool small to avoid nested thread storms.
         cpu = os.cpu_count() or 2
@@ -231,26 +241,48 @@ class RegionMapService:
         if not path:
             return {}
 
-        if task is None:
-            task = asyncio.create_task(
-                asyncio.to_thread(scan_region_meta, Path(path))
-            )
-            with self._data_lock:
-                existing = self._region_meta_tasks.get(coord)
-                if existing is None:
-                    self._region_meta_tasks[coord] = task
-                    task.add_done_callback(
-                        lambda completed: self._finish_region_meta_task(
-                            coord,
-                            path,
-                            generation,
-                            completed,
-                        )
-                    )
-                else:
-                    task.cancel()
-                    task = existing
+        task = self._get_or_create_region_meta_task(coord, path, generation, task)
+        meta = await self._await_region_meta_task(coord, task)
+        return self._store_region_meta_if_current(
+            coord,
+            path,
+            generation,
+            meta,
+        )
 
+    def _get_or_create_region_meta_task(
+        self,
+        coord: Tuple[int, int],
+        path: str,
+        generation: int,
+        task: Optional[Any],
+    ) -> Any:
+        if task is not None:
+            return task
+        task = asyncio.create_task(
+            asyncio.to_thread(scan_region_meta, Path(path))
+        )
+        with self._data_lock:
+            existing = self._region_meta_tasks.get(coord)
+            if existing is None:
+                self._region_meta_tasks[coord] = task
+                task.add_done_callback(
+                    lambda completed: self._finish_region_meta_task(
+                        coord,
+                        path,
+                        generation,
+                        completed,
+                    )
+                )
+                return task
+            task.cancel()
+            return existing
+
+    async def _await_region_meta_task(
+        self,
+        coord: Tuple[int, int],
+        task: Any,
+    ) -> Dict[str, Any]:
         try:
             # One caller cancelling its UI operation must not cancel a shared
             # parse still awaited by another consumer. Lifecycle methods can
@@ -258,13 +290,24 @@ class RegionMapService:
             meta = await asyncio.shield(task)
         except asyncio.CancelledError:
             raise
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+            meta = {}
         except Exception:
+            # Shared region-meta parse may fail for damaged MCA; treat as empty.
             meta = {}
         finally:
             with self._data_lock:
                 if self._region_meta_tasks.get(coord) is task and task.done():
                     self._region_meta_tasks.pop(coord, None)
+        return dict(meta or {})
 
+    def _store_region_meta_if_current(
+        self,
+        coord: Tuple[int, int],
+        path: str,
+        generation: int,
+        meta: Dict[str, Any],
+    ) -> Dict[str, Any]:
         with self._data_lock:
             if (
                 self._closed
@@ -272,7 +315,7 @@ class RegionMapService:
                 or self._region_paths.get(coord) != path
             ):
                 return {}
-            self._region_meta[coord] = dict(meta or {})
+            self._region_meta[coord] = dict(meta)
             return dict(self._region_meta[coord])
 
     def clear_data(self) -> None:
@@ -324,7 +367,7 @@ class RegionMapService:
             from core.mca.surface import clear_chunk_decode_cache
 
             clear_chunk_decode_cache()
-        except Exception:
+        except (ImportError, RuntimeError, AttributeError):
             pass
 
     def set_tile_ready_callback(self, callback: Optional[Any]) -> None:
@@ -558,47 +601,73 @@ class RegionMapService:
             cancel_event = self._topview_cancel_event
             queued = len(self._topview_queue) + self._topview_active
             for coord in coords:
-                if self._promote_pending_topview_locked(
-                    coord,
-                    size,
-                    priority,
-                    generation,
-                    cancel_event,
-                ):
-                    accepted.add(coord)
-                    continue
-                path = self._topview_path_for_request_locked(coord, size, force)
-                if path is None:
-                    continue
-                # A large modded save can contain thousands of visible regions.
-                # Keep only a bounded window in memory; later rebuilds refill
-                # the queue as earlier tiles complete.
-                available = self._make_topview_queue_room_locked(
-                    generation,
-                    priority,
-                    queued,
+                queued, keep_going = self._enqueue_topview_coord_locked(
+                    coord=coord,
+                    size=size,
+                    force=force,
+                    priority=priority,
+                    generation=generation,
+                    cancel_event=cancel_event,
+                    queued=queued,
+                    accepted=accepted,
                 )
-                if available is None:
+                if not keep_going:
                     break
-                queued = available
-                self._topview_pending[coord] = generation
-                self._topview_pending_sizes[coord] = size
-                job = (
-                    coord,
-                    path,
-                    size,
-                    generation,
-                    cancel_event,
-                    0,
-                )
-                if priority:
-                    self._topview_queue.appendleft(job)
-                else:
-                    self._topview_queue.append(job)
-                queued += 1
-                accepted.add(coord)
         self._pump_topview_queue()
         return accepted
+
+    def _enqueue_topview_coord_locked(
+        self,
+        *,
+        coord: Tuple[int, int],
+        size: int,
+        force: bool,
+        priority: bool,
+        generation: int,
+        cancel_event: threading.Event,
+        queued: int,
+        accepted: set[Tuple[int, int]],
+    ) -> tuple[int, bool]:
+        """Try to enqueue one coord. Returns ``(queued, continue_loop)``."""
+        if self._promote_pending_topview_locked(
+            coord,
+            size,
+            priority,
+            generation,
+            cancel_event,
+        ):
+            accepted.add(coord)
+            return queued, True
+        path = self._topview_path_for_request_locked(coord, size, force)
+        if path is None:
+            return queued, True
+        # A large modded save can contain thousands of visible regions.
+        # Keep only a bounded window in memory; later rebuilds refill
+        # the queue as earlier tiles complete.
+        available = self._make_topview_queue_room_locked(
+            generation,
+            priority,
+            queued,
+        )
+        if available is None:
+            return queued, False
+        queued = available
+        self._topview_pending[coord] = generation
+        self._topview_pending_sizes[coord] = size
+        job = (
+            coord,
+            path,
+            size,
+            generation,
+            cancel_event,
+            0,
+        )
+        if priority:
+            self._topview_queue.appendleft(job)
+        else:
+            self._topview_queue.append(job)
+        accepted.add(coord)
+        return queued + 1, True
 
     def _pump_topview_queue(self) -> None:
         """Start queued jobs up to the worker cap."""
@@ -625,12 +694,17 @@ class RegionMapService:
 
         try:
             executor = self._ensure_topview_executor()
+        except (RuntimeError, ValueError, OSError):
+            self._rollback_topview_jobs(jobs)
+            return
         except Exception:
             self._rollback_topview_jobs(jobs)
             return
         for job in jobs:
             try:
                 executor.submit(self._render_topview_worker, *job)
+            except (RuntimeError, ValueError):
+                self._rollback_topview_jobs([job])
             except Exception:
                 self._rollback_topview_jobs([job])
 
@@ -695,7 +769,7 @@ class RegionMapService:
                 )
             if external_signature:
                 parts.append(f"mcc:{external_signature}")
-        except Exception:
+        except (OSError, ValueError, TypeError, RuntimeError, McaError):
             # The MCA signature still prevents stale suppression when the
             # region is replaced or removed while a retry is being checked.
             pass
@@ -710,133 +784,285 @@ class RegionMapService:
         cancel_event: threading.Event,
         source_mtime_ns: int = 0,
     ) -> None:
+        """Render one region topview tile and publish it if still current."""
         png: Optional[bytes] = None
         render_complete = True
-        source_signature = ""
         source_file_size = 0
         try:
-            # Skip work for superseded generations as early as possible.
-            with self._data_lock:
-                if (
-                    generation != self._topview_generation
-                    or cancel_event.is_set()
-                    or self._closed
-                ):
-                    return
-            try:
-                source_stat = Path(path).stat()
-                if source_mtime_ns <= 0:
-                    source_mtime_ns = int(source_stat.st_mtime_ns)
-                source_file_size = int(source_stat.st_size)
-            except OSError:
-                source_mtime_ns = 0
-            render_status: list[bool] = []
-            png = render_region_topview(
+            if self._topview_generation_stale(generation, cancel_event):
+                return
+            source_mtime_ns, source_file_size = self._read_topview_source_stat(
                 path,
-                tile_size=tile_size,
-                cancel_check=cancel_event.is_set,
-                decode_workers=2 if tile_size >= LEAF_TILE_SIZE else 1,
-                status_out=render_status,
+                source_mtime_ns,
             )
-            if render_status:
-                render_complete = render_status[-1]
+            png, render_complete = self._render_topview_png(
+                path,
+                tile_size,
+                cancel_event,
+            )
+        except (OSError, ValueError, TypeError, RuntimeError):
+            png = None
         except Exception:
+            # Topview worker boundary: keep the map session alive on render faults.
             png = None
         finally:
-            callback = None
-            upgrade_size: Optional[int] = None
-            with self._data_lock:
-                result_is_current = (
-                    generation == self._topview_generation
-                    and not cancel_event.is_set()
-                    and not self._closed
-                )
-            if result_is_current and (png is None or not render_complete):
-                source_signature = self._topview_source_signature(
-                    path,
+            self._finalize_topview_job(
+                coord=coord,
+                path=path,
+                tile_size=tile_size,
+                generation=generation,
+                cancel_event=cancel_event,
+                png=png,
+                render_complete=render_complete,
+                source_mtime_ns=source_mtime_ns,
+                source_file_size=source_file_size,
+            )
+
+    def _topview_generation_stale(
+        self,
+        generation: int,
+        cancel_event: threading.Event,
+    ) -> bool:
+        with self._data_lock:
+            return (
+                generation != self._topview_generation
+                or cancel_event.is_set()
+                or self._closed
+            )
+
+    @staticmethod
+    def _read_topview_source_stat(
+        path: str,
+        source_mtime_ns: int,
+    ) -> tuple[int, int]:
+        try:
+            source_stat = Path(path).stat()
+            if source_mtime_ns <= 0:
+                source_mtime_ns = int(source_stat.st_mtime_ns)
+            return source_mtime_ns, int(source_stat.st_size)
+        except OSError:
+            return 0, 0
+
+    @staticmethod
+    def _render_topview_png(
+        path: str,
+        tile_size: int,
+        cancel_event: threading.Event,
+    ) -> tuple[Optional[bytes], bool]:
+        render_status: list[bool] = []
+        png = render_region_topview(
+            path,
+            tile_size=tile_size,
+            cancel_check=cancel_event.is_set,
+            decode_workers=2 if tile_size >= LEAF_TILE_SIZE else 1,
+            status_out=render_status,
+        )
+        render_complete = render_status[-1] if render_status else True
+        return png, render_complete
+
+    def _finalize_topview_job(
+        self,
+        *,
+        coord: Tuple[int, int],
+        path: str,
+        tile_size: int,
+        generation: int,
+        cancel_event: threading.Event,
+        png: Optional[bytes],
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+    ) -> None:
+        """Publish worker output, notify UI, and refill the queue."""
+        source_signature = self._topview_result_signature(
+            path=path,
+            coord=coord,
+            generation=generation,
+            cancel_event=cancel_event,
+            png=png,
+            render_complete=render_complete,
+            source_mtime_ns=source_mtime_ns,
+            source_file_size=source_file_size,
+        )
+        callback, upgrade_size = self._publish_topview_result_locked(
+            coord=coord,
+            tile_size=tile_size,
+            generation=generation,
+            cancel_event=cancel_event,
+            png=png,
+            render_complete=render_complete,
+            source_mtime_ns=source_mtime_ns,
+            source_file_size=source_file_size,
+            source_signature=source_signature,
+        )
+        self._notify_topview_ready(callback, coord)
+        self._safe_pump_topview_queue()
+        self._request_topview_upgrade_if_needed(
+            coord,
+            tile_size,
+            generation,
+            upgrade_size,
+        )
+
+    def _topview_result_signature(
+        self,
+        *,
+        path: str,
+        coord: Tuple[int, int],
+        generation: int,
+        cancel_event: threading.Event,
+        png: Optional[bytes],
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+    ) -> str:
+        with self._data_lock:
+            result_is_current = (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+            )
+        if result_is_current and (png is None or not render_complete):
+            return self._topview_source_signature(
+                path,
+                coord,
+                source_mtime_ns,
+                source_file_size,
+                cancel_check=cancel_event.is_set,
+            )
+        return ""
+
+    def _notify_topview_ready(
+        self,
+        callback: Optional[Any],
+        coord: Tuple[int, int],
+    ) -> None:
+        if callback is None:
+            return
+        try:
+            callback(coord)
+        except Exception:
+            # UI callback may fail after dispose; keep worker alive.
+            pass
+
+    def _safe_pump_topview_queue(self) -> None:
+        try:
+            self._pump_topview_queue()
+        except (RuntimeError, ValueError, OSError):
+            # Queue pump failures must not kill the worker thread.
+            pass
+
+    def _request_topview_upgrade_if_needed(
+        self,
+        coord: Tuple[int, int],
+        tile_size: int,
+        generation: int,
+        upgrade_size: Optional[int],
+    ) -> None:
+        if (
+            upgrade_size is not None
+            and upgrade_size > tile_size
+            and generation == self.get_topview_generation()
+        ):
+            self.request_topview_tiles(
+                [coord],
+                tile_size=upgrade_size,
+                force=True,
+                priority=True,
+            )
+
+    def _publish_topview_result_locked(
+        self,
+        *,
+        coord: Tuple[int, int],
+        tile_size: int,
+        generation: int,
+        cancel_event: threading.Event,
+        png: Optional[bytes],
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+        source_signature: str,
+    ) -> tuple[Optional[Any], Optional[int]]:
+        """Apply success/failure bookkeeping under the data lock.
+
+        Returns:
+            tuple: ``(callback, upgrade_size)``.
+        """
+        callback = None
+        upgrade_size: Optional[int] = None
+        with self._data_lock:
+            if self._topview_pending.get(coord) == generation:
+                self._topview_pending.pop(coord, None)
+                self._topview_pending_sizes.pop(coord, None)
+                upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
+            self._topview_active = max(0, self._topview_active - 1)
+            current = (
+                generation == self._topview_generation
+                and not cancel_event.is_set()
+                and not self._closed
+            )
+            if current and png is not None:
+                self._store_topview_tile_locked(
                     coord,
+                    png,
+                    tile_size,
+                    render_complete,
                     source_mtime_ns,
                     source_file_size,
-                    cancel_check=cancel_event.is_set,
+                    source_signature,
                 )
-            with self._data_lock:
-                if self._topview_pending.get(coord) == generation:
-                    self._topview_pending.pop(coord, None)
-                    self._topview_pending_sizes.pop(coord, None)
-                    upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
-                self._topview_active = max(0, self._topview_active - 1)
-                if (
-                    generation == self._topview_generation
-                    and not cancel_event.is_set()
-                    and not self._closed
-                    and png is not None
-                ):
-                    if render_complete:
-                        self._clear_topview_failure_locked(coord)
-                    else:
-                        self._record_topview_failure_locked(
-                            coord,
-                            tile_size,
-                            source_mtime_ns,
-                            source_file_size,
-                            source_signature,
-                        )
-                    previous = self._topview_tiles.pop(coord, None)
-                    if previous is not None:
-                        self._topview_memory_bytes -= len(previous)
-                    self._topview_tiles[coord] = png
-                    self._topview_memory_bytes += len(png)
-                    self._topview_tile_sizes[coord] = int(tile_size)
-                    self._topview_tile_complete[coord] = render_complete
-                    self._topview_revision_counter += 1
-                    self._topview_tile_revisions[coord] = (
-                        self._topview_revision_counter
-                    )
-                    while (
-                        self._topview_memory_bytes > self.TOPVIEW_MEMORY_LIMIT
-                        and self._topview_tiles
-                    ):
-                        old_coord, old_png = self._topview_tiles.popitem(last=False)
-                        self._topview_memory_bytes -= len(old_png)
-                        self._topview_tile_sizes.pop(old_coord, None)
-                        self._topview_tile_complete.pop(old_coord, None)
-                        self._topview_tile_revisions.pop(old_coord, None)
-                    callback = self._tile_ready_callback
-                elif (
-                    generation == self._topview_generation
-                    and not cancel_event.is_set()
-                    and not self._closed
-                    and png is None
-                ):
-                    self._record_topview_failure_locked(
-                        coord,
-                        tile_size,
-                        source_mtime_ns,
-                        source_file_size,
-                        source_signature,
-                    )
-                    callback = self._tile_ready_callback
-            if callback is not None:
-                try:
-                    callback(coord)
-                except Exception:
-                    pass
-            # Fill freed worker slots.
-            try:
-                self._pump_topview_queue()
-            except Exception:
-                pass
-            if (
-                upgrade_size is not None
-                and upgrade_size > tile_size
-                and generation == self.get_topview_generation()
-            ):
-                self.request_topview_tiles(
-                    [coord],
-                    tile_size=upgrade_size,
-                    force=True,
-                    priority=True,
+                callback = self._tile_ready_callback
+            elif current and png is None:
+                self._record_topview_failure_locked(
+                    coord,
+                    tile_size,
+                    source_mtime_ns,
+                    source_file_size,
+                    source_signature,
                 )
+                callback = self._tile_ready_callback
+        return callback, upgrade_size
+
+    def _store_topview_tile_locked(
+        self,
+        coord: Tuple[int, int],
+        png: bytes,
+        tile_size: int,
+        render_complete: bool,
+        source_mtime_ns: int,
+        source_file_size: int,
+        source_signature: str,
+    ) -> None:
+        """Store a rendered tile and trim the in-memory cache (lock held)."""
+        if render_complete:
+            self._clear_topview_failure_locked(coord)
+        else:
+            self._record_topview_failure_locked(
+                coord,
+                tile_size,
+                source_mtime_ns,
+                source_file_size,
+                source_signature,
+            )
+        previous = self._topview_tiles.pop(coord, None)
+        if previous is not None:
+            self._topview_memory_bytes -= len(previous)
+        self._topview_tiles[coord] = png
+        self._topview_memory_bytes += len(png)
+        self._topview_tile_sizes[coord] = int(tile_size)
+        self._topview_tile_complete[coord] = render_complete
+        self._topview_revision_counter += 1
+        self._topview_tile_revisions[coord] = self._topview_revision_counter
+        while (
+            self._topview_memory_bytes > self.TOPVIEW_MEMORY_LIMIT
+            and self._topview_tiles
+        ):
+            old_coord, old_png = self._topview_tiles.popitem(last=False)
+            self._topview_memory_bytes -= len(old_png)
+            self._topview_tile_sizes.pop(old_coord, None)
+            self._topview_tile_complete.pop(old_coord, None)
+            self._topview_tile_revisions.pop(old_coord, None)
 
     def _mark_data_dirty(self) -> None:
         """标记数据变更，下次 get_statistics/get_all_data 时重算。"""
@@ -871,6 +1097,10 @@ class RegionMapService:
                 batch_size,
             )
             self._finish_silent_scan(scan_generation)
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            self._error = str(exc)
+            self._is_scanning = False
+            raise
         except Exception as exc:
             self._error = str(exc)
             self._is_scanning = False
@@ -900,6 +1130,8 @@ class RegionMapService:
                     return
                 if self._scanned_count % batch_size == 0:
                     await asyncio.sleep(0)
+            except (OSError, ValueError, TypeError, RuntimeError):
+                continue
             except Exception:
                 continue
 

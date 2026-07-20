@@ -90,16 +90,7 @@ def build_application_shell(
         border_radius=8,
         expand=True,
     )
-    sidebar = Sidebar(
-        tabs=tab_defs,
-        on_tab_select=dependencies.on_tab_select,
-        on_tabs_reorder=dependencies.on_tabs_reorder,
-        on_import_save=dependencies.on_import_save,
-        on_set_current_save=dependencies.on_import_save,
-        on_recent_save_select=dependencies.on_recent_save_select,
-        recent_saves=list(dependencies.recent_saves),
-        default_tab="explorer",
-    )
+    sidebar = _build_shell_sidebar(dependencies, tab_defs)
     top_bar = _build_top_bar(dependencies.translate, dependencies.top_actions)
     scrollable_content = ft.Container(
         content=content,
@@ -111,16 +102,7 @@ def build_application_shell(
         spacing=0,
         expand=True,
     )
-    floating_log_panel = FloatingLogPanel(
-        page=dependencies.page,
-        title=dependencies.translate("log_panel.title", "日志"),
-    )
-    log_button = FloatingLogButton(
-        floating_panel=floating_log_panel,
-        page=dependencies.page,
-    )
-    log_button.set_visible(dependencies.show_log_panel)
-    floating_log_panel.set_visible(False)
+    floating_log_panel, log_button = _build_shell_log_controls(dependencies)
     right_panel = ft.Stack(
         [content_area, floating_log_panel, log_button],
         expand=True,
@@ -151,8 +133,69 @@ def build_application_shell(
     )
 
 
+def _build_shell_sidebar(
+    dependencies: ApplicationShellDependencies,
+    tab_defs: list[dict],
+) -> Sidebar:
+    return Sidebar(
+        tabs=tab_defs,
+        on_tab_select=dependencies.on_tab_select,
+        on_tabs_reorder=dependencies.on_tabs_reorder,
+        on_import_save=dependencies.on_import_save,
+        on_set_current_save=dependencies.on_import_save,
+        on_recent_save_select=dependencies.on_recent_save_select,
+        recent_saves=list(dependencies.recent_saves),
+        default_tab="explorer",
+    )
+
+
+def _build_shell_log_controls(
+    dependencies: ApplicationShellDependencies,
+) -> tuple[FloatingLogPanel, FloatingLogButton]:
+    floating_log_panel = FloatingLogPanel(
+        page=dependencies.page,
+        title=dependencies.translate("log_panel.title", "日志"),
+    )
+    log_button = FloatingLogButton(
+        floating_panel=floating_log_panel,
+        page=dependencies.page,
+    )
+    log_button.set_visible(dependencies.show_log_panel)
+    floating_log_panel.set_visible(False)
+    return floating_log_panel, log_button
+
+
 def _build_top_bar(translate: Translate, top_actions: ft.Row) -> ft.Container:
-    identity = ft.Row(
+    identity = _build_top_bar_identity(translate)
+    header = ft.Container(
+        content=ft.Row(
+            [identity, top_actions],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
+        bgcolor=THEME.mc_wood,
+    )
+    grass_strip = ft.Container(
+        height=6,
+        bgcolor=THEME.mc_grass,
+        border_radius=ft.BorderRadius(
+            top_left=8,
+            top_right=8,
+            bottom_left=0,
+            bottom_right=0,
+        ),
+    )
+    return ft.Container(
+        content=ft.Column([grass_strip, header], spacing=0),
+        bgcolor=THEME.mc_wood,
+        border=mc_border(3),
+        border_radius=8,
+    )
+
+
+def _build_top_bar_identity(translate: Translate) -> ft.Row:
+    return ft.Row(
         [
             ft.Container(
                 content=ft.Icon(
@@ -188,31 +231,6 @@ def _build_top_bar(translate: Translate, top_actions: ft.Row) -> ft.Container:
         ],
         spacing=14,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-    header = ft.Container(
-        content=ft.Row(
-            [identity, top_actions],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
-        bgcolor=THEME.mc_wood,
-    )
-    grass_strip = ft.Container(
-        height=6,
-        bgcolor=THEME.mc_grass,
-        border_radius=ft.BorderRadius(
-            top_left=8,
-            top_right=8,
-            bottom_left=0,
-            bottom_right=0,
-        ),
-    )
-    return ft.Container(
-        content=ft.Column([grass_strip, header], spacing=0),
-        bgcolor=THEME.mc_wood,
-        border=mc_border(3),
-        border_radius=8,
     )
 
 

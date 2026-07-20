@@ -3,15 +3,19 @@
 
 实现 Java ↔ Bedrock 桥接、版本软着陆等转换功能。
 """
+from __future__ import annotations
+
 import io
 import os
+import struct
 import tempfile
 import zlib
-import nbtlib
 from dataclasses import dataclass, field
-from nbtlib import File, Compound, String, List
-from typing import Dict, Any, Optional, Tuple, List as TList
 from pathlib import Path
+from typing import Any, Dict, List as TList, Optional, Tuple
+
+import nbtlib
+from nbtlib import Compound, File, List, String
 
 from .utils import replace_directory_tree
 
@@ -89,61 +93,83 @@ def _decompress_nbt_bytes(encoded: bytes) -> bytes:
 
 
 def _parse_byteorders(data: bytes) -> TList[str]:
+    """Return byteorders that can parse *data* as a root Compound."""
     parsed: TList[str] = []
     for byteorder in ("big", "little"):
         try:
             nbtlib.File.parse(io.BytesIO(data), byteorder=byteorder)
+        except (OSError, ValueError, TypeError, struct.error):
+            continue
         except Exception:
+            # nbtlib may raise library-specific parse errors.
             continue
         parsed.append(byteorder)
     return parsed
 
 
 def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:
-    """
-    加载 NBT 文件，可选择指定字节序。
+    """加载 NBT 文件，可选择指定字节序。
 
-    如果 byteorder 为 None，则自动检测。
+    Args:
+        file_path: NBT 文件路径。
+        byteorder: ``big`` / ``little``；``None`` 时自动检测。
+
+    Returns:
+        File: 解析后的 NBT 文件对象。
+
+    Raises:
+        ConversionError: 读取或解析失败。
     """
     if byteorder is None:
         byteorder = detect_endian(file_path)
     try:
         return nbtlib.load(file_path, byteorder=byteorder)
-    except Exception as e:
-        raise ConversionError(f"加载 NBT 文件失败: {e}")
+    except (OSError, ValueError, TypeError) as exc:
+        raise ConversionError(f"加载 NBT 文件失败: {exc}") from exc
+    except Exception as exc:
+        raise ConversionError(f"加载 NBT 文件失败: {exc}") from exc
 
 
-def save_nbt(file_path: Path, nbt_data: File, byteorder: str = 'big') -> None:
-    """
-    以指定字节序保存 NBT 文件。
+def save_nbt(file_path: Path, nbt_data: File, byteorder: str = "big") -> None:
+    """以指定字节序原子保存 NBT 文件。
 
-    使用原子写入模式避免数据损坏：先写入临时文件，成功后再替换原文件。
+    先写入同目录临时文件，成功后再 ``os.replace``。
+
+    Args:
+        file_path: 目标路径。
+        nbt_data: 要保存的 NBT 文件对象。
+        byteorder: 目标字节序。
+
+    Raises:
+        ConversionError: 写入失败。
     """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = None
     fd = None
     try:
         fd, tmp_name = tempfile.mkstemp(
-            prefix=f".{
-                file_path.name}.", suffix=".tmp", dir=str(
-                file_path.parent))
+            prefix=f".{file_path.name}.",
+            suffix=".tmp",
+            dir=str(file_path.parent),
+        )
         tmp_path = Path(tmp_name)
         # 立即关闭文件描述符，允许 nbtlib 打开文件进行写入
         os.close(fd)
         fd = None
         nbt_data.save(tmp_path, byteorder=byteorder)
         os.replace(tmp_path, file_path)
-        tmp_path = None  # 标记为已成功处理，避免 finally 中删除
-    except Exception as e:
-        raise ConversionError(f"保存 NBT 文件失败: {e}")
+        tmp_path = None
+    except (OSError, ValueError, TypeError) as exc:
+        raise ConversionError(f"保存 NBT 文件失败: {exc}") from exc
+    except Exception as exc:
+        raise ConversionError(f"保存 NBT 文件失败: {exc}") from exc
     finally:
-        # 清理资源
         if fd is not None:
             try:
                 os.close(fd)
             except OSError:
                 pass
-        if tmp_path and tmp_path.exists():
+        if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
 
 
@@ -313,6 +339,7 @@ class VersionDowngrader:
 
 
 def _prepare_work_path(src_path: Path, dst_path: Path) -> Path:
+    """Copy *src_path* to *dst_path* when they differ; return the work root."""
     if src_path.resolve() == dst_path.resolve():
         return src_path
     try:
@@ -323,7 +350,7 @@ def _prepare_work_path(src_path: Path, dst_path: Path) -> Path:
             dst_path,
             ignore=shutil.ignore_patterns("*.tmp", "*.bak", "*.old"),
         )
-    except Exception as exc:
+    except OSError as exc:
         raise ConversionError(f"复制世界目录失败: {exc}") from exc
     return dst_path
 
@@ -358,6 +385,7 @@ def _convert_nbt_files(
     tracker: Any,
     log_warning: Any,
 ) -> None:
+    """Convert each ``.dat``/``.nbt`` under *work_path*, recording per-file errors."""
     for file_path in _iter_nbt_files(work_path):
         try:
             source_byteorder = detect_endian(file_path)
@@ -366,6 +394,16 @@ def _convert_nbt_files(
             save_nbt(file_path, data, byteorder=target_byteorder)
             tracker.increment_files(1)
             result.converted_files += 1
+        except ConversionError as exc:
+            message = f"转换文件 {file_path} 时出错: {exc}"
+            result.errors.append(message)
+            log_warning(message, module="Converter")
+            tracker.increment_errors(1)
+        except (OSError, ValueError, TypeError) as exc:
+            message = f"转换文件 {file_path} 时出错: {exc}"
+            result.errors.append(message)
+            log_warning(message, module="Converter")
+            tracker.increment_errors(1)
         except Exception as exc:
             message = f"转换文件 {file_path} 时出错: {exc}"
             result.errors.append(message)
@@ -378,6 +416,7 @@ def _convert_one_region(
     target_platform: str,
     target_version: Optional[int],
 ) -> Tuple[bool, Optional[str]]:
+    """Convert one region file; return ``(modified, error_message)``."""
     from core.mca import WritableRegion
 
     try:
@@ -393,6 +432,8 @@ def _convert_one_region(
             region.save(mca_path, backup=True)
             return True, None
         return False, None
+    except (OSError, ValueError, TypeError, RuntimeError) as exc:
+        return False, f"转换区域文件 {mca_path} 时出错: {exc}"
     except Exception as exc:
         return False, f"转换区域文件 {mca_path} 时出错: {exc}"
 
@@ -437,33 +478,26 @@ def convert_world(
     target_platform: str = "java",
     target_version: Optional[int] = None,
 ) -> ConversionResult:
-    """
-    转换整个世界存档（高级接口）。
+    """转换整个世界存档（高级接口）。
 
-    Args:
-        src_path: 源世界路径
-        dst_path: 目标世界路径
-        target_platform: "java" 或 "bedrock"
-        target_version: 目标版本 ID（仅 Java 版有效）
-
-    Returns:
-        ConversionResult: 转换结果，包含成功状态、已转换文件数和错误摘要
+    当前可靠路径仅支持 Java 同构复制与保守校验；Bedrock 与跨版本
+    会显式拒绝，避免写出半损坏世界。
     """
-    if target_platform != "java":
-        raise ConversionError("尚未接入可靠的 Java/Bedrock 转换引擎，已拒绝转换")
-    if target_version is not None:
-        raise ConversionError("尚未实现可靠的跨版本数据迁移，已拒绝版本降级")
+    _reject_unsupported_conversion(target_platform, target_version)
     if src_path.resolve() == dst_path.resolve():
         return ConversionResult()
 
-    from core.performance import get_tracker
     from core.logger import logger as _logger
+    from core.performance import get_tracker
+
     tracker = get_tracker()
     result = ConversionResult()
 
     with tracker.track("存档版本转换", {
-        "src": str(src_path), "dst": str(dst_path),
-        "platform": target_platform, "version": str(target_version),
+        "src": str(src_path),
+        "dst": str(dst_path),
+        "platform": target_platform,
+        "version": str(target_version),
     }):
         work_path = _prepare_work_path(src_path, dst_path)
         target_byteorder = "big" if target_platform == "java" else "little"
@@ -476,23 +510,55 @@ def convert_world(
             tracker,
             _logger.warning,
         )
-
-        if target_platform != "java" or target_version is not None:
-            try:
-                _convert_region_files(
-                    work_path,
-                    target_platform,
-                    target_version,
-                    result,
-                    tracker,
-                    _logger.warning,
-                )
-            except ImportError:
-                message = "区域文件转换模块不可用，跳过区域文件转换"
-                result.warnings.append(message)
-                _logger.warning(message, module="Converter")
+        _convert_regions_if_needed(
+            work_path,
+            target_platform,
+            target_version,
+            result,
+            tracker,
+            _logger.warning,
+        )
 
     return result
+
+
+def _reject_unsupported_conversion(
+    target_platform: str,
+    target_version: Optional[int],
+) -> None:
+    if target_platform != "java":
+        raise ConversionError(
+            "尚未接入可靠的 Java/Bedrock 转换引擎，已拒绝转换"
+        )
+    if target_version is not None:
+        raise ConversionError(
+            "尚未实现可靠的跨版本数据迁移，已拒绝版本降级"
+        )
+
+
+def _convert_regions_if_needed(
+    work_path: Path,
+    target_platform: str,
+    target_version: Optional[int],
+    result: ConversionResult,
+    tracker: Any,
+    warn: Any,
+) -> None:
+    if target_platform == "java" and target_version is None:
+        return
+    try:
+        _convert_region_files(
+            work_path,
+            target_platform,
+            target_version,
+            result,
+            tracker,
+            warn,
+        )
+    except ImportError:
+        message = "区域文件转换模块不可用，跳过区域文件转换"
+        result.warnings.append(message)
+        warn(message, module="Converter")
 
 
 if __name__ == "__main__":

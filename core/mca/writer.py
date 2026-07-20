@@ -92,6 +92,10 @@ class WritableRegion:
                     if not isinstance(nbt, nbtlib.File):
                         nbt = nbtlib.File(dict(nbt))
                     self._chunks[(cx, cz)] = nbt
+                except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+                    raise McaError(
+                        f"Cannot safely load chunk ({cx}, {cz}) from {self.path}: {exc}"
+                    ) from exc
                 except Exception as exc:
                     raise McaError(
                         f"Cannot safely load chunk ({cx}, {cz}) from {self.path}: {exc}"
@@ -195,6 +199,10 @@ class WritableRegion:
             try:
                 raw = nbt_to_bytes(nbt)
                 compression, payload = compress_chunk(raw, COMPRESSION_ZLIB)
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                raise McaError(
+                    f"Failed to encode chunk ({cx}, {cz}): {exc}"
+                ) from exc
             except Exception as exc:
                 raise McaError(
                     f"Failed to encode chunk ({cx}, {cz}): {exc}"
