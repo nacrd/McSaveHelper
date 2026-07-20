@@ -1,4 +1,6 @@
 """纹理服务 - 管理 Minecraft 物品纹理的获取、缓存和提供"""
+from __future__ import annotations
+
 import base64
 import logging
 import re
@@ -49,13 +51,21 @@ class JarTextureImportResult:
         return self.extracted > 0
 
 
-class TextureService:
-    """纹理服务 - 管理物品纹理的获取和缓存
+def _is_valid_png_payload(data: bytes) -> bool:
+    """Whether *data* looks like a bounded PNG texture payload."""
+    return bool(data) and len(data) <= _MAX_TEXTURE_BYTES and data.startswith(
+        _PNG_SIGNATURE
+    )
 
-    优先级: 内存缓存 > 本地文件缓存 > JAR提取 > 在线API
+
+class TextureService:
+    """纹理服务：物品纹理的获取、缓存与批量导入。
+
+    查找优先级：内存缓存 → 本地文件缓存 → JAR 提取 → 在线资源 API。
     """
 
     def __init__(self) -> None:
+        """初始化缓存目录与内存表。"""
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._jar_cache_dir = Path.home() / ".mc_save_helper" / "jars"
@@ -73,28 +83,36 @@ class TextureService:
         self._tried_paths: Dict[str, str] = {}
 
     def get_texture_path(self, item_id: str) -> Optional[Path]:
+        """解析物品纹理文件路径。
+
+        Args:
+            item_id: 资源定位符，如 ``minecraft:stone``。
+
+        Returns:
+            Path | None: 本地 PNG 路径；ID 不安全或找不到时为 None。
+        """
         if not self._is_safe_item_id(item_id):
             return None
 
         cached = self._try_memory_cache(item_id)
-        if cached:
+        if cached is not None:
             return cached
 
         cached = self._try_file_cache(item_id)
-        if cached:
+        if cached is not None:
             self._put_memory_cache(item_id, cached)
             return cached
 
         texture_res = self._resolve_texture_resource(item_id)
 
         data = self._try_extract_from_jar(texture_res)
-        if data:
+        if data is not None:
             path = self._save_to_cache(texture_res, data)
             self._put_memory_cache(item_id, path)
             return path
 
         data = self._try_fetch_from_api(texture_res)
-        if data:
+        if data is not None:
             path = self._save_to_cache(texture_res, data)
             self._put_memory_cache(item_id, path)
             return path
@@ -102,7 +120,14 @@ class TextureService:
         return None
 
     def get_texture_base64(self, item_id: str) -> Optional[str]:
-        """获取物品纹理的 base64 data URI，可直接用于 ft.Image.src"""
+        """获取物品纹理的 base64 data URI（可用于 ``ft.Image.src``）。
+
+        Args:
+            item_id: 资源定位符。
+
+        Returns:
+            str | None: ``data:image/png;base64,...`` 或 None。
+        """
         if not self._is_safe_item_id(item_id):
             return None
 
@@ -128,7 +153,7 @@ class TextureService:
                 while len(self._base64_cache) > _MAX_MEMORY_CACHE:
                     self._base64_cache.popitem(last=False)
             return uri
-        except Exception:
+        except OSError:
             return None
 
     def load_textures_async(
@@ -136,16 +161,29 @@ class TextureService:
         item_ids: List[str],
         on_loaded: Optional[Callable[[str, Optional[str]], None]] = None,
     ) -> None:
-        """在后台线程中批量加载纹理，每完成一个回调 (item_id, base64_uri_or_None)"""
+        """在后台线程批量加载纹理。
+
+        Args:
+            item_ids: 物品 ID 列表。
+            on_loaded: 每完成一个调用 ``(item_id, base64_uri_or_None)``；
+                回调异常会被吞掉以免中断批量加载。
+        """
         def _worker() -> None:
             for item_id in item_ids:
                 uri = self.get_texture_base64(item_id)
-                if on_loaded is not None:
-                    try:
-                        on_loaded(item_id, uri)
-                    except Exception:
-                        pass
-        threading.Thread(target=_worker, daemon=True).start()
+                if on_loaded is None:
+                    continue
+                try:
+                    on_loaded(item_id, uri)
+                except Exception:
+                    # 回调由 UI 提供，失败不影响后续纹理。
+                    pass
+
+        threading.Thread(
+            target=_worker,
+            name="texture-load",
+            daemon=True,
+        ).start()
 
     def import_textures_from_jars(
         self,
@@ -153,9 +191,16 @@ class TextureService:
         *,
         set_primary: bool = True,
     ) -> JarTextureImportResult:
-        """Bulk-extract ``assets/*/textures/**/*.png`` from jars into the cache.
+        """从多个 JAR 批量提取 ``assets/*/textures/**/*.png`` 到缓存。
 
-        Also registers jars so subsequent per-item lookups can read from them.
+        成功的 JAR 会注册，供后续按物品查找使用。
+
+        Args:
+            jar_paths: 客户端/模组/资源包 JAR 路径序列。
+            set_primary: 是否将第一个成功 JAR 设为主客户端 JAR。
+
+        Returns:
+            JarTextureImportResult: 提取数量、成功 JAR 数与跳过数。
         """
         extracted = 0
         jars_ok = 0
@@ -182,7 +227,12 @@ class TextureService:
         )
 
     def register_texture_jar(self, path: Path, *, primary: bool = False) -> None:
-        """Remember a jar for future texture lookups."""
+        """注册供后续查找的纹理 JAR。
+
+        Args:
+            path: JAR 路径。
+            primary: True 时作为主客户端 JAR。
+        """
         resolved = Path(path)
         with self._jar_lock:
             if primary:
@@ -214,15 +264,11 @@ class TextureService:
                         data = archive.read(name)
                     except KeyError:
                         continue
-                    if (
-                        not data
-                        or len(data) > _MAX_TEXTURE_BYTES
-                        or not data.startswith(_PNG_SIGNATURE)
-                    ):
+                    if not _is_valid_png_payload(data):
                         continue
                     try:
                         self._save_to_cache(relative, data)
-                    except ValueError:
+                    except (ValueError, OSError):
                         continue
                     count += 1
         except (OSError, zipfile.BadZipFile, RuntimeError):
@@ -313,11 +359,12 @@ class TextureService:
                     lower = name.replace("\\", "/").lower()
                     if lower.endswith(suffix):
                         return zf.read(name)
-        except Exception:
+        except (OSError, zipfile.BadZipFile, RuntimeError, KeyError):
             return None
         return None
 
     def _try_fetch_from_api(self, texture_res: str) -> Optional[bytes]:
+        """从 Mojang 资源 CDN 按 asset index 哈希下载纹理。"""
         try:
             asset_index = self._get_asset_index_keys()
             if asset_index is None:
@@ -333,12 +380,12 @@ class TextureService:
             resp = requests.get(url, timeout=_REQUEST_TIMEOUT)
             if resp.status_code == 200 and len(resp.content) > 0:
                 return resp.content
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, requests.RequestException):
+            return None
         return None
 
     def _save_to_cache(self, texture_res: str, data: bytes) -> Path:
-        if len(data) > _MAX_TEXTURE_BYTES or not data.startswith(_PNG_SIGNATURE):
+        if not _is_valid_png_payload(data):
             raise ValueError("纹理数据不是受支持的 PNG")
         path = self._safe_cache_path(texture_res)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -387,9 +434,19 @@ class TextureService:
             return self._minecraft_jar
 
     def find_minecraft_jar(self) -> Optional[Path]:
+        """在本机常见路径查找 Minecraft 客户端 JAR。
+
+        Returns:
+            Path | None: 找到的 JAR 路径。
+        """
         return find_local_minecraft_jar()
 
     def set_minecraft_jar(self, path: Path) -> None:
+        """设置主客户端 JAR 路径。
+
+        Args:
+            path: 客户端 JAR。
+        """
         self._minecraft_jar = path
 
     def _download_client_jar(self) -> Optional[Path]:
@@ -397,6 +454,7 @@ class TextureService:
         return download_client_jar(self._jar_cache_dir)
 
     def _load_asset_index(self) -> None:
+        """懒加载最新正式版 asset index（失败时标记已加载以免重试风暴）。"""
         try:
             version_url = self._find_latest_version_url()
             if version_url is None:
@@ -407,7 +465,8 @@ class TextureService:
             asset_index = self._download_asset_index(asset_index_url)
             if asset_index is not None:
                 self._asset_index = asset_index
-        except Exception:
+        except (OSError, ValueError, TypeError, requests.RequestException):
+            # 网络/JSON 失败时保持空索引，由调用方走 JAR 回退。
             pass
         finally:
             self._asset_index_loaded = True
@@ -501,7 +560,7 @@ class TextureService:
             deleted_count = self._delete_texture_files()
             if deleted_count > 0:
                 logger.info(f"已清理 {deleted_count} 个纹理缓存文件")
-        except Exception as exc:
+        except OSError as exc:
             logger.warning(f"清理纹理缓存失败: {exc}")
 
     def _delete_texture_files(self) -> int:
@@ -510,8 +569,8 @@ class TextureService:
             try:
                 texture_file.unlink()
                 deleted_count += 1
-            except Exception:
-                pass
+            except OSError:
+                continue
         return deleted_count
 
     def _clear_jar_files(self) -> None:
@@ -524,7 +583,7 @@ class TextureService:
                 logger.info(
                     f"已清理 {deleted_count} 个 JAR 文件 ({size_mb:.1f} MB)"
                 )
-        except Exception as exc:
+        except OSError as exc:
             logger.warning(f"清理 JAR 缓存失败: {exc}")
 
     def _delete_jar_files(self) -> tuple[int, int]:
@@ -536,6 +595,6 @@ class TextureService:
                 jar_file.unlink()
                 deleted_count += 1
                 deleted_size += size
-            except Exception:
-                pass
+            except OSError:
+                continue
         return deleted_count, deleted_size
