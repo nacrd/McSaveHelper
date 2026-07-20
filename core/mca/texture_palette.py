@@ -46,7 +46,7 @@ def set_texture_jar(path: Optional[Path | str]) -> None:
         if _archive is not None:
             try:
                 _archive.close()
-            except Exception:
+            except (OSError, ValueError, AttributeError):
                 pass
         _archive = None
         _archive_path = None
@@ -69,6 +69,8 @@ def _discover_jar() -> Optional[Path]:
         discovered = find_local_minecraft_jar()
         if discovered is not None and discovered.is_file():
             return discovered
+    except (OSError, ValueError, TypeError, AttributeError, ImportError):
+        pass
     except Exception:
         pass
     return None
@@ -139,6 +141,8 @@ def _average_texture(block_path: str) -> Optional[Color]:
             return None
         with Image.open(io.BytesIO(archive.read(texture_name))) as image:
             return _average_image_pixels(image)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
     except Exception:
         return None
 

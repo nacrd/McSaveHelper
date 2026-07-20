@@ -106,7 +106,7 @@ def _preferred_heightmap(
             return raw
     try:
         items = list(heightmaps.items())
-    except Exception:
+    except (TypeError, AttributeError):
         return None
     return items[0][1] if items else None
 
@@ -145,6 +145,6 @@ def surface_y_from_heightmap(
     index = local_z * 16 + local_x
     try:
         value = int(values[index])
-    except Exception:
+    except (TypeError, ValueError, IndexError, KeyError):
         return None
     return heightmap_value_to_block_y(value, version)
