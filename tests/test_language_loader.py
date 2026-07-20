@@ -230,6 +230,25 @@ def test_discover_from_save_relative_path(tmp_path: Path) -> None:
     assert discover_minecraft_directory(start_path=save) == root.resolve()
 
 
+def test_discover_from_version_isolated_saves(tmp_path: Path) -> None:
+    """Launcher version isolation: .minecraft/versions/1.19.4/saves/World."""
+    from core.texture.client_jar import (
+        discover_minecraft_directory,
+        minecraft_dir_from_start_path,
+    )
+
+    root = tmp_path / "Game" / "minecraft" / ".minecraft"
+    save = root / "versions" / "1.19.4" / "saves" / "World"
+    save.mkdir(parents=True)
+    (root / "assets" / "indexes").mkdir(parents=True)
+    (root / "assets" / "objects").mkdir(parents=True)
+    (root / "versions" / "1.19.4").mkdir(parents=True, exist_ok=True)
+
+    assert minecraft_dir_from_start_path(save) == root.resolve()
+    assert minecraft_dir_from_start_path(save.parent) == root.resolve()
+    assert discover_minecraft_directory(start_path=save) == root.resolve()
+
+
 def test_configured_dir_overrides_default(tmp_path: Path) -> None:
     from core.texture.client_jar import discover_minecraft_directory
 
