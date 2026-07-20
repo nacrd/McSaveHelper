@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-import nbtlib
 from nbtlib import Byte, Compound, Double, Float, Int, List as NbtList, String
 
 from core.omni.player_manager import PlayerManager

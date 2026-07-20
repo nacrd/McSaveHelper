@@ -357,8 +357,6 @@ class McaMapView(ft.Container):
             if schedule_tail and self.page is not None:
                 run_on_ui(cast(ft.Page, self.page), self._rebuild_canvas_safe)
 
-
-
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
         self._last_x = e.local_position.x

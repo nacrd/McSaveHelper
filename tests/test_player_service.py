@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 from unittest.mock import MagicMock
 
-import nbtlib
 from nbtlib import Byte, Compound, Double, Float, Int, List as NbtList, String
 
 from app.services.player_service import PlayerService

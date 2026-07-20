@@ -206,57 +206,82 @@ def _format_limited_list(values: List[str], limit: int = 10) -> str:
     return ", ".join(values[:limit]) + suffix
 
 
-def _mod_section(
+def _mod_status_text(
     info: WorldInfo,
+    mods: list[ModInfo],
+    loaders: list[str],
     translate: Optional[Translate],
-) -> InfoSection:
-    rows: List[InfoRow] = []
-    mods = info.mods or []
-    loaders = info.mod_loaders or []
-
+) -> str:
+    """根据模组/加载器/标记生成「是否使用模组」文案。"""
     if mods:
         if info.mod_list_complete:
-            status = _tr(
+            return _tr(
                 translate,
                 "world_info.mods_status_recorded",
                 "是（存档记录了 {count} 个模组）",
                 count=len(mods),
             )
-        else:
-            status = _tr(
-                translate,
-                "world_info.mods_status_inferred",
-                "是（至少检测到 {count} 个，列表可能不完整）",
-                count=len(mods),
-            )
-    elif loaders:
-        status = _tr(
+        return _tr(
+            translate,
+            "world_info.mods_status_inferred",
+            "是（至少检测到 {count} 个，列表可能不完整）",
+            count=len(mods),
+        )
+    if loaders:
+        return _tr(
             translate,
             "world_info.mods_status_loader_only",
             "检测到模组加载器，但存档未保存可读取的模组清单",
         )
-    elif info.was_modded is not None and bool(info.was_modded):
-        status = _tr(
-            translate,
-            "world_info.mods_status_no_list",
-            "是（存档未保存可读取的模组清单）",
-        )
-    elif info.was_modded is not None:
-        status = _tr(
-            translate,
-            "world_info.mods_status_clean",
-            "否（未检测到模组）",
-        )
-    else:
-        status = _tr(
+    if info.was_modded is None:
+        return _tr(
             translate,
             "world_info.mods_status_unknown",
             "未知（存档未提供模组标记）",
         )
+    if info.was_modded:
+        return _tr(
+            translate,
+            "world_info.mods_status_no_list",
+            "是（存档未保存可读取的模组清单）",
+        )
+    return _tr(
+        translate,
+        "world_info.mods_status_clean",
+        "否（未检测到模组）",
+    )
+
+
+def _mod_source_text(
+    complete: bool,
+    translate: Optional[Translate],
+) -> str:
+    """模组清单来源说明。"""
+    if complete:
+        return _tr(
+            translate,
+            "world_info.mod_source_explicit",
+            "level.dat 中的显式模组清单",
+        )
+    return _tr(
+        translate,
+        "world_info.mod_source_inferred",
+        "根据存档数据包标识推断，可能不完整",
+    )
+
+
+def _mod_section(
+    info: WorldInfo,
+    translate: Optional[Translate],
+) -> InfoSection:
+    """构建模组信息分区（状态、加载器、列表与来源）。"""
+    rows: List[InfoRow] = []
+    mods = list(info.mods or [])
+    loaders = list(info.mod_loaders or [])
 
     rows.append(InfoRow(
         _tr(translate, "world_info.mods_status", "🧩 是否使用模组"),
-        status,
+        _mod_status_text(info, mods, loaders, translate),
     ))
     if loaders:
         rows.append(InfoRow(
@@ -268,22 +293,9 @@ def _mod_section(
             _tr(translate, "world_info.mod_list", "📚 模组列表"),
             "\n".join(_format_mod(mod) for mod in mods),
         ))
-        source = (
-            _tr(
-                translate,
-                "world_info.mod_source_explicit",
-                "level.dat 中的显式模组清单",
-            )
-            if info.mod_list_complete
-            else _tr(
-                translate,
-                "world_info.mod_source_inferred",
-                "根据存档数据包标识推断，可能不完整",
-            )
-        )
         rows.append(InfoRow(
             _tr(translate, "world_info.mod_source", "ℹ️ 清单来源"),
-            source,
+            _mod_source_text(info.mod_list_complete, translate),
         ))
     return _section(
         _tr(translate, "world_info.mods_section", "🧩 模组信息"),

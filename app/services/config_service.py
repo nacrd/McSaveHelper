@@ -117,15 +117,20 @@ class ConfigService:
         }
 
     @staticmethod
-    def _merge(defaults: Dict, user: Dict) -> Dict:
-        """合并默认配置和用户配置
+    def _merge(
+        defaults: Dict[str, Any],
+        user: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """递归合并默认配置与用户配置。
+
+        仅接受与默认值同类型的用户字段；嵌套 dict 递归合并。
 
         Args:
-            defaults: 默认配置字典
-            user: 用户配置字典
+            defaults: 默认配置字典。
+            user: 用户配置字典。
 
         Returns:
-            Dict: 合并后的配置字典
+            Dict[str, Any]: 合并后的新字典（不修改入参）。
         """
         merged = deepcopy(defaults)
         for key, default_value in defaults.items():
@@ -410,12 +415,20 @@ class ConfigService:
         self.save()
 
     def get_minecraft_dir(self) -> str:
-        """Return configured Minecraft data directory (may be empty)."""
+        """返回配置的 Minecraft 数据目录。
+
+        Returns:
+            str: 已配置路径；未设置时为空字符串。
+        """
         with self._lock:
             return str(self._config.get("minecraft_dir", "") or "").strip()
 
     def set_minecraft_dir(self, path: str) -> None:
-        """Persist a custom Minecraft data directory path."""
+        """持久化自定义 Minecraft 数据目录。
+
+        Args:
+            path: 目录路径；空白值会保存为空字符串表示自动推断。
+        """
         with self._lock:
             self._config["minecraft_dir"] = str(path or "").strip()
         self.save()
