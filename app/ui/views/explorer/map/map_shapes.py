@@ -282,18 +282,16 @@ def marker_overlay(
     for marker in markers:
         if not marker.enabled:
             continue
-        try:
-            screen_x, screen_y = block_to_screen(marker.x, marker.z)
-        except (TypeError, ValueError):
+        point = _marker_screen_point(
+            marker,
+            block_to_screen=block_to_screen,
+            width=width,
+            height=height,
+            radius=radius,
+        )
+        if point is None:
             continue
-        # Skip markers that are far outside the viewport, but clamp nearby
-        # ones so a search result remains visible while panning.
-        if screen_x < -radius * 8 or screen_x > width + radius * 8:
-            continue
-        if screen_y < -radius * 8 or screen_y > height + radius * 8:
-            continue
-        draw_x = min(max(screen_x, radius + 2), max(radius + 2, width - radius - 2))
-        draw_y = min(max(screen_y, radius + 2), max(radius + 2, height - radius - 2))
+        draw_x, draw_y = point
         selected = marker.id == selected_id
         bounds[marker.id] = (
             draw_x - radius - 4,
@@ -301,55 +299,112 @@ def marker_overlay(
             radius * 2 + 8,
             radius * 2 + 8,
         )
-        shapes.append(
-            cv.Circle(
-                draw_x,
-                draw_y,
-                radius + (2 if selected else 0),
-                paint=ft.Paint(color="#FFFFFF" if selected else "#000000AA"),
-            )
-        )
-        shapes.append(
-            cv.Circle(
+        shapes.extend(
+            _marker_pin_shapes(
                 draw_x,
                 draw_y,
                 radius,
-                paint=ft.Paint(color=marker.color),
-            )
-        )
-        # A tiny stem gives the generic pin icon a recognizable silhouette.
-        shapes.append(
-            cv.Line(
-                draw_x,
-                draw_y + radius,
-                draw_x,
-                draw_y + radius + 5,
-                paint=ft.Paint(color=marker.color, stroke_width=2),
+                marker.color,
+                selected=selected,
             )
         )
         if marker.show_label and (scale >= 0.55 or selected):
-            label = marker.name[:24]
-            text_width = max(34, len(label) * 7 + 10)
-            label_x = min(max(draw_x + radius + 4, 4), max(4, width - text_width - 4))
-            label_y = min(max(draw_y - 8, 4), max(4, height - 20))
-            shapes.append(
-                cv.Rect(
-                    label_x - 3,
-                    label_y - 2,
-                    text_width,
-                    18,
-                    paint=ft.Paint(color="#101810CC"),
-                )
-            )
-            shapes.append(
-                cv.Text(
-                    x=label_x + 2,
-                    y=label_y + 2,
-                    value=label,
-                    style=ft.TextStyle(size=10, color="#F6E7B0"),
+            shapes.extend(
+                _marker_label_shapes(
+                    marker.name,
+                    draw_x,
+                    draw_y,
+                    radius,
+                    width,
+                    height,
                 )
             )
     return shapes, bounds
+
+
+def _marker_screen_point(
+    marker: MapMarker,
+    *,
+    block_to_screen: BlockToScreen,
+    width: float,
+    height: float,
+    radius: float,
+) -> Optional[Tuple[float, float]]:
+    try:
+        screen_x, screen_y = block_to_screen(marker.x, marker.z)
+    except (TypeError, ValueError):
+        return None
+    # Skip markers that are far outside the viewport, but clamp nearby
+    # ones so a search result remains visible while panning.
+    if screen_x < -radius * 8 or screen_x > width + radius * 8:
+        return None
+    if screen_y < -radius * 8 or screen_y > height + radius * 8:
+        return None
+    draw_x = min(max(screen_x, radius + 2), max(radius + 2, width - radius - 2))
+    draw_y = min(max(screen_y, radius + 2), max(radius + 2, height - radius - 2))
+    return draw_x, draw_y
+
+
+def _marker_pin_shapes(
+    draw_x: float,
+    draw_y: float,
+    radius: float,
+    color: str,
+    *,
+    selected: bool,
+) -> List[cv.Shape]:
+    shapes: List[cv.Shape] = [
+        cv.Circle(
+            draw_x,
+            draw_y,
+            radius + (2 if selected else 0),
+            paint=ft.Paint(color="#FFFFFF" if selected else "#000000AA"),
+        ),
+        cv.Circle(
+            draw_x,
+            draw_y,
+            radius,
+            paint=ft.Paint(color=color),
+        ),
+        # A tiny stem gives the generic pin icon a recognizable silhouette.
+        cv.Line(
+            draw_x,
+            draw_y + radius,
+            draw_x,
+            draw_y + radius + 5,
+            paint=ft.Paint(color=color, stroke_width=2),
+        ),
+    ]
+    return shapes
+
+
+def _marker_label_shapes(
+    name: str,
+    draw_x: float,
+    draw_y: float,
+    radius: float,
+    width: float,
+    height: float,
+) -> List[cv.Shape]:
+    label = name[:24]
+    text_width = max(34, len(label) * 7 + 10)
+    label_x = min(max(draw_x + radius + 4, 4), max(4, width - text_width - 4))
+    label_y = min(max(draw_y - 8, 4), max(4, height - 20))
+    return [
+        cv.Rect(
+            label_x - 3,
+            label_y - 2,
+            text_width,
+            18,
+            paint=ft.Paint(color="#101810CC"),
+        ),
+        cv.Text(
+            x=label_x + 2,
+            y=label_y + 2,
+            value=label,
+            style=ft.TextStyle(size=10, color="#F6E7B0"),
+        ),
+    ]
 
 
 def block_grid_for_region(

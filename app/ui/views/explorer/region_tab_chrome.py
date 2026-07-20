@@ -195,6 +195,145 @@ def _build_map_toggle_buttons(
     return coord_button, empty_button, marker_button, fullscreen_button
 
 
+def _build_floating_toolbars(
+    t: Translate,
+    *,
+    dimension_dropdown: ft.Dropdown,
+    display_mode_dropdown: ft.Dropdown,
+    search_field: ft.TextField,
+    search_button: ft.IconButton,
+    on_zoom_in: SimpleCallback,
+    on_zoom_out: SimpleCallback,
+    on_reset: SimpleCallback,
+    on_refresh: SimpleCallback,
+    coord_button: ft.IconButton,
+    empty_button: ft.IconButton,
+    marker_button: ft.IconButton,
+    fullscreen_button: ft.IconButton,
+) -> tuple[ft.Container, ft.Container, ft.Container]:
+    """Top/left/right floating toolbars over the map."""
+    top_bar = ft.Container(
+        content=ft.Row(
+            [
+                ft.Icon(ft.Icons.MAP_OUTLINED, size=20, color=THEME.mc_gold),
+                dimension_dropdown,
+                display_mode_dropdown,
+                ft.Container(expand=True),
+                search_field,
+                search_button,
+            ],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        left=12,
+        top=12,
+        right=12,
+        height=56,
+        padding=ft.Padding(left=10, right=8, top=4, bottom=4),
+        bgcolor="#0B120BE8",
+        border=mc_border(1),
+        border_radius=6,
+    )
+    left_toolbar = ft.Container(
+        content=ft.Column(
+            [
+                _icon_button(
+                    ft.Icons.ZOOM_IN,
+                    t("map.zoom_in", "放大"),
+                    on_zoom_in,
+                ),
+                _icon_button(
+                    ft.Icons.ZOOM_OUT,
+                    t("map.zoom_out", "缩小"),
+                    on_zoom_out,
+                ),
+                _icon_button(
+                    ft.Icons.MY_LOCATION,
+                    t("map.fit_world", "显示完整世界"),
+                    on_reset,
+                ),
+            ],
+            spacing=4,
+            tight=True,
+        ),
+        left=12,
+        top=82,
+        padding=4,
+        bgcolor="#0B120BCC",
+        border_radius=6,
+    )
+    right_toolbar = ft.Container(
+        content=ft.Column(
+            [
+                _icon_button(
+                    ft.Icons.REFRESH,
+                    t("map.refresh", "刷新地图"),
+                    on_refresh,
+                ),
+                coord_button,
+                empty_button,
+                marker_button,
+                fullscreen_button,
+            ],
+            spacing=4,
+            tight=True,
+        ),
+        right=12,
+        top=82,
+        padding=4,
+        bgcolor="#0B120BCC",
+        border_radius=6,
+    )
+    return top_bar, left_toolbar, right_toolbar
+
+
+def _build_map_help_bar(t: Translate) -> tuple[ft.Text, ft.Container]:
+    help_text = ft.Text(
+        t("map.help", REGION_DISPLAY_HELP),
+        size=11,
+        color="#D0D8C8",
+        no_wrap=True,
+        overflow=ft.TextOverflow.ELLIPSIS,
+    )
+    bottom_bar = ft.Container(
+        content=help_text,
+        left=12,
+        right=12,
+        bottom=12,
+        height=30,
+        padding=ft.Padding(left=10, right=10, top=6, bottom=5),
+        bgcolor="#0B120BCC",
+        border_radius=4,
+    )
+    return help_text, bottom_bar
+
+
+def _build_map_host_stack(
+    map_content: ft.Control,
+    top_bar: ft.Container,
+    left_toolbar: ft.Container,
+    right_toolbar: ft.Container,
+    bottom_bar: ft.Container,
+    sync_map_size: Callable[[Any], None],
+) -> tuple[ft.Container, ft.Container]:
+    map_host = ft.Container(
+        content=ft.Stack(
+            [map_content, top_bar, left_toolbar, right_toolbar, bottom_bar],
+            expand=True,
+            fit=ft.StackFit.EXPAND,
+        ),
+        bgcolor="#0B120B",
+        border=mc_border(2),
+        border_radius=0,
+        padding=0,
+        expand=True,
+        alignment=ft.Alignment(0, 0),
+        on_size_change=sync_map_size,
+    )
+    # Compatibility alias consumed by fullscreen/layout code.
+    return map_host, map_host
+
+
 def build_region_legend_content(
     translate: Optional[Translate] = None,
 ) -> ft.Column:
@@ -324,116 +463,98 @@ def build_region_tab_chrome(
         on_toggle_fullscreen,
     )
 
-    top_bar = ft.Container(
-        content=ft.Row(
-            [
-                ft.Icon(ft.Icons.MAP_OUTLINED, size=20, color=THEME.mc_gold),
-                dimension_dropdown,
-                display_mode_dropdown,
-                ft.Container(expand=True),
-                search_field,
-                search_button,
-            ],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        left=12,
-        top=12,
-        right=12,
-        height=56,
-        padding=ft.Padding(left=10, right=8, top=4, bottom=4),
-        bgcolor="#0B120BE8",
-        border=mc_border(1),
-        border_radius=6,
+    top_bar, left_toolbar, right_toolbar = _build_floating_toolbars(
+        t,
+        dimension_dropdown=dimension_dropdown,
+        display_mode_dropdown=display_mode_dropdown,
+        search_field=search_field,
+        search_button=search_button,
+        on_zoom_in=on_zoom_in,
+        on_zoom_out=on_zoom_out,
+        on_reset=on_reset,
+        on_refresh=on_refresh,
+        coord_button=coord_button,
+        empty_button=empty_button,
+        marker_button=marker_button,
+        fullscreen_button=fullscreen_button,
     )
-
-    left_toolbar = ft.Container(
-        content=ft.Column(
-            [
-                _icon_button(
-                    ft.Icons.ZOOM_IN,
-                    t("map.zoom_in", "放大"),
-                    on_zoom_in,
-                ),
-                _icon_button(
-                    ft.Icons.ZOOM_OUT,
-                    t("map.zoom_out", "缩小"),
-                    on_zoom_out,
-                ),
-                _icon_button(
-                    ft.Icons.MY_LOCATION,
-                    t("map.fit_world", "显示完整世界"),
-                    on_reset,
-                ),
-            ],
-            spacing=4,
-            tight=True,
-        ),
-        left=12,
-        top=82,
-        padding=4,
-        bgcolor="#0B120BCC",
-        border_radius=6,
+    help_text, bottom_bar = _build_map_help_bar(t)
+    map_host, map_card = _build_map_host_stack(
+        map_content,
+        top_bar,
+        left_toolbar,
+        right_toolbar,
+        bottom_bar,
+        sync_map_size,
     )
-    right_toolbar = ft.Container(
-        content=ft.Column(
-            [
-                _icon_button(
-                    ft.Icons.REFRESH,
-                    t("map.refresh", "刷新地图"),
-                    on_refresh,
-                ),
-                coord_button,
-                empty_button,
-                marker_button,
-                fullscreen_button,
-            ],
-            spacing=4,
-            tight=True,
-        ),
-        right=12,
-        top=82,
-        padding=4,
-        bgcolor="#0B120BCC",
-        border_radius=6,
-    )
-
-    help_text = ft.Text(
-        t("map.help", REGION_DISPLAY_HELP),
-        size=11,
-        color="#D0D8C8",
-        no_wrap=True,
-        overflow=ft.TextOverflow.ELLIPSIS,
-    )
-    bottom_bar = ft.Container(
-        content=help_text,
-        left=12,
-        right=12,
-        bottom=12,
-        height=30,
-        padding=ft.Padding(left=10, right=10, top=6, bottom=5),
-        bgcolor="#0B120BCC",
-        border_radius=4,
-    )
-
     toolbar = top_bar
-    map_host = ft.Container(
-        content=ft.Stack(
-            [map_content, top_bar, left_toolbar, right_toolbar, bottom_bar],
-            expand=True,
-            fit=ft.StackFit.EXPAND,
-        ),
-        bgcolor="#0B120B",
-        border=mc_border(2),
-        border_radius=0,
-        padding=0,
-        expand=True,
-        alignment=ft.Alignment(0, 0),
-        on_size_change=sync_map_size,
-    )
-    # Compatibility alias consumed by fullscreen/layout code.
-    map_card = map_host
 
+    side = _build_region_side_panel(
+        t=t,
+        translate=translate,
+        add_marker_callback=add_marker_callback,
+        delete_marker_callback=delete_marker_callback,
+        on_fill_nbt=on_fill_nbt,
+        on_delete_region=on_delete_region,
+    )
+    left_panel = ft.Container(content=map_host, expand=True)
+    side_panel = ft.Container(
+        content=ft.Column(
+            [
+                side["selection_panel"],
+                side["stats_panel"],
+                side["marker_panel"],
+                card(side["legend_container"], padding=8),
+                side["action_panel"],
+            ],
+            spacing=6,
+            scroll=ft.ScrollMode.AUTO,
+        ),
+        width=280,
+        expand=False,
+    )
+    layout = ft.Row(
+        [left_panel, side_panel],
+        spacing=8,
+        expand=True,
+        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+    return RegionTabChrome(
+        layout=layout,
+        dimension_dropdown=dimension_dropdown,
+        display_mode_dropdown=display_mode_dropdown,
+        search_field=search_field,
+        search_button=search_button,
+        coord_button=coord_button,
+        empty_button=empty_button,
+        marker_button=marker_button,
+        fullscreen_button=fullscreen_button,
+        add_marker_button=side["add_marker_button"],
+        delete_marker_button=side["delete_marker_button"],
+        marker_list=side["marker_list"],
+        marker_count_text=side["marker_count_text"],
+        help_text=help_text,
+        stats_text=side["stats_text"],
+        status_text=side["status_text"],
+        legend_container=side["legend_container"],
+        toolbar=toolbar,
+        map_host=map_host,
+        map_card=map_card,
+        left_panel=left_panel,
+        side_panel=side_panel,
+    )
+
+
+def _build_region_side_panel(
+    *,
+    t: Translate,
+    translate: Optional[Translate],
+    add_marker_callback: EventCallback,
+    delete_marker_callback: EventCallback,
+    on_fill_nbt: EventCallback,
+    on_delete_region: EventCallback,
+) -> dict[str, Any]:
+    """Right-side selection/stats/marker/legend/action panels."""
     stats_text = ft.Text(
         t("map.waiting", "等待设置当前存档..."),
         size=11,
@@ -469,7 +590,6 @@ def build_region_tab_chrome(
         disabled=True,
         on_click=delete_marker_callback,
     )
-
     selection_panel = card(
         ft.Column(
             [
@@ -556,50 +676,16 @@ def build_region_tab_chrome(
         ),
         padding=8,
     )
-
-    left_panel = ft.Container(content=map_host, expand=True)
-    side_panel = ft.Container(
-        content=ft.Column(
-            [
-                selection_panel,
-                stats_panel,
-                marker_panel,
-                card(legend_container, padding=8),
-                action_panel,
-            ],
-            spacing=6,
-            scroll=ft.ScrollMode.AUTO,
-        ),
-        width=280,
-        expand=False,
-    )
-    layout = ft.Row(
-        [left_panel, side_panel],
-        spacing=8,
-        expand=True,
-        vertical_alignment=ft.CrossAxisAlignment.STRETCH,
-    )
-    return RegionTabChrome(
-        layout=layout,
-        dimension_dropdown=dimension_dropdown,
-        display_mode_dropdown=display_mode_dropdown,
-        search_field=search_field,
-        search_button=search_button,
-        coord_button=coord_button,
-        empty_button=empty_button,
-        marker_button=marker_button,
-        fullscreen_button=fullscreen_button,
-        add_marker_button=add_marker_button,
-        delete_marker_button=delete_marker_button,
-        marker_list=marker_list,
-        marker_count_text=marker_count_text,
-        help_text=help_text,
-        stats_text=stats_text,
-        status_text=status_text,
-        legend_container=legend_container,
-        toolbar=toolbar,
-        map_host=map_host,
-        map_card=map_card,
-        left_panel=left_panel,
-        side_panel=side_panel,
-    )
+    return {
+        "stats_text": stats_text,
+        "status_text": status_text,
+        "marker_count_text": marker_count_text,
+        "marker_list": marker_list,
+        "add_marker_button": add_marker_button,
+        "delete_marker_button": delete_marker_button,
+        "selection_panel": selection_panel,
+        "stats_panel": stats_panel,
+        "marker_panel": marker_panel,
+        "legend_container": legend_container,
+        "action_panel": action_panel,
+    }
