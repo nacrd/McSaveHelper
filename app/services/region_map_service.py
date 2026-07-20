@@ -561,47 +561,73 @@ class RegionMapService:
             cancel_event = self._topview_cancel_event
             queued = len(self._topview_queue) + self._topview_active
             for coord in coords:
-                if self._promote_pending_topview_locked(
-                    coord,
-                    size,
-                    priority,
-                    generation,
-                    cancel_event,
-                ):
-                    accepted.add(coord)
-                    continue
-                path = self._topview_path_for_request_locked(coord, size, force)
-                if path is None:
-                    continue
-                # A large modded save can contain thousands of visible regions.
-                # Keep only a bounded window in memory; later rebuilds refill
-                # the queue as earlier tiles complete.
-                available = self._make_topview_queue_room_locked(
-                    generation,
-                    priority,
-                    queued,
+                queued, keep_going = self._enqueue_topview_coord_locked(
+                    coord=coord,
+                    size=size,
+                    force=force,
+                    priority=priority,
+                    generation=generation,
+                    cancel_event=cancel_event,
+                    queued=queued,
+                    accepted=accepted,
                 )
-                if available is None:
+                if not keep_going:
                     break
-                queued = available
-                self._topview_pending[coord] = generation
-                self._topview_pending_sizes[coord] = size
-                job = (
-                    coord,
-                    path,
-                    size,
-                    generation,
-                    cancel_event,
-                    0,
-                )
-                if priority:
-                    self._topview_queue.appendleft(job)
-                else:
-                    self._topview_queue.append(job)
-                queued += 1
-                accepted.add(coord)
         self._pump_topview_queue()
         return accepted
+
+    def _enqueue_topview_coord_locked(
+        self,
+        *,
+        coord: Tuple[int, int],
+        size: int,
+        force: bool,
+        priority: bool,
+        generation: int,
+        cancel_event: threading.Event,
+        queued: int,
+        accepted: set[Tuple[int, int]],
+    ) -> tuple[int, bool]:
+        """Try to enqueue one coord. Returns ``(queued, continue_loop)``."""
+        if self._promote_pending_topview_locked(
+            coord,
+            size,
+            priority,
+            generation,
+            cancel_event,
+        ):
+            accepted.add(coord)
+            return queued, True
+        path = self._topview_path_for_request_locked(coord, size, force)
+        if path is None:
+            return queued, True
+        # A large modded save can contain thousands of visible regions.
+        # Keep only a bounded window in memory; later rebuilds refill
+        # the queue as earlier tiles complete.
+        available = self._make_topview_queue_room_locked(
+            generation,
+            priority,
+            queued,
+        )
+        if available is None:
+            return queued, False
+        queued = available
+        self._topview_pending[coord] = generation
+        self._topview_pending_sizes[coord] = size
+        job = (
+            coord,
+            path,
+            size,
+            generation,
+            cancel_event,
+            0,
+        )
+        if priority:
+            self._topview_queue.appendleft(job)
+        else:
+            self._topview_queue.append(job)
+        accepted.add(coord)
+        return queued + 1, True
 
     def _pump_topview_queue(self) -> None:
         """Start queued jobs up to the worker cap."""

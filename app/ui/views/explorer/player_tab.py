@@ -341,7 +341,12 @@ class PlayerTabMixin(ExplorerMixinHost):
             t_cb=self._t,
         )
         right.controls.append(card(self._equipment, padding=12))
+        right.controls.extend(self._build_player_inventory_panels(t))
+        right.controls.append(self._build_container_preview_panel(t))
+        return right
 
+    def _build_player_inventory_panels(self, t: Any) -> list[ft.Control]:
+        """Main inventory / ender chest panels with tab chips."""
         self._inventory = InventoryGrid(
             self.app.item,
             self.app.texture,
@@ -376,17 +381,19 @@ class PlayerTabMixin(ExplorerMixinHost):
             t("player.tab.ender", "末影箱"),
             lambda e: self._switch_player_container_tab(1),
         )
-        right.controls.append(
+        return [
             self._responsive_chips(
                 [
                     self._container_tab_inventory_btn,
                     self._container_tab_ender_btn,
                 ]
-            )
-        )
-        right.controls.append(self._inventory_panel)
-        right.controls.append(self._ender_panel)
+            ),
+            self._inventory_panel,
+            self._ender_panel,
+        ]
 
+    def _build_container_preview_panel(self, t: Any) -> ft.Container:
+        """Nested container (shulker etc.) preview for the right column."""
         self._container_preview_title = ft.Text(
             t("player.container.preview_title", "容器内容"),
             size=13,
@@ -427,8 +434,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             ),
             visible=False,
         )
-        right.controls.append(self._container_preview_panel)
-        return right
+        return self._container_preview_panel
 
     def _assemble_player_layout(
         self,
