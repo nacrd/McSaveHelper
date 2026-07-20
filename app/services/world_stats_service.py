@@ -142,7 +142,11 @@ StatsProgressCallback = Callable[[float, str], None]
 
 
 class WorldStatsService:
-    """存档统计服务"""
+    """存档统计服务。
+
+    先收集维度规模与玩家 stats，再扫描区域文件汇总方块/实体计数。
+    单个区域失败不会中止整次分析。
+    """
 
     AIR_BLOCKS = {
         "minecraft:air",
@@ -159,15 +163,29 @@ class WorldStatsService:
     _FINALIZE_VALUE = 0.98
 
     def __init__(self, log: Optional[LogCallback] = None) -> None:
+        """初始化统计服务。
+
+        Args:
+            log: 可选日志回调；默认空操作。
+        """
         self.log: LogCallback = log or _default_log
 
     def analyze_world(
-            self,
-            world_path: Path,
-            progress_callback: Optional[StatsProgressCallback] = None,
-            name_map: Optional[Dict[str, Optional[str]]] = None,
+        self,
+        world_path: Path,
+        progress_callback: Optional[StatsProgressCallback] = None,
+        name_map: Optional[Dict[str, Optional[str]]] = None,
     ) -> WorldStatistics:
-        """分析存档并返回统计数据"""
+        """分析存档并返回完整统计。
+
+        Args:
+            world_path: 世界根目录。
+            progress_callback: 可选进度回调 ``(0..1, stage)``。
+            name_map: 可选 UUID→玩家名映射，优先于 usercache。
+
+        Returns:
+            WorldStatistics: 维度、玩家与区域汇总结果。
+        """
         from core.performance import get_tracker
         tracker = get_tracker()
 
@@ -214,20 +232,28 @@ class WorldStatsService:
                         block_counter,
                         entity_counter,
                     )
+                except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                    self.log(
+                        f"分析区域 {region_path.name} 失败: {exc}",
+                        "WARNING",
+                    )
+                    tracker.increment_errors(1)
                 except Exception as exc:
+                    # 区域解析库可能抛出非标准错误；跳过该文件继续。
                     self.log(
                         f"分析区域 {region_path.name} 失败: {exc}",
                         "WARNING",
                     )
                     tracker.increment_errors(1)
                 done = idx + 1
-                fraction = done / total_regions
-                value = self._REGION_START + self._REGION_SPAN * fraction
-                self._report_progress(
-                    progress_callback,
-                    value,
-                    f"regions:{done}:{total_regions}",
-                )
+                if total_regions > 0:
+                    fraction = done / total_regions
+                    value = self._REGION_START + self._REGION_SPAN * fraction
+                    self._report_progress(
+                        progress_callback,
+                        value,
+                        f"regions:{done}:{total_regions}",
+                    )
 
             self._report_progress(
                 progress_callback,
@@ -264,7 +290,7 @@ class WorldStatsService:
                 try:
                     total_bytes += region_path.stat().st_size
                 except OSError:
-                    pass
+                    continue
             results.append(
                 DimensionSizeStats(
                     dimension_id=dimension.id,
