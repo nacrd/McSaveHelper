@@ -239,12 +239,27 @@ class PlayerService:
         *,
         target_label: Optional[str] = None,
     ) -> PlayerEditResult:
-        """Stage Pos + Dimension updates from LastDeathLocation."""
+        """根据 ``LastDeathLocation`` 生成传送到死亡点的暂存变更。
+
+        Args:
+            uuid: 玩家 UUID。
+            player_data: 当前玩家 NBT。
+            target_label: 可选变更展示标签。
+
+        Returns:
+            PlayerEditResult: 位置/维度变更；无死亡点时返回错误码
+            ``no_death_location``。
+        """
         if player_data is None:
             return PlayerEditResult(changes=(), errors=("missing_player_data",))
         manager = PlayerManager(log_callback=self._log)
         death = manager.extract_death(player_data)
-        if death is None or death.x is None or death.y is None or death.z is None:
+        if (
+            death is None
+            or death.x is None
+            or death.y is None
+            or death.z is None
+        ):
             return PlayerEditResult(changes=(), errors=("no_death_location",))
 
         field_values = {
@@ -273,6 +288,16 @@ class PlayerService:
         *,
         include_items: bool = True,
     ) -> Optional[PlayerExportBundle]:
+        """构建玩家导出包。
+
+        Args:
+            session: 当前世界会话。
+            uuid: 玩家 UUID。
+            include_items: 是否附带物品列表。
+
+        Returns:
+            PlayerExportBundle | None: 玩家不存在时为 None。
+        """
         summary = self.load_summary(session, uuid)
         if summary is None:
             return None
@@ -295,13 +320,24 @@ class PlayerService:
         *,
         specs: Optional[Sequence[PlayerEditSpec]] = None,
     ) -> Dict[str, str]:
-        """Read current field values for form population."""
+        """从表数据读取字段当前值，供表单回填。
+
+        Args:
+            player_data: 玩家 NBT 根。
+            specs: 可选字段规格子集。
+
+        Returns:
+            dict[str, str]: ``field_id ->`` 显示字符串；缺失路径为空串。
+        """
         values: Dict[str, str] = {}
         if player_data is None:
             return values
         for spec in specs or PLAYER_EDIT_SPECS:
             try:
-                value = self._get_tag_at_path(player_data, list(spec.nbt_path))
+                value = self._get_tag_at_path(
+                    player_data,
+                    list(spec.nbt_path),
+                )
                 values[spec.field_id] = tag_display_value(value)
             except (KeyError, IndexError, TypeError):
                 values[spec.field_id] = ""
