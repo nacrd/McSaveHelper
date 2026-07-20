@@ -267,8 +267,17 @@ class MapExportRenderer:
                     )
             except MapRenderCancelled:
                 raise
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+                log(
+                    f"处理区块文件 {region_file.name} 失败: {exc}",
+                    "WARNING",
+                )
             except Exception as exc:
-                log(f"处理区块文件 {region_file.name} 失败: {exc}", "WARNING")
+                # Region/MCA libraries may raise package-specific errors.
+                log(
+                    f"处理区块文件 {region_file.name} 失败: {exc}",
+                    "WARNING",
+                )
         return rendered_chunks
 
     def _render_region_chunks(
@@ -326,7 +335,10 @@ class MapExportRenderer:
                     rendered_chunks += 1
             except MapRenderCancelled:
                 raise
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+                continue
             except Exception:
+                # Skip corrupted chunk payloads without aborting the region.
                 continue
         return rendered_chunks
 
@@ -398,8 +410,12 @@ class MapExportRenderer:
 
         except MapRenderCancelled:
             raise
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, IndexError):
+            # 跳过损坏的区块数据
+            return
         except Exception:
-            pass  # 跳过损坏的区块数据
+            # 跳过损坏的区块数据
+            return
 
     def _render_chunk_columns(
         self,
@@ -438,8 +454,18 @@ class MapExportRenderer:
                         and 0 <= pixel_z < context.image.height
                     ):
                         context.pixels[pixel_x, pixel_z] = color
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    RuntimeError,
+                    KeyError,
+                    IndexError,
+                    AttributeError,
+                ):
+                    continue
                 except Exception:
-                    pass
+                    continue
 
     @staticmethod
     def _raise_if_cancelled(
@@ -472,6 +498,7 @@ class MapExportRenderer:
         return min_x, min_z, max_x, max_z
 
     def highest_block_y(self, chunk: Any, x: int, z: int) -> Optional[int]:
+        """Return the highest non-air block Y for column ``(x, z)``."""
         try:
             surface_y = self._native_surface_y(chunk, x, z)
             if surface_y is not None:
@@ -482,6 +509,8 @@ class MapExportRenderer:
                 x,
                 z,
             )
+        except (OSError, ValueError, TypeError, RuntimeError, AttributeError):
+            return None
         except Exception:
             return None
 
@@ -495,6 +524,7 @@ class MapExportRenderer:
 
     @staticmethod
     def _get_non_air_sections(chunk: Any) -> List[int]:
+        """List section indices that contain at least one non-air palette entry."""
         cache_attr = "_mcsh_non_air_sections"
         cached = getattr(chunk, cache_attr, None)
         if isinstance(cached, list):
@@ -502,6 +532,8 @@ class MapExportRenderer:
         try:
             from core.mca import section_range_for_chunk
             section_range = section_range_for_chunk(chunk)
+        except (ImportError, TypeError, ValueError, AttributeError):
+            section_range = range(-4, 20)
         except Exception:
             section_range = range(-4, 20)
         sections = []
@@ -514,11 +546,13 @@ class MapExportRenderer:
                     for block in palette
                 ):
                     sections.append(section_y)
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                continue
             except Exception:
                 continue
         try:
             setattr(chunk, cache_attr, sections)
-        except Exception:
+        except (AttributeError, TypeError):
             pass
         return sections
 
@@ -529,6 +563,7 @@ class MapExportRenderer:
         x: int,
         z: int,
     ) -> Optional[int]:
+        """Scan section columns from top to bottom for the first solid block."""
         for section_y in sections:
             y_start = section_y * 16
             for y in range(y_start + 15, y_start - 1, -1):
@@ -537,25 +572,37 @@ class MapExportRenderer:
                     block_id = str(getattr(block, "id", ""))
                     if block and not block_id.endswith("air"):
                         return y
+                except (
+                    OSError,
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    IndexError,
+                    AttributeError,
+                ):
+                    continue
                 except Exception:
                     continue
         return None
 
-    def _get_block_color(self, block: Any, y: int,
-                         map_type: str) -> Tuple[int, int, int]:
-        """获取方块颜色
+    def _get_block_color(
+        self,
+        block: Any,
+        y: int,
+        map_type: str,
+    ) -> Tuple[int, int, int]:
+        """获取方块颜色。
 
         Args:
-            block: 方块对象
-            y: Y 坐标
-            map_type: 地图类型
+            block: 方块对象。
+            y: Y 坐标。
+            map_type: 地图类型（``terrain`` 时按高度调亮度）。
 
         Returns:
-            RGB 颜色元组
+            RGB 颜色元组；失败时返回中性灰。
         """
         try:
             block_name = block.name()
-
             if block_name in self.BLOCK_COLORS:
                 color: Tuple[int, int, int] = self.BLOCK_COLORS[block_name]
             else:
@@ -570,13 +617,16 @@ class MapExportRenderer:
                     int(color[1] * scale_factor),
                     int(color[2] * scale_factor),
                 )
-
             return color
-
+        except (AttributeError, TypeError, ValueError, KeyError):
+            return (128, 128, 128)
         except Exception:
-            return (128, 128, 128)  # 默认灰色
+            return (128, 128, 128)
 
     def _generate_color_from_name(
-            self, block_name: str) -> Tuple[int, int, int]:
-        h = hashlib.md5(block_name.encode("utf-8")).digest()
-        return (h[0], h[1], h[2])
+        self,
+        block_name: str,
+    ) -> Tuple[int, int, int]:
+        """Derive a stable pseudo-random RGB color from a block name."""
+        digest = hashlib.md5(block_name.encode("utf-8")).digest()
+        return (digest[0], digest[1], digest[2])

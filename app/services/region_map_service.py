@@ -258,7 +258,10 @@ class RegionMapService:
             meta = await asyncio.shield(task)
         except asyncio.CancelledError:
             raise
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError):
+            meta = {}
         except Exception:
+            # Shared region-meta parse may fail for damaged MCA; treat as empty.
             meta = {}
         finally:
             with self._data_lock:
@@ -324,7 +327,7 @@ class RegionMapService:
             from core.mca.surface import clear_chunk_decode_cache
 
             clear_chunk_decode_cache()
-        except Exception:
+        except (ImportError, RuntimeError, AttributeError):
             pass
 
     def set_tile_ready_callback(self, callback: Optional[Any]) -> None:
@@ -625,12 +628,17 @@ class RegionMapService:
 
         try:
             executor = self._ensure_topview_executor()
+        except (RuntimeError, ValueError, OSError):
+            self._rollback_topview_jobs(jobs)
+            return
         except Exception:
             self._rollback_topview_jobs(jobs)
             return
         for job in jobs:
             try:
                 executor.submit(self._render_topview_worker, *job)
+            except (RuntimeError, ValueError):
+                self._rollback_topview_jobs([job])
             except Exception:
                 self._rollback_topview_jobs([job])
 
@@ -835,10 +843,13 @@ class RegionMapService:
                 try:
                     callback(coord)
                 except Exception:
+                    # UI callback may fail after dispose; keep worker alive.
                     pass
             # Fill freed worker slots.
             try:
                 self._pump_topview_queue()
+            except (RuntimeError, ValueError, OSError):
+                pass
             except Exception:
                 pass
             if (
@@ -886,6 +897,10 @@ class RegionMapService:
                 batch_size,
             )
             self._finish_silent_scan(scan_generation)
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            self._error = str(exc)
+            self._is_scanning = False
+            raise
         except Exception as exc:
             self._error = str(exc)
             self._is_scanning = False
@@ -915,6 +930,8 @@ class RegionMapService:
                     return
                 if self._scanned_count % batch_size == 0:
                     await asyncio.sleep(0)
+            except (OSError, ValueError, TypeError, RuntimeError):
+                continue
             except Exception:
                 continue
 
