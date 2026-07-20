@@ -521,11 +521,12 @@ def _uses_external_streams_cached(
     _size: int,
 ) -> bool:
     try:
+        from core.mca.errors import McaError
         from core.mca.region_file import RegionFile
 
         with RegionFile.open(path) as region:
             return region.has_external_chunks()
-    except (OSError, ValueError, TypeError, RuntimeError, ImportError):
+    except (OSError, ValueError, TypeError, RuntimeError, ImportError, McaError):
         return False
 
 
