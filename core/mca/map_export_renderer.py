@@ -337,9 +337,6 @@ class MapExportRenderer:
                 raise
             except (OSError, ValueError, TypeError, RuntimeError, KeyError):
                 continue
-            except Exception:
-                # Skip corrupted chunk payloads without aborting the region.
-                continue
         return rendered_chunks
 
     @staticmethod
@@ -413,9 +410,6 @@ class MapExportRenderer:
         except (OSError, ValueError, TypeError, RuntimeError, KeyError, IndexError):
             # 跳过损坏的区块数据
             return
-        except Exception:
-            # 跳过损坏的区块数据
-            return
 
     def _render_chunk_columns(
         self,
@@ -464,8 +458,6 @@ class MapExportRenderer:
                     AttributeError,
                 ):
                     continue
-                except Exception:
-                    continue
 
     @staticmethod
     def _raise_if_cancelled(
@@ -511,8 +503,6 @@ class MapExportRenderer:
             )
         except (OSError, ValueError, TypeError, RuntimeError, AttributeError):
             return None
-        except Exception:
-            return None
 
     @staticmethod
     def _native_surface_y(chunk: Any, x: int, z: int) -> Optional[int]:
@@ -534,8 +524,6 @@ class MapExportRenderer:
             section_range = section_range_for_chunk(chunk)
         except (ImportError, TypeError, ValueError, AttributeError):
             section_range = range(-4, 20)
-        except Exception:
-            section_range = range(-4, 20)
         sections = []
         for section_y in reversed(list(section_range)):
             try:
@@ -547,8 +535,6 @@ class MapExportRenderer:
                 ):
                     sections.append(section_y)
             except (OSError, ValueError, TypeError, KeyError, AttributeError):
-                continue
-            except Exception:
                 continue
         try:
             setattr(chunk, cache_attr, sections)
@@ -580,8 +566,6 @@ class MapExportRenderer:
                     IndexError,
                     AttributeError,
                 ):
-                    continue
-                except Exception:
                     continue
         return None
 
@@ -619,8 +603,6 @@ class MapExportRenderer:
                 )
             return color
         except (AttributeError, TypeError, ValueError, KeyError):
-            return (128, 128, 128)
-        except Exception:
             return (128, 128, 128)
 
     def _generate_color_from_name(
