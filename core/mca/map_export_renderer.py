@@ -124,38 +124,20 @@ class MapExportRenderer:
             block_bounds,
             bounds,
         )
-        spec = self.calculate_image_spec(
-            bounds,
-            scale,
-            block_bounds=block_bounds,
-        )
-        log(
-            f"创建 {spec.width}x{spec.height} 的图像 "
-            f"(预计 {spec.estimated_mb:.0f} MB)",
-            "INFO",
-        )
-        image = Image.new(
-            "RGB",
-            (spec.width, spec.height),
-            color=(135, 206, 235),
-        )
+        image = self._create_blank_map_image(bounds, scale, block_bounds, log)
         self.last_rendered_chunks = 0
         try:
-            try:
-                self.last_rendered_chunks = self._render_regions(
-                    image,
-                    region_files,
-                    bounds,
-                    map_type,
-                    scale,
-                    log,
-                    progress,
-                    block_bounds=normalized_block_bounds,
-                    cancel_event=cancel_event,
-                )
-            except ImportError:
-                log("地图渲染后端不可用，使用简化渲染", "WARNING")
-                self.draw_fallback_grid(image, scale)
+            self.last_rendered_chunks = self._render_or_fallback(
+                image,
+                region_files,
+                bounds,
+                map_type,
+                scale,
+                log,
+                progress,
+                normalized_block_bounds,
+                cancel_event,
+            )
             if self.last_rendered_chunks == 0:
                 raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
             self._raise_if_cancelled(cancel_event)
@@ -167,6 +149,58 @@ class MapExportRenderer:
                 pass
             raise
         return image
+
+    def _create_blank_map_image(
+        self,
+        bounds: Dict[str, int],
+        scale: int,
+        block_bounds: Optional[Tuple[int, int, int, int]],
+        log: Callable[[str, str], None],
+    ) -> Any:
+        spec = self.calculate_image_spec(
+            bounds,
+            scale,
+            block_bounds=block_bounds,
+        )
+        log(
+            f"创建 {spec.width}x{spec.height} 的图像 "
+            f"(预计 {spec.estimated_mb:.0f} MB)",
+            "INFO",
+        )
+        return Image.new(
+            "RGB",
+            (spec.width, spec.height),
+            color=(135, 206, 235),
+        )
+
+    def _render_or_fallback(
+        self,
+        image: Any,
+        region_files: List[Path],
+        bounds: Dict[str, int],
+        map_type: str,
+        scale: int,
+        log: Callable[[str, str], None],
+        progress: Callable[[float, str], None],
+        block_bounds: Tuple[int, int, int, int],
+        cancel_event: Optional[threading.Event],
+    ) -> int:
+        try:
+            return self._render_regions(
+                image,
+                region_files,
+                bounds,
+                map_type,
+                scale,
+                log,
+                progress,
+                block_bounds=block_bounds,
+                cancel_event=cancel_event,
+            )
+        except ImportError:
+            log("地图渲染后端不可用，使用简化渲染", "WARNING")
+            self.draw_fallback_grid(image, scale)
+            return 0
 
     @staticmethod
     def calculate_image_spec(

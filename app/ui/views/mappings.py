@@ -101,7 +101,6 @@ class MappingsView(ft.Column):
     def _build_item_section(self) -> None:
         s = ft.Column(spacing=0)
         s.controls.append(section_title("物品 ID 映射"))
-
         s.controls.append(ft.Container(
             content=ft.Text(
                 "管理物品 ID 与显示名称的映射。支持导入语言文件或自定义 JSON 映射。",
@@ -109,7 +108,20 @@ class MappingsView(ft.Column):
             ),
             padding=ft.Padding(left=20, right=20, top=10, bottom=10),
         ))
+        s.controls.extend(self._item_import_controls())
+        s.controls.extend(self._item_add_controls())
+        s.controls.extend(self._item_search_controls())
+        self._render_item_table("")
+        c = card(ft.Column(spacing=0), padding=0)
+        c.content = s
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(bottom=16),
+            )
+        )
 
+    def _item_import_controls(self) -> list[ft.Control]:
         import_row = ft.Row([
             btn_primary("导入 JSON", width=110, on_click=self._import_json),
             btn_ghost("导出 JSON", width=110, on_click=self._export_json),
@@ -119,63 +131,68 @@ class MappingsView(ft.Column):
                 on_click=self._import_assets,
             ),
         ], spacing=8)
-        s.controls.append(ft.Container(
-            content=import_row,
-            padding=ft.Padding(left=20, right=20, bottom=12),
-        ))
-        s.controls.append(ft.Container(
-            content=ft.Text(
-                self._t(
-                    "mappings.assets_hint",
-                    "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。",
-                ),
-                size=11,
-                color=THEME.text_muted,
+        return [
+            ft.Container(
+                content=import_row,
+                padding=ft.Padding(left=20, right=20, bottom=12),
             ),
-            padding=ft.Padding(left=20, right=20, bottom=8),
-        ))
+            ft.Container(
+                content=ft.Text(
+                    self._t(
+                        "mappings.assets_hint",
+                        "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。",
+                    ),
+                    size=11,
+                    color=THEME.text_muted,
+                ),
+                padding=ft.Padding(left=20, right=20, bottom=8),
+            ),
+        ]
 
+    def _item_add_controls(self) -> list[ft.Control]:
         self._item_id_field = text_field(
             label="物品 ID",
             hint_text="modid:item_name",
             expand=False,
-            width=260)
+            width=260,
+        )
         self._item_name_field = text_field(
-            label="显示名称", hint_text="显示在物品栏中的名称", expand=False, width=200)
+            label="显示名称",
+            hint_text="显示在物品栏中的名称",
+            expand=False,
+            width=200,
+        )
         self._item_mapping_status = ft.Text(
-            "", size=11, color=THEME.text_muted)
+            "", size=11, color=THEME.text_muted
+        )
         add_row = ft.Row([
-            self._item_id_field, self._item_name_field,
+            self._item_id_field,
+            self._item_name_field,
             btn_success("添加", width=80, on_click=self._add_item_mapping),
             self._item_mapping_status,
         ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
-        s.controls.append(ft.Container(
-            content=add_row,
-            padding=ft.Padding(left=20, right=20, bottom=12),
-        ))
+        return [
+            ft.Container(
+                content=add_row,
+                padding=ft.Padding(left=20, right=20, bottom=12),
+            )
+        ]
 
+    def _item_search_controls(self) -> list[ft.Control]:
         self._item_search_field = text_field(
             label="搜索物品 ID 或名称",
             on_change=lambda _: self._on_item_search(),
         )
         self._item_table_container = ft.Container()
-        s.controls.append(ft.Container(
-            content=ft.Column([
-                self._item_search_field,
-                self._item_table_container,
-            ], spacing=8),
-            padding=ft.Padding(left=20, right=20, bottom=20),
-        ))
-
-        self._render_item_table("")
-
-        c = card(ft.Column(spacing=0), padding=0)
-        c.content = s
-        self.controls.append(
+        return [
             ft.Container(
-                content=c,
-                padding=ft.Padding(
-                    bottom=16)))
+                content=ft.Column([
+                    self._item_search_field,
+                    self._item_table_container,
+                ], spacing=8),
+                padding=ft.Padding(left=20, right=20, bottom=20),
+            )
+        ]
 
     def _render_item_table(self, filter_text: str) -> None:
         mappings = self._item_service.get_custom_item_mappings()

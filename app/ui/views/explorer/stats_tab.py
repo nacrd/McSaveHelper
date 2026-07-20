@@ -628,75 +628,96 @@ class StatsTabMixin(ExplorerMixinHost):
         generation = self._stats_generation
         self._stats_busy = True
         task_name = self._t("stats.progress_task", "统计存档")
-        # Prefer the already-loaded WorldSession name map (same source as
-        # the player tab) so stats reuse PlayerManager/usercache results.
-        name_map: dict[str, str | None] = {}
-        session = self.world_session
-        if session is not None:
-            try:
-                name_map = dict(session.get_player_names())
-            except Exception:
-                # Name resolution is optional for stats aggregation.
-                name_map = {}
+        name_map = self._stats_name_map()
 
         def run() -> None:
-            try:
-                run_on_ui(
-                    self.app.page,
-                    self.app.show_progress,
-                    self._t("stats.analyzing", "正在分析存档..."),
-                )
-
-                def progress(value: float, stage: str) -> None:
-                    if generation != getattr(self, "_stats_generation", 0):
-                        return
-                    message = self._format_stats_stage(stage)
-                    run_on_ui(
-                        self.app.page,
-                        self.app.update_progress_with_task,
-                        message or task_name,
-                        value,
-                    )
-                    run_on_ui(
-                        self.app.page,
-                        self._apply_stats_progress,
-                        value,
-                        message,
-                    )
-
-                stats = service.analyze_world(
-                    world_path,
-                    progress_callback=progress,
-                    name_map=name_map,
-                )
-                # Late-bind names that may have been resolved while scanning.
-                if session is not None:
-                    try:
-                        latest = dict(session.get_player_names())
-                        stats.player_stats = service.with_player_names(
-                            stats.player_stats,
-                            latest,
-                        )
-                    except Exception:
-                        # Sort preference may fail; keep unsorted results.
-                        pass
-                self.app.page.run_task(
-                    self._update_stats_ui,
-                    stats,
-                    service,
-                    generation,
-                )
-            except Exception as ex:
-                self.app.page.run_task(
-                    self._handle_stats_error,
-                    ex,
-                    generation,
-                )
-            finally:
-                run_on_ui(self.app.page, self.app.hide_progress)
-                run_on_ui(self.app.page, self._finish_stats_busy, generation)
+            self._run_stats_analysis(
+                world_path=world_path,
+                service=service,
+                generation=generation,
+                task_name=task_name,
+                name_map=name_map,
+            )
 
         threading.Thread(target=run, daemon=True).start()
+
+    def _stats_name_map(self) -> dict[str, str | None]:
+        """Prefer the already-loaded WorldSession name map."""
+        name_map: dict[str, str | None] = {}
+        session = self.world_session
+        if session is None:
+            return name_map
+        try:
+            return dict(session.get_player_names())
+        except Exception:
+            # Name resolution is optional for stats aggregation.
+            return {}
+
+    def _run_stats_analysis(
+        self,
+        *,
+        world_path: Path,
+        service: Any,
+        generation: int,
+        task_name: str,
+        name_map: dict[str, str | None],
+    ) -> None:
+        session = self.world_session
+        try:
+            run_on_ui(
+                self.app.page,
+                self.app.show_progress,
+                self._t("stats.analyzing", "正在分析存档..."),
+            )
+
+            def progress(value: float, stage: str) -> None:
+                if generation != getattr(self, "_stats_generation", 0):
+                    return
+                message = self._format_stats_stage(stage)
+                run_on_ui(
+                    self.app.page,
+                    self.app.update_progress_with_task,
+                    message or task_name,
+                    value,
+                )
+                run_on_ui(
+                    self.app.page,
+                    self._apply_stats_progress,
+                    value,
+                    message,
+                )
+
+            stats = service.analyze_world(
+                world_path,
+                progress_callback=progress,
+                name_map=name_map,
+            )
+            # Late-bind names that may have been resolved while scanning.
+            if session is not None:
+                try:
+                    latest = dict(session.get_player_names())
+                    stats.player_stats = service.with_player_names(
+                        stats.player_stats,
+                        latest,
+                    )
+                except Exception:
+                    # Sort preference may fail; keep unsorted results.
+                    pass
+            self.app.page.run_task(
+                self._update_stats_ui,
+                stats,
+                service,
+                generation,
+            )
+        except Exception as ex:
+            self.app.page.run_task(
+                self._handle_stats_error,
+                ex,
+                generation,
+            )
+        finally:
+            run_on_ui(self.app.page, self.app.hide_progress)
+            run_on_ui(self.app.page, self._finish_stats_busy, generation)
 
     def _finish_stats_busy(self, generation: int) -> None:
         if generation != getattr(self, "_stats_generation", 0):
