@@ -1380,56 +1380,12 @@ class PlayerTabMixin(ExplorerMixinHost):
             if not paths:
                 return
             locale = self._preferred_item_locale()
-            lang_count = 0
-            texture_count = 0
-            jar_count = 0
-            lang_sources = 0
-
-            json_files = [p for p in paths if p.suffix.lower() == ".json"]
-            jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
-
-            for json_path in json_files:
-                lang_count += self.app.item.load_language_file(json_path)
-
-            if jar_files:
-                for jar_path in jar_files:
-                    result = self.app.item.extract_language_from_jar_detailed(
-                        jar_path,
-                        locale=locale,
-                    )
-                    if result.count > 0:
-                        lang_count += result.count
-                        lang_sources += len(result.sources)
-                        jar_count += 1
-                tex = self.app.texture.import_textures_from_jars(jar_files)
-                texture_count = tex.extracted
-                if tex.jars and not jar_count:
-                    jar_count = tex.jars
-
-            # If nothing selected that works, try local Minecraft client jar.
-            if not json_files and not jar_files:
-                return
-            if lang_count == 0 and texture_count == 0 and not jar_files:
-                # Only JSON selected but empty.
-                self._notify_language_import(0)
-                return
-            if lang_count == 0 and texture_count == 0 and jar_files:
-                # Try discovered/local Minecraft as additional language source.
-                local = self.app.item.import_language_from_local_minecraft(
-                    locale=locale,
-                    configured_dir=self._configured_minecraft_dir(),
-                    start_path=self._current_save_start_path(),
-                )
-                if local.count > 0:
-                    lang_count = local.count
-                    if local.jar_path:
-                        jar_count = max(jar_count, 1)
-
+            counts = self._import_selected_asset_sources(paths, locale)
             self._notify_asset_import(
-                lang_count=lang_count,
-                texture_count=texture_count,
-                jar_count=jar_count,
-                lang_sources=lang_sources,
+                lang_count=counts["lang_count"],
+                texture_count=counts["texture_count"],
+                jar_count=counts["jar_count"],
+                lang_sources=counts["lang_sources"],
             )
         except Exception as ex:
             self.app.handle_exception(
@@ -1439,6 +1395,58 @@ class PlayerTabMixin(ExplorerMixinHost):
                     "导入语言/贴图失败",
                 ),
             )
+
+    def _import_selected_asset_sources(
+        self,
+        paths: List[Path],
+        locale: str,
+    ) -> Dict[str, int]:
+        lang_count = 0
+        texture_count = 0
+        jar_count = 0
+        lang_sources = 0
+        json_files = [p for p in paths if p.suffix.lower() == ".json"]
+        jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
+
+        for json_path in json_files:
+            lang_count += self.app.item.load_language_file(json_path)
+
+        if jar_files:
+            for jar_path in jar_files:
+                result = self.app.item.extract_language_from_jar_detailed(
+                    jar_path,
+                    locale=locale,
+                )
+                if result.count > 0:
+                    lang_count += result.count
+                    lang_sources += len(result.sources)
+                    jar_count += 1
+            tex = self.app.texture.import_textures_from_jars(jar_files)
+            texture_count = tex.extracted
+            if tex.jars and not jar_count:
+                jar_count = tex.jars
+
+        if lang_count == 0 and texture_count == 0 and not jar_files:
+            # Only JSON selected but empty.
+            self._notify_language_import(0)
+        elif lang_count == 0 and texture_count == 0 and jar_files:
+            # Try discovered/local Minecraft as additional language source.
+            local = self.app.item.import_language_from_local_minecraft(
+                locale=locale,
+                configured_dir=self._configured_minecraft_dir(),
+                start_path=self._current_save_start_path(),
+            )
+            if local.count > 0:
+                lang_count = local.count
+                if local.jar_path:
+                    jar_count = max(jar_count, 1)
+
+        return {
+            "lang_count": lang_count,
+            "texture_count": texture_count,
+            "jar_count": jar_count,
+            "lang_sources": lang_sources,
+        }
 
     def _pick_asset_sources(self) -> List[Path]:
         """Pick JSON and/or JAR sources (multi-select when available)."""

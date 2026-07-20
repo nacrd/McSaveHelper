@@ -683,40 +683,15 @@ class StatsTabMixin(ExplorerMixinHost):
                 self.app.show_progress,
                 self._t("stats.analyzing", "正在分析存档..."),
             )
-
-            def progress(value: float, stage: str) -> None:
-                if generation != getattr(self, "_stats_generation", 0):
-                    return
-                message = self._format_stats_stage(stage)
-                run_on_ui(
-                    self.app.page,
-                    self.app.update_progress_with_task,
-                    message or task_name,
-                    value,
-                )
-                run_on_ui(
-                    self.app.page,
-                    self._apply_stats_progress,
-                    value,
-                    message,
-                )
-
             stats = service.analyze_world(
                 world_path,
-                progress_callback=progress,
+                progress_callback=self._make_stats_progress_callback(
+                    generation,
+                    task_name,
+                ),
                 name_map=name_map,
             )
-            # Late-bind names that may have been resolved while scanning.
-            if session is not None:
-                try:
-                    latest = dict(session.get_player_names())
-                    stats.player_stats = service.with_player_names(
-                        stats.player_stats,
-                        latest,
-                    )
-                except Exception:
-                    # Sort preference may fail; keep unsorted results.
-                    pass
+            stats = self._late_bind_player_names(service, session, stats)
             self.app.page.run_task(
                 self._update_stats_ui,
                 stats,
@@ -732,6 +707,50 @@ class StatsTabMixin(ExplorerMixinHost):
         finally:
             run_on_ui(self.app.page, self.app.hide_progress)
             run_on_ui(self.app.page, self._finish_stats_busy, generation)
+
+    def _make_stats_progress_callback(
+        self,
+        generation: int,
+        task_name: str,
+    ) -> Any:
+        def progress(value: float, stage: str) -> None:
+            if generation != getattr(self, "_stats_generation", 0):
+                return
+            message = self._format_stats_stage(stage)
+            run_on_ui(
+                self.app.page,
+                self.app.update_progress_with_task,
+                message or task_name,
+                value,
+            )
+            run_on_ui(
+                self.app.page,
+                self._apply_stats_progress,
+                value,
+                message,
+            )
+
+        return progress
+
+    def _late_bind_player_names(
+        self,
+        service: Any,
+        session: Any,
+        stats: Any,
+    ) -> Any:
+        # Late-bind names that may have been resolved while scanning.
+        if session is None:
+            return stats
+        try:
+            latest = dict(session.get_player_names())
+            stats.player_stats = service.with_player_names(
+                stats.player_stats,
+                latest,
+            )
+        except Exception:
+            # Sort preference may fail; keep unsorted results.
+            pass
+        return stats
 
     def _finish_stats_busy(self, generation: int) -> None:
         if generation != getattr(self, "_stats_generation", 0):

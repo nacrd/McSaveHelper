@@ -55,20 +55,14 @@ def run_full(
     log(f"存档已克隆到 {dest_world}", "FILE")
 
     # 2. 加载缓存与构建映射
-    cache = load_usercache(src_world)
-    log(f"本地缓存: {len(cache)} 条", "CACHE")
-    mappings = build_mappings(
+    mappings = _build_full_mode_mappings(
+        src_world,
         dest_world,
-        cache,
         offline_mode,
         manual_names,
         log,
-        custom_mappings)
-    if not mappings:
-        log("未生成任何 UUID 映射，终止", "ERROR")
-        raise RuntimeError("未生成任何 UUID 映射，完整迁移已中止")
-    log(f"生成 {len(mappings)} 条映射", "INFO")
-
+        custom_mappings,
+    )
     _process_core_nbt(dest_world, mappings, log)
     _rename_player_files(dest_world, mappings, log)
     _process_regions(dest_world, mappings, progress, log)
@@ -81,6 +75,31 @@ def run_full(
 
     # 8. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
+
+
+def _build_full_mode_mappings(
+    src_world: Path,
+    dest_world: Path,
+    offline_mode: bool,
+    manual_names: Optional[List[str]],
+    log: LogCallback,
+    custom_mappings: Optional[Dict[str, str]],
+) -> List[UUIDMapping]:
+    cache = load_usercache(src_world)
+    log(f"本地缓存: {len(cache)} 条", "CACHE")
+    mappings = build_mappings(
+        dest_world,
+        cache,
+        offline_mode,
+        manual_names,
+        log,
+        custom_mappings,
+    )
+    if not mappings:
+        log("未生成任何 UUID 映射，终止", "ERROR")
+        raise RuntimeError("未生成任何 UUID 映射，完整迁移已中止")
+    log(f"生成 {len(mappings)} 条映射", "INFO")
+    return mappings
 
 
 def _process_core_nbt(

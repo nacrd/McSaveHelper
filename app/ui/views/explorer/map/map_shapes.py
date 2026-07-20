@@ -102,33 +102,9 @@ def region_cell(
     value_label: Optional[str] = None,
 ) -> List[cv.Shape]:
     shapes: List[cv.Shape] = []
-    if tile_src:
-        shapes.append(
-            cv.Image(
-                src=tile_src,
-                x=x,
-                y=y,
-                width=size,
-                height=size,
-                paint=ft.Paint(anti_alias=False),
-            )
-        )
-    else:
-        shapes.append(cv.Rect(x, y, size, size, paint=ft.Paint(color=color)))
+    shapes.extend(_region_base_fill(x, y, size, color, tile_src))
     if selected:
-        shapes.append(
-            cv.Rect(
-                x,
-                y,
-                size,
-                size,
-                paint=ft.Paint(
-                    color=SELECTED_BORDER_COLOR,
-                    style=ft.PaintingStyle.STROKE,
-                    stroke_width=3,
-                ),
-            )
-        )
+        shapes.append(_region_selected_border(x, y, size))
     if show_coordinates and size >= 22 and view_level != "block":
         shapes.extend(
             _region_coord_labels(
@@ -153,6 +129,41 @@ def region_cell(
             )
         )
     return shapes
+
+
+def _region_base_fill(
+    x: float,
+    y: float,
+    size: float,
+    color: str,
+    tile_src: Optional[str],
+) -> List[cv.Shape]:
+    if tile_src:
+        return [
+            cv.Image(
+                src=tile_src,
+                x=x,
+                y=y,
+                width=size,
+                height=size,
+                paint=ft.Paint(anti_alias=False),
+            )
+        ]
+    return [cv.Rect(x, y, size, size, paint=ft.Paint(color=color))]
+
+
+def _region_selected_border(x: float, y: float, size: float) -> cv.Shape:
+    return cv.Rect(
+        x,
+        y,
+        size,
+        size,
+        paint=ft.Paint(
+            color=SELECTED_BORDER_COLOR,
+            style=ft.PaintingStyle.STROKE,
+            stroke_width=3,
+        ),
+    )
 
 
 def _region_coord_labels(

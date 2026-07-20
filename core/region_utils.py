@@ -171,7 +171,15 @@ def discover_dimension_region_dirs(
         list[DimensionRegionDirectory]: 有序维度列表。
     """
     collector = _DimensionCollector()
+    _collect_modern_vanilla_dimensions(collector, world_path)
+    _collect_legacy_and_custom_dimensions(collector, world_path)
+    return collector.dimensions
 
+
+def _collect_modern_vanilla_dimensions(
+    collector: _DimensionCollector,
+    world_path: Path,
+) -> None:
     modern_root = world_path / "dimensions" / "minecraft"
     for dimension_dir in _iter_directories(modern_root):
         dimension_name = dimension_dir.name
@@ -188,13 +196,17 @@ def discover_dimension_region_dirs(
             ),
             dimension_dir / "region",
         )
-
     collector.add(
         "overworld",
         _VANILLA_DIMENSION_NAMES["overworld"],
         world_path / "region",
     )
 
+
+def _collect_legacy_and_custom_dimensions(
+    collector: _DimensionCollector,
+    world_path: Path,
+) -> None:
     for dimension_dir in _iter_directories(world_path):
         if not dimension_dir.name.startswith("DIM"):
             continue
@@ -219,8 +231,6 @@ def discover_dimension_region_dirs(
                 f"📦 {dim_id}",
                 dimension_dir / "region",
             )
-
-    return collector.dimensions
 
 
 def iter_region_dirs(

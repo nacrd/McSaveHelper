@@ -450,33 +450,57 @@ class RegionTabMixin(ExplorerMixinHost):
             return
         fields = self._build_add_marker_fields()
         error_text = ft.Text(size=11, color=THEME.error)
+        dialog_holder: dict[str, Any] = {}
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text(
                 self.app.translate("map.add_marker_title", "添加地图标记")
             ),
-            content=ft.Column(
-                [
-                    fields["name_field"],
-                    ft.Row(
-                        [
-                            fields["x_field"],
-                            fields["y_field"],
-                            fields["z_field"],
-                        ],
-                        spacing=6,
-                    ),
-                    fields["color_field"],
-                    error_text,
-                ],
-                spacing=8,
-                tight=True,
+            content=self._build_add_marker_dialog_content(fields, error_text),
+            actions=self._build_add_marker_dialog_actions(
+                controller,
+                fields,
+                error_text,
+                dialog_holder,
             ),
-            actions=[],
+        )
+        dialog_holder["dialog"] = dialog
+        self.app.page.show_dialog(dialog)
+
+    def _build_add_marker_dialog_content(
+        self,
+        fields: dict[str, Any],
+        error_text: ft.Text,
+    ) -> ft.Column:
+        return ft.Column(
+            [
+                fields["name_field"],
+                ft.Row(
+                    [
+                        fields["x_field"],
+                        fields["y_field"],
+                        fields["z_field"],
+                    ],
+                    spacing=6,
+                ),
+                fields["color_field"],
+                error_text,
+            ],
+            spacing=8,
+            tight=True,
         )
 
+    def _build_add_marker_dialog_actions(
+        self,
+        controller: Any,
+        fields: dict[str, Any],
+        error_text: ft.Text,
+        dialog_holder: dict[str, Any],
+    ) -> list[ft.Control]:
         def close(_click: Any = None) -> None:
-            dialog.open = False
+            dialog = dialog_holder.get("dialog")
+            if dialog is not None:
+                dialog.open = False
             self.app.page.update()
 
         def save(_click: Any = None) -> None:
@@ -495,7 +519,7 @@ class RegionTabMixin(ExplorerMixinHost):
                 error_text.value = str(exc)
                 safe_update(error_text)
 
-        dialog.actions = [
+        return [
             ft.TextButton(
                 self.app.translate("map.add", "添加"),
                 icon=ft.Icons.ADD_LOCATION_ALT,
@@ -506,7 +530,6 @@ class RegionTabMixin(ExplorerMixinHost):
                 on_click=close,
             ),
         ]
-        self.app.page.show_dialog(dialog)
 
     def _build_add_marker_fields(self) -> dict[str, Any]:
         block_x, block_z = self._default_marker_coordinates()

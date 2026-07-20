@@ -153,7 +153,16 @@ def run_fast(
         offline_mode,
         log,
     )
+    _apply_fast_mode_cleanup(dest_world, do_clean, pure_clean, log)
+    update_server_properties(dest_dir, world_name, log)
 
+
+def _apply_fast_mode_cleanup(
+    dest_world: Path,
+    do_clean: bool,
+    pure_clean: bool,
+    log: LogCallback,
+) -> None:
     if do_clean:
         log("正在精简存档...", "CLEAN")
         clean_world(dest_world, log)
@@ -166,5 +175,3 @@ def run_fast(
             raise RuntimeError("纯净扫描未完整处理所有区域文件")
     else:
         log("跳过纯净扫描", "INFO")
-
-    update_server_properties(dest_dir, world_name, log)
