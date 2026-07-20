@@ -85,7 +85,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._shulker_dialog: Optional[ft.AlertDialog] = None
 
         # ── Left: player list (compact) ───────────────────────
-        left = ft.Column(spacing=6)
+        left = ft.Column(spacing=6, expand=True)
         left.controls.append(
             ft.Text(
                 t("explorer.select_player", "选择玩家"),
@@ -107,88 +107,85 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         left.controls.append(self._player_list_column)
         left.controls.append(
-            btn_ghost(
+            self._chip_button(
                 t("explorer.import_usercache", "导入 usercache"),
-                height=28,
-                on_click=self._import_usercache,
+                self._import_usercache,
             )
         )
 
         # ── Center: HUD + categorized editor sections ─────────
-        center = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
+        center = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self._player_hud = PlayerHUDCard(t_cb=self._t)
         center.controls.append(card(self._player_hud, padding=10))
 
-        action_row = ft.Row(
-            [
-                btn_ghost(
-                    t("player.export_action", "导出"),
-                    height=28,
-                    on_click=self._export_player_summary,
-                ),
-                btn_ghost(
-                    t("player.teleport_death", "死亡点"),
-                    height=28,
-                    on_click=self._stage_teleport_to_death,
-                ),
-                btn_ghost(
-                    t("player.import_language", "语言"),
-                    height=28,
-                    on_click=self._import_language_file,
-                ),
-                btn_ghost(
-                    t("player.import_mc_jar", "MC jar"),
-                    height=28,
-                    on_click=self._import_language_from_minecraft,
-                ),
-            ],
-            spacing=6,
-        )
-        center.controls.append(action_row)
+        action_controls = [
+            self._chip_button(
+                t("player.export_action", "导出"),
+                self._export_player_summary,
+            ),
+            self._chip_button(
+                t("player.teleport_death", "死亡点"),
+                self._stage_teleport_to_death,
+            ),
+            self._chip_button(
+                t("player.import_language", "语言"),
+                self._import_language_file,
+            ),
+            self._chip_button(
+                t("player.import_mc_jar", "MC jar"),
+                self._import_language_from_minecraft,
+            ),
+        ]
+        center.controls.append(self._responsive_chips(action_controls))
 
-        # Section switcher keeps one category visible at a time.
-        self._center_section_btns: List[ft.Control] = []
+        # Section switcher — one category visible at a time.
         section_defs = (
             (0, "player.section.vitals", "生命/经验"),
             (1, "player.section.world", "坐标/出生"),
             (2, "player.section.abilities", "能力"),
             (3, "player.section.advanced", "属性/效果"),
         )
-        for index, key, default in section_defs:
-            btn = btn_ghost(
+        section_controls = [
+            self._chip_button(
                 t(key, default),
-                height=28,
-                on_click=lambda e, i=index: self._switch_center_section(i),
+                lambda e, i=index: self._switch_center_section(i),
             )
-            self._center_section_btns.append(btn)
-        center.controls.append(
-            ft.Row(self._center_section_btns, spacing=4)
-        )
+            for index, key, default in section_defs
+        ]
+        self._center_section_btns = section_controls
+        center.controls.append(self._responsive_chips(section_controls))
 
         self._build_player_edit_fields()
-        self._attributes_list = ft.Column(spacing=2)
-        self._effects_list = ft.Column(spacing=2)
+        self._attributes_list = ft.Column(
+            spacing=2, scroll=ft.ScrollMode.AUTO, height=180
+        )
+        self._effects_list = ft.Column(
+            spacing=2, scroll=ft.ScrollMode.AUTO, height=140
+        )
 
         self._section_vitals = self._build_section_card(
             t("player.edit.section_vitals", "生命 / 饥饿 / 经验"),
             [
-                self._field_row("Health", "foodLevel", "foodSaturationLevel"),
-                self._field_row("XpLevel", "XpTotal", "XpP"),
-                self._field_row("Air", "playerGameType", "SelectedItemSlot"),
+                self._field_row("Health", "foodLevel"),
+                self._field_row("foodSaturationLevel", "Air"),
+                self._field_row("XpLevel", "XpTotal"),
+                self._field_row("XpP", "playerGameType"),
+                self._field_row("SelectedItemSlot"),
             ],
         )
         self._section_world = self._build_section_card(
             t("player.edit.section_pos", "坐标与维度"),
             [
-                self._field_row("Pos.0", "Pos.1", "Pos.2"),
-                self._field_row("Dimension"),
+                self._field_row("Pos.0", "Pos.1"),
+                self._field_row("Pos.2", "Dimension"),
                 ft.Text(
                     t("player.edit.section_spawn", "出生点"),
                     size=12,
                     color=THEME.text_secondary,
                 ),
-                self._field_row("SpawnX", "SpawnY", "SpawnZ"),
-                self._field_row("SpawnDimension", "SpawnForced"),
+                self._field_row("SpawnX", "SpawnY"),
+                self._field_row("SpawnZ", "SpawnForced"),
+                self._field_row("SpawnDimension"),
             ],
         )
         self._section_abilities = self._build_section_card(
@@ -230,20 +227,18 @@ class PlayerTabMixin(ExplorerMixinHost):
             ]
         )
         center.controls.append(
-            ft.Row(
+            self._responsive_chips(
                 [
-                    btn_ghost(
+                    self._chip_button(
                         t("player.edit.refresh", "刷新表单"),
-                        height=30,
-                        on_click=self._refresh_player_edit_form,
+                        self._refresh_player_edit_form,
                     ),
-                    btn_primary(
+                    self._chip_button(
                         t("player.edit.stage", "暂存修改"),
-                        height=30,
-                        on_click=self._stage_player_edit_form,
+                        self._stage_player_edit_form,
+                        primary=True,
                     ),
-                ],
-                spacing=8,
+                ]
             )
         )
         self._switch_center_section(0)
@@ -262,7 +257,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             self.app.item,
             self.app.texture,
             layout="main",
-            slot_size=44,
+            slot_size=42,
             t_cb=self._t,
             on_slot_click=self._on_inventory_slot_click,
         )
@@ -270,7 +265,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             self.app.item,
             self.app.texture,
             layout="ender",
-            slot_size=44,
+            slot_size=42,
             t_cb=self._t,
             on_slot_click=self._on_inventory_slot_click,
         )
@@ -284,46 +279,87 @@ class PlayerTabMixin(ExplorerMixinHost):
             padding=ft.Padding(0, 4, 0, 0),
             visible=False,
         )
-        self._container_tab_inventory_btn = btn_ghost(
+        self._container_tab_inventory_btn = self._chip_button(
             t("player.tab.inventory", "主背包"),
-            height=28,
-            on_click=lambda e: self._switch_player_container_tab(0),
+            lambda e: self._switch_player_container_tab(0),
         )
-        self._container_tab_ender_btn = btn_ghost(
+        self._container_tab_ender_btn = self._chip_button(
             t("player.tab.ender", "末影箱"),
-            height=28,
-            on_click=lambda e: self._switch_player_container_tab(1),
+            lambda e: self._switch_player_container_tab(1),
         )
         right.controls.append(
-            ft.Row(
+            self._responsive_chips(
                 [
                     self._container_tab_inventory_btn,
                     self._container_tab_ender_btn,
-                ],
-                spacing=6,
+                ]
             )
         )
         right.controls.append(self._inventory_panel)
         right.controls.append(self._ender_panel)
 
+        # Flexible column widths: avoid fixed widths that collide on narrow UI.
         self._player_left_panel = ft.Container(
-            content=left, width=210, expand=False
+            content=left,
+            expand=2,
+            padding=ft.Padding(0, 0, 4, 0),
         )
         self._player_center_panel = ft.Container(
-            content=center, width=340, expand=False
+            content=center,
+            expand=4,
+            padding=ft.Padding(4, 0, 4, 0),
         )
-        self._player_right_panel = ft.Container(content=right, expand=True)
+        self._player_right_panel = ft.Container(
+            content=right,
+            expand=5,
+            padding=ft.Padding(4, 0, 0, 0),
+        )
         self._player_layout = ft.Row(
             [
                 self._player_left_panel,
                 self._player_center_panel,
                 self._player_right_panel,
             ],
-            spacing=8,
+            spacing=0,
             vertical_alignment=ft.CrossAxisAlignment.START,
             expand=True,
         )
-        self._tab_player.content = self._player_layout
+        self._tab_player.content = ft.Container(
+            content=self._player_layout,
+            expand=True,
+            padding=ft.Padding(4, 4, 4, 4),
+        )
+
+    def _chip_button(
+        self,
+        text: str,
+        on_click: Any,
+        *,
+        primary: bool = False,
+    ) -> ft.Control:
+        """Compact action chip that can reflow in ResponsiveRow."""
+        factory = btn_primary if primary else btn_ghost
+        button = factory(text, height=30, on_click=on_click)
+        # Clear fixed width so ResponsiveRow can size chips without collision.
+        button.width = None
+        # Give text room; McButton content is centered.
+        try:
+            button.padding = ft.Padding(8, 0, 8, 0)
+        except Exception:
+            pass
+        return ft.Container(
+            content=button,
+            col={"xs": 12, "sm": 6, "md": 4, "lg": 3},
+        )
+
+    def _responsive_chips(self, controls: List[ft.Control]) -> ft.ResponsiveRow:
+        return ft.ResponsiveRow(
+            controls=controls,
+            columns=12,
+            spacing=6,
+            run_spacing=6,
+            alignment=ft.MainAxisAlignment.START,
+        )
 
     def _build_player_edit_fields(self) -> None:
         t = self._t
@@ -357,16 +393,32 @@ class PlayerTabMixin(ExplorerMixinHost):
             key, default = label_defaults.get(
                 field_id, (f"player.edit.{field_id}", field_id)
             )
+            # expand=True + no fixed width: fields share available column space.
             self._player_edit_fields[field_id] = text_field(
                 label=t(key, default),
-                width=100,
-                expand=False,
+                expand=True,
             )
 
-    def _field_row(self, *field_ids: str) -> ft.Row:
-        return ft.Row(
-            [self._player_edit_fields[fid] for fid in field_ids],
-            spacing=6,
+    def _field_row(self, *field_ids: str) -> ft.ResponsiveRow:
+        """Two-up adaptive field row; narrow widths stack to one column."""
+        cells: List[ft.Control] = []
+        count = max(1, len(field_ids))
+        # 2 fields => 6/12 each; 1 field => full width; 3 => 4/12 each.
+        span = 12 // min(count, 2) if count <= 2 else 4
+        for field_id in field_ids:
+            field = self._player_edit_fields[field_id]
+            cells.append(
+                ft.Container(
+                    content=field,
+                    col={"xs": 12, "sm": span, "md": span, "lg": span},
+                    padding=ft.Padding(0, 0, 4, 4),
+                )
+            )
+        return ft.ResponsiveRow(
+            controls=cells,
+            columns=12,
+            spacing=4,
+            run_spacing=4,
         )
 
     def _build_section_card(
