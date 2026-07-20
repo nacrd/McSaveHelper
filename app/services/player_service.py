@@ -142,61 +142,94 @@ class PlayerService:
         specs: Optional[Sequence[PlayerEditSpec]] = None,
         target_label: Optional[str] = None,
     ) -> PlayerEditResult:
-        """Build staged NbtChange list from form field_id -> raw string values."""
+        """从表单字段值构建暂存 ``NbtChange`` 列表。
+
+        Args:
+            uuid: 玩家 UUID（任意连字符形式）。
+            player_data: 当前玩家 NBT 根。
+            field_values: ``field_id ->`` 表单原始字符串。
+            specs: 可选字段规格子集；默认使用全部可编辑规格。
+            target_label: 变更展示标签；默认 ``player:<uuid>``。
+
+        Returns:
+            PlayerEditResult: 变更列表与校验/路径错误。
+        """
         if player_data is None:
             return PlayerEditResult(changes=(), errors=("missing_player_data",))
 
         norm = normalize_uuid(uuid)
         label = target_label or f"player:{format_uuid_with_hyphens(norm)}"
-        selected_specs = list(specs) if specs is not None else list(PLAYER_EDIT_SPECS)
+        selected_specs = (
+            list(specs) if specs is not None else list(PLAYER_EDIT_SPECS)
+        )
         changes: List[NbtChange] = []
         errors: List[str] = []
 
         for spec in selected_specs:
-            if spec.read_only:
-                continue
-            if spec.field_id not in field_values:
-                continue
-            raw = field_values[spec.field_id]
-            if raw is None or str(raw).strip() == "":
-                continue
-
-            validation_error = self._validate_field(spec, str(raw))
-            if validation_error:
-                errors.append(f"{spec.field_id}:{validation_error}")
-                continue
-
-            try:
-                old_value = self._get_tag_at_path(player_data, list(spec.nbt_path))
-            except (KeyError, IndexError, TypeError):
-                errors.append(f"{spec.field_id}:path_missing")
-                continue
-
-            try:
-                new_value = coerce_like_tag(str(raw), old_value)
-            except Exception as exc:
-                errors.append(f"{spec.field_id}:coerce:{exc}")
-                continue
-
-            if tag_display_value(old_value) == tag_display_value(new_value):
-                continue
-
-            changes.append(
-                NbtChange.create(
-                    target=uuid,
-                    target_label=label,
-                    format="nbt",
-                    path=spec.nbt_path,
-                    display_path=".".join(str(part) for part in spec.nbt_path),
-                    old_value=old_value,
-                    new_value=new_value,
-                )
+            change_or_error = self._change_for_field(
+                uuid=uuid,
+                player_data=player_data,
+                field_values=field_values,
+                spec=spec,
+                label=label,
             )
+            if change_or_error is None:
+                continue
+            if isinstance(change_or_error, str):
+                errors.append(change_or_error)
+                continue
+            changes.append(change_or_error)
 
         return PlayerEditResult(
             changes=tuple(changes),
             errors=tuple(errors),
             staged_count=len(changes),
+        )
+
+    def _change_for_field(
+        self,
+        *,
+        uuid: str,
+        player_data: Any,
+        field_values: Mapping[str, str],
+        spec: PlayerEditSpec,
+        label: str,
+    ) -> NbtChange | str | None:
+        """为单个字段生成变更，或返回错误码字符串，或跳过。"""
+        if spec.read_only or spec.field_id not in field_values:
+            return None
+        raw = field_values[spec.field_id]
+        if raw is None or str(raw).strip() == "":
+            return None
+
+        validation_error = self._validate_field(spec, str(raw))
+        if validation_error:
+            return f"{spec.field_id}:{validation_error}"
+
+        try:
+            old_value = self._get_tag_at_path(player_data, list(spec.nbt_path))
+        except (KeyError, IndexError, TypeError):
+            return f"{spec.field_id}:path_missing"
+
+        try:
+            new_value = coerce_like_tag(str(raw), old_value)
+        except (TypeError, ValueError) as exc:
+            return f"{spec.field_id}:coerce:{exc}"
+        except Exception as exc:
+            # nbtlib 可能抛出库专属类型错误。
+            return f"{spec.field_id}:coerce:{exc}"
+
+        if tag_display_value(old_value) == tag_display_value(new_value):
+            return None
+
+        return NbtChange.create(
+            target=uuid,
+            target_label=label,
+            format="nbt",
+            path=spec.nbt_path,
+            display_path=".".join(str(part) for part in spec.nbt_path),
+            old_value=old_value,
+            new_value=new_value,
         )
 
     def build_teleport_to_death_changes(
