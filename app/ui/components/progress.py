@@ -32,8 +32,6 @@ class McProgressBar(ft.Container):
         self._bgcolor = bgcolor
         self._show_percentage = show_percentage
         self._animated = animated
-
-        # Create inner progress bar
         self._progress_bar = ft.ProgressBar(
             value=value,
             color=color,
@@ -42,8 +40,6 @@ class McProgressBar(ft.Container):
             border_radius=0,
             bar_height=height - 4,
         )
-
-        # Percentage text (optional)
         self._percentage_text = ft.Text(
             self._format_percentage(value),
             size=10,
@@ -52,39 +48,39 @@ class McProgressBar(ft.Container):
             font_family="monospace",
             visible=show_percentage,
         )
-
-        # Build container with decorative border
-        content = ft.Stack([
-            # Background layer
-            ft.Container(
-                bgcolor=bgcolor,
-                height=height,
-            ),
-            # Progress bar layer
-            ft.Container(
-                content=self._progress_bar,
-                padding=ft.Padding(left=2, right=2, top=2, bottom=2),
-            ),
-            # Percentage text layer (centered)
-            ft.Container(
-                content=self._percentage_text,
-                alignment=ft.alignment.Alignment(0, 0),
-                visible=show_percentage,
-            ) if show_percentage else ft.Container(),
-            # Decorative border layer
-            ft.Container(
-                border=mc_border(2),
-                height=height,
-            ),
-        ])
-
         super().__init__(
-            content=content,
+            content=self._build_progress_stack(height, bgcolor, show_percentage),
             width=width,
             height=height,
             bgcolor=THEME.bg_card,
             border_radius=0,
         )
+
+    def _build_progress_stack(
+        self,
+        height: int,
+        bgcolor: str,
+        show_percentage: bool,
+    ) -> ft.Stack:
+        return ft.Stack([
+            ft.Container(
+                bgcolor=bgcolor,
+                height=height,
+            ),
+            ft.Container(
+                content=self._progress_bar,
+                padding=ft.Padding(left=2, right=2, top=2, bottom=2),
+            ),
+            ft.Container(
+                content=self._percentage_text,
+                alignment=ft.alignment.Alignment(0, 0),
+                visible=show_percentage,
+            ) if show_percentage else ft.Container(),
+            ft.Container(
+                border=mc_border(2),
+                height=height,
+            ),
+        ])
 
     def _format_percentage(self, value: float) -> str:
         """Format percentage value as string"""

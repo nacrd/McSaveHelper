@@ -780,24 +780,13 @@ class PlayerTabMixin(ExplorerMixinHost):
             selected = (
                 PlayerManager.normalize_uuid(self.current_uuid) == ref.uuid_norm
             )
-        initial = (ref.name or ref.display_name or "?")[:1].upper()
-        avatar = ft.CircleAvatar(
-            content=ft.Text(initial, size=14, color=THEME.text_primary),
-            radius=_LIST_AVATAR_SIZE // 2,
-            bgcolor=THEME.bg_secondary,
-        )
-        if not hasattr(self, "_player_list_avatars"):
-            self._player_list_avatars = {}
-        self._player_list_avatars[ref.uuid_norm] = avatar
-
-        # Prefer full hyphen UUID; text truncates via overflow when narrow.
-        uuid_text = ref.uuid_hyphen or ref.uuid_norm
+        avatar = self._create_player_list_avatar(ref)
         list_width = float(
             (getattr(self, "_player_col_widths", None) or [280.0])[0]
         )
         name_size = 15 if list_width >= 250 else 13
         uuid_size = 11 if list_width >= 250 else 10
-
+        uuid_text = ref.uuid_hyphen or ref.uuid_norm
         return ft.Container(
             content=ft.Row(
                 [
@@ -843,6 +832,18 @@ class PlayerTabMixin(ExplorerMixinHost):
             width=None,
             expand=False,
         )
+
+    def _create_player_list_avatar(self, ref: Any) -> ft.CircleAvatar:
+        initial = (ref.name or ref.display_name or "?")[:1].upper()
+        avatar = ft.CircleAvatar(
+            content=ft.Text(initial, size=14, color=THEME.text_primary),
+            radius=_LIST_AVATAR_SIZE // 2,
+            bgcolor=THEME.bg_secondary,
+        )
+        if not hasattr(self, "_player_list_avatars"):
+            self._player_list_avatars = {}
+        self._player_list_avatars[ref.uuid_norm] = avatar
+        return avatar
 
     def _load_list_avatar(self, ref: Any) -> None:
         """Async-load face avatar into the player list tile."""

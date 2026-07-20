@@ -245,16 +245,28 @@ class StatsTabMixin(ExplorerMixinHost):
         ]
         total = sum(value for _, value in items)
         if total <= 0:
-            shapes.append(
-                cv.Text(
-                    x=78,
-                    y=98,
-                    value=self._t("stats.pie_empty", "暂无方块数据"),
-                    style=ft.TextStyle(size=13, color=THEME.text_muted),
-                )
-            )
+            shapes.append(self._empty_pie_text())
             return shapes
 
+        shapes.extend(self._pie_slices(items, total, colors))
+        shapes.extend(self._pie_center_labels())
+        return shapes
+
+    def _empty_pie_text(self) -> cv.Text:
+        return cv.Text(
+            x=78,
+            y=98,
+            value=self._t("stats.pie_empty", "暂无方块数据"),
+            style=ft.TextStyle(size=13, color=THEME.text_muted),
+        )
+
+    def _pie_slices(
+        self,
+        items: List[Tuple[str, int]],
+        total: int,
+        colors: List[str],
+    ) -> List[cv.Shape]:
+        shapes: List[cv.Shape] = []
         start = -90.0
         cx, cy, radius = 130, 104, 76
         shapes.append(
@@ -262,9 +274,9 @@ class StatsTabMixin(ExplorerMixinHost):
                 cx,
                 cy,
                 radius + 2,
-                paint=ft.Paint(
-                    color=THEME.border_light)))
-
+                paint=ft.Paint(color=THEME.border_light),
+            )
+        )
         for idx, (_, value) in enumerate(items):
             sweep = value / total * 360
             shapes.append(
@@ -278,33 +290,29 @@ class StatsTabMixin(ExplorerMixinHost):
                     paint=ft.Paint(
                         color=colors[idx % len(colors)],
                         stroke_width=radius,
-                        style=ft.PaintingStyle.STROKE
+                        style=ft.PaintingStyle.STROKE,
                     ),
                 )
             )
             start += sweep
+        return shapes
 
-        shapes.append(
-            cv.Circle(
-                cx, cy, 38, paint=ft.Paint(
-                    color=THEME.bg_card)))
-        shapes.append(
+    def _pie_center_labels(self) -> List[cv.Shape]:
+        return [
+            cv.Circle(130, 104, 38, paint=ft.Paint(color=THEME.bg_card)),
             cv.Text(
                 x=102,
                 y=96,
                 value="TOP",
-                style=ft.TextStyle(size=13, color=THEME.text_primary)
-            )
-        )
-        shapes.append(
+                style=ft.TextStyle(size=13, color=THEME.text_primary),
+            ),
             cv.Text(
                 x=98,
                 y=113,
                 value=self._t("stats.pie_center", "方块"),
-                style=ft.TextStyle(size=12, color=THEME.text_muted)
-            )
-        )
-        return shapes
+                style=ft.TextStyle(size=12, color=THEME.text_muted),
+            ),
+        ]
 
     def _update_block_pie_chart(self, items: List[Tuple[str, int]]) -> None:
         """更新方块分布饼图和图例"""
