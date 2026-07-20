@@ -241,8 +241,33 @@ class BlockDataService:
                 False,
                 "目标方块与当前方块相同，无需修改",
             )
+        return self._commit_palette_index(
+            block_states=block_states,
+            data=data,
+            old_palette_size=old_palette_size,
+            new_palette_size=len(palette),
+            local_x=local_x,
+            local_y=local_y,
+            local_z=local_z,
+            new_palette_index=new_palette_index,
+            old_name=old_name,
+            block_name=block_name,
+        )
 
-        new_palette_size = len(palette)
+    def _commit_palette_index(
+        self,
+        *,
+        block_states: Any,
+        data: Any,
+        old_palette_size: int,
+        new_palette_size: int,
+        local_x: int,
+        local_y: int,
+        local_z: int,
+        new_palette_index: int,
+        old_name: str,
+        block_name: str,
+    ) -> SetBlockResult:
         old_bits = (
             max(4, (old_palette_size - 1).bit_length())
             if old_palette_size > 1

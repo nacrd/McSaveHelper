@@ -213,7 +213,57 @@ def chunk_grid(
         return shapes, chunk_bounds, block_bounds
 
     rx, rz = region_coord
+    shapes.extend(_chunk_grid_lines(x, y, size, chunk_size))
+    shapes.extend(
+        _chunk_cell_labels(
+            x,
+            y,
+            region_coord,
+            chunk_size,
+            chunk_bounds,
+            show_block_grid=show_block_grid,
+            show_coordinates=show_coordinates,
+        )
+    )
+    if show_block_grid and chunk_size >= 24:
+        block_shapes, block_bounds = block_grid_for_region(
+            x,
+            y,
+            chunk_size,
+            region_coord,
+            show_coordinates=show_coordinates,
+            selected_chunk=selected_chunk,
+        )
+        shapes.extend(block_shapes)
+    if selected_chunk is not None:
+        scx, scz = selected_chunk
+        if scx // 32 == rx and scz // 32 == rz:
+            local_x = scx - rx * 32
+            local_z = scz - rz * 32
+            shapes.append(
+                cv.Rect(
+                    x + local_x * chunk_size,
+                    y + local_z * chunk_size,
+                    chunk_size,
+                    chunk_size,
+                    paint=ft.Paint(
+                        color="#FFD54F",
+                        style=ft.PaintingStyle.STROKE,
+                        stroke_width=max(1.5, min(3.0, chunk_size / 3)),
+                    ),
+                )
+            )
+    return shapes, chunk_bounds, block_bounds
+
+
+def _chunk_grid_lines(
+    x: float,
+    y: float,
+    size: float,
+    chunk_size: float,
+) -> List[cv.Shape]:
     line_color = "#00000066" if chunk_size >= 4 else "#00000040"
+    shapes: List[cv.Shape] = []
     for index in range(1, 32):
         pos = index * chunk_size
         shapes.append(
@@ -234,7 +284,21 @@ def chunk_grid(
                 paint=ft.Paint(color=line_color, stroke_width=0.6),
             )
         )
+    return shapes
 
+
+def _chunk_cell_labels(
+    x: float,
+    y: float,
+    region_coord: Coord,
+    chunk_size: float,
+    chunk_bounds: Dict[Coord, ScreenRect],
+    *,
+    show_block_grid: bool,
+    show_coordinates: bool,
+) -> List[cv.Shape]:
+    rx, rz = region_coord
+    shapes: List[cv.Shape] = []
     for local_z in range(32):
         for local_x in range(32):
             cx = rx * 32 + local_x
@@ -251,37 +315,7 @@ def chunk_grid(
                         style=ft.TextStyle(size=8, color="#FFECB3"),
                     )
                 )
-
-    if show_block_grid and chunk_size >= 24:
-        block_shapes, block_bounds = block_grid_for_region(
-            x,
-            y,
-            chunk_size,
-            region_coord,
-            show_coordinates=show_coordinates,
-            selected_chunk=selected_chunk,
-        )
-        shapes.extend(block_shapes)
-
-    if selected_chunk is not None:
-        scx, scz = selected_chunk
-        if scx // 32 == rx and scz // 32 == rz:
-            local_x = scx - rx * 32
-            local_z = scz - rz * 32
-            shapes.append(
-                cv.Rect(
-                    x + local_x * chunk_size,
-                    y + local_z * chunk_size,
-                    chunk_size,
-                    chunk_size,
-                    paint=ft.Paint(
-                        color="#FFD54F",
-                        style=ft.PaintingStyle.STROKE,
-                        stroke_width=max(1.5, min(3.0, chunk_size / 3)),
-                    ),
-                )
-            )
-    return shapes, chunk_bounds, block_bounds
+    return shapes
 
 
 def marker_overlay(

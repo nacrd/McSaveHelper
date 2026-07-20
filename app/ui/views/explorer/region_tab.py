@@ -438,46 +438,25 @@ class RegionTabMixin(ExplorerMixinHost):
                 self.app.translate("map.select_save_first", "请先设置当前存档。"),
             )
             return
-        block_x, block_z = self._default_marker_coordinates()
-        name_field = ft.TextField(
-            label=self.app.translate("map.marker_name", "名称"),
-            autofocus=True,
-            width=300,
-        )
-        x_field = ft.TextField(label="X", value=str(block_x), width=100)
-        y_field = ft.TextField(label="Y", value="64", width=100)
-        z_field = ft.TextField(label="Z", value=str(block_z), width=100)
-        color_field = ft.Dropdown(
-            label=self.app.translate("map.marker_color", "颜色"),
-            value="#FFD54F",
-            width=180,
-            options=[
-                ft.dropdown.Option(
-                    "#FFD54F", self.app.translate("map.color_gold", "金色")
-                ),
-                ft.dropdown.Option(
-                    "#55FF55", self.app.translate("map.color_green", "绿色")
-                ),
-                ft.dropdown.Option(
-                    "#55AAFF", self.app.translate("map.color_blue", "蓝色")
-                ),
-                ft.dropdown.Option(
-                    "#FF6B6B", self.app.translate("map.color_red", "红色")
-                ),
-                ft.dropdown.Option(
-                    "#FFFFFF", self.app.translate("map.color_white", "白色")
-                ),
-            ],
-        )
+        fields = self._build_add_marker_fields()
         error_text = ft.Text(size=11, color=THEME.error)
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text(self.app.translate("map.add_marker_title", "添加地图标记")),
+            title=ft.Text(
+                self.app.translate("map.add_marker_title", "添加地图标记")
+            ),
             content=ft.Column(
                 [
-                    name_field,
-                    ft.Row([x_field, y_field, z_field], spacing=6),
-                    color_field,
+                    fields["name_field"],
+                    ft.Row(
+                        [
+                            fields["x_field"],
+                            fields["y_field"],
+                            fields["z_field"],
+                        ],
+                        spacing=6,
+                    ),
+                    fields["color_field"],
                     error_text,
                 ],
                 spacing=8,
@@ -493,11 +472,11 @@ class RegionTabMixin(ExplorerMixinHost):
         def save(_click: Any = None) -> None:
             try:
                 marker = controller.upsert_marker(
-                    name_field.value or "",
-                    int((x_field.value or "0").strip()),
-                    int((z_field.value or "0").strip()),
-                    y=int((y_field.value or "64").strip()),
-                    color=color_field.value or "#FFD54F",
+                    fields["name_field"].value or "",
+                    int((fields["x_field"].value or "0").strip()),
+                    int((fields["z_field"].value or "0").strip()),
+                    y=int((fields["y_field"].value or "64").strip()),
+                    color=fields["color_field"].value or "#FFD54F",
                 )
                 close()
                 self._refresh_map_markers()
@@ -512,9 +491,52 @@ class RegionTabMixin(ExplorerMixinHost):
                 icon=ft.Icons.ADD_LOCATION_ALT,
                 on_click=save,
             ),
-            ft.TextButton(self.app.translate("map.cancel", "取消"), on_click=close),
+            ft.TextButton(
+                self.app.translate("map.cancel", "取消"),
+                on_click=close,
+            ),
         ]
         self.app.page.show_dialog(dialog)
+
+    def _build_add_marker_fields(self) -> dict[str, Any]:
+        block_x, block_z = self._default_marker_coordinates()
+        return {
+            "name_field": ft.TextField(
+                label=self.app.translate("map.marker_name", "名称"),
+                autofocus=True,
+                width=300,
+            ),
+            "x_field": ft.TextField(label="X", value=str(block_x), width=100),
+            "y_field": ft.TextField(label="Y", value="64", width=100),
+            "z_field": ft.TextField(label="Z", value=str(block_z), width=100),
+            "color_field": ft.Dropdown(
+                label=self.app.translate("map.marker_color", "颜色"),
+                value="#FFD54F",
+                width=180,
+                options=[
+                    ft.dropdown.Option(
+                        "#FFD54F",
+                        self.app.translate("map.color_gold", "金色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#55FF55",
+                        self.app.translate("map.color_green", "绿色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#55AAFF",
+                        self.app.translate("map.color_blue", "蓝色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#FF6B6B",
+                        self.app.translate("map.color_red", "红色"),
+                    ),
+                    ft.dropdown.Option(
+                        "#FFFFFF",
+                        self.app.translate("map.color_white", "白色"),
+                    ),
+                ],
+            ),
+        }
 
     def _default_marker_coordinates(self) -> Tuple[int, int]:
         if self._map_view is not None:
