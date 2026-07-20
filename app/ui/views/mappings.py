@@ -113,14 +113,9 @@ class MappingsView(ft.Column):
             btn_primary("导入 JSON", width=110, on_click=self._import_json),
             btn_ghost("导出 JSON", width=110, on_click=self._export_json),
             btn_ghost(
-                self._t("mappings.import_mc_jar", "从本地 Minecraft 导入"),
-                width=170,
-                on_click=self._import_from_local_minecraft,
-            ),
-            btn_ghost(
-                self._t("mappings.import_jar", "选择 JAR 导入"),
-                width=130,
-                on_click=self._import_from_jar_file,
+                self._t("mappings.import_assets", "导入语言/贴图"),
+                width=150,
+                on_click=self._import_assets,
             ),
         ], spacing=8)
         s.controls.append(ft.Container(
@@ -130,9 +125,8 @@ class MappingsView(ft.Column):
         s.controls.append(ft.Container(
             content=ft.Text(
                 self._t(
-                    "mappings.jar_hint",
-                    "可从本机 .minecraft/versions 客户端 jar 或模组 jar 提取 "
-                    "assets/*/lang/zh_cn.json。",
+                    "mappings.assets_hint",
+                    "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。",
                 ),
                 size=11,
                 color=THEME.text_muted,
@@ -314,105 +308,111 @@ class MappingsView(ft.Column):
             pass
 
     def _import_lang(self, e: ft.ControlEvent) -> None:
+        """Top-bar entry — same unified assets importer."""
+        self._import_assets(e)
+
+    def _import_assets(self, e: ft.ControlEvent = None) -> None:
+        """Unified multi-select language + jar texture importer."""
         try:
-            path = self.app.pick_file(
-                title="选择语言文件 (zh_cn.json 等)",
-                file_types=[
-                    ("JSON / JAR", "*.json;*.jar"),
-                    ("JSON 文件 (*.json)", "*.json"),
-                    ("JAR 文件 (*.jar)", "*.jar"),
-                ],
-            )
-            if not path:
-                return
-            source = Path(path)
-            if source.suffix.lower() == ".jar":
-                result = self._item_service.extract_language_from_jar_detailed(
-                    source,
-                    locale=self._preferred_locale(),
-                )
-                count = result.count
+            paths = self._pick_asset_sources()
+            locale = self._preferred_locale()
+            lang_count = 0
+            texture_count = 0
+            jar_count = 0
+
+            if paths:
+                json_files = [p for p in paths if p.suffix.lower() == ".json"]
+                jar_files = [p for p in paths if p.suffix.lower() == ".jar"]
+                for json_path in json_files:
+                    lang_count += self._item_service.load_language_file(json_path)
+                for jar_path in jar_files:
+                    result = self._item_service.extract_language_from_jar_detailed(
+                        jar_path,
+                        locale=locale,
+                    )
+                    lang_count += result.count
+                    if result.count > 0:
+                        jar_count += 1
+                if jar_files:
+                    texture = self.app.texture.import_textures_from_jars(jar_files)
+                    texture_count = texture.extracted
+                    jar_count = max(jar_count, texture.jars)
             else:
-                count = self._item_service.load_language_file(source)
-            self._item_mapping_status.value = f"已导入 {count} 个名称。"
-            self._item_mapping_status.color = (
-                THEME.mc_grass if count > 0 else THEME.warning
-            )
+                # No files chosen — fall back to local Minecraft client jar.
+                result = self._item_service.import_language_from_local_minecraft(
+                    locale=locale,
+                )
+                lang_count = result.count
+                if result.jar_path:
+                    jar_path = Path(result.jar_path)
+                    texture = self.app.texture.import_textures_from_jars([jar_path])
+                    texture_count = texture.extracted
+                    jar_count = max(1, texture.jars)
+                    self.app.texture.set_minecraft_jar(jar_path)
+
+            if lang_count <= 0 and texture_count <= 0:
+                self._item_mapping_status.value = self._t(
+                    "mappings.import_assets_empty",
+                    "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。",
+                )
+                self._item_mapping_status.color = THEME.warning
+            else:
+                parts = []
+                if lang_count > 0:
+                    parts.append(f"语言 {lang_count}")
+                if texture_count > 0:
+                    parts.append(f"贴图 {texture_count}（{max(1, jar_count)} jar）")
+                self._item_mapping_status.value = (
+                    f"导入完成：{'；'.join(parts)}（优先 {locale}）。"
+                )
+                self._item_mapping_status.color = THEME.mc_grass
             self._render_item_table(self._item_search_field.value or "")
             self.update()
         except Exception as ex:
-            self.app.handle_exception(ex, title="导入语言文件失败")
+            self.app.handle_exception(ex, title="导入语言/贴图失败")
+
+    def _pick_asset_sources(self) -> list[Path]:
+        title = self._t(
+            "mappings.import_assets_title",
+            "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+        )
+        file_types = [
+            ("JSON / JAR", "*.json;*.jar"),
+            ("JSON (*.json)", "*.json"),
+            ("JAR (*.jar)", "*.jar"),
+        ]
+        pick_files = getattr(self.app, "pick_files", None)
+        if callable(pick_files):
+            selected = pick_files(title=title, file_types=file_types)
+            if selected:
+                return [Path(item) for item in selected if item]
+            return []
+        path = self.app.pick_file(title=title, file_types=file_types)
+        return [Path(path)] if path else []
 
     def _import_from_local_minecraft(self, e: ft.ControlEvent = None) -> None:
-        try:
-            result = self._item_service.import_language_from_local_minecraft(
-                locale=self._preferred_locale(),
-            )
-            if result.count > 0:
-                jar_name = Path(result.jar_path).name if result.jar_path else ""
-                self._item_mapping_status.value = (
-                    f"已从本地 Minecraft 导入 {result.count} 个名称"
-                    + (f"（{jar_name}, {result.locale}）" if jar_name else "")
-                    + "。"
-                )
-                self._item_mapping_status.color = THEME.mc_grass
-            else:
-                self._item_mapping_status.value = self._t(
-                    "mappings.local_mc_missing",
-                    "未找到本机 Minecraft 客户端 jar，请改用「选择 JAR 导入」。",
-                )
-                self._item_mapping_status.color = THEME.warning
-            self._render_item_table(self._item_search_field.value or "")
-            self.update()
-        except Exception as ex:
-            self.app.handle_exception(ex, title="从本地 Minecraft 导入语言失败")
+        """Back-compat: unified importer with empty selection falls back to local."""
+        self._import_assets(e)
 
     def _import_from_jar_file(self, e: ft.ControlEvent = None) -> None:
-        try:
-            path = self.app.pick_file(
-                title=self._t(
-                    "mappings.pick_jar_title",
-                    "选择 Minecraft 客户端或模组 JAR",
-                ),
-                file_types=[("JAR 文件 (*.jar)", "*.jar")],
-            )
-            if not path:
-                return
-            result = self._item_service.extract_language_from_jar_detailed(
-                Path(path),
-                locale=self._preferred_locale(),
-            )
-            if result.count > 0:
-                self._item_mapping_status.value = (
-                    f"已从 JAR 导入 {result.count} 个名称"
-                    f"（{result.locale}, {len(result.sources)} 个语言文件）。"
-                )
-                self._item_mapping_status.color = THEME.mc_grass
-            else:
-                self._item_mapping_status.value = self._t(
-                    "mappings.jar_empty",
-                    "JAR 中未找到可用语言文件（尝试 zh_cn / en_us）。",
-                )
-                self._item_mapping_status.color = THEME.warning
-            self._render_item_table(self._item_search_field.value or "")
-            self.update()
-        except Exception as ex:
-            self.app.handle_exception(ex, title="从 JAR 导入语言失败")
+        """Back-compat alias for the unified assets importer."""
+        self._import_assets(e)
 
     def _preferred_locale(self) -> str:
-        """Map app language setting to Minecraft lang code."""
+        """Map app UI translation language to Minecraft jar lang stem."""
+        from app.services.item.language_loader import normalize_locale
+
         try:
-            lang = getattr(self.app, "i18n", None)
             code = ""
-            if lang is not None:
-                code = str(getattr(lang, "current_language", "") or "")
+            i18n = getattr(self.app, "i18n", None)
+            if i18n is not None:
+                code = str(getattr(i18n, "current_language", "") or "")
             if not code and hasattr(self.app, "config"):
-                code = str(getattr(self.app.config, "language", "") or "")
-            code = code.replace("-", "_").lower()
-            if code.startswith("zh"):
-                return "zh_cn"
-            if code.startswith("en"):
-                return "en_us"
+                settings = getattr(self.app.config, "get_settings", None)
+                if callable(settings):
+                    code = str(getattr(settings(), "language", "") or "")
+            if code:
+                return normalize_locale(code)
         except Exception:
             pass
         return "zh_cn"

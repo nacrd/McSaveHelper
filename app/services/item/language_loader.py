@@ -87,21 +87,32 @@ def save_custom_mapping(
 
 
 def normalize_locale(locale: str) -> str:
-    """Normalize locale codes to Minecraft lang file form (e.g. zh_cn)."""
-    text = (locale or "").strip().replace("-", "_")
+    """Normalize locale codes to Minecraft lang file form (e.g. zh_cn).
+
+    App UI codes such as ``zh_CN`` / ``en_US`` map to jar lang stems
+    ``zh_cn`` / ``en_us``. Bare ``zh`` is expanded to ``zh_cn`` because
+    vanilla client jars do not ship a ``zh.json`` language file.
+    """
+    text = (locale or "").strip().replace("-", "_").lower()
     if not text:
         return "en_us"
-    return text.lower()
+    if text == "zh" or text.startswith("zh_"):
+        return "zh_cn"
+    if text == "en" or text.startswith("en_"):
+        return "en_us"
+    return text
 
 
 def locale_fallbacks(locale: str) -> Tuple[str, ...]:
-    """Return locale preference chain ending with en_us when needed."""
+    """Return locale preference chain for jar language extraction.
+
+    Always tries the UI/app-preferred locale first, then ``en_us`` as the
+    only automatic fallback (never a bare language tag like ``zh``).
+    """
     primary = normalize_locale(locale)
-    chain: List[str] = []
-    for candidate in (primary, primary.split("_")[0], "en_us"):
-        if candidate and candidate not in chain:
-            chain.append(candidate)
-    # Prefer full codes; if primary is language-only, keep en_us last.
+    chain: List[str] = [primary]
+    if primary != "en_us":
+        chain.append("en_us")
     return tuple(chain)
 
 

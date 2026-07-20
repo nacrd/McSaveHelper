@@ -359,7 +359,11 @@
     "jar_hint": "可从本机 .minecraft/versions 客户端 jar 或模组 jar 提取 assets/*/lang/zh_cn.json。",
     "local_mc_missing": "未找到本机 Minecraft 客户端 jar，请改用「选择 JAR 导入」。",
     "pick_jar_title": "选择 Minecraft 客户端或模组 JAR",
-    "jar_empty": "JAR 中未找到可用语言文件（尝试 zh_cn / en_us）。"
+    "jar_empty": "JAR 中未找到可用语言文件（尝试 zh_cn / en_us）。",
+    "import_assets": "导入语言/贴图",
+    "assets_hint": "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。优先使用当前 UI 语言。",
+    "import_assets_title": "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+    "import_assets_empty": "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。"
   },
   "settings": {
     "general": {
@@ -654,7 +658,8 @@
       "import_usercache": "导入 usercache 失败",
       "import_language": "导入语言文件失败",
       "shulker": "打开潜影盒失败",
-      "import_mc_jar": "从 Minecraft jar 导入语言失败"
+      "import_mc_jar": "从 Minecraft jar 导入语言失败",
+      "import_assets": "导入语言/贴图失败"
     },
     "list_empty": "没有匹配的玩家",
     "attributes": {
@@ -681,6 +686,12 @@
     "resize_columns": "拖拽调节列宽",
     "container": {
       "preview_title": "容器内容"
-    }
+    },
+    "import_assets": "导入语言/贴图",
+    "import_assets_title": "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
+    "import_assets_empty": "未导入任何语言名称或贴图。\n\n支持：\n- 语言 JSON（item.minecraft.xxx）\n- 客户端/模组 JAR 内 lang 与 textures\n- 可一次多选多个 JAR 批量导入贴图",
+    "import_assets_lang": "语言名称 {count} 个",
+    "import_assets_tex": "贴图 {count} 张（来自 {jars} 个 JAR）",
+    "import_assets_ok": "导入完成：{detail}。\n物品栏名称与贴图将立即生效。"
   }
 }

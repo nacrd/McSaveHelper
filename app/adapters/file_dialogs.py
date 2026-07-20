@@ -34,6 +34,13 @@ class FileDialogPort(Protocol):
     ) -> Optional[str]:
         ...
 
+    def pick_files(
+        self,
+        title: str,
+        file_types: FileTypes,
+    ) -> Optional[list[str]]:
+        ...
+
     def save_file(
         self,
         title: str,
@@ -47,7 +54,7 @@ class FileDialogPort(Protocol):
 class _DialogRequest:
     method_name: str
     options: dict[str, Any]
-    response: "queue.Queue[Optional[str]]"
+    response: "queue.Queue[Any]"
 
 
 class TkFileDialogs:
@@ -95,6 +102,25 @@ class TkFileDialogs:
             filetypes=list(file_types),
         )
 
+    def pick_files(
+        self,
+        title: str,
+        file_types: FileTypes,
+    ) -> Optional[list[str]]:
+        result = self._show(
+            "askopenfilenames",
+            title=title,
+            filetypes=list(file_types),
+        )
+        if not result:
+            return None
+        if isinstance(result, (list, tuple)):
+            paths = [str(item) for item in result if item]
+            return paths or None
+        # Some Tk builds return a single path string.
+        text = str(result).strip()
+        return [text] if text else None
+
     def save_file(
         self,
         title: str,
@@ -108,7 +134,7 @@ class TkFileDialogs:
             filetypes=list(file_types),
         )
 
-    def _show(self, method_name: str, **options: Any) -> Optional[str]:
+    def _show(self, method_name: str, **options: Any) -> Any:
         if self._closed:
             return None
         if not self._ready.wait(timeout=self._STARTUP_TIMEOUT_S):
@@ -116,7 +142,7 @@ class TkFileDialogs:
         if self._closed:
             return None
 
-        response: "queue.Queue[Optional[str]]" = queue.Queue(maxsize=1)
+        response: "queue.Queue[Any]" = queue.Queue(maxsize=1)
         self._requests.put(_DialogRequest(method_name, options, response))
         try:
             return response.get(timeout=self._DIALOG_TIMEOUT_S)
@@ -161,7 +187,17 @@ class TkFileDialogs:
         try:
             method = getattr(filedialog, request.method_name)
             selected = method(parent=root, **request.options)
-            result = str(selected) if selected else None
+            if request.method_name == "askopenfilenames":
+                if not selected:
+                    result: Any = None
+                elif isinstance(selected, (list, tuple)):
+                    paths = [str(item) for item in selected if item]
+                    result = paths or None
+                else:
+                    text = str(selected).strip()
+                    result = [text] if text else None
+            else:
+                result = str(selected) if selected else None
         except Exception:
             result = None
         try:

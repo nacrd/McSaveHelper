@@ -5,8 +5,9 @@ import re
 import threading
 import zipfile
 from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 import requests
 
@@ -21,7 +22,7 @@ from core.texture.client_jar import (
     find_local_minecraft_jar,
 )
 
-__all__ = ["ClientJarInfo", "TextureService"]
+__all__ = ["ClientJarInfo", "JarTextureImportResult", "TextureService"]
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,19 @@ _MAX_MEMORY_CACHE = 500
 _MAX_TEXTURE_BYTES = 16 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _RESOURCE_LOCATION_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
+
+
+@dataclass(frozen=True)
+class JarTextureImportResult:
+    """Outcome of bulk-importing textures from one or more jars."""
+
+    extracted: int
+    jars: int
+    skipped: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return self.extracted > 0
 
 
 class TextureService:
@@ -49,6 +63,8 @@ class TextureService:
         self._memory_cache: OrderedDict[str, Path] = OrderedDict()
         self._base64_cache: OrderedDict[str, str] = OrderedDict()
         self._minecraft_jar: Optional[Path] = None
+        # Extra jars (resource packs / mods) searched after the client jar.
+        self._extra_jars: List[Path] = []
         self._asset_index: Optional[Dict[str, str]] = None
         self._asset_index_loaded = False
         self._jar_download_attempted = False
@@ -131,6 +147,88 @@ class TextureService:
                         pass
         threading.Thread(target=_worker, daemon=True).start()
 
+    def import_textures_from_jars(
+        self,
+        jar_paths: Sequence[Path],
+        *,
+        set_primary: bool = True,
+    ) -> JarTextureImportResult:
+        """Bulk-extract ``assets/*/textures/**/*.png`` from jars into the cache.
+
+        Also registers jars so subsequent per-item lookups can read from them.
+        """
+        extracted = 0
+        jars_ok = 0
+        skipped = 0
+        for raw in jar_paths:
+            path = Path(raw)
+            if not path.is_file():
+                skipped += 1
+                continue
+            count = self._extract_all_textures_from_jar(path)
+            if count <= 0:
+                skipped += 1
+                continue
+            jars_ok += 1
+            extracted += count
+            self.register_texture_jar(
+                path,
+                primary=set_primary and jars_ok == 1,
+            )
+        return JarTextureImportResult(
+            extracted=extracted,
+            jars=jars_ok,
+            skipped=skipped,
+        )
+
+    def register_texture_jar(self, path: Path, *, primary: bool = False) -> None:
+        """Remember a jar for future texture lookups."""
+        resolved = Path(path)
+        with self._jar_lock:
+            if primary:
+                self._minecraft_jar = resolved
+            elif resolved not in self._extra_jars:
+                self._extra_jars.insert(0, resolved)
+
+    def _extract_all_textures_from_jar(self, jar_path: Path) -> int:
+        count = 0
+        try:
+            with zipfile.ZipFile(jar_path) as archive:
+                for name in archive.namelist():
+                    lower = name.lower().replace("\\", "/")
+                    if not lower.startswith("assets/"):
+                        continue
+                    if "/textures/" not in lower or not lower.endswith(".png"):
+                        continue
+                    parts = lower.split("/")
+                    try:
+                        tex_idx = parts.index("textures")
+                    except ValueError:
+                        continue
+                    if tex_idx < 2:
+                        continue
+                    relative = "/".join(parts[tex_idx + 1:])
+                    if not relative or ".." in relative:
+                        continue
+                    try:
+                        data = archive.read(name)
+                    except KeyError:
+                        continue
+                    if (
+                        not data
+                        or len(data) > _MAX_TEXTURE_BYTES
+                        or not data.startswith(_PNG_SIGNATURE)
+                    ):
+                        continue
+                    try:
+                        self._save_to_cache(relative, data)
+                    except ValueError:
+                        continue
+                    count += 1
+        except (OSError, zipfile.BadZipFile, RuntimeError):
+            return 0
+        return count
+
     def _try_memory_cache(self, item_id: str) -> Optional[Path]:
         with self._lock:
             if item_id in self._memory_cache:
@@ -179,22 +277,44 @@ class TextureService:
         return self._asset_index
 
     def _try_extract_from_jar(self, texture_res: str) -> Optional[bytes]:
-        jar = self._find_or_get_jar()
-        if jar is None:
-            return None
+        for jar in self._iter_texture_jars():
+            data = self._read_texture_from_jar(jar, texture_res)
+            if data:
+                return data
+        return None
+
+    def _iter_texture_jars(self) -> List[Path]:
+        jars: List[Path] = []
+        primary = self._find_or_get_jar()
+        if primary is not None:
+            jars.append(primary)
+        with self._jar_lock:
+            extras = list(self._extra_jars)
+        for path in extras:
+            if path not in jars and path.exists():
+                jars.append(path)
+        return jars
+
+    @staticmethod
+    def _read_texture_from_jar(jar: Path, texture_res: str) -> Optional[bytes]:
+        leaf = texture_res.split("/", 1)[-1]
+        candidates = (
+            f"{_JAR_TEXTURE_PREFIX}{leaf}",
+            f"{_JAR_TEXTURE_PREFIX}{texture_res}",
+        )
         try:
             with zipfile.ZipFile(jar) as zf:
-                jar_path = f"{_JAR_TEXTURE_PREFIX}{
-                    texture_res.split(
-                        '/', 1)[
-                        -1]}"
-                if jar_path in zf.namelist():
-                    return zf.read(jar_path)
-                full_path = f"{_JAR_TEXTURE_PREFIX}{texture_res}"
-                if full_path in zf.namelist():
-                    return zf.read(full_path)
+                names = set(zf.namelist())
+                for candidate in candidates:
+                    if candidate in names:
+                        return zf.read(candidate)
+                suffix = f"/textures/{leaf}"
+                for name in names:
+                    lower = name.replace("\\", "/").lower()
+                    if lower.endswith(suffix):
+                        return zf.read(name)
         except Exception:
-            pass
+            return None
         return None
 
     def _try_fetch_from_api(self, texture_res: str) -> Optional[bytes]:

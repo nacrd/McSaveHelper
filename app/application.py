@@ -644,6 +644,14 @@ class Application:
         """
         return self.dialog_manager.pick_file(title, file_types)
 
+    def pick_files(
+        self,
+        title: str = "",
+        file_types: Optional[List[FileType]] = None,
+    ) -> Optional[List[str]]:
+        """Multi-select file dialog."""
+        return self.dialog_manager.pick_files(title, file_types)
+
     def save_file(
         self,
         title: str = "",

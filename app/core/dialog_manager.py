@@ -499,6 +499,19 @@ class DialogManager:
             selected_types,
         )
 
+    def pick_files(
+        self,
+        title: str = "",
+        file_types: Optional[List[FileType]] = None,
+    ) -> Optional[List[str]]:
+        """Multi-select file dialog."""
+        dialog_title = title or self._translate("common.select_file", "选择文件")
+        selected_types = file_types or [("所有文件", "*.*")]
+        return self._deps.file_dialogs.pick_files(
+            dialog_title,
+            selected_types,
+        )
+
     def save_file(
         self,
         title: str = "",

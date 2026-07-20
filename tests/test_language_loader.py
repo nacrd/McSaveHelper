@@ -28,9 +28,14 @@ def _write_jar(path: Path, entries: dict[str, dict | str]) -> Path:
 
 def test_normalize_and_fallback_locale() -> None:
     assert normalize_locale("zh-CN") == "zh_cn"
+    assert normalize_locale("zh_CN") == "zh_cn"
+    assert normalize_locale("zh") == "zh_cn"
+    assert normalize_locale("en_US") == "en_us"
     assert normalize_locale("") == "en_us"
-    assert locale_fallbacks("zh_CN")[0] == "zh_cn"
-    assert "en_us" in locale_fallbacks("zh_cn")
+    # UI language first; en_us only as fallback — never bare "zh".
+    assert locale_fallbacks("zh_CN") == ("zh_cn", "en_us")
+    assert locale_fallbacks("en_US") == ("en_us",)
+    assert "zh" not in locale_fallbacks("zh_CN")
 
 
 def test_extract_language_from_client_jar_style(tmp_path: Path) -> None:
@@ -71,6 +76,24 @@ def test_extract_falls_back_to_en_us(tmp_path: Path) -> None:
     result = extract_language_from_jar(jar, names, {}, locale="zh_cn")
     assert result.locale == "en_us"
     assert names["minecraft:apple"] == "Apple"
+
+
+def test_extract_prefers_ui_locale_over_en_us(tmp_path: Path) -> None:
+    jar = _write_jar(
+        tmp_path / "client.jar",
+        {
+            "assets/minecraft/lang/zh_cn.json": {
+                "item.minecraft.apple": "苹果",
+            },
+            "assets/minecraft/lang/en_us.json": {
+                "item.minecraft.apple": "Apple",
+            },
+        },
+    )
+    names: dict[str, str] = {}
+    result = extract_language_from_jar(jar, names, {}, locale="zh_CN")
+    assert result.locale == "zh_cn"
+    assert names["minecraft:apple"] == "苹果"
 
 
 def test_list_lang_entries_in_jar(tmp_path: Path) -> None:
