@@ -634,6 +634,7 @@ class StatsTabMixin(ExplorerMixinHost):
             try:
                 name_map = dict(session.get_player_names())
             except Exception:
+                # Name resolution is optional for stats aggregation.
                 name_map = {}
 
         def run() -> None:
@@ -675,6 +676,7 @@ class StatsTabMixin(ExplorerMixinHost):
                             latest,
                         )
                     except Exception:
+                        # Sort preference may fail; keep unsorted results.
                         pass
                 self.app.page.run_task(
                     self._update_stats_ui,

@@ -18,6 +18,7 @@ def _is_closing() -> bool:
         from app.ui.utils import is_app_closing
         return is_app_closing()
     except Exception:
+        # Import/state lookup best-effort during teardown.
         return False
 
 
@@ -85,6 +86,7 @@ class NotificationManager:
             )
             self.page.show_dialog(snackbar)
         except Exception:
+            # UI best-effort: page/dialog host may already be closing.
             pass
 
     def show_success(self, message: str, duration_ms: int = 3000) -> None:

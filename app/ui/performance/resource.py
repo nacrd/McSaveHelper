@@ -119,6 +119,7 @@ class ResourceUsageMonitor:
                 self._sample_metrics()
                 time.sleep(self.sample_interval)
         except Exception:
+            # Sampler thread boundary: never crash the process.
             pass
 
     def _resolve_monitors(
@@ -154,6 +155,7 @@ class ResourceUsageMonitor:
                 self._last_print_time = now
                 self._print_log_summary(perf_monitor)
         except Exception:
+            # Metric sampling is best-effort.
             pass
 
     def _print_log_summary(
@@ -177,5 +179,7 @@ class ResourceUsageMonitor:
             lines.append(f"  memory: {perf_monitor.get_memory_usage():.2f} MB")
             lines.append(f"  cpu: {perf_monitor.get_cpu_percent():.1f}%")
             _logger.info("\n".join(lines), module="PerfMonitor")
+        except (OSError, TypeError, ValueError, AttributeError, RuntimeError) as e:
+            print(f"[PERF] 资源摘要输出失败: {e}")
         except Exception as e:
             print(f"[PERF] 资源摘要输出失败: {e}")

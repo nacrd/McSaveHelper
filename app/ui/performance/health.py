@@ -208,6 +208,7 @@ class HealthMonitor(ThreadMonitoringMixin):
 
             self._cleanup_dead_threads(current_threads)
         except Exception:
+            # Frame introspection can race under concurrent teardown.
             pass
 
     def _should_alert(self, key: str) -> bool:
@@ -234,6 +235,7 @@ class HealthMonitor(ThreadMonitoringMixin):
             try:
                 self._on_alert(alert)
             except Exception:
+                # Alert UI callbacks must not crash the monitor.
                 pass
 
     def get_status(self) -> Dict[str, Any]:

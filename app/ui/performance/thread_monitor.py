@@ -193,6 +193,9 @@ class ThreadMonitoringMixin:
             for thread in threading.enumerate():
                 if thread.ident == thread_id:
                     return thread.name
+        except RuntimeError:
+            # enumerate() can race while threads exit
+            pass
         except Exception:
             pass
         return f"Thread-{thread_id}"
@@ -223,6 +226,8 @@ class ThreadMonitoringMixin:
 
                 f = f.f_back
                 depth += 1
+        except (AttributeError, RuntimeError, TypeError):
+            pass
         except Exception:
             pass
 
