@@ -255,3 +255,89 @@ def test_extract_identity() -> None:
     assert identity.uuid_norm == norm
     assert identity.uuid_hyphen == format_uuid_with_hyphens(norm)
     assert identity.name == "Alex"
+
+
+def test_extract_attributes_and_effects() -> None:
+    manager = PlayerManager()
+    data = Compound({
+        "Attributes": NbtList[Compound]([
+            Compound({
+                "Name": String("minecraft:generic.max_health"),
+                "Base": Double(20.0),
+                "Modifiers": NbtList[Compound]([
+                    Compound({"Name": String("bonus"), "Amount": Double(2.0)}),
+                ]),
+            }),
+        ]),
+        "active_effects": NbtList[Compound]([
+            Compound({
+                "id": String("minecraft:speed"),
+                "amplifier": Byte(1),
+                "duration": Int(200),
+                "ambient": Byte(0),
+                "show_particles": Byte(1),
+                "show_icon": Byte(1),
+            }),
+        ]),
+    })
+    attrs = manager.extract_attributes(data)
+    assert len(attrs) == 1
+    assert attrs[0].name == "minecraft:generic.max_health"
+    assert attrs[0].base == 20.0
+    assert attrs[0].modifiers == 1
+
+    effects = manager.extract_effects(data)
+    assert len(effects) == 1
+    assert effects[0].id == "minecraft:speed"
+    assert effects[0].amplifier == 1
+    assert effects[0].duration == 200
+
+
+def test_extract_nested_shulker_legacy_and_components() -> None:
+    manager = PlayerManager()
+    legacy = {
+        "id": "minecraft:shulker_box",
+        "count": 1,
+        "tag": Compound({
+            "BlockEntityTag": Compound({
+                "Items": NbtList[Compound]([
+                    _item(0, "minecraft:diamond", 5),
+                    _item(10, "minecraft:gold_ingot", 2),
+                ]),
+            }),
+        }),
+    }
+    nested = manager.extract_nested_container_items(legacy)
+    assert len(nested) == 2
+    assert nested[0]["id"] == "minecraft:diamond"
+    assert nested[0]["count"] == 5
+
+    modern = {
+        "id": "minecraft:white_shulker_box",
+        "count": 1,
+        "components": Compound({
+            "minecraft:container": NbtList[Compound]([
+                Compound({
+                    "slot": Int(3),
+                    "item": Compound({
+                        "id": String("minecraft:emerald"),
+                        "count": Int(7),
+                    }),
+                }),
+            ]),
+        }),
+    }
+    nested2 = manager.extract_nested_container_items(modern)
+    assert nested2 == [{
+        "slot": 3,
+        "id": "minecraft:emerald",
+        "count": 7,
+    }]
+
+    assert manager.is_container_item("minecraft:purple_shulker_box")
+    assert manager.extract_nested_container_items(
+        {"id": "minecraft:shulker_box", "count": 1}
+    ) == []
+    assert manager.extract_nested_container_items(
+        {"id": "minecraft:stone", "count": 1}
+    ) == []

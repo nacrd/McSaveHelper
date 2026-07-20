@@ -523,7 +523,8 @@
     "metric_distance": "{meters:.1f} m"
   },
   "common": {
-    "tip": "提示"
+    "tip": "提示",
+    "close": "关闭"
   },
   "player": {
     "filter": "搜索玩家",
@@ -551,7 +552,9 @@
     "inventory": {
       "main": "主物品栏",
       "hotbar": "快捷栏",
-      "ender": "末影箱"
+      "ender": "末影箱",
+      "shulker": "潜影盒内容",
+      "click_hint": "点击查看详情"
     },
     "equip": {
       "title": "装备栏",
@@ -642,7 +645,20 @@
       "teleport": "暂存传送失败",
       "export": "导出玩家摘要失败",
       "import_usercache": "导入 usercache 失败",
-      "import_language": "导入语言文件失败"
+      "import_language": "导入语言文件失败",
+      "shulker": "打开潜影盒失败"
+    },
+    "list_empty": "没有匹配的玩家",
+    "attributes": {
+      "title": "属性 Attributes",
+      "empty": "无属性数据"
+    },
+    "effects": {
+      "title": "状态效果",
+      "empty": "无状态效果"
+    },
+    "shulker": {
+      "title": "容器内容"
     }
   }
 }

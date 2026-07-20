@@ -1,4 +1,4 @@
-"""Player tab mixin for ExplorerView."""
+"""Player tab mixin for ExplorerView — three-column player browser."""
 from __future__ import annotations
 
 import json
@@ -21,6 +21,7 @@ from app.ui.views.explorer.inventory_grid import InventoryGrid
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.ui.views.explorer.player_hud import PlayerHUDCard
 from app.ui.views.explorer.utils import safe_update
+from core.omni.player_manager import PlayerManager
 
 # Fields shown in the compact form (full registry still available via service).
 _FORM_FIELD_IDS = (
@@ -49,6 +50,13 @@ _FORM_FIELD_IDS = (
     "abilities.mayBuild",
 )
 
+_GAME_TYPE_LABELS = {
+    0: ("player.game_type.survival", "生存"),
+    1: ("player.game_type.creative", "创造"),
+    2: ("player.game_type.adventure", "冒险"),
+    3: ("player.game_type.spectator", "旁观"),
+}
+
 
 class PlayerTabMixin(ExplorerMixinHost):
     """Build and handle Explorer player tab interactions."""
@@ -70,8 +78,13 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _build_player_tab(self) -> None:
         t = self._t
         self._player_avatar_generation = 0
-        left = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
+        self._player_refs_cache: List[Any] = []
+        self._player_list_tiles: Dict[str, ft.Container] = {}
+        self._player_container_index = 0
+        self._shulker_dialog: Optional[ft.AlertDialog] = None
 
+        # ── Left: player list ─────────────────────────────────
+        left = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
         left.controls.append(
             ft.Text(
                 t("explorer.select_player", "选择玩家"),
@@ -80,46 +93,37 @@ class PlayerTabMixin(ExplorerMixinHost):
                 color=THEME.text_primary,
             )
         )
-
         self._player_filter = text_field(
             label=t("player.filter", "搜索玩家"),
-            width=300,
+            width=220,
             expand=False,
             on_change=self._on_player_filter_changed,
         )
         left.controls.append(self._player_filter)
-
-        self._player_dropdown = ft.Dropdown(
-            options=[],
-            on_select=self._on_player_selected,
-            border_color=THEME.border_standard,
-            text_size=13,
+        self._player_list_column = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
+        left.controls.append(self._player_list_column)
+        left.controls.append(
+            ft.Row(
+                [
+                    btn_ghost(
+                        t("explorer.import_usercache", "导入 usercache"),
+                        height=30,
+                        on_click=self._import_usercache,
+                    ),
+                ],
+                spacing=8,
+            )
         )
-        left.controls.append(self._player_dropdown)
 
-        self._player_summary_line = ft.Text(
-            t("player.summary_placeholder", "选择玩家后显示摘要"),
-            size=11,
-            color=THEME.text_muted,
-        )
-        left.controls.append(self._player_summary_line)
+        # ── Center: HUD / edit / attributes / effects ─────────
+        center = ft.Column(spacing=10, scroll=ft.ScrollMode.AUTO)
+        self._player_hud = PlayerHUDCard(t_cb=self._t)
+        center.controls.append(card(self._player_hud, padding=15))
 
-        btn_row = ft.Row(
-            [
-                btn_ghost(
-                    t("explorer.import_usercache", "导入 usercache"),
-                    height=30,
-                    on_click=self._import_usercache,
-                ),
-                btn_ghost(
-                    t("player.import_language", "导入语言文件"),
-                    height=30,
-                    on_click=self._import_language_file,
-                ),
-            ],
-            spacing=8,
+        self._equipment = EquipmentPreview(
+            self.app.item, self.app.texture, t_cb=self._t
         )
-        left.controls.append(btn_row)
+        center.controls.append(card(self._equipment, padding=15))
 
         action_row = ft.Row(
             [
@@ -133,43 +137,71 @@ class PlayerTabMixin(ExplorerMixinHost):
                     height=30,
                     on_click=self._stage_teleport_to_death,
                 ),
+                btn_ghost(
+                    t("player.import_language", "导入语言文件"),
+                    height=30,
+                    on_click=self._import_language_file,
+                ),
             ],
             spacing=8,
         )
-        left.controls.append(action_row)
+        center.controls.append(action_row)
+        self._build_player_edit_panel(center)
 
-        self._player_hud = PlayerHUDCard(t_cb=self._t)
-        self._hud_card = card(self._player_hud, padding=15)
-        left.controls.append(self._hud_card)
-
-        self._equipment = EquipmentPreview(
-            self.app.item,
-            self.app.texture,
-            t_cb=self._t,
+        self._attributes_list = ft.Column(spacing=2)
+        self._effects_list = ft.Column(spacing=2)
+        center.controls.append(
+            card(
+                ft.Column(
+                    [
+                        ft.Text(
+                            t("player.attributes.title", "属性 Attributes"),
+                            size=14,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.text_primary,
+                        ),
+                        self._attributes_list,
+                    ],
+                    spacing=6,
+                ),
+                padding=12,
+            )
         )
-        self._equip_card = card(self._equipment, padding=15)
-        left.controls.append(self._equip_card)
+        center.controls.append(
+            card(
+                ft.Column(
+                    [
+                        ft.Text(
+                            t("player.effects.title", "状态效果"),
+                            size=14,
+                            weight=ft.FontWeight.BOLD,
+                            color=THEME.text_primary,
+                        ),
+                        self._effects_list,
+                    ],
+                    spacing=6,
+                ),
+                padding=12,
+            )
+        )
 
-        self._build_player_edit_panel(left)
-
+        # ── Right: inventory / ender ──────────────────────────
         right = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
         right.expand = True
-
         self._inventory = InventoryGrid(
             self.app.item,
             self.app.texture,
             layout="main",
             t_cb=self._t,
+            on_slot_click=self._on_inventory_slot_click,
         )
         self._ender_inventory = InventoryGrid(
             self.app.item,
             self.app.texture,
             layout="ender",
             t_cb=self._t,
+            on_slot_click=self._on_inventory_slot_click,
         )
-
-        # Flet 0.86 Tabs no longer accept Tab(content=...); use simple toggles.
-        self._player_container_index = 0
         self._inventory_panel = ft.Container(
             content=self._inventory,
             padding=ft.Padding(0, 8, 0, 0),
@@ -202,15 +234,20 @@ class PlayerTabMixin(ExplorerMixinHost):
         right.controls.append(self._inventory_panel)
         right.controls.append(self._ender_panel)
 
-        self._player_left_panel = ft.Container(content=left, width=380)
+        self._player_left_panel = ft.Container(content=left, width=240)
+        self._player_center_panel = ft.Container(content=center, width=360)
         self._player_right_panel = ft.Container(content=right, expand=True)
         self._player_layout = ft.Row(
-            [self._player_left_panel, self._player_right_panel],
+            [
+                self._player_left_panel,
+                self._player_center_panel,
+                self._player_right_panel,
+            ],
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.START,
+            expand=True,
         )
         self._tab_player.content = self._player_layout
-        self._player_refs_cache: List[Any] = []
 
     def _build_player_edit_panel(self, parent: ft.Column) -> None:
         t = self._t
@@ -247,12 +284,11 @@ class PlayerTabMixin(ExplorerMixinHost):
             )
             self._player_edit_fields[field_id] = text_field(
                 label=t(key, default),
-                width=110,
+                width=105,
                 expand=False,
             )
 
         def row(*field_ids: str) -> ft.Row:
-            # Flet 0.86: Row.wrap causes WrapParentData/FlexParentData cast crashes.
             return ft.Row(
                 [self._player_edit_fields[fid] for fid in field_ids],
                 spacing=8,
@@ -289,14 +325,8 @@ class PlayerTabMixin(ExplorerMixinHost):
                     size=12,
                     color=THEME.text_secondary,
                 ),
-                row(
-                    "abilities.flying",
-                    "abilities.mayfly",
-                ),
-                row(
-                    "abilities.instabuild",
-                    "abilities.invulnerable",
-                ),
+                row("abilities.flying", "abilities.mayfly"),
+                row("abilities.instabuild", "abilities.invulnerable"),
                 row("abilities.mayBuild"),
                 ft.Row(
                     [
@@ -318,8 +348,9 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         parent.controls.append(card(form, padding=15))
 
+    # ── Player list (left column) ─────────────────────────────
+
     def _switch_player_container_tab(self, index: int) -> None:
-        """Toggle between main inventory and ender chest panels."""
         self._player_container_index = index
         if hasattr(self, "_inventory_panel"):
             self._inventory_panel.visible = index == 0
@@ -330,55 +361,106 @@ class PlayerTabMixin(ExplorerMixinHost):
 
     def _on_player_filter_changed(self, e: Any = None) -> None:
         try:
-            self._apply_player_dropdown_options()
+            self._apply_player_list()
         except Exception as ex:
-            self.app.handle_exception(ex, title=self._t(
-                "player.error.filter", "过滤玩家失败"
-            ))
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.filter", "过滤玩家失败"),
+            )
 
     def _refresh_player_list(self) -> None:
-        if not self.world_session or not hasattr(self, "_player_dropdown"):
+        if not self.world_session or not hasattr(self, "_player_list_column"):
             return
         service = self._player_service()
         self._player_refs_cache = service.list_players(self.world_session)
-        self._apply_player_dropdown_options()
-
+        self._apply_player_list()
         if self._player_refs_cache and not self.current_uuid:
             first = self._player_refs_cache[0]
-            self._player_dropdown.value = first.uuid_hyphen
-            safe_update(self._player_dropdown)
             self._load_player_data(first.uuid_hyphen)
 
-    def _apply_player_dropdown_options(self) -> None:
-        if not hasattr(self, "_player_dropdown"):
+    def _apply_player_list(self) -> None:
+        if not hasattr(self, "_player_list_column"):
             return
         query = ""
         if hasattr(self, "_player_filter") and self._player_filter.value:
             query = str(self._player_filter.value).strip().lower()
 
-        options = []
+        tiles: List[ft.Control] = []
+        self._player_list_tiles = {}
         for ref in getattr(self, "_player_refs_cache", []):
-            label = ref.display_name
-            if ref.name and ref.uuid_hyphen:
-                label = f"{ref.name} ({ref.uuid_hyphen[:8]}…)"
-            haystack = f"{ref.display_name} {ref.uuid_norm} {ref.uuid_hyphen}".lower()
+            haystack = (
+                f"{ref.display_name} {ref.uuid_norm} {ref.uuid_hyphen}".lower()
+            )
             if query and query not in haystack:
                 continue
-            options.append(ft.dropdown.Option(ref.uuid_hyphen, label))
+            tile = self._build_player_list_tile(ref)
+            self._player_list_tiles[ref.uuid_norm] = tile
+            tiles.append(tile)
 
-        self._player_dropdown.options = options
-        safe_update(self._player_dropdown)
+        if not tiles:
+            tiles.append(
+                ft.Text(
+                    self._t("player.list_empty", "没有匹配的玩家"),
+                    size=12,
+                    color=THEME.text_muted,
+                )
+            )
+        self._player_list_column.controls = tiles
+        safe_update(self._player_list_column)
 
-    def _on_player_selected(self, e: Any) -> None:
+    def _build_player_list_tile(self, ref: Any) -> ft.Container:
+        selected = False
+        if self.current_uuid:
+            selected = (
+                PlayerManager.normalize_uuid(self.current_uuid) == ref.uuid_norm
+            )
+        subtitle = ref.uuid_hyphen[:13] + "…" if ref.uuid_hyphen else ref.uuid_norm
+        return ft.Container(
+            content=ft.Column(
+                [
+                    ft.Text(
+                        ref.display_name,
+                        size=13,
+                        weight=ft.FontWeight.BOLD,
+                        color=THEME.text_primary,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                    ft.Text(
+                        subtitle,
+                        size=10,
+                        color=THEME.text_muted,
+                        max_lines=1,
+                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ),
+                ],
+                spacing=2,
+            ),
+            padding=10,
+            border_radius=6,
+            bgcolor=THEME.mc_stone if selected else THEME.bg_secondary,
+            border=ft.Border.all(
+                1, THEME.accent if selected else THEME.border_light
+            ),
+            on_click=lambda e, uuid=ref.uuid_hyphen: self._on_player_tile_click(
+                uuid
+            ),
+            ink=True,
+        )
+
+    def _on_player_tile_click(self, uuid: str) -> None:
         try:
-            if not self.world_session or not e.control.value:
+            if not self.world_session:
                 return
-            self._load_player_data(e.control.value)
+            self._load_player_data(uuid)
+            self._apply_player_list()
         except Exception as ex:
             self.app.handle_exception(
                 ex,
                 title=self._t("player.error.select", "选择玩家失败"),
             )
+
+    # ── Load / apply player data ──────────────────────────────
 
     def _load_player_data(self, uuid: str) -> None:
         try:
@@ -393,9 +475,14 @@ class PlayerTabMixin(ExplorerMixinHost):
 
             summary = service.load_summary(self.world_session, uuid)
             containers = service.load_containers(self.world_session, uuid)
+            attributes = service.load_attributes(self.world_session, uuid)
+            effects = service.load_effects(self.world_session, uuid)
             self._apply_player_summary_ui(summary, player_data)
             self._apply_player_containers_ui(uuid, containers)
+            self._apply_attributes_ui(attributes)
+            self._apply_effects_ui(effects)
             self._apply_player_nbt_target(uuid)
+            self._apply_player_list()
         except Exception as exc:
             self.app.handle_exception(
                 exc,
@@ -412,17 +499,6 @@ class PlayerTabMixin(ExplorerMixinHost):
             self._load_player_avatar(summary.ref.uuid_norm, summary.ref.name)
         elif hasattr(self, "_player_hud"):
             self._player_hud.update_from_nbt(player_data)
-
-        if summary is not None and hasattr(self, "_player_summary_line"):
-            pose = summary.pose
-            state = summary.state
-            self._player_summary_line.value = (
-                f"{state.dimension or '--'} · "
-                f"{_coord(pose.x)}, {_coord(pose.y)}, {_coord(pose.z)} · "
-                f"♥ {_coord(state.health)} · "
-                f"🎒 {summary.inventory_count}"
-            )
-            safe_update(self._player_summary_line)
 
         if hasattr(self, "_player_edit_fields"):
             self._refresh_player_edit_form()
@@ -458,6 +534,64 @@ class PlayerTabMixin(ExplorerMixinHost):
             ender = self.world_session.get_player_ender_items(uuid)
             self._ender_inventory.set_inventory(ender)
 
+    def _apply_attributes_ui(self, attributes: Any) -> None:
+        if not hasattr(self, "_attributes_list"):
+            return
+        rows: List[ft.Control] = []
+        if not attributes:
+            rows.append(
+                ft.Text(
+                    self._t("player.attributes.empty", "无属性数据"),
+                    size=12,
+                    color=THEME.text_muted,
+                )
+            )
+        else:
+            for attr in attributes:
+                base = "--" if attr.base is None else f"{attr.base:g}"
+                mod = (
+                    f"  (+{attr.modifiers} mods)"
+                    if attr.modifiers
+                    else ""
+                )
+                rows.append(
+                    ft.Text(
+                        f"{attr.name}: {base}{mod}",
+                        size=12,
+                        color=THEME.text_secondary,
+                        font_family="monospace",
+                    )
+                )
+        self._attributes_list.controls = rows
+        safe_update(self._attributes_list)
+
+    def _apply_effects_ui(self, effects: Any) -> None:
+        if not hasattr(self, "_effects_list"):
+            return
+        rows: List[ft.Control] = []
+        if not effects:
+            rows.append(
+                ft.Text(
+                    self._t("player.effects.empty", "无状态效果"),
+                    size=12,
+                    color=THEME.text_muted,
+                )
+            )
+        else:
+            for effect in effects:
+                amp = effect.amplifier + 1
+                duration_s = max(0, effect.duration) // 20
+                rows.append(
+                    ft.Text(
+                        f"{effect.id} ×{amp}  ({duration_s}s)",
+                        size=12,
+                        color=THEME.text_secondary,
+                        font_family="monospace",
+                    )
+                )
+        self._effects_list.controls = rows
+        safe_update(self._effects_list)
+
     def _apply_player_nbt_target(self, uuid: str) -> None:
         if not self.world_session:
             return
@@ -477,7 +611,6 @@ class PlayerTabMixin(ExplorerMixinHost):
         uuid_norm: str,
         name: Optional[str],
     ) -> None:
-        """Async load skin face; discard stale results via generation."""
         if not hasattr(self, "_player_hud"):
             return
         self._player_avatar_generation = getattr(
@@ -505,6 +638,7 @@ class PlayerTabMixin(ExplorerMixinHost):
                         path,
                         initial=(name or uuid_norm or "?")[:1],
                     )
+
             try:
                 page = getattr(self.app, "page", None)
             except Exception:
@@ -512,6 +646,80 @@ class PlayerTabMixin(ExplorerMixinHost):
             run_on_ui(page, apply)
 
         service.load_avatar_async(uuid_norm, on_loaded)
+
+    # ── Shulker / nested container ────────────────────────────
+
+    def _on_inventory_slot_click(
+        self,
+        slot: int,
+        item: Optional[Dict[str, Any]],
+    ) -> None:
+        try:
+            if not item:
+                return
+            item_id = str(item.get("id", "") or "")
+            nested = self._player_service().open_nested_container(item)
+            if nested is None:
+                return
+            self._show_shulker_dialog(item_id, nested)
+        except Exception as ex:
+            self.app.handle_exception(
+                ex,
+                title=self._t("player.error.shulker", "打开潜影盒失败"),
+            )
+
+    def _show_shulker_dialog(
+        self,
+        item_id: str,
+        nested_items: List[Dict[str, Any]],
+    ) -> None:
+        t = self._t
+        page = getattr(self.app, "page", None)
+        if page is None:
+            return
+
+        grid = InventoryGrid(
+            self.app.item,
+            self.app.texture,
+            layout="shulker",
+            slot_size=40,
+            t_cb=self._t,
+            title=item_id or t("player.inventory.shulker", "潜影盒内容"),
+        )
+        grid.set_inventory(nested_items)
+
+        def close_dialog(_e: Any = None) -> None:
+            dialog.open = False
+            if self._shulker_dialog is dialog:
+                self._shulker_dialog = None
+            page.update()
+
+        dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text(
+                t("player.shulker.title", "容器内容"),
+                color=THEME.text_primary,
+            ),
+            content=ft.Container(
+                content=grid,
+                width=420,
+                height=280,
+            ),
+            actions=[
+                ft.TextButton(
+                    t("common.close", "关闭"),
+                    on_click=close_dialog,
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+            bgcolor=THEME.bg_card,
+        )
+        self._shulker_dialog = dialog
+        page.overlay.append(dialog)
+        dialog.open = True
+        page.update()
+
+    # ── Edit form / stage / export ────────────────────────────
 
     def _refresh_player_edit_form(self, e: Any = None) -> None:
         try:
@@ -527,7 +735,9 @@ class PlayerTabMixin(ExplorerMixinHost):
         except Exception as ex:
             self.app.handle_exception(
                 ex,
-                title=self._t("player.error.refresh_form", "刷新玩家编辑表单失败"),
+                title=self._t(
+                    "player.error.refresh_form", "刷新玩家编辑表单失败"
+                ),
             )
 
     def _stage_player_edit_form(self, e: Any = None) -> None:
@@ -724,7 +934,9 @@ class PlayerTabMixin(ExplorerMixinHost):
         except Exception as ex:
             self.app.handle_exception(
                 ex,
-                title=self._t("player.error.import_usercache", "导入 usercache 失败"),
+                title=self._t(
+                    "player.error.import_usercache", "导入 usercache 失败"
+                ),
             )
 
     def _import_language_file(self, e: Any = None) -> None:
@@ -774,7 +986,6 @@ class PlayerTabMixin(ExplorerMixinHost):
         wanted = set(_FORM_FIELD_IDS)
         return [spec for spec in PLAYER_EDIT_SPECS if spec.field_id in wanted]
 
-    # Keep legacy mapping helper for any external callers / tests.
     def _player_edit_mapping(self) -> Dict[str, List[Any]]:
         return {
             spec.field_id: list(spec.nbt_path)

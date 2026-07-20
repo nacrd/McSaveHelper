@@ -20,6 +20,7 @@ from app.ui.views.explorer.item_slot import (
 from app.ui.views.explorer.utils import safe_update
 
 Translate = Callable[..., str]
+SlotClickCallback = Callable[[int, Optional[Dict[str, Any]]], None]
 
 # Highlight for SelectedItemSlot
 SELECTED_BORDER = "#42A5F5"
@@ -36,6 +37,8 @@ class InventoryGrid(ft.Column):
         *,
         layout: str = "main",
         t_cb: Optional[Translate] = None,
+        on_slot_click: Optional[SlotClickCallback] = None,
+        title: Optional[str] = None,
     ) -> None:
         super().__init__(spacing=0)
         self._slot_size = slot_size
@@ -45,23 +48,40 @@ class InventoryGrid(ft.Column):
         self._texture_service = texture_service
         self._texture_generation = 0
         self._slot_item_ids: Dict[int, str] = {}
+        self._slot_items: Dict[int, Dict[str, Any]] = {}
         self._t = t_cb or (lambda key, default="", **_kw: default or key)
         self._layout = layout
+        self._on_slot_click = on_slot_click
         self._selected_slot: Optional[int] = None
+        self._custom_title = title
         self._title_main: Optional[ft.Text] = None
         self._title_hotbar: Optional[ft.Text] = None
         self._title_ender: Optional[ft.Text] = None
 
         if layout == "ender":
             self._build_ender_layout()
+        elif layout == "shulker":
+            self._build_shulker_layout()
         else:
             self._build_main_layout()
 
+    def set_on_slot_click(self, callback: Optional[SlotClickCallback]) -> None:
+        self._on_slot_click = callback
+
     def _make_slot(self, nbt_slot: int) -> ft.Container:
         slot = create_item_slot(self._slot_size)
-        self._slots[nbt_slot] = slot.container
+        container = slot.container
+        container.data = nbt_slot
+        container.on_click = lambda e, s=nbt_slot: self._handle_slot_click(s)
+        self._slots[nbt_slot] = container
         self._slot_controls[nbt_slot] = slot
-        return slot.container
+        return container
+
+    def _handle_slot_click(self, nbt_slot: int) -> None:
+        if self._on_slot_click is None:
+            return
+        item = self._slot_items.get(nbt_slot)
+        self._on_slot_click(nbt_slot, item)
 
     def _build_main_layout(self) -> None:
         main_rows: List[ft.Control] = []
@@ -87,7 +107,8 @@ class InventoryGrid(ft.Column):
         )
 
         self._title_main = ft.Text(
-            self._t("player.inventory.main", "主物品栏"),
+            self._custom_title
+            or self._t("player.inventory.main", "主物品栏"),
             size=12,
             color=THEME.text_muted,
         )
@@ -105,24 +126,38 @@ class InventoryGrid(ft.Column):
         ]
 
     def _build_ender_layout(self) -> None:
+        self.controls = self._build_grid_rows(
+            slots=range(0, 27),
+            title=self._custom_title
+            or self._t("player.inventory.ender", "末影箱"),
+        )
+
+    def _build_shulker_layout(self) -> None:
+        self.controls = self._build_grid_rows(
+            slots=range(0, 27),
+            title=self._custom_title
+            or self._t("player.inventory.shulker", "潜影盒内容"),
+        )
+
+    def _build_grid_rows(
+        self,
+        slots: range,
+        title: str,
+    ) -> List[ft.Control]:
+        slot_list = list(slots)
         rows: List[ft.Control] = []
-        for row in range(3):
-            slots_row: List[ft.Control] = [
-                self._make_slot(row * 9 + col) for col in range(9)
-            ]
+        for row_start in range(0, len(slot_list), 9):
+            row_slots = slot_list[row_start:row_start + 9]
             rows.append(
                 ft.Row(
-                    slots_row,
+                    [self._make_slot(si) for si in row_slots],
                     spacing=2,
                     alignment=ft.MainAxisAlignment.START,
                 )
             )
-        self._title_ender = ft.Text(
-            self._t("player.inventory.ender", "末影箱"),
-            size=12,
-            color=THEME.text_muted,
-        )
-        self.controls = [self._title_ender, *rows]
+        title_ctrl = ft.Text(title, size=12, color=THEME.text_muted)
+        self._title_ender = title_ctrl
+        return [title_ctrl, *rows]
 
     def set_inventory(
         self,
@@ -132,9 +167,14 @@ class InventoryGrid(ft.Column):
     ) -> None:
         self._texture_generation += 1
         self._selected_slot = selected_slot
+        self._slot_items = {}
         for nbt_slot in self._slots:
             reset_item_slot(self._slot_controls[nbt_slot])
             self._apply_slot_highlight(nbt_slot, selected=False)
+            container = self._slots[nbt_slot]
+            container.on_click = (
+                lambda e, s=nbt_slot: self._handle_slot_click(s)
+            )
 
         item_ids_to_load: Dict[int, str] = {}
         allowed = set(self._slots.keys())
@@ -148,12 +188,15 @@ class InventoryGrid(ft.Column):
                 if slot_ctrl is None:
                     continue
 
+                self._slot_items[si] = item
                 item_info = self._item_service.parse_item(item)
-                apply_item_to_slot(
-                    slot_ctrl,
-                    item_info,
-                    self._item_service.format_item_tooltip(item_info),
-                )
+                tooltip = self._item_service.format_item_tooltip(item_info)
+                if self._on_slot_click is not None:
+                    tooltip = (
+                        f"{tooltip}\n"
+                        f"{self._t('player.inventory.click_hint', '点击查看详情')}"
+                    )
+                apply_item_to_slot(slot_ctrl, item_info, tooltip)
                 if item_info.id:
                     item_ids_to_load[si] = item_info.id
         except (TypeError, ValueError, AttributeError, KeyError):

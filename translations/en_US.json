@@ -523,7 +523,8 @@
     "metric_distance": "{meters:.1f} m"
   },
   "common": {
-    "tip": "Notice"
+    "tip": "Notice",
+    "close": "Close"
   },
   "player": {
     "filter": "Search players",
@@ -551,7 +552,9 @@
     "inventory": {
       "main": "Main inventory",
       "hotbar": "Hotbar",
-      "ender": "Ender chest"
+      "ender": "Ender chest",
+      "shulker": "Shulker contents",
+      "click_hint": "Click for details"
     },
     "equip": {
       "title": "Equipment",
@@ -642,7 +645,20 @@
       "teleport": "Failed to stage teleport",
       "export": "Failed to export player summary",
       "import_usercache": "Failed to import usercache",
-      "import_language": "Failed to import language file"
+      "import_language": "Failed to import language file",
+      "shulker": "Failed to open container"
+    },
+    "list_empty": "No matching players",
+    "attributes": {
+      "title": "Attributes",
+      "empty": "No attributes"
+    },
+    "effects": {
+      "title": "Status effects",
+      "empty": "No active effects"
+    },
+    "shulker": {
+      "title": "Container contents"
     }
   }
 }

@@ -112,6 +112,27 @@ class PlayerAbilities:
 
 
 @dataclass(frozen=True)
+class PlayerAttribute:
+    """One entry from the player Attributes list."""
+
+    name: str
+    base: Optional[float]
+    modifiers: int = 0
+
+
+@dataclass(frozen=True)
+class PlayerEffect:
+    """One potion / status effect on the player."""
+
+    id: str
+    amplifier: int
+    duration: int
+    ambient: bool = False
+    show_particles: bool = True
+    show_icon: bool = True
+
+
+@dataclass(frozen=True)
 class PlayerContainers:
     inventory: tuple[PlayerItemStack, ...]
     equipment: tuple[PlayerItemStack, ...]
@@ -365,6 +386,142 @@ class PlayerManager:
             ender_items=ender,
         )
 
+    def extract_attributes(
+        self,
+        player_data: Optional[Compound],
+    ) -> tuple[PlayerAttribute, ...]:
+        if player_data is None:
+            return ()
+        raw = player_data.get("Attributes")
+        if raw is None:
+            return ()
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            return ()
+        results: List[PlayerAttribute] = []
+        for entry in raw:
+            if not hasattr(entry, "get"):
+                continue
+            name = _as_str(entry.get("Name", entry.get("name")))
+            if not name:
+                continue
+            base = _as_float(entry.get("Base", entry.get("base")))
+            modifiers = entry.get("Modifiers", entry.get("modifiers"))
+            mod_count = 0
+            if modifiers is not None and hasattr(modifiers, "__len__"):
+                try:
+                    mod_count = len(modifiers)
+                except TypeError:
+                    mod_count = 0
+            results.append(
+                PlayerAttribute(name=name, base=base, modifiers=mod_count)
+            )
+        return tuple(results)
+
+    def extract_effects(
+        self,
+        player_data: Optional[Compound],
+    ) -> tuple[PlayerEffect, ...]:
+        if player_data is None:
+            return ()
+        raw = player_data.get("active_effects")
+        if raw is None:
+            raw = player_data.get("ActiveEffects")
+        if raw is None:
+            return ()
+        if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+            return ()
+        results: List[PlayerEffect] = []
+        for entry in raw:
+            if not hasattr(entry, "get"):
+                continue
+            effect_id = _as_str(
+                entry.get("id", entry.get("Id", entry.get("effect")))
+            )
+            if not effect_id:
+                # Pre-1.20 numeric potion id
+                numeric = _as_int(entry.get("Id", entry.get("id")))
+                if numeric is None:
+                    continue
+                effect_id = f"effect:{numeric}"
+            amplifier = _as_int(entry.get("amplifier", entry.get("Amplifier", 0)))
+            duration = _as_int(entry.get("duration", entry.get("Duration", 0)))
+            ambient = _as_bool(entry.get("ambient", entry.get("Ambient")))
+            show_particles = _as_bool(
+                entry.get("show_particles", entry.get("ShowParticles"))
+            )
+            show_icon = _as_bool(entry.get("show_icon", entry.get("ShowIcon")))
+            results.append(
+                PlayerEffect(
+                    id=effect_id,
+                    amplifier=amplifier if amplifier is not None else 0,
+                    duration=duration if duration is not None else 0,
+                    ambient=bool(ambient) if ambient is not None else False,
+                    show_particles=(
+                        bool(show_particles)
+                        if show_particles is not None
+                        else True
+                    ),
+                    show_icon=bool(show_icon) if show_icon is not None else True,
+                )
+            )
+        return tuple(results)
+
+    @staticmethod
+    def extract_nested_container_items(
+        item: Mapping[str, Any] | PlayerItemStack,
+    ) -> List[Dict[str, Any]]:
+        """Extract items stored inside a shulker / bundle-like stack.
+
+        Supports:
+        - legacy ``tag.BlockEntityTag.Items``
+        - 1.20.5+ ``components['minecraft:container']`` list of
+          ``{slot, item: {id, count, ...}}``
+        """
+        if isinstance(item, PlayerItemStack):
+            tag = item.tag
+            components = item.components
+            item_id = item.id
+        else:
+            tag = item.get("tag")
+            components = item.get("components")
+            item_id = str(item.get("id", "") or "")
+
+        # Modern components container
+        if components is not None:
+            modern = _extract_component_container(components)
+            if modern:
+                return modern
+
+        # Legacy BlockEntityTag
+        if tag is not None and hasattr(tag, "get"):
+            block_entity = tag.get("BlockEntityTag")
+            if block_entity is not None and hasattr(block_entity, "get"):
+                nested = _parse_item_list(block_entity.get("Items"))
+                if nested:
+                    return [entry.to_dict() for entry in nested]
+
+        # Bundles etc. may use tag.Items directly
+        if tag is not None and hasattr(tag, "get"):
+            nested = _parse_item_list(tag.get("Items"))
+            if nested:
+                return [entry.to_dict() for entry in nested]
+
+        # No nested payload — empty shulker still counts as openable.
+        if "shulker_box" in item_id:
+            return []
+        return []
+
+    @staticmethod
+    def is_container_item(item_id: str) -> bool:
+        """Return True if the item id is a known openable container."""
+        text = (item_id or "").lower()
+        return (
+            "shulker_box" in text
+            or text.endswith(":bundle")
+            or text.endswith(":bundle_of")
+            or "bundle" in text
+        )
+
     def get_player_inventory(
         self,
         player_data: Optional[Compound],
@@ -482,6 +639,66 @@ def _parse_item_list(raw: Any) -> List[PlayerItemStack]:
         except (TypeError, ValueError, AttributeError, KeyError):
             continue
     return items
+
+
+def _mapping_get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    try:
+        if hasattr(obj, "get"):
+            return obj.get(key, default)
+        if isinstance(obj, Mapping):
+            return obj.get(key, default)
+    except (TypeError, KeyError):
+        return default
+    return default
+
+
+def _extract_component_container(components: Any) -> List[Dict[str, Any]]:
+    """Parse ``minecraft:container`` component into item dicts."""
+    raw = _mapping_get(components, "minecraft:container")
+    if raw is None:
+        raw = _mapping_get(components, "container")
+    if raw is None:
+        return []
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for entry in raw:
+        parsed = _parse_container_entry(entry)
+        if parsed is not None:
+            results.append(parsed)
+    return results
+
+
+def _parse_container_entry(entry: Any) -> Optional[Dict[str, Any]]:
+    if not hasattr(entry, "get"):
+        return None
+    slot_index = _as_int(entry.get("slot", -1))
+    if slot_index is None:
+        slot_index = -1
+    nested_item = entry.get("item")
+    if nested_item is None or not hasattr(nested_item, "get"):
+        nested_item = entry
+    item_id = _as_str(nested_item.get("id"))
+    if not item_id:
+        return None
+    count = _as_int(nested_item.get("count", nested_item.get("Count", 1)))
+    if count is None:
+        count = 1
+    payload: Dict[str, Any] = {
+        "slot": slot_index,
+        "id": item_id,
+        "count": count,
+    }
+    tag = nested_item.get("tag")
+    comps = nested_item.get("components")
+    if tag is not None:
+        payload["tag"] = tag
+    if comps is not None:
+        payload["components"] = comps
+    return payload
 
 
 def _as_int(value: Any) -> Optional[int]:

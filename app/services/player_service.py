@@ -17,7 +17,11 @@ from app.services.player.models import (
     get_edit_spec,
 )
 from app.services.nbt_value_utils import coerce_like_tag, tag_display_value
-from core.omni.player_manager import PlayerManager
+from core.omni.player_manager import (
+    PlayerAttribute,
+    PlayerEffect,
+    PlayerManager,
+)
 from core.omni.world_session import WorldSession
 from core.uuid_utils import format_uuid_with_hyphens, normalize_uuid
 
@@ -99,6 +103,35 @@ class PlayerService:
             containers,
             selected_slot=state.selected_slot,
         )
+
+    def load_attributes(
+        self,
+        session: WorldSession,
+        uuid: str,
+    ) -> tuple[PlayerAttribute, ...]:
+        data = session.get_player_data(uuid)
+        return PlayerManager(log_callback=self._log).extract_attributes(data)
+
+    def load_effects(
+        self,
+        session: WorldSession,
+        uuid: str,
+    ) -> tuple[PlayerEffect, ...]:
+        data = session.get_player_data(uuid)
+        return PlayerManager(log_callback=self._log).extract_effects(data)
+
+    def open_nested_container(
+        self,
+        item: Dict[str, Any],
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return nested items if ``item`` is a shulker/bundle; else None."""
+        item_id = str(item.get("id", "") or "")
+        nested = PlayerManager.extract_nested_container_items(item)
+        if nested:
+            return nested
+        if PlayerManager.is_container_item(item_id):
+            return []
+        return None
 
     def build_edit_changes(
         self,
