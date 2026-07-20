@@ -106,10 +106,11 @@ class MapFullscreenController:
             overlay.opacity = 0.0
             body.scale = 0.96
             body.opacity = 0.0
-            overlay.update()
-            body.update()
         except Exception:
+            # UI best-effort: overlay may already be disposed.
             pass
+        safe_update(overlay)
+        safe_update(body)
         self._cancel_timer(self._exit_timer)
         self._exit_timer = threading.Timer(0.18, self._restore_on_ui)
         self._exit_timer.daemon = True
@@ -285,8 +286,10 @@ class MapFullscreenController:
             try:
                 if overlay in self._page.overlay:
                     self._page.overlay.remove(overlay)
-                self._page.update()
+                if self._page is not None:
+                    self._page.update()
             except Exception:
+                # UI best-effort: page/overlay may already be closing.
                 pass
         self._overlay = None
         self._body = None

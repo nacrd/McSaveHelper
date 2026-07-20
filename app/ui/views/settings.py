@@ -382,10 +382,11 @@ class SettingsView(ft.Column):
         try:
             self._cache_summary.value = self._cache_summary_text()
             self._cache_path_label.value = self._cache_path_text()
-            self._cache_summary.update()
-            self._cache_path_label.update()
         except Exception:
+            # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._cache_summary)
+        safe_update(self._cache_path_label)
 
     def _clear_map_cache(self) -> None:
         try:
