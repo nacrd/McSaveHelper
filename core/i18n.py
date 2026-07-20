@@ -161,15 +161,17 @@ class TranslationManager:
         lang_code = file_path.stem
         display_name = lang_code
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                if "__meta__" in data and isinstance(data["__meta__"], dict):
-                    meta = data["__meta__"]
+            with open(file_path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            if isinstance(data, dict):
+                meta = data.get("__meta__")
+                if isinstance(meta, dict):
                     if "language" in meta:
-                        lang_code = meta["language"]
+                        lang_code = str(meta["language"])
                     if "display_name" in meta:
-                        display_name = meta["display_name"]
-        except Exception:
+                        display_name = str(meta["display_name"])
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            # 元数据损坏时退回文件名 stem，不阻断语言扫描。
             pass
         return lang_code, display_name
 
@@ -257,11 +259,11 @@ class TranslationManager:
         }
 
         try:
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(template, f, ensure_ascii=False, indent=2)
+            with open(file_path, "w", encoding="utf-8") as handle:
+                json.dump(template, handle, ensure_ascii=False, indent=2)
             print(f"已创建翻译模板文件: {file_path}")
-        except Exception as e:
-            print(f"创建翻译模板文件时出错: {e}")
+        except OSError as exc:
+            print(f"创建翻译模板文件时出错: {exc}")
 
     def set_language(self, language: Language) -> None:
         """设置当前语言
@@ -280,8 +282,8 @@ class TranslationManager:
             return
         try:
             self._language_saver(self._current_language.value)
-        except Exception as e:
-            print(f"保存语言配置时出错: {e}")
+        except (OSError, TypeError, ValueError, RuntimeError) as exc:
+            print(f"保存语言配置时出错: {exc}")
 
     def get(
             self,
