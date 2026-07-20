@@ -57,9 +57,10 @@ _GAME_TYPE_LABELS = {
     3: ("player.game_type.spectator", "旁观"),
 }
 
-_DEFAULT_COL_WIDTHS = (220.0, 360.0, 480.0)
-_MIN_COL_WIDTHS = (160.0, 260.0, 280.0)
+_DEFAULT_COL_WIDTHS = (280.0, 340.0, 520.0)
+_MIN_COL_WIDTHS = (220.0, 260.0, 320.0)
 _SPLITTER_CHROME = 28.0  # two handles + padding budget
+_LIST_AVATAR_SIZE = 36
 
 
 def resize_adjacent_columns(
@@ -297,21 +298,21 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         self._switch_center_section(0)
 
-        # ── Right: equipment + inventory ──────────────────────
+        # ── Right: equipment + inventory + nested container ───
         right = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self._equipment = EquipmentPreview(
             self.app.item,
             self.app.texture,
-            slot_size=40,
+            slot_size=52,
             t_cb=self._t,
         )
-        right.controls.append(card(self._equipment, padding=10))
+        right.controls.append(card(self._equipment, padding=12))
 
         self._inventory = InventoryGrid(
             self.app.item,
             self.app.texture,
             layout="main",
-            slot_size=42,
+            slot_size=52,
             t_cb=self._t,
             on_slot_click=self._on_inventory_slot_click,
         )
@@ -319,7 +320,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             self.app.item,
             self.app.texture,
             layout="ender",
-            slot_size=42,
+            slot_size=52,
             t_cb=self._t,
             on_slot_click=self._on_inventory_slot_click,
         )
@@ -351,6 +352,49 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         right.controls.append(self._inventory_panel)
         right.controls.append(self._ender_panel)
+
+        # Nested container (shulker etc.) preview uses the empty right-column space.
+        self._container_preview_title = ft.Text(
+            t("player.container.preview_title", "容器内容"),
+            size=13,
+            weight=ft.FontWeight.BOLD,
+            color=THEME.text_primary,
+            expand=True,
+        )
+        self._container_preview_close = btn_ghost(
+            t("common.close", "关闭"),
+            height=28,
+            on_click=self._close_container_preview,
+        )
+        self._container_preview_grid = InventoryGrid(
+            self.app.item,
+            self.app.texture,
+            layout="shulker",
+            slot_size=48,
+            t_cb=self._t,
+            title="",
+        )
+        self._container_preview_panel = ft.Container(
+            content=card(
+                ft.Column(
+                    [
+                        ft.Row(
+                            [
+                                self._container_preview_title,
+                                self._container_preview_close,
+                            ],
+                            spacing=8,
+                            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        ),
+                        self._container_preview_grid,
+                    ],
+                    spacing=8,
+                ),
+                padding=12,
+            ),
+            visible=False,
+        )
+        right.controls.append(self._container_preview_panel)
 
         # Flexible, user-resizable column widths.
         self._player_col_widths = list(_DEFAULT_COL_WIDTHS)
@@ -483,6 +527,13 @@ class PlayerTabMixin(ExplorerMixinHost):
             panel.width = float(width)
             panel.expand = False
             safe_update(panel)
+        # Rebuild list tiles only when name/UUID size class changes.
+        wide_now = float(widths[0]) >= 250.0
+        prev = getattr(self, "_player_list_wide", None)
+        if prev is None or prev != wide_now:
+            self._player_list_wide = wide_now
+            if getattr(self, "_player_refs_cache", None):
+                self._apply_player_list()
 
     def _chip_button(
         self,
@@ -650,6 +701,10 @@ class PlayerTabMixin(ExplorerMixinHost):
 
         tiles: List[ft.Control] = []
         self._player_list_tiles = {}
+        self._player_list_avatars: Dict[str, ft.CircleAvatar] = {}
+        self._player_list_avatar_gen = (
+            getattr(self, "_player_list_avatar_gen", 0) + 1
+        )
         for ref in getattr(self, "_player_refs_cache", []):
             haystack = (
                 f"{ref.display_name} {ref.uuid_norm} {ref.uuid_hyphen}".lower()
@@ -659,12 +714,13 @@ class PlayerTabMixin(ExplorerMixinHost):
             tile = self._build_player_list_tile(ref)
             self._player_list_tiles[ref.uuid_norm] = tile
             tiles.append(tile)
+            self._load_list_avatar(ref)
 
         if not tiles:
             tiles.append(
                 ft.Text(
                     self._t("player.list_empty", "没有匹配的玩家"),
-                    size=12,
+                    size=13,
                     color=THEME.text_muted,
                 )
             )
@@ -677,33 +733,57 @@ class PlayerTabMixin(ExplorerMixinHost):
             selected = (
                 PlayerManager.normalize_uuid(self.current_uuid) == ref.uuid_norm
             )
-        subtitle = (
-            ref.uuid_hyphen[:10] + "…" if ref.uuid_hyphen else ref.uuid_norm[:10]
+        initial = (ref.name or ref.display_name or "?")[:1].upper()
+        avatar = ft.CircleAvatar(
+            content=ft.Text(initial, size=14, color=THEME.text_primary),
+            radius=_LIST_AVATAR_SIZE // 2,
+            bgcolor=THEME.bg_secondary,
         )
+        if not hasattr(self, "_player_list_avatars"):
+            self._player_list_avatars = {}
+        self._player_list_avatars[ref.uuid_norm] = avatar
+
+        # Prefer full hyphen UUID; text truncates via overflow when narrow.
+        uuid_text = ref.uuid_hyphen or ref.uuid_norm
+        list_width = float(
+            (getattr(self, "_player_col_widths", None) or [280.0])[0]
+        )
+        name_size = 15 if list_width >= 250 else 13
+        uuid_size = 11 if list_width >= 250 else 10
+
         return ft.Container(
-            content=ft.Column(
+            content=ft.Row(
                 [
-                    ft.Text(
-                        ref.display_name,
-                        size=12,
-                        weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                    ),
-                    ft.Text(
-                        subtitle,
-                        size=9,
-                        color=THEME.text_muted,
-                        max_lines=1,
-                        overflow=ft.TextOverflow.ELLIPSIS,
-                        font_family="monospace",
+                    avatar,
+                    ft.Column(
+                        [
+                            ft.Text(
+                                ref.display_name,
+                                size=name_size,
+                                weight=ft.FontWeight.BOLD,
+                                color=THEME.text_primary,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                uuid_text,
+                                size=uuid_size,
+                                color=THEME.text_muted,
+                                max_lines=1,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                                font_family="monospace",
+                                selectable=True,
+                            ),
+                        ],
+                        spacing=2,
+                        expand=True,
                     ),
                 ],
-                spacing=1,
+                spacing=10,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.Padding(8, 6, 8, 6),
-            border_radius=6,
+            padding=ft.Padding(10, 10, 10, 10),
+            border_radius=8,
             bgcolor=THEME.mc_stone if selected else THEME.bg_secondary,
             border=ft.Border.all(
                 1, THEME.accent if selected else THEME.border_light
@@ -713,6 +793,56 @@ class PlayerTabMixin(ExplorerMixinHost):
             ),
             ink=True,
         )
+
+    def _load_list_avatar(self, ref: Any) -> None:
+        """Async-load face avatar into the player list tile."""
+        avatars = getattr(self, "_player_list_avatars", None)
+        if not avatars:
+            return
+        avatar = avatars.get(ref.uuid_norm)
+        if avatar is None:
+            return
+        service = self._player_avatar_service()
+        generation = getattr(self, "_player_list_avatar_gen", 0)
+
+        cached = service.get_cached_path(ref.uuid_norm)
+        if cached is not None:
+            self._set_list_avatar_image(avatar, str(cached))
+            return
+
+        def on_loaded(path: Optional[str]) -> None:
+            def apply() -> None:
+                if generation != getattr(self, "_player_list_avatar_gen", 0):
+                    return
+                current = getattr(self, "_player_list_avatars", {}).get(
+                    ref.uuid_norm
+                )
+                if current is None or path is None:
+                    return
+                self._set_list_avatar_image(current, path)
+
+            try:
+                page = getattr(self.app, "page", None)
+            except Exception:
+                page = None
+            run_on_ui(page, apply)
+
+        service.load_avatar_async(ref.uuid_norm, on_loaded)
+
+    def _set_list_avatar_image(
+        self,
+        avatar: ft.CircleAvatar,
+        path: str,
+    ) -> None:
+        size = _LIST_AVATAR_SIZE
+        avatar.content = ft.Image(
+            src=path,
+            width=size,
+            height=size,
+            fit=ft.BoxFit.COVER,
+            border_radius=size // 2,
+        )
+        safe_update(avatar)
 
     def _on_player_tile_click(self, uuid: str) -> None:
         try:
@@ -913,7 +1043,7 @@ class PlayerTabMixin(ExplorerMixinHost):
 
         service.load_avatar_async(uuid_norm, on_loaded)
 
-    # ── Shulker / nested container ────────────────────────────
+    # ── Nested container preview (right column empty space) ──
 
     def _on_inventory_slot_click(
         self,
@@ -927,63 +1057,46 @@ class PlayerTabMixin(ExplorerMixinHost):
             nested = self._player_service().open_nested_container(item)
             if nested is None:
                 return
-            self._show_shulker_dialog(item_id, nested)
+            self._show_container_preview(item_id, nested)
         except Exception as ex:
             self.app.handle_exception(
                 ex,
                 title=self._t("player.error.shulker", "打开潜影盒失败"),
             )
 
+    def _show_container_preview(
+        self,
+        item_id: str,
+        nested_items: List[Dict[str, Any]],
+    ) -> None:
+        """Show nested container contents in the right-column free space."""
+        t = self._t
+        title = item_id or t("player.inventory.shulker", "潜影盒内容")
+        if hasattr(self, "_container_preview_title"):
+            self._container_preview_title.value = (
+                f"{t('player.container.preview_title', '容器内容')}: {title}"
+            )
+            safe_update(self._container_preview_title)
+        if hasattr(self, "_container_preview_grid"):
+            self._container_preview_grid.set_inventory(nested_items)
+        if hasattr(self, "_container_preview_panel"):
+            self._container_preview_panel.visible = True
+            safe_update(self._container_preview_panel)
+
+    def _close_container_preview(self, e: Any = None) -> None:
+        if hasattr(self, "_container_preview_panel"):
+            self._container_preview_panel.visible = False
+            safe_update(self._container_preview_panel)
+        if hasattr(self, "_container_preview_grid"):
+            self._container_preview_grid.clear()
+
+    # keep old name as alias for any external references
     def _show_shulker_dialog(
         self,
         item_id: str,
         nested_items: List[Dict[str, Any]],
     ) -> None:
-        t = self._t
-        page = getattr(self.app, "page", None)
-        if page is None:
-            return
-
-        grid = InventoryGrid(
-            self.app.item,
-            self.app.texture,
-            layout="shulker",
-            slot_size=40,
-            t_cb=self._t,
-            title=item_id or t("player.inventory.shulker", "潜影盒内容"),
-        )
-        grid.set_inventory(nested_items)
-
-        def close_dialog(_e: Any = None) -> None:
-            dialog.open = False
-            if self._shulker_dialog is dialog:
-                self._shulker_dialog = None
-            page.update()
-
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(
-                t("player.shulker.title", "容器内容"),
-                color=THEME.text_primary,
-            ),
-            content=ft.Container(
-                content=grid,
-                width=420,
-                height=280,
-            ),
-            actions=[
-                ft.TextButton(
-                    t("common.close", "关闭"),
-                    on_click=close_dialog,
-                ),
-            ],
-            actions_alignment=ft.MainAxisAlignment.END,
-            bgcolor=THEME.bg_card,
-        )
-        self._shulker_dialog = dialog
-        page.overlay.append(dialog)
-        dialog.open = True
-        page.update()
+        self._show_container_preview(item_id, nested_items)
 
     # ── Edit form / stage / export ────────────────────────────
 

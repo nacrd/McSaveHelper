@@ -42,7 +42,7 @@ class EquipmentPreview(ft.Column):
     ) -> None:
         super().__init__(spacing=4)
         self._slot_size = slot_size
-        self._slot_rows: Dict[int, ft.Row] = {}
+        self._slot_rows: Dict[int, ft.Column] = {}
         self._slot_containers: Dict[int, ft.Container] = {}
         self._slot_controls: Dict[int, ItemSlotControl] = {}
         self._item_service = item_service
@@ -70,19 +70,30 @@ class EquipmentPreview(ft.Column):
             )
         )
 
+        # Horizontal strip uses the wide right column better than a tall stack.
+        equip_cells: List[ft.Control] = []
         for nbt_slot in self._slot_order:
             icon, label = self._equip_slots[nbt_slot]
-            row = self._create_slot(nbt_slot, icon, label)
-            self._slot_rows[nbt_slot] = row
-            self.controls.append(row)
+            cell = self._create_slot(nbt_slot, icon, label)
+            self._slot_rows[nbt_slot] = cell
+            equip_cells.append(cell)
+        self.controls.append(
+            ft.Row(
+                equip_cells,
+                spacing=10,
+                alignment=ft.MainAxisAlignment.START,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                scroll=ft.ScrollMode.AUTO,
+            )
+        )
 
     def _create_slot(
         self,
         nbt_slot: int,
         slot_icon_emoji: str,
         label: str,
-    ) -> ft.Row:
-        slot = create_item_slot(self._slot_size, count_size=8)
+    ) -> ft.Column:
+        slot = create_item_slot(self._slot_size, count_size=10)
         slot_container = slot.container
 
         slot_icon = ft.Text(slot_icon_emoji, size=14, color=THEME.text_muted)
@@ -90,17 +101,23 @@ class EquipmentPreview(ft.Column):
             label,
             size=11,
             color=THEME.text_secondary,
-            width=45,
             text_align=ft.TextAlign.CENTER,
+            max_lines=1,
+            overflow=ft.TextOverflow.ELLIPSIS,
         )
 
         self._slot_containers[nbt_slot] = slot_container
         self._slot_controls[nbt_slot] = slot
 
-        return ft.Row(
-            [slot_icon, label_text, slot_container, ft.Container(width=10)],
-            spacing=6,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        return ft.Column(
+            [
+                slot_icon,
+                slot_container,
+                label_text,
+            ],
+            spacing=2,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            width=max(self._slot_size + 8, 56),
         )
 
     def set_equipment(self, inventory: List[Dict[str, Any]]) -> None:
@@ -176,13 +193,25 @@ class EquipmentPreview(ft.Column):
         self._equip_slots[slot_id] = (icon, label)
         self._slot_order = sorted(self._equip_slots.keys(), reverse=True)
 
-        row = self._create_slot(slot_id, icon, label)
-        self._slot_rows[slot_id] = row
+        cell = self._create_slot(slot_id, icon, label)
+        self._slot_rows[slot_id] = cell
 
-        self.controls = [self.controls[0]]
-        for nbt_slot in self._slot_order:
-            self.controls.append(self._slot_rows[nbt_slot])
-
+        title = self.controls[0] if self.controls else ft.Text(
+            self._t("player.equip.title", "装备栏"),
+            size=12,
+            color=THEME.text_muted,
+        )
+        equip_cells = [self._slot_rows[slot] for slot in self._slot_order]
+        self.controls = [
+            title,
+            ft.Row(
+                equip_cells,
+                spacing=10,
+                alignment=ft.MainAxisAlignment.START,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+                scroll=ft.ScrollMode.AUTO,
+            ),
+        ]
         safe_update(self)
 
     def clear(self) -> None:

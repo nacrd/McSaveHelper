@@ -678,6 +678,9 @@
       "abilities": "Abilities",
       "advanced": "Attrs/Effects"
     },
-    "resize_columns": "Drag to resize columns"
+    "resize_columns": "Drag to resize columns",
+    "container": {
+      "preview_title": "Container contents"
+    }
   }
 }
