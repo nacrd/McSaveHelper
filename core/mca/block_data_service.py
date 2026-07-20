@@ -145,6 +145,28 @@ class BlockDataService:
         local_y = world_y & 15
         local_z = world_z & 15
         section_y = world_y // 16
+        resolved = self._resolve_block_states(chunk_data, section_y, block_name)
+        if isinstance(resolved, SetBlockResult):
+            return resolved
+        block_states, palette, data = resolved
+        return self._write_palette_index(
+            block_states=block_states,
+            palette=palette,
+            data=data,
+            local_x=local_x,
+            local_y=local_y,
+            local_z=local_z,
+            block_name=block_name,
+            properties=properties or {},
+        )
+
+    def _resolve_block_states(
+        self,
+        chunk_data: Any,
+        section_y: int,
+        block_name: str,
+    ) -> SetBlockResult | tuple[Any, Any, Any]:
+        """Locate section palette/data or return a failed result."""
         sections = self._get(chunk_data, "sections")
         if sections is None:
             return SetBlockResult(
@@ -176,7 +198,21 @@ class BlockDataService:
             return SetBlockResult(
                 False, "", block_name, -1, False, "palette 为空"
             )
+        return block_states, palette, data
 
+    def _write_palette_index(
+        self,
+        *,
+        block_states: Any,
+        palette: Any,
+        data: Any,
+        local_x: int,
+        local_y: int,
+        local_z: int,
+        block_name: str,
+        properties: Dict[str, str],
+    ) -> SetBlockResult:
+        """Encode a palette index into the section block_states payload."""
         old_palette_size = len(palette)
         old_index = self._decode_palette_index(
             data, old_palette_size, local_x, local_y, local_z
@@ -194,7 +230,7 @@ class BlockDataService:
         old_state = palette[old_index]
         old_name = self._value(self._get(old_state, "Name", "unknown"))
         new_palette_index = self._find_or_add_palette_entry(
-            palette, block_name, properties or {}
+            palette, block_name, properties
         )
         if new_palette_index == old_index:
             return SetBlockResult(

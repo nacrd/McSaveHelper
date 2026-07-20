@@ -127,6 +127,63 @@ def build_nbt_tab_chrome(
 
 
 def _build_left_panel(callbacks: NbtTabCallbacks) -> _LeftPanel:
+    target_dropdown, data_source = _build_nbt_data_source_section(callbacks)
+    (
+        region_file_field,
+        chunk_x_field,
+        chunk_z_field,
+        world_x_field,
+        world_z_field,
+        chunk_section,
+    ) = _build_nbt_chunk_section(callbacks)
+    (
+        block_y_field,
+        block_query_result,
+        block_replace_name_field,
+        block_section,
+    ) = _build_nbt_block_section(callbacks)
+    chunk_objects_list, chunk_objects = _build_nbt_chunk_objects_section(
+        callbacks
+    )
+    content = ft.Column(
+        [
+            data_source,
+            ft.Divider(height=1, color=THEME.border_light),
+            chunk_section,
+            ft.Divider(height=1, color=THEME.border_light),
+            block_section,
+            ft.Divider(height=1, color=THEME.border_light),
+            chunk_objects,
+        ],
+        spacing=12,
+        scroll=ft.ScrollMode.AUTO,
+    )
+    panel = ft.Container(
+        content=content,
+        width=280,
+        bgcolor=THEME.bg_card,
+        border=ft.Border.all(1, THEME.border_light),
+        border_radius=8,
+        padding=12,
+    )
+    return _LeftPanel(
+        panel=panel,
+        target_dropdown=target_dropdown,
+        region_file_field=region_file_field,
+        chunk_x_field=chunk_x_field,
+        chunk_z_field=chunk_z_field,
+        world_x_field=world_x_field,
+        world_z_field=world_z_field,
+        block_y_field=block_y_field,
+        block_query_result=block_query_result,
+        block_replace_name_field=block_replace_name_field,
+        chunk_objects_list=chunk_objects_list,
+    )
+
+
+def _build_nbt_data_source_section(
+    callbacks: NbtTabCallbacks,
+) -> tuple[ft.Dropdown, ft.Column]:
     target_dropdown = ft.Dropdown(
         label="NBT 目标",
         options=[],
@@ -169,7 +226,19 @@ def _build_left_panel(callbacks: NbtTabCallbacks) -> _LeftPanel:
         ],
         spacing=8,
     )
+    return target_dropdown, data_source
 
+
+def _build_nbt_chunk_section(
+    callbacks: NbtTabCallbacks,
+) -> tuple[
+    ft.Control,
+    ft.Control,
+    ft.Control,
+    ft.Control,
+    ft.Control,
+    ft.Column,
+]:
     region_file_field = text_field(
         label="区域文件",
         hint_text="region/r.0.0.mca",
@@ -238,7 +307,19 @@ def _build_left_panel(callbacks: NbtTabCallbacks) -> _LeftPanel:
         ],
         spacing=6,
     )
+    return (
+        region_file_field,
+        chunk_x_field,
+        chunk_z_field,
+        world_x_field,
+        world_z_field,
+        chunk_section,
+    )
 
+
+def _build_nbt_block_section(
+    callbacks: NbtTabCallbacks,
+) -> tuple[ft.Control, ft.Text, ft.Control, ft.Column]:
     block_y_field = text_field(
         value="64",
         label="Y",
@@ -289,7 +370,17 @@ def _build_left_panel(callbacks: NbtTabCallbacks) -> _LeftPanel:
         ],
         spacing=6,
     )
+    return (
+        block_y_field,
+        block_query_result,
+        block_replace_name_field,
+        block_section,
+    )
 
+
+def _build_nbt_chunk_objects_section(
+    callbacks: NbtTabCallbacks,
+) -> tuple[ft.Column, ft.Column]:
     chunk_objects_list = ft.Column(spacing=4)
     chunk_objects = ft.Column(
         [
@@ -310,40 +401,7 @@ def _build_left_panel(callbacks: NbtTabCallbacks) -> _LeftPanel:
         ],
         spacing=6,
     )
-    content = ft.Column(
-        [
-            data_source,
-            ft.Divider(height=1, color=THEME.border_light),
-            chunk_section,
-            ft.Divider(height=1, color=THEME.border_light),
-            block_section,
-            ft.Divider(height=1, color=THEME.border_light),
-            chunk_objects,
-        ],
-        spacing=12,
-        scroll=ft.ScrollMode.AUTO,
-    )
-    panel = ft.Container(
-        content=content,
-        width=280,
-        bgcolor=THEME.bg_card,
-        border=ft.Border.all(1, THEME.border_light),
-        border_radius=8,
-        padding=12,
-    )
-    return _LeftPanel(
-        panel=panel,
-        target_dropdown=target_dropdown,
-        region_file_field=region_file_field,
-        chunk_x_field=chunk_x_field,
-        chunk_z_field=chunk_z_field,
-        world_x_field=world_x_field,
-        world_z_field=world_z_field,
-        block_y_field=block_y_field,
-        block_query_result=block_query_result,
-        block_replace_name_field=block_replace_name_field,
-        chunk_objects_list=chunk_objects_list,
-    )
+    return chunk_objects_list, chunk_objects
 
 
 def _build_center_panel(
