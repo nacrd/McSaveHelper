@@ -160,7 +160,11 @@ class MapExportRenderer:
                 raise ValueError("所有 MCA 文件均不可读或不包含可渲染区块")
             self._raise_if_cancelled(cancel_event)
         except Exception:
-            image.close()
+            try:
+                image.close()
+            except Exception:
+                # best-effort: never mask the original render error
+                pass
             raise
         return image
 
@@ -171,6 +175,19 @@ class MapExportRenderer:
         *,
         block_bounds: Optional[Tuple[int, int, int, int]] = None,
     ) -> MapImageSpec:
+        """计算导出图像尺寸与预估内存。
+
+        Args:
+            bounds: inclusive region 坐标范围。
+            scale: 正整数缩放比例（方块像素合并）。
+            block_bounds: 可选 inclusive 方块裁剪范围。
+
+        Returns:
+            MapImageSpec: 宽高与预估 MB。
+
+        Raises:
+            ValueError: 缩放/范围非法，或尺寸/内存超限。
+        """
         if not isinstance(scale, int) or isinstance(scale, bool) or scale <= 0:
             raise ValueError("缩放比例必须是正整数")
         if block_bounds is None:
@@ -195,8 +212,8 @@ class MapExportRenderer:
                 full_height // max_dimension + 1,
             )
             raise ValueError(
-                f"图像尺寸过大 ({width}x{height})，超出限制 ({max_dimension}px)。"
-                f"请将缩放比例调整为至少 1:{needed_scale}"
+                f"图像尺寸过大 ({width}x{height})，超出限制 "
+                f"({max_dimension}px)。请将缩放比例调整为至少 1:{needed_scale}"
             )
         estimated_mb = width * height * 3 / (1024 * 1024)
         if estimated_mb > 2048:

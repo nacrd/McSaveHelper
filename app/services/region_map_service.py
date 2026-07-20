@@ -695,9 +695,11 @@ class RegionMapService:
                 )
             if external_signature:
                 parts.append(f"mcc:{external_signature}")
-        except Exception:
+        except (OSError, ValueError, TypeError, RuntimeError):
             # The MCA signature still prevents stale suppression when the
             # region is replaced or removed while a retry is being checked.
+            pass
+        except Exception:
             pass
         return hashlib.sha1("|".join(parts).encode("ascii")).hexdigest()
 
@@ -710,6 +712,16 @@ class RegionMapService:
         cancel_event: threading.Event,
         source_mtime_ns: int = 0,
     ) -> None:
+        """Render one region topview tile and publish it if still current.
+
+        Args:
+            coord: Region coordinate.
+            path: Absolute MCA path.
+            tile_size: Target tile size in pixels.
+            generation: Generation token captured at enqueue time.
+            cancel_event: Cancellation event for this generation.
+            source_mtime_ns: Optional pre-read source mtime for failure keys.
+        """
         png: Optional[bytes] = None
         render_complete = True
         source_signature = ""
@@ -740,7 +752,10 @@ class RegionMapService:
             )
             if render_status:
                 render_complete = render_status[-1]
+        except (OSError, ValueError, TypeError, RuntimeError):
+            png = None
         except Exception:
+            # Topview worker boundary: keep the map session alive on render faults.
             png = None
         finally:
             callback = None
