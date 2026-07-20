@@ -36,12 +36,7 @@ class MapCameraAnimator:
 
     def cancel(self) -> None:
         self.active = False
-        try:
-            if self._timer is not None:
-                self._timer.cancel()
-        except Exception:
-            pass
-        self._timer = None
+        self._cancel_timer()
 
     def animate_to(
         self,
@@ -81,36 +76,46 @@ class MapCameraAnimator:
         return target
 
     def _kick(self) -> None:
+        self._cancel_timer()
+        self._schedule_tick(0.0)
+
+    def _cancel_timer(self) -> None:
         try:
             if self._timer is not None:
                 self._timer.cancel()
         except Exception:
             pass
+        self._timer = None
 
-        def _tick() -> None:
-            if not self.active or not self._is_alive():
-                return
-            elapsed = time.monotonic() - self._t0
-            progress = min(1.0, elapsed / self._duration)
-            ease = 1.0 - (1.0 - progress) ** 3
-            self._viewport.apply(self.start.interpolate(self.target, ease))
-            try:
-                self._on_frame()
-            except Exception:
-                pass
-            if progress < 1.0:
-                self._timer = threading.Timer(1.0 / 60.0, _tick)
-                self._timer.daemon = True
-                self._timer.start()
-                return
-            self.active = False
-            self._timer = None
-            self._viewport.apply(self.target)
-            try:
-                self._on_complete()
-            except Exception:
-                pass
-
-        self._timer = threading.Timer(0.0, _tick)
+    def _schedule_tick(self, delay: float) -> None:
+        self._timer = threading.Timer(delay, self._tick)
         self._timer.daemon = True
         self._timer.start()
+
+    def _tick(self) -> None:
+        if not self.active or not self._is_alive():
+            return
+        elapsed = time.monotonic() - self._t0
+        progress = min(1.0, elapsed / self._duration)
+        ease = 1.0 - (1.0 - progress) ** 3
+        self._viewport.apply(self.start.interpolate(self.target, ease))
+        self._notify_frame()
+        if progress < 1.0:
+            self._schedule_tick(1.0 / 60.0)
+            return
+        self._complete_animation()
+
+    def _notify_frame(self) -> None:
+        try:
+            self._on_frame()
+        except Exception:
+            pass
+
+    def _complete_animation(self) -> None:
+        self.active = False
+        self._timer = None
+        self._viewport.apply(self.target)
+        try:
+            self._on_complete()
+        except Exception:
+            pass

@@ -63,62 +63,95 @@ def run_full(
         raise RuntimeError("未生成任何 UUID 映射，完整迁移已中止")
     log(f"生成 {len(mappings)} 条映射", "INFO")
 
-    # 3. 处理核心 NBT 文件
-    log("处理核心 NBT 文件...", "NBT")
-    l_c = process_nbt_file(dest_world / "level.dat", mappings, log, required=True)
-    log(f"level.dat 修改 {l_c} 处", "INFO")
-
-    for data_dir in find_data_dirs(dest_world):
-        for df in data_dir.glob("*.dat"):
-            process_nbt_file(df, mappings, log, required=True)
-
-    # 4. 物理重命名（兼容 26.1 新旧路径）
-    log("重命名玩家文件...", "FILE")
-    # 收集所有需要重命名的目录（新+旧）
-    rename_folders: List[Path] = []
-    for find_fn in [find_player_data_dirs, find_stats_dirs, find_advancements_dirs]:
-        rename_folders.extend(find_fn(dest_world))
-    # 去重
-    seen_folders: set = set()
-    for f_path in rename_folders:
-        if f_path in seen_folders:
-            continue
-        seen_folders.add(f_path)
-        if f_path.exists():
-            for m in mappings:
-                old_u, new_u = m[2], m[3]
-                for old_file in f_path.glob(f"{old_u}*"):
-                    new_name = old_file.name.replace(old_u, new_u)
-                    new_path = f_path / new_name
-                    if new_path.exists():
-                        log(f"跳过重命名冲突: {old_file.name} -> {new_name}，目标已存在", "WARN")
-                        continue
-                    old_file.rename(new_path)
-
-    # 5. 处理区域文件
-    log("扫描区域文件...", "MCA")
-    mca_files = scan_all_regions(dest_world)
-    total = len(mca_files)
-    log(f"发现 {total} 个 .mca 文件", "INFO")
-    if total > 0:
-        process_regions_parallel(mca_files, mappings, progress, log)
-    else:
-        log("没有区域文件需要处理", "INFO")
+    _process_core_nbt(dest_world, mappings, log)
+    _rename_player_files(dest_world, mappings, log)
+    _process_regions(dest_world, mappings, progress, log)
 
     # 6. 精简
     if do_clean:
         clean_world(dest_world, log)
 
-    # 7. 纯净扫描
-    if pure_clean:
-        log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
-        if not purge_mod_blocks_and_entities(dest_world, log):
-            raise RuntimeError("纯净扫描未完整处理所有区域文件")
-    else:
-        log("跳过纯净扫描", "INFO")
+    _run_pure_clean(dest_world, pure_clean, log)
 
     # 8. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
+
+
+def _process_core_nbt(
+    dest_world: Path,
+    mappings: List[UUIDMapping],
+    log: LogCallback,
+) -> None:
+    log("处理核心 NBT 文件...", "NBT")
+    level_changes = process_nbt_file(
+        dest_world / "level.dat", mappings, log, required=True
+    )
+    log(f"level.dat 修改 {level_changes} 处", "INFO")
+    for data_dir in find_data_dirs(dest_world):
+        for data_file in data_dir.glob("*.dat"):
+            process_nbt_file(data_file, mappings, log, required=True)
+
+
+def _rename_player_files(
+    dest_world: Path,
+    mappings: List[UUIDMapping],
+    log: LogCallback,
+) -> None:
+    log("重命名玩家文件...", "FILE")
+    rename_folders: List[Path] = []
+    for find_fn in (find_player_data_dirs, find_stats_dirs, find_advancements_dirs):
+        rename_folders.extend(find_fn(dest_world))
+    for folder in dict.fromkeys(rename_folders):
+        if not folder.exists():
+            continue
+        for mapping in mappings:
+            _rename_mapping_files(folder, mapping, log)
+
+
+def _rename_mapping_files(
+    folder: Path,
+    mapping: UUIDMapping,
+    log: LogCallback,
+) -> None:
+    old_uuid, new_uuid = mapping[2], mapping[3]
+    for old_file in folder.glob(f"{old_uuid}*"):
+        new_name = old_file.name.replace(old_uuid, new_uuid)
+        new_path = folder / new_name
+        if new_path.exists():
+            log(
+                f"跳过重命名冲突: {old_file.name} -> {new_name}，目标已存在",
+                "WARN",
+            )
+            continue
+        old_file.rename(new_path)
+
+
+def _process_regions(
+    dest_world: Path,
+    mappings: List[UUIDMapping],
+    progress: ProgressCallback,
+    log: LogCallback,
+) -> None:
+    log("扫描区域文件...", "MCA")
+    mca_files = scan_all_regions(dest_world)
+    log(f"发现 {len(mca_files)} 个 .mca 文件", "INFO")
+    if mca_files:
+        process_regions_parallel(mca_files, mappings, progress, log)
+    else:
+        log("没有区域文件需要处理", "INFO")
+
+
+def _run_pure_clean(
+    dest_world: Path,
+    enabled: bool,
+    log: LogCallback,
+) -> None:
+    if not enabled:
+        log("跳过纯净扫描", "INFO")
+        return
+    log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
+    if not purge_mod_blocks_and_entities(dest_world, log):
+        raise RuntimeError("纯净扫描未完整处理所有区域文件")
 
 
 def process_nbt_file(

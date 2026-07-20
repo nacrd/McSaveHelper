@@ -2,7 +2,7 @@
 
 提供区块、玩家数据、level.dat 的验证功能。
 """
-from typing import Any, List, Dict
+from typing import Any, List, Mapping, Optional, Tuple
 
 import nbtlib
 
@@ -74,7 +74,52 @@ def validate_player_data(nbt_data: Any, required_fields: List[str]) -> List[str]
     return issues
 
 
-def validate_level_dat_data(data: Any, required_fields: Dict[str, Any]) -> List[str]:
+def _missing_level_fields(
+    data: Any,
+    required_fields: Mapping[str, Any],
+) -> List[str]:
+    return [
+        field_name
+        for field_name, default_value in required_fields.items()
+        if field_name not in data and default_value is not None
+    ]
+
+
+def _integer_range_issue(
+    data: Any,
+    field_name: str,
+    bounds: Optional[Tuple[int, int]],
+) -> Optional[str]:
+    if field_name not in data:
+        return None
+    try:
+        value = int(data[field_name])
+    except (ValueError, TypeError):
+        return f"{field_name} 值类型错误"
+    if bounds is not None and not bounds[0] <= value <= bounds[1]:
+        return f"{field_name} 超出范围: {value}"
+    return None
+
+
+def _level_range_issues(data: Any) -> List[str]:
+    rules = (
+        ("SpawnX", None),
+        ("SpawnY", (-64, 320)),
+        ("SpawnZ", None),
+        ("Difficulty", (0, 3)),
+    )
+    issues: List[str] = []
+    for field_name, bounds in rules:
+        issue = _integer_range_issue(data, field_name, bounds)
+        if issue is not None:
+            issues.append(issue)
+    return issues
+
+
+def validate_level_dat_data(
+    data: Any,
+    required_fields: Mapping[str, Any],
+) -> List[str]:
     """验证 level.dat 数据，返回问题列表
 
     Args:
@@ -84,36 +129,8 @@ def validate_level_dat_data(data: Any, required_fields: Dict[str, Any]) -> List[
     Returns:
         问题列表
     """
-    issues: List[str] = []
-
-    # 检查必需字段
-    missing_fields: List[str] = []
-    for field_name, default_value in required_fields.items():
-        if field_name not in data and default_value is not None:
-            missing_fields.append(field_name)
-
-    # 检查范围异常
-    range_issues: List[str] = []
-    for spawn_field in ("SpawnX", "SpawnY", "SpawnZ"):
-        if spawn_field in data:
-            try:
-                val = int(data[spawn_field])
-                if spawn_field == "SpawnY" and (val < -64 or val > 320):
-                    range_issues.append(f"{spawn_field} 超出范围: {val}")
-            except (ValueError, TypeError):
-                range_issues.append(f"{spawn_field} 值类型错误")
-
-    if "Difficulty" in data:
-        try:
-            val = int(data["Difficulty"])
-            if val < 0 or val > 3:
-                range_issues.append(f"Difficulty 超出范围: {val}")
-        except (ValueError, TypeError):
-            range_issues.append("Difficulty 值类型错误")
-
-    issues = [
-        *(f"缺失字段: {f}" for f in missing_fields),
-        *range_issues,
+    missing_fields = _missing_level_fields(data, required_fields)
+    return [
+        *(f"缺失字段: {field_name}" for field_name in missing_fields),
+        *_level_range_issues(data),
     ]
-
-    return issues

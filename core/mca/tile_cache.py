@@ -46,7 +46,7 @@ def _cache_key(region_path: Path, tile_size: int) -> str:
     except Exception:
         texture_signature = "fallback"
     raw = (
-        f"{region_path.resolve()}|{mtime_ns}|{size}|{tile_size}|"
+        f"{region_path.absolute()}|{mtime_ns}|{size}|{tile_size}|"
         f"{ALGO_VERSION}|{texture_signature}"
     )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
@@ -60,7 +60,7 @@ def cache_path_for(region_path: PathLike, tile_size: int) -> Path:
 def load_tile(region_path: PathLike, tile_size: int) -> Optional[bytes]:
     path = cache_path_for(region_path, tile_size)
     try:
-        if path.is_file() and path.stat().st_size > 32:
+        if path.stat().st_size > 32:
             return path.read_bytes()
     except OSError:
         return None

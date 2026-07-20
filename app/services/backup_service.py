@@ -69,6 +69,14 @@ class BackupVerification:
     issues: tuple[str, ...] = ()
 
 
+@dataclass
+class _ManifestVerification:
+    expected_paths: set[str]
+    checked_files: int
+    checked_bytes: int
+    issues: list[str]
+
+
 class BackupService:
     """Create and publish backups without exposing arbitrary filesystem paths."""
 
@@ -526,14 +534,7 @@ class BackupService:
         progress_callback: Optional[ProgressCallback],
     ) -> BackupVerification:
         if not record.integrity_available:
-            self._progress(progress_callback, 1.0, "旧版备份没有完整性清单")
-            return BackupVerification(
-                valid=True,
-                complete=False,
-                checked_files=0,
-                checked_bytes=0,
-                issues=("旧版备份没有完整性清单",),
-            )
+            return self._legacy_verification(progress_callback)
         try:
             entries = self._read_manifest(record)
         except BackupError as exc:
@@ -546,28 +547,42 @@ class BackupService:
             )
 
         snapshot = record.backup_path / _SNAPSHOT_DIR
-        issues: list[str] = []
+        manifest_result = self._verify_manifest_entries(
+            entries,
+            snapshot,
+            progress_callback,
+        )
+        manifest_result.issues.extend(
+            self._manifest_path_issues(snapshot, manifest_result.expected_paths)
+        )
+        self._progress(progress_callback, 1.0, "备份完整性校验完成")
+        return BackupVerification(
+            valid=not manifest_result.issues,
+            complete=True,
+            checked_files=manifest_result.checked_files,
+            checked_bytes=manifest_result.checked_bytes,
+            issues=tuple(manifest_result.issues),
+        )
+
+    def _verify_manifest_entries(
+        self,
+        entries: list[object],
+        snapshot: Path,
+        progress_callback: Optional[ProgressCallback],
+    ) -> _ManifestVerification:
         expected_paths: set[str] = set()
         checked_files = 0
         checked_bytes = 0
+        issues: list[str] = []
         for index, entry in enumerate(entries, start=1):
             try:
-                relative, expected_size, expected_hash = self._manifest_entry(entry)
-                path_key = relative.as_posix()
-                if path_key in expected_paths:
-                    raise BackupError(f"清单包含重复路径: {path_key}")
-                expected_paths.add(path_key)
-                target = (snapshot / relative).resolve()
-                target.relative_to(snapshot.resolve())
-                if not target.is_file() or self._is_link_or_reparse(target):
-                    raise BackupError(f"备份文件缺失或类型无效: {path_key}")
-                stat = target.stat()
-                if stat.st_size != expected_size:
-                    raise BackupError(f"备份文件大小不匹配: {path_key}")
-                if self._hash_file(target) != expected_hash:
-                    raise BackupError(f"备份文件摘要不匹配: {path_key}")
+                checked_size = self._verify_manifest_entry(
+                    entry,
+                    snapshot,
+                    expected_paths,
+                )
                 checked_files += 1
-                checked_bytes += stat.st_size
+                checked_bytes += checked_size
             except (BackupError, OSError, ValueError) as exc:
                 issues.append(str(exc))
             self._progress(
@@ -575,7 +590,41 @@ class BackupService:
                 index / max(len(entries), 1) * 0.9,
                 f"正在校验文件 {index}/{len(entries)}",
             )
+        return _ManifestVerification(
+            expected_paths=expected_paths,
+            checked_files=checked_files,
+            checked_bytes=checked_bytes,
+            issues=issues,
+        )
 
+    def _verify_manifest_entry(
+        self,
+        entry: object,
+        snapshot: Path,
+        expected_paths: set[str],
+    ) -> int:
+        relative, expected_size, expected_hash = self._manifest_entry(entry)
+        path_key = relative.as_posix()
+        if path_key in expected_paths:
+            raise BackupError(f"清单包含重复路径: {path_key}")
+        expected_paths.add(path_key)
+        target = (snapshot / relative).resolve()
+        target.relative_to(snapshot.resolve())
+        if not target.is_file() or self._is_link_or_reparse(target):
+            raise BackupError(f"备份文件缺失或类型无效: {path_key}")
+        stat = target.stat()
+        if stat.st_size != expected_size:
+            raise BackupError(f"备份文件大小不匹配: {path_key}")
+        if self._hash_file(target) != expected_hash:
+            raise BackupError(f"备份文件摘要不匹配: {path_key}")
+        return stat.st_size
+
+    def _manifest_path_issues(
+        self,
+        snapshot: Path,
+        expected_paths: set[str],
+    ) -> list[str]:
+        issues: list[str] = []
         try:
             actual_paths = {
                 relative.as_posix()
@@ -589,13 +638,20 @@ class BackupService:
                 issues.append(f"备份缺少清单文件: {sorted(missing)[0]}")
         except BackupError as exc:
             issues.append(str(exc))
-        self._progress(progress_callback, 1.0, "备份完整性校验完成")
+        return issues
+
+    def _legacy_verification(
+        self,
+        progress_callback: Optional[ProgressCallback],
+    ) -> BackupVerification:
+        message = "旧版备份没有完整性清单"
+        self._progress(progress_callback, 1.0, message)
         return BackupVerification(
-            valid=not issues,
-            complete=True,
-            checked_files=checked_files,
-            checked_bytes=checked_bytes,
-            issues=tuple(issues),
+            valid=True,
+            complete=False,
+            checked_files=0,
+            checked_bytes=0,
+            issues=(message,),
         )
 
     def _read_manifest(self, record: BackupRecord) -> list[object]:

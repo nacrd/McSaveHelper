@@ -865,72 +865,82 @@ class RegionMapService:
             region_dir: region 目录路径
             batch_size: 每批处理文件数量（用于进度更新）
         """
-        if self._closed:
-            raise RuntimeError("区域地图服务已关闭")
-
-        # 如果正在扫描，先取消
-        if self._is_scanning:
-            await self.cancel_scan()
-
-        # 清空旧数据
-        self.clear_data()
-        scan_generation = self._scan_generation
-        self._is_scanning = True
-        self._error = None
-
+        scan_generation = await self._prepare_silent_scan()
         try:
             region_path = Path(region_dir)
-
-            # 首先快速统计文件总数
             mca_files = await asyncio.to_thread(scan_region_dir, region_path)
             self._total_count = len(mca_files)
-
-            if self._total_count == 0:
-                self._is_scanning = False
-                self._scan_progress = 1.0
+            if not mca_files:
+                self._finish_silent_scan(scan_generation)
                 return
 
-            for mca_file in mca_files:
-                if self._closed or scan_generation != self._scan_generation:
-                    return
-                try:
-                    coord = parse_region_coords(mca_file)
-                    if coord is not None:
-                        size = mca_file.stat().st_size
-                        with self._data_lock:
-                            if (
-                                self._closed
-                                or scan_generation != self._scan_generation
-                            ):
-                                return
-                            self._mca_data[coord] = size
-                            self._region_paths[coord] = str(mca_file)
-                            self._mark_data_dirty()
-                        # Topview tiles are requested by the map view for
-                        # currently visible cells only (not every region).
-
-                    with self._data_lock:
-                        self._scanned_count += 1
-                        if self._total_count > 0:
-                            self._scan_progress = (
-                                self._scanned_count / self._total_count)
-
-                    if self._scanned_count % batch_size == 0:
-                        await asyncio.sleep(0)
-                except Exception:
-                    continue
-
-            # 最终更新
-            if scan_generation == self._scan_generation:
-                with self._data_lock:
-                    self._scan_progress = 1.0
-                    self._is_scanning = False
-                    self._mark_data_dirty()
-
-        except Exception as e:
-            self._error = str(e)
+            await self._scan_region_files(
+                mca_files,
+                scan_generation,
+                batch_size,
+            )
+            self._finish_silent_scan(scan_generation)
+        except Exception as exc:
+            self._error = str(exc)
             self._is_scanning = False
             raise
+
+    async def _prepare_silent_scan(self) -> int:
+        if self._closed:
+            raise RuntimeError("区域地图服务已关闭")
+        if self._is_scanning:
+            await self.cancel_scan()
+        self.clear_data()
+        self._is_scanning = True
+        self._error = None
+        return self._scan_generation
+
+    async def _scan_region_files(
+        self,
+        mca_files: list[Path],
+        scan_generation: int,
+        batch_size: int,
+    ) -> None:
+        for mca_file in mca_files:
+            if not self._scan_is_current(scan_generation):
+                return
+            try:
+                if not self._record_scanned_region(mca_file, scan_generation):
+                    return
+                if self._scanned_count % batch_size == 0:
+                    await asyncio.sleep(0)
+            except Exception:
+                continue
+
+    def _record_scanned_region(
+        self,
+        mca_file: Path,
+        scan_generation: int,
+    ) -> bool:
+        coord = parse_region_coords(mca_file)
+        size = mca_file.stat().st_size if coord is not None else 0
+        with self._data_lock:
+            if not self._scan_is_current(scan_generation):
+                return False
+            if coord is not None:
+                self._mca_data[coord] = size
+                self._region_paths[coord] = str(mca_file)
+                self._mark_data_dirty()
+            self._scanned_count += 1
+            if self._total_count > 0:
+                self._scan_progress = self._scanned_count / self._total_count
+        return True
+
+    def _finish_silent_scan(self, scan_generation: int) -> None:
+        with self._data_lock:
+            if not self._scan_is_current(scan_generation):
+                return
+            self._scan_progress = 1.0
+            self._is_scanning = False
+            self._mark_data_dirty()
+
+    def _scan_is_current(self, scan_generation: int) -> bool:
+        return not self._closed and scan_generation == self._scan_generation
 
     async def cancel_scan(self) -> None:
         """取消当前扫描任务"""

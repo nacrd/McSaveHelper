@@ -90,7 +90,7 @@ class CurrentSaveStore:
         selected = RecentSave(path=context.display_path, name=context.name)
         self._recent = [save for save in self._recent if save.path != selected.path]
         self._recent.insert(0, selected)
-        del self._recent[self.MAX_RECENT_SAVES :]
+        del self._recent[self.MAX_RECENT_SAVES:]
         self._publish_recent()
 
     def remove_recent(self, path: str) -> bool:

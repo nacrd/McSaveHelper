@@ -46,6 +46,7 @@ def test_surface_tiles_share_one_exact_pixel_boundary() -> None:
     image = Image.frombytes("RGBA", (frame.width, frame.height), frame.pixels)
     assert image.getpixel((3, 1)) == (220, 20, 20, 255)
     assert image.getpixel((4, 1)) == (20, 80, 220, 255)
+    assert image.getchannel("A").getextrema() == (255, 255)
 
 
 def test_missing_tile_uses_opaque_region_color_without_a_seam() -> None:

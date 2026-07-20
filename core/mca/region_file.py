@@ -31,6 +31,7 @@ from core.mca.format import (
 
 PathLike = Union[str, Path]
 RegionData = Union[bytes, mmap.mmap]
+LocationTable = Tuple[Tuple[int, int], ...]
 _REGION_NAME_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.mca$")
 
 
@@ -53,7 +54,7 @@ def world_to_local(chunk_x: int, chunk_z: int) -> Tuple[int, int, int, int]:
 class RegionFile:
     """Read-only view of one ``r.X.Z.mca`` file."""
 
-    __slots__ = ("_path", "_data", "_closed")
+    __slots__ = ("_path", "_data", "_closed", "_locations")
 
     def __init__(self, data: RegionData, path: Optional[Path] = None) -> None:
         if len(data) < HEADER_SIZE:
@@ -63,6 +64,7 @@ class RegionFile:
         self._data = data
         self._path = path
         self._closed = False
+        self._locations: Optional[LocationTable] = None
 
     @classmethod
     def open(cls, path: PathLike) -> "RegionFile":
@@ -126,16 +128,20 @@ class RegionFile:
         """Return (sector_offset, sector_count). (0, 0) means missing."""
         self._ensure_open()
         index = local_chunk_index(local_cx, local_cz)
-        b_off = index * 4
-        off = int.from_bytes(self._data[b_off : b_off + 3], "big")
-        sectors = self._data[b_off + 3]
-        return off, sectors
+        locations = self._locations
+        if locations is not None:
+            return locations[index]
+        byte_offset = index * 4
+        return (
+            int.from_bytes(self._data[byte_offset:byte_offset + 3], "big"),
+            self._data[byte_offset + 3],
+        )
 
     def chunk_timestamp(self, local_cx: int, local_cz: int) -> int:
         self._ensure_open()
         index = local_chunk_index(local_cx, local_cz)
         b_off = LOCATION_TABLE_SIZE + index * 4
-        return int.from_bytes(self._data[b_off : b_off + 4], "big")
+        return int.from_bytes(self._data[b_off:b_off + 4], "big")
 
     def has_chunk(self, local_cx: int, local_cz: int) -> bool:
         off, sectors = self.chunk_location(local_cx, local_cz)
@@ -143,15 +149,26 @@ class RegionFile:
 
     def iter_present_chunks(self) -> Iterable[Tuple[int, int]]:
         self._ensure_open()
-        for index in range(CHUNKS_PER_REGION):
-            b_off = index * 4
-            off = int.from_bytes(self._data[b_off : b_off + 3], "big")
-            sectors = self._data[b_off + 3]
+        for index, (off, sectors) in enumerate(self._location_table()):
             if off == 0 and sectors == 0:
                 continue
             local_cx = index % CHUNKS_PER_SIDE
             local_cz = index // CHUNKS_PER_SIDE
             yield local_cx, local_cz
+
+    def _location_table(self) -> LocationTable:
+        locations = self._locations
+        if locations is None:
+            data = self._data
+            locations = tuple(
+                (
+                    int.from_bytes(data[index * 4:index * 4 + 3], "big"),
+                    data[index * 4 + 3],
+                )
+                for index in range(CHUNKS_PER_REGION)
+            )
+            self._locations = locations
+        return locations
 
     def has_external_chunks(self) -> bool:
         """Return whether any present chunk uses an external ``.mcc`` stream."""
@@ -243,7 +260,7 @@ class RegionFile:
             )
 
         length = int.from_bytes(
-            self._data[byte_off : byte_off + LENGTH_HEADER_SIZE], "big"
+            self._data[byte_off:byte_off + LENGTH_HEADER_SIZE], "big"
         )
         if length < COMPRESSION_HEADER_SIZE:
             raise CorruptChunk(
@@ -268,7 +285,7 @@ class RegionFile:
         if compression_marker & EXTERNAL_CHUNK_STREAM_FLAG:
             payload = self._read_external_chunk(local_cx, local_cz)
         else:
-            payload = self._data[comp_off + COMPRESSION_HEADER_SIZE : end]
+            payload = self._data[comp_off + COMPRESSION_HEADER_SIZE:end]
         return decompress_chunk(compression, payload)
 
     def _read_external_chunk(self, local_cx: int, local_cz: int) -> bytes:

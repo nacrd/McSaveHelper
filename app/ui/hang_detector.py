@@ -16,6 +16,35 @@ except ImportError:
     _FRAME_AVAILABLE = False
 
 
+_SKIPPED_THREAD_TOKENS = (
+    "Daemon",
+    "Monitor",
+    "Detector",
+    "topview",
+    "HangDetector",
+    "LogManager",
+)
+_GENERIC_WAIT_FUNCTIONS = frozenset(
+    {
+        "sleep",
+        "wait",
+        "_wait",
+        "join",
+        "select",
+        "poll",
+        "_poll",
+        "recv",
+        "accept",
+        "get",
+        "put",
+        "_worker",
+        "_run_once",
+        "run_forever",
+        "run_until_complete",
+    }
+)
+
+
 @dataclass
 class HangReport:
     """卡死报告"""
@@ -121,89 +150,99 @@ class HangDetector:
 
         try:
             frames = sys._current_frames()
-            current_threads = set()
-
+            current_threads = set(frames)
             for thread_id, frame in frames.items():
-                current_threads.add(thread_id)
-
-                # 获取线程名称
-                thread_name = self._get_thread_name(thread_id)
-
-                # 跳过守护线程、监控线程、以及预期会长时间跑 CPU/IO 的 worker
-                skip_names = (
-                    "Daemon",
-                    "Monitor",
-                    "Detector",
-                    "topview",
-                    "HangDetector",
-                    "LogManager",
-                )
-                if any(token in thread_name for token in skip_names):
-                    continue
-
-                # 提取位置指纹
-                location = f"{
-                    frame.f_code.co_filename}:{
-                    frame.f_lineno}:{
-                    frame.f_code.co_name}"
-
-                # Idle wait (event loop, queue.get, thread-pool worker park, etc.)
-                # stays on the same stack forever — never treat that as a hang.
-                if self._is_benign_wait(frame):
-                    self._thread_snapshots.pop(thread_id, None)
-                    self._blocked_threads.discard(thread_id)
-                    continue
-
-                if thread_id not in self._thread_snapshots:
-                    self._thread_snapshots[thread_id] = {
-                        "location": location,
-                        "timestamp": now,
-                        "name": thread_name,
-                        "alerted": False,
-                    }
-                else:
-                    snapshot = self._thread_snapshots[thread_id]
-
-                    if snapshot["location"] != location:
-                        # 位置变化，线程活跃
-                        snapshot["location"] = location
-                        snapshot["timestamp"] = now
-                        snapshot["alerted"] = False
-                        self._blocked_threads.discard(thread_id)
-                    else:
-                        # 位置未变，检查超时
-                        elapsed = now - snapshot["timestamp"]
-                        threshold = self._thread_block_threshold
-
-                        if elapsed >= threshold and not snapshot["alerted"]:
-                            # 提取堆栈
-                            stack_lines = []
-                            f = frame
-                            depth = 0
-                            while f is not None and depth < 3:
-                                stack_lines.append(
-                                    f"{f.f_code.co_filename}:{f.f_lineno} in {f.f_code.co_name}")
-                                f = f.f_back
-                                depth += 1
-
-                            stack_trace = " -> ".join(stack_lines)
-
-                            snapshot["alerted"] = True
-                            self._blocked_threads.add(thread_id)
-
-                            self._log_warning(
-                                f"线程 [{thread_name}] 可能阻塞：{
-                                    elapsed:.0f}s 无进展（阈值 {
-                                    threshold:.0f}s）| 堆栈: {stack_trace}")
-
-            # 清理已退出的线程
-            dead_threads = set(self._thread_snapshots.keys()) - current_threads
-            for thread_id in dead_threads:
-                self._thread_snapshots.pop(thread_id, None)
-                self._blocked_threads.discard(thread_id)
+                self._inspect_thread_frame(thread_id, frame, now)
+            self._remove_dead_threads(current_threads)
 
         except Exception:
             pass
+
+    def _inspect_thread_frame(self, thread_id: int, frame: Any, now: float) -> None:
+        """更新一个线程的快照，忽略明确的空闲等待。"""
+        thread_name = self._get_thread_name(thread_id)
+        if any(token in thread_name for token in _SKIPPED_THREAD_TOKENS):
+            return
+        if self._is_benign_wait(frame):
+            self._clear_thread_snapshot(thread_id)
+            return
+
+        location = self._frame_location(frame)
+        snapshot = self._thread_snapshots.get(thread_id)
+        if snapshot is None:
+            self._thread_snapshots[thread_id] = {
+                "location": location,
+                "timestamp": now,
+                "name": thread_name,
+                "alerted": False,
+            }
+            return
+        if snapshot["location"] != location:
+            self._reset_thread_snapshot(snapshot, location, thread_id, now)
+            return
+        self._check_thread_timeout(thread_id, frame, snapshot, now)
+
+    def _check_thread_timeout(
+        self,
+        thread_id: int,
+        frame: Any,
+        snapshot: Dict[str, Any],
+        now: float,
+    ) -> None:
+        elapsed = now - snapshot["timestamp"]
+        threshold = self._thread_block_threshold
+        if elapsed < threshold or snapshot["alerted"]:
+            return
+        stack_trace = self._stack_trace(frame)
+        snapshot["alerted"] = True
+        self._blocked_threads.add(thread_id)
+        self._log_warning(
+            f"线程 [{snapshot['name']}] 可能阻塞：{elapsed:.0f}s 无进展"
+            f"（阈值 {threshold:.0f}s）| 堆栈: {stack_trace}"
+        )
+
+    def _clear_thread_snapshot(self, thread_id: int) -> None:
+        self._thread_snapshots.pop(thread_id, None)
+        self._blocked_threads.discard(thread_id)
+
+    def _reset_thread_snapshot(
+        self,
+        snapshot: Dict[str, Any],
+        location: str,
+        thread_id: int,
+        now: float,
+    ) -> None:
+        snapshot["location"] = location
+        snapshot["timestamp"] = now
+        snapshot["alerted"] = False
+        self._blocked_threads.discard(thread_id)
+
+    @staticmethod
+    def _frame_location(frame: Any) -> str:
+        return (
+            f"{frame.f_code.co_filename}:"
+            f"{frame.f_lineno}:{frame.f_code.co_name}"
+        )
+
+    @staticmethod
+    def _stack_trace(frame: Any) -> str:
+        stack_lines = []
+        current = frame
+        for _ in range(3):
+            if current is None:
+                break
+            stack_lines.append(
+                f"{current.f_code.co_filename}:{current.f_lineno} "
+                f"in {current.f_code.co_name}"
+            )
+            current = current.f_back
+        return " -> ".join(stack_lines)
+
+    def _remove_dead_threads(self, current_threads: set[int]) -> None:
+        """清理已退出的线程。"""
+        dead_threads = set(self._thread_snapshots) - current_threads
+        for thread_id in dead_threads:
+            self._clear_thread_snapshot(thread_id)
 
     def _get_thread_name(self, thread_id: int) -> str:
         """获取线程名称"""
@@ -215,63 +254,32 @@ class HangDetector:
             pass
         return f"Thread-{thread_id}"
 
-    def _is_benign_wait(self, frame) -> bool:
+    def _is_benign_wait(self, frame: Any) -> bool:
         """判断是否为良性等待（空闲阻塞，不是卡死）。"""
         try:
-            f = frame
-            depth = 0
-            while f is not None and depth < 12:
-                func_name = f.f_code.co_name
-                file_name = f.f_code.co_filename.replace("\\", "/")
-                lower = file_name.lower()
-
-                # Generic parking points
-                if func_name in (
-                    "sleep",
-                    "wait",
-                    "_wait",
-                    "join",
-                    "select",
-                    "poll",
-                    "_poll",
-                    "recv",
-                    "accept",
-                    "get",
-                    "put",
-                    "_worker",
-                    "_run_once",
-                    "run_forever",
-                    "run_until_complete",
-                ):
+            current = frame
+            for _ in range(12):
+                if current is None:
+                    break
+                if self._is_benign_wait_frame(current):
                     return True
-
-                if "threading.py" in lower and func_name in ("wait", "_wait"):
-                    return True
-
-                if "queue.py" in lower and func_name in ("get", "put"):
-                    return True
-
-                if "asyncio" in lower and func_name in (
-                        "select", "_poll", "_run_once", "run_forever",
-                        "run_until_complete"):
-                    return True
-
-                if "concurrent" in lower and "futures" in lower and func_name in (
-                        "_worker", "wait", "result"):
-                    return True
-
-                if "selectors.py" in lower and func_name in ("select", "_select"):
-                    return True
-
-                if "windows_events.py" in lower and func_name in ("_poll", "select"):
-                    return True
-
-                f = f.f_back
-                depth += 1
+                current = current.f_back
         except Exception:
             pass
 
         return False
+
+    @staticmethod
+    def _is_benign_wait_frame(frame: Any) -> bool:
+        func_name = frame.f_code.co_name
+        if func_name in _GENERIC_WAIT_FUNCTIONS:
+            return True
+        # Names too common to treat as generic parks — only trust them in
+        # known idle-wait modules.
+        lower = frame.f_code.co_filename.replace("\\", "/").lower()
+        if func_name == "result" and "concurrent" in lower and "futures" in lower:
+            return True
+        return func_name == "_select" and "selectors.py" in lower
 
     def _log_warning(self, message: str) -> None:
         """记录警告到日志系统"""

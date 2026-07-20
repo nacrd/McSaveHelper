@@ -38,8 +38,24 @@ def detect_mod_metadata(
     """Detect explicit Forge lists and conservative loader/datapack hints."""
     mods: dict[str, ModInfo] = {}
     loaders: set[str] = set()
-    explicit_list_found = False
+    explicit_list_found = _collect_explicit_mods(root, data, mods, loaders)
+    _collect_data_pack_mods(data_packs, mods, loaders)
+    _collect_brand_loaders(server_brands, loaders)
 
+    return ModMetadata(
+        mods=tuple(sorted(mods.values(), key=lambda item: item.mod_id.casefold())),
+        loaders=tuple(sorted(loaders)),
+        list_complete=explicit_list_found,
+    )
+
+
+def _collect_explicit_mods(
+    root: Mapping[str, Any],
+    data: Mapping[str, Any],
+    mods: dict[str, ModInfo],
+    loaders: set[str],
+) -> bool:
+    explicit_list_found = False
     for container_name in ("FML", "fml"):
         for parent in (data, root):
             container = parent.get(container_name)
@@ -50,9 +66,15 @@ def detect_mod_metadata(
                 explicit_list_found = True
                 for mod in _parse_mod_collection(collection):
                     _add_mod(mods, loaders, mod)
+    return explicit_list_found
 
-    enabled_packs = (data_packs or {}).get("enabled", [])
-    for pack_name in enabled_packs:
+
+def _collect_data_pack_mods(
+    data_packs: Optional[Mapping[str, list[str]]],
+    mods: dict[str, ModInfo],
+    loaders: set[str],
+) -> None:
+    for pack_name in (data_packs or {}).get("enabled", []):
         value = str(pack_name).strip()
         if not value.lower().startswith("mod:"):
             continue
@@ -60,6 +82,11 @@ def detect_mod_metadata(
         if mod_id:
             _add_mod(mods, loaders, ModInfo(mod_id=mod_id))
 
+
+def _collect_brand_loaders(
+    server_brands: Optional[Iterable[Any]],
+    loaders: set[str],
+) -> None:
     for brand in server_brands or ():
         normalized = str(brand).casefold()
         if "neoforge" in normalized:
@@ -70,12 +97,6 @@ def detect_mod_metadata(
             _add_loader(loaders, "Fabric Loader")
         if "quilt" in normalized:
             _add_loader(loaders, "Quilt Loader")
-
-    return ModMetadata(
-        mods=tuple(sorted(mods.values(), key=lambda item: item.mod_id.casefold())),
-        loaders=tuple(sorted(loaders)),
-        list_complete=explicit_list_found,
-    )
 
 
 def _find_mod_collections(value: Mapping[str, Any], depth: int = 0) -> list[Any]:

@@ -46,32 +46,12 @@ def detect_endian(file_path: Path) -> str:
     通过读取第一个字节（标签 ID）和后续长度来判断。
     Java 版 NBT 以大端序存储，Bedrock 版以小端序存储。
     """
-    try:
-        encoded = file_path.read_bytes()
-    except OSError as exc:
-        raise ConversionError(f"读取 NBT 文件失败: {exc}") from exc
-    if len(encoded) > MAX_COMPRESSED_NBT_BYTES:
-        raise ConversionError("NBT 文件超过 64 MiB 压缩输入限制")
-    if encoded.startswith(b"\x1f\x8b"):
-        try:
-            stream = zlib.decompressobj(16 + zlib.MAX_WBITS)
-            data = stream.decompress(encoded, MAX_DECOMPRESSED_NBT_BYTES + 1)
-            if len(data) > MAX_DECOMPRESSED_NBT_BYTES or not stream.eof:
-                raise ConversionError("NBT 解压结果超过 256 MiB 限制")
-        except zlib.error as exc:
-            raise ConversionError(f"NBT gzip 数据损坏: {exc}") from exc
-    else:
-        data = encoded
+    encoded = _read_nbt_bytes(file_path)
+    data = _decompress_nbt_bytes(encoded)
     if len(data) < 3 or data[0] != 0x0A:
         raise ConversionError("NBT 根标签无效，无法检测字节序")
 
-    parsed: TList[str] = []
-    for byteorder in ("big", "little"):
-        try:
-            nbtlib.File.parse(io.BytesIO(data), byteorder=byteorder)
-        except Exception:
-            continue
-        parsed.append(byteorder)
+    parsed = _parse_byteorders(data)
     if len(parsed) == 1:
         return parsed[0]
     if not parsed:
@@ -83,6 +63,40 @@ def detect_endian(file_path: Path) -> str:
     if little_length < big_length:
         return "little"
     return "big"
+
+
+def _read_nbt_bytes(file_path: Path) -> bytes:
+    try:
+        encoded = file_path.read_bytes()
+    except OSError as exc:
+        raise ConversionError(f"读取 NBT 文件失败: {exc}") from exc
+    if len(encoded) > MAX_COMPRESSED_NBT_BYTES:
+        raise ConversionError("NBT 文件超过 64 MiB 压缩输入限制")
+    return encoded
+
+
+def _decompress_nbt_bytes(encoded: bytes) -> bytes:
+    if not encoded.startswith(b"\x1f\x8b"):
+        return encoded
+    try:
+        stream = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        data = stream.decompress(encoded, MAX_DECOMPRESSED_NBT_BYTES + 1)
+    except zlib.error as exc:
+        raise ConversionError(f"NBT gzip 数据损坏: {exc}") from exc
+    if len(data) > MAX_DECOMPRESSED_NBT_BYTES or not stream.eof:
+        raise ConversionError("NBT 解压结果超过 256 MiB 限制")
+    return data
+
+
+def _parse_byteorders(data: bytes) -> TList[str]:
+    parsed: TList[str] = []
+    for byteorder in ("big", "little"):
+        try:
+            nbtlib.File.parse(io.BytesIO(data), byteorder=byteorder)
+        except Exception:
+            continue
+        parsed.append(byteorder)
+    return parsed
 
 
 def load_nbt(file_path: Path, byteorder: Optional[str] = None) -> File:

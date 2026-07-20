@@ -55,7 +55,7 @@ def _build_region_with_chunk(
     header = bytearray(HEADER_SIZE)
     index = local_chunk_index(local_cx, local_cz)
     b_off = index * 4
-    header[b_off : b_off + 3] = sector_offset.to_bytes(3, "big")
+    header[b_off:b_off + 3] = sector_offset.to_bytes(3, "big")
     header[b_off + 3] = data_sectors
 
     return bytes(header) + payload
@@ -68,7 +68,7 @@ def _build_region_with_external_chunk(local_cx: int, local_cz: int) -> bytes:
     header = bytearray(HEADER_SIZE)
     index = local_chunk_index(local_cx, local_cz)
     b_off = index * 4
-    header[b_off : b_off + 3] = (2).to_bytes(3, "big")
+    header[b_off:b_off + 3] = (2).to_bytes(3, "big")
     header[b_off + 3] = 1
     return bytes(header) + payload
 
@@ -119,6 +119,21 @@ class TestRegionFileSynthetic:
         assert int(nbt["xPos"]) == 2
         assert int(nbt["zPos"]) == 3
         assert str(nbt["Status"]) == "full"
+
+    def test_repeated_location_scans_reuse_parsed_table(self) -> None:
+        blob = _build_region_with_chunk(2, 3, _build_minimal_chunk_nbt())
+        rf = RegionFile.from_bytes(blob)
+
+        assert rf.chunk_location(2, 3) != (0, 0)
+        assert rf._locations is None
+        first_scan = list(rf.iter_present_chunks())
+        locations = rf._locations
+        second_scan = list(rf.iter_present_chunks())
+
+        assert first_scan == second_scan == [(2, 3)]
+        assert locations is not None
+        assert rf._locations is locations
+        assert rf.chunk_location(2, 3) == locations[local_chunk_index(2, 3)]
 
     def test_corrupt_truncated(self) -> None:
         header = bytearray(HEADER_SIZE)

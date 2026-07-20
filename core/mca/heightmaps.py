@@ -86,18 +86,7 @@ def decode_heightmap_raw(
     if not is_mapping(heightmaps):
         return None, version
 
-    raw = None
-    for name in heightmap_names:
-        raw = mapping_get(heightmaps, name)
-        if raw is not None:
-            break
-    if raw is None:
-        try:
-            items = list(heightmaps.items())
-            if items:
-                raw = items[0][1]
-        except Exception:
-            raw = None
+    raw = _preferred_heightmap(heightmaps, heightmap_names)
     if raw is None:
         return None, version
 
@@ -109,6 +98,20 @@ def decode_heightmap_raw(
     if len(values) < 256:
         return None, version
     return values, version
+
+
+def _preferred_heightmap(
+    heightmaps: Any, heightmap_names: Sequence[str]
+) -> Any:
+    for name in heightmap_names:
+        raw = mapping_get(heightmaps, name)
+        if raw is not None:
+            return raw
+    try:
+        items = list(heightmaps.items())
+    except Exception:
+        return None
+    return items[0][1] if items else None
 
 
 def heightmap_value_to_block_y(

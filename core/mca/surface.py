@@ -32,6 +32,25 @@ SampleJob = Tuple[int, int, int, int, int, int]
 DEFAULT_EMPTY = (45, 60, 50)
 DEFAULT_WATERISH = (64, 164, 223)
 DEFAULT_UNKNOWN = (100, 100, 100)
+_OVERLAY_ALPHA_BY_NAME = {
+    "lily_pad": 0.72,
+    "kelp": 0.72,
+    "kelp_plant": 0.72,
+    "seagrass": 0.72,
+    "tall_seagrass": 0.72,
+    "vine": 0.48,
+    "cave_vines": 0.48,
+    "cave_vines_plant": 0.48,
+    "twisting_vines": 0.48,
+    "weeping_vines": 0.48,
+    "grass": 0.42,
+    "short_grass": 0.42,
+    "tall_grass": 0.42,
+    "fern": 0.42,
+    "large_fern": 0.42,
+    "moss_carpet": 0.62,
+    "snow": 0.70,
+}
 
 # RegionMapService renders multiple regions concurrently.  Keep this nested
 # decoder pool deliberately small; large pools mostly contend on the GIL while
@@ -210,20 +229,13 @@ def _overlay_alpha(name: Optional[str]) -> float:
     path = name.lower().rsplit(":", 1)[-1]
     if "leaves" in path or path.endswith("_leaf"):
         return 0.52
-    if path in {"lily_pad", "kelp", "kelp_plant", "seagrass", "tall_seagrass"}:
-        return 0.72
-    if path in {"vine", "cave_vines", "cave_vines_plant", "twisting_vines", "weeping_vines"}:
-        return 0.48
-    if path in {"grass", "short_grass", "tall_grass", "fern", "large_fern"}:
-        return 0.42
-    if path.endswith("_flower") or path.endswith("_flowers"):
+    named = _OVERLAY_ALPHA_BY_NAME.get(path)
+    if named is not None:
+        return named
+    if path.endswith(("_flower", "_flowers")):
         return 0.46
-    if path.endswith("_sapling") or path.endswith("_plant"):
+    if path.endswith(("_sapling", "_plant")):
         return 0.48
-    if path == "moss_carpet":
-        return 0.62
-    if path == "snow":
-        return 0.70
     if is_transparent_surface_name(name):
         return 0.44
     return 0.0
@@ -255,47 +267,13 @@ def _select_surface_strata(
 
 
 def _sample_column(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
-    sample = getattr(blocks, "surface_sample", None)
-    raw_sample: SurfaceValue
-    if callable(sample):
-        raw_sample = cast(SurfaceValue, sample(local_x, local_z))
-    else:
-        raw_sample = blocks.surface_block_id(local_x, local_z)
+    raw_sample = _read_surface_sample(blocks, local_x, local_z)
     name, height, _unused_depth, biome, overlay, alpha = _surface_parts(raw_sample)
-
-    strata_getter = getattr(blocks, "surface_strata", None)
-    has_overlay_metadata = len(raw_sample) >= 5 if isinstance(raw_sample, tuple) else False
-    if callable(strata_getter):
-        try:
-            base_name, base_height, strata_overlay, strata_alpha = _select_surface_strata(
-                cast(Sequence[Tuple[str, int]], strata_getter(local_x, local_z))
-            )
-        except (TypeError, ValueError):
-            base_name = base_height = strata_overlay = None
-            strata_alpha = 0.0
-        if base_name is not None:
-            name, height = base_name, base_height
-        if strata_overlay is not None:
-            overlay, alpha = strata_overlay, strata_alpha
-            has_overlay_metadata = True
-
-    biome_getter = getattr(blocks, "biome_at", None)
-    include_biome = len(raw_sample) >= 4 if isinstance(raw_sample, tuple) else False
-    if callable(biome_getter) and height is not None:
-        try:
-            biome = cast(Optional[str], biome_getter(local_x, height, local_z))
-            include_biome = True
-        except (TypeError, ValueError):
-            pass
-
-    water_depth = _unused_depth
-    if name and "water" in name.lower() and height is not None:
-        for depth in range(1, 9):
-            below = blocks.block_id_at(local_x, height - depth, local_z)
-            if below and "water" in below.lower():
-                water_depth = depth
-            else:
-                break
+    name, height, overlay, alpha, has_overlay_metadata = _apply_surface_strata(
+        blocks, local_x, local_z, name, height, overlay, alpha, raw_sample
+    )
+    biome, include_biome = _sample_biome(blocks, local_x, local_z, height, biome, raw_sample)
+    water_depth = _water_depth(blocks, local_x, local_z, name, height, _unused_depth)
     return _surface_value(
         name,
         height,
@@ -306,6 +284,64 @@ def _sample_column(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
         include_biome=include_biome,
         include_overlay=has_overlay_metadata,
     )
+
+
+def _read_surface_sample(blocks: Any, local_x: int, local_z: int) -> SurfaceValue:
+    sample = getattr(blocks, "surface_sample", None)
+    if callable(sample):
+        return cast(SurfaceValue, sample(local_x, local_z))
+    return cast(SurfaceValue, blocks.surface_block_id(local_x, local_z))
+
+
+def _apply_surface_strata(
+    blocks: Any, local_x: int, local_z: int, name: Optional[str], height: Optional[int],
+    overlay: Optional[str], alpha: float, raw_sample: SurfaceValue,
+) -> Tuple[Optional[str], Optional[int], Optional[str], float, bool]:
+    has_overlay = isinstance(raw_sample, tuple) and len(raw_sample) >= 5
+    strata_getter = getattr(blocks, "surface_strata", None)
+    if not callable(strata_getter):
+        return name, height, overlay, alpha, has_overlay
+    try:
+        base_name, base_height, strata_overlay, strata_alpha = _select_surface_strata(
+            cast(Sequence[Tuple[str, int]], strata_getter(local_x, local_z))
+        )
+    except (TypeError, ValueError):
+        return name, height, overlay, alpha, has_overlay
+    return (
+        base_name if base_name is not None else name,
+        base_height if base_name is not None else height,
+        strata_overlay if strata_overlay is not None else overlay,
+        strata_alpha if strata_overlay is not None else alpha,
+        has_overlay or strata_overlay is not None,
+    )
+
+
+def _sample_biome(
+    blocks: Any, local_x: int, local_z: int, height: Optional[int], biome: Optional[str],
+    raw_sample: SurfaceValue,
+) -> Tuple[Optional[str], bool]:
+    include_biome = isinstance(raw_sample, tuple) and len(raw_sample) >= 4
+    biome_getter = getattr(blocks, "biome_at", None)
+    if not callable(biome_getter) or height is None:
+        return biome, include_biome
+    try:
+        return cast(Optional[str], biome_getter(local_x, height, local_z)), True
+    except (TypeError, ValueError):
+        return biome, include_biome
+
+
+def _water_depth(
+    blocks: Any, local_x: int, local_z: int, name: Optional[str], height: Optional[int], depth: int,
+) -> int:
+    if not name or "water" not in name.lower() or height is None:
+        return depth
+    water_depth = depth
+    for candidate_depth in range(1, 9):
+        below = blocks.block_id_at(local_x, height - candidate_depth, local_z)
+        if not below or "water" not in below.lower():
+            break
+        water_depth = candidate_depth
+    return water_depth
 
 
 def _build_sample_jobs(edge: int) -> List[SampleJob]:
@@ -775,39 +811,21 @@ def _coerce_surface_sample(value: SurfaceValue) -> SurfaceValue:
     return value, None, 0
 
 
-def _sample_height(
-    samples: Sequence[Sequence[SurfaceValue]],
-    x: int,
-    z: int,
-    fallback: int,
-) -> int:
-    if not samples:
-        return fallback
-    z = min(max(0, z), len(samples) - 1)
-    row = samples[z]
-    if not row:
-        return fallback
-    x = min(max(0, x), len(row) - 1)
-    height = _surface_parts(row[x])[1]
-    return fallback if height is None else height
-
-
-def _relief_factor(
-    samples: Sequence[Sequence[SurfaceValue]],
-    x: int,
-    z: int,
+def _relief_factor_from_neighbors(
     height: Optional[int],
+    north: Optional[int],
+    west: Optional[int],
+    north_west: Optional[int],
     name: Optional[str],
     water_depth: int,
+    spacing_scale: float,
 ) -> float:
+    """Shade one sample when neighboring heights are already available."""
     if height is None:
         return 1.0
-    north = _sample_height(samples, x, z - 1, height)
-    west = _sample_height(samples, x - 1, z, height)
-    north_west = _sample_height(samples, x - 1, z - 1, height)
-    edge = _coarse_edge(len(samples))
-    sample_spacing = max(1.0, 512.0 / max(1, edge))
-    spacing_scale = min(1.0, 2.0 / sample_spacing)
+    north = height if north is None else north
+    west = height if west is None else west
+    north_west = height if north_west is None else north_west
     slope = spacing_scale * (
         (height - north) * 0.055
         + (height - west) * 0.040
@@ -820,6 +838,19 @@ def _relief_factor(
         # the sand/terrain contrast underneath them.
         factor *= 1.0 - min(8, max(0, water_depth)) * 0.030
     return max(0.72, min(1.28, factor))
+
+
+def _height_from_row(
+    heights: Optional[Sequence[Optional[int]]],
+    index: int,
+    fallback: int,
+) -> int:
+    """Read a clamped neighboring height without normalizing its full sample."""
+    if not heights:
+        return fallback
+    index = min(max(0, index), len(heights) - 1)
+    height = heights[index]
+    return fallback if height is None else height
 
 
 def _shade_color(color: Color, factor: float) -> Color:
@@ -884,12 +915,21 @@ def sample_region_surface_colors(
         return None
 
     colors: List[List[Color]] = []
+    edge = _coarse_edge(len(samples))
+    sample_spacing = max(1.0, 512.0 / max(1, edge))
+    spacing_scale = min(1.0, 2.0 / sample_spacing)
+    previous_heights: Optional[List[Optional[int]]] = None
     processed = 0
-    for z, row in enumerate(samples):
+    for row in samples:
         color_row: List[Color] = []
+        current_heights: List[Optional[int]] = []
+        north_source = (
+            current_heights if previous_heights is None else previous_heights
+        )
         for x, value in enumerate(row):
             parts = _surface_parts(value)
             name, height, water_depth, biome, overlay, overlay_alpha = parts
+            current_heights.append(height)
             if name is None:
                 base = DEFAULT_EMPTY
             elif is_air_name(name):
@@ -909,13 +949,14 @@ def sample_region_surface_colors(
                     color_for_surface,
                 )
                 base = _blend_surface_color(base, overlay_color, overlay_alpha)
-            factor = _relief_factor(
-                samples,
-                x,
-                z,
+            factor = _relief_factor_from_neighbors(
                 height,
+                _height_from_row(north_source, x, height or 0),
+                _height_from_row(current_heights, x - 1, height or 0),
+                _height_from_row(north_source, x - 1, height or 0),
                 name,
                 water_depth,
+                spacing_scale,
             )
             color_row.append(_shade_color(base, factor))
             processed += 1
@@ -926,6 +967,7 @@ def sample_region_surface_colors(
             ):
                 return None
         colors.append(color_row)
+        previous_heights = current_heights
     return colors
 
 

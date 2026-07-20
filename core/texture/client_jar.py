@@ -34,42 +34,49 @@ class ClientJarInfo:
 
 def find_local_minecraft_jar() -> Optional[Path]:
     """Locate the newest installed client jar under the local Minecraft dir."""
-    system = platform.system()
-    if system == "Windows":
-        mc_dir = Path(os.environ.get("APPDATA", "")) / ".minecraft"
-    elif system == "Darwin":
-        mc_dir = Path.home() / "Library" / "Application Support" / "minecraft"
-    else:
-        mc_dir = Path.home() / ".minecraft"
-
-    versions_dir = mc_dir / "versions"
+    versions_dir = _minecraft_directory() / "versions"
     if not versions_dir.exists():
         return None
+    jars = _find_version_jars(versions_dir)
+    if not jars:
+        return None
+    jars.sort(key=lambda item: item[0], reverse=True)
+    return jars[0][1]
 
+
+def _minecraft_directory() -> Path:
+    system = platform.system()
+    if system == "Windows":
+        return Path(os.environ.get("APPDATA", "")) / ".minecraft"
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "minecraft"
+    return Path.home() / ".minecraft"
+
+
+def _find_version_jars(versions_dir: Path) -> list[tuple[float, Path]]:
     jars: list[tuple[float, Path]] = []
     for version_dir in versions_dir.iterdir():
         if not version_dir.is_dir():
             continue
         jar_path = version_dir / f"{version_dir.name}.jar"
         if jar_path.exists():
-            sort_time = jar_path.stat().st_mtime
-            metadata_path = version_dir / f"{version_dir.name}.json"
-            try:
-                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-                release_time = metadata.get("releaseTime") or metadata.get("time")
-                if release_time:
-                    sort_time = datetime.fromisoformat(
-                        str(release_time).replace("Z", "+00:00")
-                    ).timestamp()
-            except (OSError, ValueError, TypeError):
-                pass
-            jars.append((sort_time, jar_path))
+            jars.append((_jar_release_time(version_dir, jar_path), jar_path))
+    return jars
 
-    if not jars:
-        return None
 
-    jars.sort(key=lambda item: item[0], reverse=True)
-    return jars[0][1]
+def _jar_release_time(version_dir: Path, jar_path: Path) -> float:
+    sort_time = jar_path.stat().st_mtime
+    metadata_path = version_dir / f"{version_dir.name}.json"
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        release_time = metadata.get("releaseTime") or metadata.get("time")
+        if release_time:
+            sort_time = datetime.fromisoformat(
+                str(release_time).replace("Z", "+00:00")
+            ).timestamp()
+    except (OSError, ValueError, TypeError):
+        pass
+    return sort_time
 
 
 def request_json(
@@ -165,39 +172,56 @@ def stream_client_jar(info: ClientJarInfo, jar_path: Path) -> bool:
     os.close(fd)
     temp_path = Path(temp_name)
     try:
-        digest = hashlib.sha1()
-        with open(temp_path, "wb") as file:
-            downloaded = 0
-            for chunk in response.iter_content(chunk_size=8192):
-                if not chunk:
-                    continue
-                file.write(chunk)
-                digest.update(chunk)
-                downloaded += len(chunk)
-                if downloaded % (1024 * 1024) == 0:
-                    logger.debug(
-                        f"已下载: {downloaded / 1024 / 1024:.1f} MB"
-                    )
-        if info.size and downloaded != info.size:
-            logger.warning(f"JAR 长度校验失败: 预期 {info.size}，实际 {downloaded}")
+        downloaded, actual_sha1 = _write_client_jar(response, temp_path)
+        if not _download_matches(info, downloaded, actual_sha1):
             return False
-        if info.sha1 and digest.hexdigest().lower() != info.sha1.lower():
-            logger.warning("JAR SHA1 校验失败")
-            return False
-        try:
-            with zipfile.ZipFile(temp_path) as archive:
-                if archive.testzip() is not None:
-                    logger.warning("JAR ZIP 完整性校验失败")
-                    return False
-        except zipfile.BadZipFile:
-            logger.warning("下载内容不是有效的 JAR")
+        if not _is_valid_jar(temp_path):
             return False
         os.replace(temp_path, jar_path)
         return True
-    except Exception:
-        raise
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+def _write_client_jar(response: Any, temp_path: Path) -> tuple[int, str]:
+    digest = hashlib.sha1()
+    downloaded = 0
+    with open(temp_path, "wb") as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            if not chunk:
+                continue
+            file.write(chunk)
+            digest.update(chunk)
+            downloaded += len(chunk)
+            if downloaded % (1024 * 1024) == 0:
+                logger.debug(f"已下载: {downloaded / 1024 / 1024:.1f} MB")
+    return downloaded, digest.hexdigest()
+
+
+def _download_matches(
+    info: ClientJarInfo,
+    downloaded: int,
+    actual_sha1: str,
+) -> bool:
+    if info.size and downloaded != info.size:
+        logger.warning(f"JAR 长度校验失败: 预期 {info.size}，实际 {downloaded}")
+        return False
+    if info.sha1 and actual_sha1.lower() != info.sha1.lower():
+        logger.warning("JAR SHA1 校验失败")
+        return False
+    return True
+
+
+def _is_valid_jar(path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            if archive.testzip() is not None:
+                logger.warning("JAR ZIP 完整性校验失败")
+                return False
+    except zipfile.BadZipFile:
+        logger.warning("下载内容不是有效的 JAR")
+        return False
+    return True
 
 
 def cleanup_old_jars(jar_cache_dir: Path, keep_count: int = 1) -> None:

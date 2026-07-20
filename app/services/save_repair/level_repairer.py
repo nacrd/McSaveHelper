@@ -7,7 +7,7 @@ import shutil
 import threading
 import tempfile
 from pathlib import Path
-from typing import Callable, List, Any, Dict
+from typing import Any, Callable, Dict, List, Optional
 
 import nbtlib
 
@@ -147,9 +147,22 @@ class LevelRepairer:
         log: Callable[[str, str], None],
     ) -> List[str]:
         """验证并修复 level.dat Data 中的字段，返回修复的字段名列表"""
-        repaired: List[str] = []
+        repaired = self._add_missing_fields(data, log)
+        for spawn_field in ("SpawnX", "SpawnY", "SpawnZ"):
+            repaired_field = self._repair_spawn_field(data, spawn_field)
+            if repaired_field is not None:
+                repaired.append(repaired_field)
+        difficulty_field = self._repair_difficulty(data)
+        if difficulty_field is not None:
+            repaired.append(difficulty_field)
+        return repaired
 
-        # 补充缺失字段
+    @staticmethod
+    def _add_missing_fields(
+        data: Any,
+        log: Callable[[str, str], None],
+    ) -> List[str]:
+        repaired: List[str] = []
         for field_name, default_factory in LEVEL_DAT_REQUIRED_FIELDS.items():
             if field_name not in data:
                 try:
@@ -158,26 +171,30 @@ class LevelRepairer:
                     log(f"level.dat 补充缺失字段: {field_name}", "WARNING")
                 except Exception:
                     pass
-
-        # 修复 SpawnX/Y/Z 为合理范围
-        for spawn_field in ("SpawnX", "SpawnY", "SpawnZ"):
-            if spawn_field in data:
-                try:
-                    val = int(data[spawn_field])
-                    if spawn_field == "SpawnY" and (val < -64 or val > 320):
-                        data[spawn_field] = nbtlib.Int(64)
-                        repaired.append(f"{spawn_field}(范围修正)")
-                except (ValueError, TypeError):
-                    pass
-
-        # 修复 Difficulty 在合理范围
-        if "Difficulty" in data:
-            try:
-                val = int(data["Difficulty"])
-                if val < 0 or val > 3:
-                    data["Difficulty"] = nbtlib.Byte(2)
-                    repaired.append("Difficulty(范围修正)")
-            except (ValueError, TypeError):
-                pass
-
         return repaired
+
+    @staticmethod
+    def _repair_spawn_field(data: Any, field_name: str) -> Optional[str]:
+        if field_name not in data:
+            return None
+        try:
+            value = int(data[field_name])
+        except (ValueError, TypeError):
+            return None
+        if field_name != "SpawnY" or -64 <= value <= 320:
+            return None
+        data[field_name] = nbtlib.Int(64)
+        return f"{field_name}(范围修正)"
+
+    @staticmethod
+    def _repair_difficulty(data: Any) -> Optional[str]:
+        if "Difficulty" not in data:
+            return None
+        try:
+            value = int(data["Difficulty"])
+        except (ValueError, TypeError):
+            return None
+        if 0 <= value <= 3:
+            return None
+        data["Difficulty"] = nbtlib.Byte(2)
+        return "Difficulty(范围修正)"

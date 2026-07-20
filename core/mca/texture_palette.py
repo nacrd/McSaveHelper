@@ -31,6 +31,7 @@ _archive: Optional[zipfile.ZipFile] = None
 _archive_path: Optional[Path] = None
 _archive_names: Optional[frozenset[str]] = None
 _lookup_attempted = False
+_palette_signature: Optional[str] = None
 
 
 def set_texture_jar(path: Optional[Path | str]) -> None:
@@ -39,7 +40,8 @@ def set_texture_jar(path: Optional[Path | str]) -> None:
     This is intentionally explicit so a UI/settings layer can point at a
     resource pack without coupling the core renderer to application state.
     """
-    global _jar_path, _archive, _archive_path, _archive_names, _lookup_attempted
+    global _jar_path, _archive, _archive_path, _archive_names
+    global _lookup_attempted, _palette_signature
     with _lock:
         if _archive is not None:
             try:
@@ -51,6 +53,7 @@ def set_texture_jar(path: Optional[Path | str]) -> None:
         _archive_names = None
         _jar_path = Path(path).expanduser() if path else None
         _lookup_attempted = path is not None
+        _palette_signature = None
         _average_texture.cache_clear()
 
 
@@ -127,50 +130,77 @@ def _texture_candidates(block_path: str) -> tuple[str, ...]:
 
 @lru_cache(maxsize=1024)
 def _average_texture(block_path: str) -> Optional[Color]:
-    global _archive_names
     archive = _get_archive()
     if archive is None or Image is None:
         return None
     try:
-        with _lock:
-            if _archive_names is None:
-                _archive_names = frozenset(archive.namelist())
-            names = _archive_names
-        texture_name = next(
-            (candidate for candidate in _texture_candidates(block_path) if candidate in names),
-            None,
-        )
+        texture_name = _find_texture_name(archive, block_path)
         if texture_name is None:
             return None
         with Image.open(io.BytesIO(archive.read(texture_name))) as image:
-            rgba = image.convert("RGBA")
-            width, height = rgba.size
-            step = max(1, min(4, min(width, height) // 8 or 1))
-            pixels = rgba.load()
-            if pixels is None:
-                return None
-            red = green = blue = weight = 0.0
-            for y in range(0, height, step):
-                for x in range(0, width, step):
-                    pixel = cast(Tuple[int, int, int, int], cast(Any, pixels[x, y]))
-                    r, g, b, alpha = pixel
-                    if alpha <= 10:
-                        continue
-                    factor = alpha / 255.0
-                    red += r * factor
-                    green += g * factor
-                    blue += b * factor
-                    weight += factor
-            rgba.close()
-        if weight <= 0:
-            return None
-        return (
-            max(0, min(255, round(red / weight))),
-            max(0, min(255, round(green / weight))),
-            max(0, min(255, round(blue / weight))),
-        )
+            return _average_image_pixels(image)
     except Exception:
         return None
+
+
+def _find_texture_name(archive: zipfile.ZipFile, block_path: str) -> Optional[str]:
+    global _archive_names
+    with _lock:
+        if _archive_names is None:
+            _archive_names = frozenset(archive.namelist())
+        names = _archive_names
+    return next(
+        (candidate for candidate in _texture_candidates(block_path) if candidate in names),
+        None,
+    )
+
+
+def _average_image_pixels(image: Any) -> Optional[Color]:
+    rgba = image.convert("RGBA")
+    try:
+        pixels = rgba.load()
+        if pixels is None:
+            return None
+        width, height = rgba.size
+        step = max(1, min(4, min(width, height) // 8 or 1))
+        totals = _accumulate_visible_pixels(pixels, width, height, step)
+        return _color_from_weighted_totals(totals)
+    finally:
+        rgba.close()
+
+
+def _accumulate_visible_pixels(
+    pixels: Any,
+    width: int,
+    height: int,
+    step: int,
+) -> Tuple[float, float, float, float]:
+    red = green = blue = weight = 0.0
+    for y in range(0, height, step):
+        for x in range(0, width, step):
+            pixel = cast(Tuple[int, int, int, int], cast(Any, pixels[x, y]))
+            pixel_red, pixel_green, pixel_blue, alpha = pixel
+            if alpha <= 10:
+                continue
+            factor = alpha / 255.0
+            red += pixel_red * factor
+            green += pixel_green * factor
+            blue += pixel_blue * factor
+            weight += factor
+    return red, green, blue, weight
+
+
+def _color_from_weighted_totals(
+    totals: Tuple[float, float, float, float],
+) -> Optional[Color]:
+    red, green, blue, weight = totals
+    if weight <= 0:
+        return None
+    return (
+        max(0, min(255, round(red / weight))),
+        max(0, min(255, round(green / weight))),
+        max(0, min(255, round(blue / weight))),
+    )
 
 
 def average_block_texture(block_id: str) -> Optional[Color]:
@@ -189,16 +219,22 @@ def texture_jar_path() -> Optional[Path]:
 
 def texture_palette_signature() -> str:
     """Return a stable cache-key fragment for the active texture source."""
-    path = texture_jar_path()
-    if path is None:
-        return "fallback"
-    try:
-        stat = path.stat()
-        return (
-            f"{path.resolve()}|{int(stat.st_mtime_ns)}|{int(stat.st_size)}"
-        )
-    except OSError:
-        return str(path)
+    global _palette_signature
+    with _lock:
+        if _palette_signature is not None:
+            return _palette_signature
+        path = texture_jar_path()
+        if path is None:
+            _palette_signature = "fallback"
+            return _palette_signature
+        try:
+            stat = path.stat()
+            _palette_signature = (
+                f"{path.absolute()}|{int(stat.st_mtime_ns)}|{int(stat.st_size)}"
+            )
+        except OSError:
+            _palette_signature = str(path)
+        return _palette_signature
 
 
 __all__ = [

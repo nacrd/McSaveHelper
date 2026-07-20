@@ -28,6 +28,16 @@ class MapImageSpec:
     estimated_mb: float
 
 
+@dataclass(frozen=True)
+class _ChunkRenderContext:
+    image: Any
+    pixels: Any
+    chunk: Any
+    block_bounds: Tuple[int, int, int, int]
+    map_type: str
+    scale: int
+
+
 class MapRenderCancelled(Exception):
     """地图渲染被调用方取消。"""
 
@@ -351,46 +361,68 @@ class MapExportRenderer:
             pixels: 像素访问对象（可选，用于批量写入优化）
         """
         try:
-            if pixels is None:
-                pixels = image.load()
-
-            if block_bounds is None:
-                block_bounds = self._normalize_block_bounds(None, bounds)
-            origin_x, origin_z, max_x, max_z = block_bounds
-            world_chunk_x = rx * 32 + cx
-            world_chunk_z = rz * 32 + cz
-
-            # 获取区块的最高方块
-            for bx in range(16):
-                self._raise_if_cancelled(cancel_event)
-                world_x = world_chunk_x * 16 + bx
-                if world_x < origin_x or world_x > max_x:
-                    continue
-                for bz in range(16):
-                    world_z = world_chunk_z * 16 + bz
-                    if world_z < origin_z or world_z > max_z:
-                        continue
-                    try:
-                        # 获取最高非空气方块
-                        y = self.highest_block_y(chunk, bx, bz)
-                        if y is not None:
-                            # 获取方块类型
-                            block = chunk.get_block(bx, y, bz)
-                            color = self._get_block_color(block, y, map_type)
-
-                            px = (world_x - origin_x) // scale
-                            py = (world_z - origin_z) // scale
-
-                            # 绘制像素（使用像素访问对象，比 putpixel 快 5-10 倍）
-                            if 0 <= px < image.width and 0 <= py < image.height:
-                                pixels[px, py] = color
-                    except Exception:
-                        pass  # 跳过无效方块
+            pixel_access = pixels if pixels is not None else image.load()
+            bounds_value = block_bounds or self._normalize_block_bounds(None, bounds)
+            self._render_chunk_columns(
+                _ChunkRenderContext(
+                    image=image,
+                    pixels=pixel_access,
+                    chunk=chunk,
+                    block_bounds=bounds_value,
+                    map_type=map_type,
+                    scale=scale,
+                ),
+                rx,
+                rz,
+                cx,
+                cz,
+                cancel_event,
+            )
 
         except MapRenderCancelled:
             raise
         except Exception:
             pass  # 跳过损坏的区块数据
+
+    def _render_chunk_columns(
+        self,
+        context: _ChunkRenderContext,
+        rx: int,
+        rz: int,
+        cx: int,
+        cz: int,
+        cancel_event: Optional[threading.Event],
+    ) -> None:
+        origin_x, origin_z, max_x, max_z = context.block_bounds
+        world_chunk_x, world_chunk_z = rx * 32 + cx, rz * 32 + cz
+        for block_x in range(16):
+            self._raise_if_cancelled(cancel_event)
+            world_x = world_chunk_x * 16 + block_x
+            if not origin_x <= world_x <= max_x:
+                continue
+            for block_z in range(16):
+                world_z = world_chunk_z * 16 + block_z
+                if not origin_z <= world_z <= max_z:
+                    continue
+                try:
+                    height = self.highest_block_y(
+                        context.chunk,
+                        block_x,
+                        block_z,
+                    )
+                    if height is None:
+                        continue
+                    block = context.chunk.get_block(block_x, height, block_z)
+                    color = self._get_block_color(block, height, context.map_type)
+                    pixel_x = (world_x - origin_x) // context.scale
+                    pixel_z = (world_z - origin_z) // context.scale
+                    if (
+                        0 <= pixel_x < context.image.width
+                        and 0 <= pixel_z < context.image.height
+                    ):
+                        context.pixels[pixel_x, pixel_z] = color
+                except Exception:
+                    pass
 
     @staticmethod
     def _raise_if_cancelled(

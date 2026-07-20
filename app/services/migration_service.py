@@ -13,7 +13,6 @@ from core.batch_processor import (
     BatchProcessor,
     scan_worlds_directory,
 )
-from core.logger import logger
 from core.types import LogCallback, ProgressCallback
 from core.i18n import t
 from app.services.config_service import ConfigService
@@ -370,53 +369,26 @@ class MigrationService:
         target_version: str,
         log_cb: LogCallback,
     ) -> bool:
-        if target_platform != "java":
-            log_cb("尚未接入可靠的基岩版转换引擎，已拒绝迁移", "ERROR")
-            return False
-        version_value = None
-        if target_version.strip():
-            log_cb("尚未实现可靠的跨版本数据迁移，已拒绝版本降级", "ERROR")
-            return False
-
-        if target_platform == "java" and version_value is None:
-            return True
-
-        from core.converter import ConversionError, convert_world
-
-        log_cb(
-            f"开始应用版本/平台转换: platform={target_platform}, "
-            f"version={version_value or 'keep'}",
-            "CONVERT",
+        del world_path
+        rejection_reason = self._conversion_rejection_reason(
+            target_platform,
+            target_version,
         )
-        try:
-            result = convert_world(
-                world_path,
-                world_path,
-                target_platform=target_platform,
-                target_version=version_value)
-        except ConversionError as e:
-            logger.error(f"版本/平台转换失败: {e}", module="MigrationService")
-            log_cb(f"版本/平台转换失败: {e}", "ERROR")
+        if rejection_reason is not None:
+            log_cb(rejection_reason, "ERROR")
             return False
-        except Exception as e:
-            logger.error(f"版本/平台转换发生未预期错误: {e}", module="MigrationService")
-            log_cb(f"版本/平台转换发生未预期错误: {e}", "ERROR")
-            return False
-
-        for warning in result.warnings:
-            log_cb(warning, "WARNING")
-
-        if not result.success:
-            for error in result.errors[:5]:
-                log_cb(error, "ERROR")
-            if len(result.errors) > 5:
-                log_cb(f"还有 {len(result.errors) - 5} 个转换错误未显示", "ERROR")
-            logger.error(
-                f"版本/平台转换完成但存在 {len(result.errors)} 个错误", module="MigrationService")
-            return False
-
-        log_cb(f"版本/平台转换完成，已处理 {result.converted_files} 个文件", "CONVERT")
         return True
+
+    @staticmethod
+    def _conversion_rejection_reason(
+        target_platform: str,
+        target_version: str,
+    ) -> Optional[str]:
+        if target_platform != "java":
+            return "尚未接入可靠的基岩版转换引擎，已拒绝迁移"
+        if target_version.strip():
+            return "尚未实现可靠的跨版本数据迁移，已拒绝版本降级"
+        return None
 
     @staticmethod
     def open_folder(path: str) -> None:

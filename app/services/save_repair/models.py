@@ -94,6 +94,50 @@ class WorldInfo:
     play_time_ticks: int = 0
 
 
+def _world_info_summary_lines(info: WorldInfo) -> List[str]:
+    lines = ["── 世界信息 ──"]
+    if info.world_name:
+        lines.append(f"名称: {info.world_name}")
+    if info.version_name:
+        lines.append(f"版本: {info.version_name} (DataVersion {info.data_version})")
+    if info.game_type_name:
+        lines.append(f"模式: {info.game_type_name}")
+    lines.extend([
+        f"难度: {info.difficulty_name}",
+        f"种子: {info.seed}",
+        f"出生点: {info.spawn_pos}",
+    ])
+    if info.play_time_ticks > 0:
+        hours = info.play_time_ticks / 72000
+        lines.append(f"游戏时间: {hours:.1f} 小时")
+    lines.extend([
+        f"存档大小: {info.world_size_mb:.1f} MB",
+        f"维度: {', '.join(info.dimensions) if info.dimensions else '无'}",
+        f"区域文件: {info.region_count}, 区块: {info.total_chunks}",
+        f"玩家: {info.player_count}",
+    ])
+    return lines
+
+
+def _unreadable_region_summary_lines(region_names: List[str]) -> List[str]:
+    if not region_names:
+        return []
+    lines = [f"无法读取的区域文件: {len(region_names)}"]
+    lines.extend(f"  - {name}" for name in region_names[:10])
+    if len(region_names) > 10:
+        lines.append(f"  ... 共 {len(region_names)} 个")
+    return lines
+
+
+def _player_issue_summary_lines(
+    player_issues: Dict[str, List[str]],
+) -> List[str]:
+    return [
+        f"  {player_name}: {', '.join(issues)}"
+        for player_name, issues in list(player_issues.items())[:5]
+    ]
+
+
 @dataclass
 class DetectReport:
     """存档检测报告（只读，不修改任何文件）"""
@@ -120,52 +164,24 @@ class DetectReport:
         )
 
     def summary_text(self) -> str:
-        lines: List[str] = []
-        info = self.world_info
-
-        lines.append("── 世界信息 ──")
-        if info.world_name:
-            lines.append(f"名称: {info.world_name}")
-        if info.version_name:
-            lines.append(f"版本: {info.version_name} (DataVersion {info.data_version})")
-        if info.game_type_name:
-            lines.append(f"模式: {info.game_type_name}")
-        lines.append(f"难度: {info.difficulty_name}")
-        lines.append(f"种子: {info.seed}")
-        lines.append(f"出生点: {info.spawn_pos}")
-        if info.play_time_ticks > 0:
-            hours = info.play_time_ticks / 72000
-            lines.append(f"游戏时间: {hours:.1f} 小时")
-        lines.append(f"存档大小: {info.world_size_mb:.1f} MB")
-        lines.append(f"维度: {', '.join(info.dimensions) if info.dimensions else '无'}")
-        lines.append(f"区域文件: {info.region_count}, 区块: {info.total_chunks}")
-        lines.append(f"玩家: {info.player_count}")
-
-        lines.append("")
-        lines.append("── 检测结果 ──")
-        lines.append(f"区块检查: {self.chunks_checked}, 损坏: {self.chunks_damaged}")
-        if self.unreadable_regions:
-            lines.append(f"无法读取的区域文件: {len(self.unreadable_regions)}")
-            for name in self.unreadable_regions[:10]:
-                lines.append(f"  - {name}")
-            if len(self.unreadable_regions) > 10:
-                lines.append(f"  ... 共 {len(self.unreadable_regions)} 个")
-        lines.append(f"玩家检查: {self.players_checked}, 有问题: {self.players_with_issues}")
-        if self.player_issues:
-            for pname, pissues in list(self.player_issues.items())[:5]:
-                lines.append(f"  {pname}: {', '.join(pissues)}")
+        lines = _world_info_summary_lines(self.world_info)
+        lines.extend([
+            "",
+            "── 检测结果 ──",
+            f"区块检查: {self.chunks_checked}, 损坏: {self.chunks_damaged}",
+        ])
+        lines.extend(_unreadable_region_summary_lines(self.unreadable_regions))
+        lines.append(
+            f"玩家检查: {self.players_checked}, 有问题: {self.players_with_issues}"
+        )
+        lines.extend(_player_issue_summary_lines(self.player_issues))
         lines.append(f"level.dat: {'正常' if self.level_dat_ok else '异常'}")
-        if self.level_dat_issues:
-            for issue in self.level_dat_issues:
-                lines.append(f"  - {issue}")
-
+        lines.extend(f"  - {issue}" for issue in self.level_dat_issues)
         lines.append(f"\n耗时: {self.elapsed_seconds:.1f}s")
         if self.cancelled:
             lines.append("(操作已取消)")
-
         if not self.has_problems:
             lines.append("\n存档状态良好，未发现问题。")
         else:
             lines.append(f"\n发现 {len(self.issues)} 个问题，建议执行修复。")
-
         return "\n".join(lines)

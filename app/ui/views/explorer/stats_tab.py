@@ -1,5 +1,6 @@
 """Stats tab mixin for ExplorerView."""
 import threading
+from pathlib import Path
 from typing import Any, List, Tuple
 
 import flet as ft
@@ -9,6 +10,7 @@ from app.ui.theme import THEME
 from app.ui.components.cards import card
 from app.ui.views.explorer.utils import safe_update, format_size
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
+from app.services.world_stats_service import WorldStatistics, WorldStatsService
 
 
 class StatsTabMixin(ExplorerMixinHost):
@@ -265,62 +267,61 @@ class StatsTabMixin(ExplorerMixinHost):
             if session is None:
                 self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
-
-            from app.services.world_stats_service import get_world_stats_service
-            service = get_world_stats_service(log=self.app.log)
             self._stats_status.value = "正在分析，较大存档可能需要较长时间..."
             safe_update(self._stats_status)
-
-            def _run():
-                try:
-                    stats = service.analyze_world(
-                        session.world_path)
-
-                    async def _update_ui():
-                        try:
-                            chunk_slots = (
-                                stats.loaded_chunks + stats.empty_chunks
-                            )
-                            loaded_ratio = (
-                                stats.loaded_chunks / chunk_slots * 100
-                                if chunk_slots
-                                else 0
-                            )
-                            total_size = sum(stats.region_sizes.values())
-                            self._stats_summary.value = (
-                                f"区域: {stats.total_regions}\n"
-                                f"已加载区块: {stats.loaded_chunks}，"
-                                f"空/未加载槽位: {stats.empty_chunks}，"
-                                f"加载比例: {loaded_ratio:.1f}%\n"
-                                f"区域文件总大小: {format_size(total_size)}\n"
-                                f"方块调色板条目: {stats.total_blocks}，"
-                                f"实体/方块实体: {stats.total_entities}"
-                            )
-                            self._fill_rank(
-                                self._block_stats_col,
-                                stats.block_stats.top_blocks[:10] if stats.block_stats else []
-                            )
-                            self._update_block_pie_chart(
-                                stats.block_stats.top_blocks[:7] if stats.block_stats else []
-                            )
-                            self._fill_rank(
-                                self._entity_stats_col,
-                                stats.entity_stats.top_entities[:10] if stats.entity_stats else []
-                            )
-                            self._fill_rank(
-                                self._size_stats_col, list(
-                                    service.get_region_size_distribution(stats).items()))
-                            self._stats_status.value = "统计完成。"
-                            safe_update(self._tab_stats)
-                        except Exception as ex:
-                            self.app.handle_exception(ex, title="统计存档失败")
-
-                    self.app.page.run_task(_update_ui)
-                except Exception as ex:
-                    async def _handle_error(error: Exception):
-                        self.app.handle_exception(error, title="统计存档失败")
-                    self.app.page.run_task(_handle_error, ex)
-
-            threading.Thread(target=_run, daemon=True).start()
+            self._start_stats_analysis(session.world_path)
         except Exception as ex:
             self.app.handle_exception(ex, title="统计存档失败")
+
+    def _start_stats_analysis(self, world_path: Path) -> None:
+        from app.services.world_stats_service import get_world_stats_service
+
+        service = get_world_stats_service(log=self.app.log)
+
+        def run() -> None:
+            try:
+                stats = service.analyze_world(world_path)
+                self.app.page.run_task(self._update_stats_ui, stats, service)
+            except Exception as ex:
+                self.app.page.run_task(self._handle_stats_error, ex)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    async def _update_stats_ui(
+        self, stats: WorldStatistics, service: WorldStatsService
+    ) -> None:
+        try:
+            self._set_stats_summary(stats)
+            self._set_ranked_stats(stats, service)
+            self._stats_status.value = "统计完成。"
+            safe_update(self._tab_stats)
+        except Exception as ex:
+            self.app.handle_exception(ex, title="统计存档失败")
+
+    def _set_stats_summary(self, stats: WorldStatistics) -> None:
+        chunk_slots = stats.loaded_chunks + stats.empty_chunks
+        loaded_ratio = stats.loaded_chunks / chunk_slots * 100 if chunk_slots else 0
+        total_size = sum(stats.region_sizes.values())
+        self._stats_summary.value = (
+            f"区域: {stats.total_regions}\n"
+            f"已加载区块: {stats.loaded_chunks}，空/未加载槽位: {stats.empty_chunks}，"
+            f"加载比例: {loaded_ratio:.1f}%\n"
+            f"区域文件总大小: {format_size(total_size)}\n"
+            f"方块调色板条目: {stats.total_blocks}，实体/方块实体: {stats.total_entities}"
+        )
+
+    def _set_ranked_stats(
+        self, stats: WorldStatistics, service: WorldStatsService
+    ) -> None:
+        block_items = stats.block_stats.top_blocks if stats.block_stats else []
+        entity_items = stats.entity_stats.top_entities if stats.entity_stats else []
+        self._fill_rank(self._block_stats_col, block_items[:10])
+        self._update_block_pie_chart(block_items[:7])
+        self._fill_rank(self._entity_stats_col, entity_items[:10])
+        self._fill_rank(
+            self._size_stats_col,
+            list(service.get_region_size_distribution(stats).items()),
+        )
+
+    async def _handle_stats_error(self, error: Exception) -> None:
+        self.app.handle_exception(error, title="统计存档失败")

@@ -368,61 +368,93 @@ def block_grid_for_region(
         return shapes, block_bounds
 
     rx, rz = region_coord
-    targets: List[Tuple[int, int]] = []
-    if selected_chunk is not None:
-        scx, scz = selected_chunk
-        if scx // 32 == rx and scz // 32 == rz:
-            targets.append((scx - rx * 32, scz - rz * 32))
-    if not targets:
-        targets.append((15, 15))
-
-    for local_x, local_z in targets:
+    for local_x, local_z in _block_grid_targets(region_coord, selected_chunk):
         bx = region_x + local_x * chunk_size
         by = region_y + local_z * chunk_size
-        line_color = "#FFFFFF33" if block_px >= 4 else "#FFFFFF22"
-        for index in range(1, 16):
-            pos = index * block_px
-            shapes.append(
-                cv.Line(
-                    bx + pos,
-                    by,
-                    bx + pos,
-                    by + chunk_size,
-                    paint=ft.Paint(color=line_color, stroke_width=0.5),
-                )
-            )
-            shapes.append(
-                cv.Line(
-                    bx,
-                    by + pos,
-                    bx + chunk_size,
-                    by + pos,
-                    paint=ft.Paint(color=line_color, stroke_width=0.5),
-                )
-            )
-        if show_coordinates and block_px >= 6:
-            cx = rx * 32 + local_x
-            cz = rz * 32 + local_z
-            shapes.append(
-                cv.Text(
-                    x=bx + 2,
-                    y=by + 2,
-                    value=f"{cx * 16},{cz * 16}",
-                    style=ft.TextStyle(size=10, color="#FFF59D"),
-                )
-            )
+        _append_block_grid_lines(shapes, bx, by, chunk_size, block_px)
+        _append_block_coordinate(
+            shapes, bx, by, region_coord, local_x, local_z, show_coordinates, block_px
+        )
         if block_px >= 4:
-            for block_z in range(16):
-                for block_x in range(16):
-                    world_bx = (rx * 32 + local_x) * 16 + block_x
-                    world_bz = (rz * 32 + local_z) * 16 + block_z
-                    block_bounds[(world_bx, world_bz)] = (
-                        bx + block_x * block_px,
-                        by + block_z * block_px,
-                        block_px,
-                        block_px,
-                    )
+            _record_block_bounds(block_bounds, bx, by, region_coord, local_x, local_z, block_px)
     return shapes, block_bounds
+
+
+def _block_grid_targets(
+    region_coord: Coord,
+    selected_chunk: Optional[Coord],
+) -> List[Coord]:
+    if selected_chunk is None:
+        return [(15, 15)]
+    region_x, region_z = region_coord
+    chunk_x, chunk_z = selected_chunk
+    if chunk_x // 32 != region_x or chunk_z // 32 != region_z:
+        return [(15, 15)]
+    return [(chunk_x - region_x * 32, chunk_z - region_z * 32)]
+
+
+def _append_block_grid_lines(
+    shapes: List[cv.Shape],
+    x: float,
+    y: float,
+    chunk_size: float,
+    block_px: float,
+) -> None:
+    line_color = "#FFFFFF33" if block_px >= 4 else "#FFFFFF22"
+    paint = ft.Paint(color=line_color, stroke_width=0.5)
+    for index in range(1, 16):
+        position = index * block_px
+        shapes.extend((
+            cv.Line(x + position, y, x + position, y + chunk_size, paint=paint),
+            cv.Line(x, y + position, x + chunk_size, y + position, paint=paint),
+        ))
+
+
+def _append_block_coordinate(
+    shapes: List[cv.Shape],
+    x: float,
+    y: float,
+    region_coord: Coord,
+    local_x: int,
+    local_z: int,
+    show_coordinates: bool,
+    block_px: float,
+) -> None:
+    if not show_coordinates or block_px < 6:
+        return
+    region_x, region_z = region_coord
+    chunk_x = region_x * 32 + local_x
+    chunk_z = region_z * 32 + local_z
+    shapes.append(
+        cv.Text(
+            x=x + 2,
+            y=y + 2,
+            value=f"{chunk_x * 16},{chunk_z * 16}",
+            style=ft.TextStyle(size=10, color="#FFF59D"),
+        )
+    )
+
+
+def _record_block_bounds(
+    block_bounds: Dict[Coord, ScreenRect],
+    x: float,
+    y: float,
+    region_coord: Coord,
+    local_x: int,
+    local_z: int,
+    block_px: float,
+) -> None:
+    region_x, region_z = region_coord
+    world_x = (region_x * 32 + local_x) * 16
+    world_z = (region_z * 32 + local_z) * 16
+    for block_z in range(16):
+        for block_x in range(16):
+            block_bounds[(world_x + block_x, world_z + block_z)] = (
+                x + block_x * block_px,
+                y + block_z * block_px,
+                block_px,
+                block_px,
+            )
 
 
 def info_overlay(

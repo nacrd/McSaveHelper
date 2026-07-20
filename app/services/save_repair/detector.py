@@ -50,6 +50,35 @@ def _read_int_tag(
         return default
 
 
+def _dimension_for_region(parts: tuple[str, ...]) -> Optional[str]:
+    """从区域文件相对路径识别 Minecraft 维度。"""
+    if len(parts) >= 2 and parts[0] == "region":
+        return "minecraft:overworld"
+    if len(parts) >= 3 and parts[0] == "DIM-1":
+        return "minecraft:the_nether"
+    if len(parts) >= 3 and parts[0] == "DIM1":
+        return "minecraft:the_end"
+    if len(parts) >= 5 and parts[:2] == ("dimensions", "minecraft"):
+        return f"minecraft:{parts[2]}"
+    if "dimensions" not in parts:
+        return None
+    index = parts.index("dimensions")
+    if index + 2 >= len(parts):
+        return None
+    return f"{parts[index + 1]}:{parts[index + 2]}"
+
+
+def _estimate_region_chunks(region_files: List[Path]) -> int:
+    total_chunks = 0
+    for region_file in region_files:
+        try:
+            size = region_file.stat().st_size
+            total_chunks += min(1024, max(0, size // 4096))
+        except OSError:
+            pass
+    return total_chunks
+
+
 class WorldDetector:
     """存档检测器（只读）"""
 
@@ -168,33 +197,14 @@ class WorldDetector:
         info.region_count = len(region_files)
         dimensions: Set[str] = set()
 
-        for rf in region_files:
-            rel = rf.relative_to(world_path)
-            parts = rel.parts
-            if len(parts) >= 2 and parts[0] == "region":
-                dimensions.add("minecraft:overworld")
-            elif len(parts) >= 3 and parts[0] == "DIM-1":
-                dimensions.add("minecraft:the_nether")
-            elif len(parts) >= 3 and parts[0] == "DIM1":
-                dimensions.add("minecraft:the_end")
-            elif len(parts) >= 5 and parts[0] == "dimensions" and parts[1] == "minecraft":
-                # 26.1 新版路径: dimensions/minecraft/<dim>/region/...
-                dimensions.add(f"minecraft:{parts[2]}")
-            elif "dimensions" in parts:
-                idx = parts.index("dimensions")
-                if idx + 2 < len(parts):
-                    dimensions.add(f"{parts[idx + 1]}:{parts[idx + 2]}")
+        for region_file in region_files:
+            parts = region_file.relative_to(world_path).parts
+            dimension = _dimension_for_region(parts)
+            if dimension is not None:
+                dimensions.add(dimension)
 
         info.dimensions = sorted(dimensions)
-
-        # 估算总区块数
-        info.total_chunks = 0
-        for rf in region_files:
-            try:
-                size = rf.stat().st_size
-                info.total_chunks += min(1024, max(0, size // 4096))
-            except OSError:
-                pass
+        info.total_chunks = _estimate_region_chunks(region_files)
 
     def _detect_chunks(
         self,

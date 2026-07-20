@@ -10,6 +10,7 @@ from core.mca.surface import (
     _needed_chunks,
     _resize_nearest,
     _downsample_surface_values,
+    _sample_column,
     _sample_coarse_grid,
     _shade_color,
     _load_chunk_views,
@@ -132,6 +133,18 @@ class _View:
         return f"{self.prefix}:{local_x},{local_z}"
 
 
+class _ReportedWaterDepth:
+    def surface_sample(
+        self,
+        _local_x: int,
+        _local_z: int,
+    ) -> tuple[str, int, int]:
+        return "minecraft:water", 64, 3
+
+    def block_id_at(self, _local_x: int, _height: int, _local_z: int) -> str:
+        return "minecraft:stone"
+
+
 def test_sample_jobs_cover_region_edges_and_local_coordinates() -> None:
     jobs = _build_sample_jobs(8)
 
@@ -139,6 +152,14 @@ def test_sample_jobs_cover_region_edges_and_local_coordinates() -> None:
     assert jobs[0] == (0, 0, 2, 2, 0, 0)
     assert jobs[-1] == (7, 7, 30, 30, 0, 0)
     assert all(0 <= job[4] < 16 and 0 <= job[5] < 16 for job in jobs)
+
+
+def test_column_sampling_preserves_reported_water_depth() -> None:
+    assert _sample_column(_ReportedWaterDepth(), 2, 3) == (
+        "minecraft:water",
+        64,
+        3,
+    )
 
 
 def test_lod_upgrades_decode_each_sampled_chunk_only_once(monkeypatch) -> None:

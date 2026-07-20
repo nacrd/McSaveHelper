@@ -85,43 +85,36 @@ class NbtDataLoader:
             self._target_options.clear()
             session = self._get_world_session()
             if not session:
-                self._target_dropdown.options = []
-                safe_update(self._target_dropdown)
+                self._set_target_options([])
                 return
-
-            candidates: List[Tuple[str, Path]] = []
-            world_path = session.world_path
-            if (world_path / "level.dat").exists():
-                candidates.append(("世界 / level.dat", Path("level.dat")))
-
-            data_dir = world_path / "data"
-            if data_dir.exists():
-                for path in sorted(data_dir.glob("*.dat")):
-                    candidates.append(
-                        (f"数据 / {path.name}", path.relative_to(world_path))
-                    )
-
-            for folder_name, label in (
-                ("stats", "统计"),
-                ("advancements", "进度"),
-            ):
-                folder = world_path / folder_name
-                if folder.exists():
-                    for path in sorted(folder.glob("*.json")):
-                        candidates.append(
-                            (f"{label} / {path.name}", path.relative_to(world_path))
-                        )
-
-            for label, relative_path in candidates:
-                key = relative_path.as_posix()
-                self._target_options[key] = relative_path
-            self._target_dropdown.options = [
-                ft.dropdown.Option(path.as_posix(), label)
-                for label, path in candidates
-            ]
-            safe_update(self._target_dropdown)
+            self._set_target_options(self._find_nbt_target_candidates(session.world_path))
         except Exception as ex:
             self._handle_error(ex, "刷新 NBT 目标失败")
+
+    @staticmethod
+    def _find_nbt_target_candidates(world_path: Path) -> List[Tuple[str, Path]]:
+        candidates: List[Tuple[str, Path]] = []
+        if (world_path / "level.dat").exists():
+            candidates.append(("世界 / level.dat", Path("level.dat")))
+        candidates.extend(
+            (f"数据 / {path.name}", path.relative_to(world_path))
+            for path in sorted((world_path / "data").glob("*.dat"))
+        )
+        for folder_name, label in (("stats", "统计"), ("advancements", "进度")):
+            candidates.extend(
+                (f"{label} / {path.name}", path.relative_to(world_path))
+                for path in sorted((world_path / folder_name).glob("*.json"))
+            )
+        return candidates
+
+    def _set_target_options(self, candidates: List[Tuple[str, Path]]) -> None:
+        self._target_options.update(
+            {relative_path.as_posix(): relative_path for _, relative_path in candidates}
+        )
+        self._target_dropdown.options = [
+            ft.dropdown.Option(path.as_posix(), label) for label, path in candidates
+        ]
+        safe_update(self._target_dropdown)
 
     def load_current_player_nbt(self, e: Any = None) -> None:
         try:

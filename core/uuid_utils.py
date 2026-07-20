@@ -232,62 +232,87 @@ def build_mappings(
     Returns:
         UUID 映射列表
     """
-    pd_dirs = find_player_data_dirs(world_path)
-    all_dat_files = []
-    for pd in pd_dirs:
-        all_dat_files.extend(pd.glob("*.dat"))
+    all_dat_files = _find_player_dat_files(world_path)
     if not all_dat_files:
         return []
-    maps: List[UUIDMapping] = []
-    new_uuids: set[str] = set()
-    unresolved: List[str] = []
 
-    # 处理自定义UUID映射
     custom_mappings = custom_mappings or {}
     if custom_mappings:
         log(f"检测到 {len(custom_mappings)} 个自定义UUID映射", "INFO")
-
-    for f in all_dat_files:
-        old_u = f.stem
-        if old_u in new_uuids:
-            continue
-
-        name = _resolve_player_name(
-            old_u,
-            cache,
-            offline_mode,
-            log,
-        )
-
-        if name:
-            new_u = _target_uuid_for_name(name, custom_mappings, log)
-            maps.append(_make_uuid_mapping(old_u, new_u))
-            new_uuids.add(new_u)
-            log(f"映射: {name} ({old_u} -> {new_u})", "INFO")
-        else:
-            unresolved.append(old_u)
+    maps, unresolved = _map_known_players(
+        all_dat_files, cache, offline_mode, custom_mappings, log
+    )
 
     if manual_names:
-        names = [name.strip() for name in manual_names if name.strip()]
-        if len(names) != len(unresolved) or len(set(names)) != len(names):
-            raise ValueError(
-                f"未知玩家数量为 {len(unresolved)}，手动名称数量为 {len(names)}，"
-                "必须一对一且名称不能重复"
-            )
-        for old_u, name in zip(sorted(unresolved), names):
-            new_u = _target_uuid_for_name(name, custom_mappings, log)
-            maps.append(_make_uuid_mapping(old_u, new_u))
-            new_uuids.add(new_u)
-            log(f"手动映射: {name} ({old_u} -> {new_u})", "MANUAL")
+        _append_manual_mappings(maps, unresolved, manual_names, custom_mappings, log)
     elif unresolved:
-        for old_u in unresolved:
-            log(f"无法识别玩家 UUID: {old_u}，已跳过", "WARN")
+        _log_unresolved(unresolved, log)
 
+    _validate_unique_targets(maps)
+    return maps
+
+
+def _find_player_dat_files(world_path: Path) -> List[Path]:
+    files: List[Path] = []
+    for player_dir in find_player_data_dirs(world_path):
+        files.extend(player_dir.glob("*.dat"))
+    return files
+
+
+def _map_known_players(
+    files: List[Path],
+    cache: dict,
+    offline_mode: bool,
+    custom_mappings: Dict[str, str],
+    log: LogCallback,
+) -> Tuple[List[UUIDMapping], List[str]]:
+    maps: List[UUIDMapping] = []
+    new_uuids: set[str] = set()
+    unresolved: List[str] = []
+    for player_file in files:
+        old_uuid = player_file.stem
+        if old_uuid in new_uuids:
+            continue
+        name = _resolve_player_name(old_uuid, cache, offline_mode, log)
+        if not name:
+            unresolved.append(old_uuid)
+            continue
+        new_uuid = _target_uuid_for_name(name, custom_mappings, log)
+        maps.append(_make_uuid_mapping(old_uuid, new_uuid))
+        new_uuids.add(new_uuid)
+        log(f"映射: {name} ({old_uuid} -> {new_uuid})", "INFO")
+    return maps, unresolved
+
+
+def _append_manual_mappings(
+    maps: List[UUIDMapping],
+    unresolved: List[str],
+    manual_names: List[str],
+    custom_mappings: Dict[str, str],
+    log: LogCallback,
+) -> None:
+    names = [name.strip() for name in manual_names if name.strip()]
+    if len(names) != len(unresolved) or len(set(names)) != len(names):
+        raise ValueError(
+            f"未知玩家数量为 {len(unresolved)}，手动名称数量为 {len(names)}，"
+            "必须一对一且名称不能重复"
+        )
+    for old_uuid, name in zip(sorted(unresolved), names):
+        new_uuid = _target_uuid_for_name(name, custom_mappings, log)
+        maps.append(_make_uuid_mapping(old_uuid, new_uuid))
+        log(f"手动映射: {name} ({old_uuid} -> {new_uuid})", "MANUAL")
+
+
+def _log_unresolved(unresolved: List[str], log: LogCallback) -> None:
+    for old_uuid in unresolved:
+        log(f"无法识别玩家 UUID: {old_uuid}，已跳过", "WARN")
+
+
+def _validate_unique_targets(maps: List[UUIDMapping]) -> None:
     target_owners: Dict[str, str] = {}
     for mapping in maps:
-        old_u, new_u = mapping[2], mapping[3]
-        owner = target_owners.get(new_u)
-        if owner is not None and owner != old_u:
-            raise ValueError(f"多个玩家映射到了同一个目标 UUID: {new_u}")
-        target_owners[new_u] = old_u
-    return maps
+        old_uuid, new_uuid = mapping[2], mapping[3]
+        owner = target_owners.get(new_uuid)
+        if owner is not None and owner != old_uuid:
+            raise ValueError(f"多个玩家映射到了同一个目标 UUID: {new_uuid}")
+        target_owners[new_uuid] = old_uuid

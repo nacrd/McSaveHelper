@@ -4,6 +4,16 @@ import json
 from typing import Any, List, Union
 
 
+_TAG_NUMERIC_CONVERTERS = {
+    **dict.fromkeys(
+        ("Byte", "Short", "Int", "Long", "TAG_Byte", "TAG_Short", "TAG_Int", "TAG_Long"),
+        int,
+    ),
+    **dict.fromkeys(("Float", "Double", "TAG_Float", "TAG_Double"), float),
+}
+_UNHANDLED = object()
+
+
 def raw_text(value: Any, type_name: str) -> str:
     try:
         if type_name in ("IntArray", "ByteArray"):
@@ -94,30 +104,40 @@ def format_primitive(value: Any, type_name: str) -> str:
 
 def coerce_value(raw: str, original: Any, type_name: str) -> Any:
     value_type = type(original)
-    integer_types = (
-        "Byte", "Short", "Int", "Long",
-        "TAG_Byte", "TAG_Short", "TAG_Int", "TAG_Long",
-    )
-    if type_name in integer_types:
-        return value_type(int(raw.strip()))
-    if type_name in ("Float", "Double", "TAG_Float", "TAG_Double"):
-        return value_type(float(raw.strip()))
+    converter = _TAG_NUMERIC_CONVERTERS.get(type_name)
+    if converter is not None:
+        return value_type(converter(raw.strip()))
     if type_name in ("String", "TAG_String"):
         return value_type(raw)
     if type_name == "str":
         return raw
+    plain_value = _coerce_plain_value(raw, type_name)
+    if plain_value is not _UNHANDLED:
+        return plain_value
+    if type_name == "NoneType":
+        return _coerce_none(raw)
+    if type_name in ("IntArray", "ByteArray"):
+        return _coerce_array(raw, value_type)
+    return _coerce_fallback(raw, value_type)
+
+
+def _coerce_plain_value(raw: str, type_name: str) -> Any:
     if type_name == "int":
         return int(raw.strip())
     if type_name == "float":
         return float(raw.strip())
     if type_name == "bool":
         return _parse_bool(raw)
-    if type_name == "NoneType":
-        if raw.strip().lower() in ("null", "none", ""):
-            return None
-        raise ValueError("空值必须是 null")
-    if type_name in ("IntArray", "ByteArray"):
-        return _coerce_array(raw, value_type)
+    return _UNHANDLED
+
+
+def _coerce_none(raw: str) -> None:
+    if raw.strip().lower() in ("null", "none", ""):
+        return None
+    raise ValueError("空值必须是 null")
+
+
+def _coerce_fallback(raw: str, value_type: type) -> Any:
     try:
         return value_type(raw)
     except Exception:

@@ -136,31 +136,19 @@ class WorldScanner:
                 continue
 
             try:
-                with open(path, "r", encoding="utf-8") as f:
-                    entries = json.load(f)
-
-                cache_map: Dict[str, str] = {}
-                match_count = 0
-
-                for entry in entries:
-                    uuid = entry.get("uuid", "").replace("-", "")
-                    name = entry.get("name", "")
-                    if uuid and name:
-                        cache_map[uuid] = name
-                        if uuid in player_set:
-                            match_count += 1
-
-                self._log(f"候选 usercache: {path}, 匹配 {match_count}/{len(player_set)}", "IMPORT")
-
-                if match_count > best_match:
-                    best_match = match_count
-                    best_cache = cache_map
-
-                if match_count == len(player_set):
-                    break  # 完美匹配，提前退出
-
+                cache_map, match_count = _load_usercache_candidate(path, player_set)
             except Exception as e:
                 self._log(f"解析 usercache {path} 失败: {e}", "WARNING")
+                continue
+            self._log(
+                f"候选 usercache: {path}, 匹配 {match_count}/{len(player_set)}",
+                "IMPORT",
+            )
+            if match_count > best_match:
+                best_match = match_count
+                best_cache = cache_map
+            if match_count == len(player_set):
+                break  # 完美匹配，提前退出
 
         if best_cache:
             self._log(f"已从 usercache 更新 {best_match} 个玩家名称", "SCAN")
@@ -226,3 +214,33 @@ class WorldScanner:
     def _normalize_uuid(uuid: str) -> str:
         """规范化 UUID：移除连字符并转为小写"""
         return uuid.replace("-", "").lower()
+
+
+def _load_usercache_candidate(
+    path: Path,
+    player_set: Set[str],
+) -> tuple[Dict[str, str], int]:
+    with open(path, "r", encoding="utf-8") as file:
+        entries = json.load(file)
+    cache_map: Dict[str, str] = {}
+    match_count = 0
+    for entry in entries:
+        parsed = _parse_usercache_entry(entry)
+        if parsed is None:
+            continue
+        uuid, name = parsed
+        cache_map[uuid] = name
+        if uuid in player_set:
+            match_count += 1
+    return cache_map, match_count
+
+
+def _parse_usercache_entry(entry: Mapping[str, Any]) -> Optional[tuple[str, str]]:
+    uuid_value = entry.get("uuid", "")
+    name_value = entry.get("name", "")
+    if not isinstance(uuid_value, str) or not isinstance(name_value, str):
+        return None
+    uuid = uuid_value.replace("-", "")
+    if not uuid or not name_value:
+        return None
+    return uuid, name_value

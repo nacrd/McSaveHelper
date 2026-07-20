@@ -5,6 +5,7 @@
 """
 import time
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -26,6 +27,36 @@ from .save_repair.detector import WorldDetector
 from .save_repair.chunk_repairer import ChunkRepairer
 from .save_repair.player_repairer import PlayerRepairer
 from .save_repair.level_repairer import LevelRepairer
+
+
+_ISSUE_LEVELS = {
+    "INFO": IssueLevel.INFO,
+    "WARNING": IssueLevel.WARNING,
+    "ERROR": IssueLevel.ERROR,
+    "SUCCESS": IssueLevel.FIXED,
+}
+
+
+@dataclass(frozen=True)
+class _RepairCallbacks:
+    report: RepairReport
+    progress_callback: Optional[Callable[[float, str], None]]
+    log_callback: Optional[Callable[[str, str], None]]
+
+    def log(self, message: str, level: str = "INFO") -> None:
+        getattr(logger, level.lower(), logger.info)(message, module="SaveRepair")
+        if self.log_callback:
+            self.log_callback(message, level)
+        issue_level = _ISSUE_LEVELS.get(level.upper(), IssueLevel.INFO)
+        self.report.issues.append(RepairIssue(
+            level=issue_level,
+            category="general",
+            message=message,
+        ))
+
+    def progress(self, value: float, message: str) -> None:
+        if self.progress_callback:
+            self.progress_callback(min(value, 1.0), message)
 
 
 class SaveRepairService:
@@ -184,77 +215,85 @@ class SaveRepairService:
         self._cancel_event.clear()
         report = RepairReport()
         start_time = time.monotonic()
-
-        def log(msg: str, level: str = "INFO") -> None:
-            getattr(logger, level.lower(), logger.info)(msg, module="SaveRepair")
-            if log_callback:
-                log_callback(msg, level)
-            issue_level = {
-                "INFO": IssueLevel.INFO,
-                "WARNING": IssueLevel.WARNING,
-                "ERROR": IssueLevel.ERROR,
-                "SUCCESS": IssueLevel.FIXED,
-            }.get(level.upper(), IssueLevel.INFO)
-            report.issues.append(RepairIssue(
-                level=issue_level,
-                category="general",
-                message=msg,
-            ))
-
-        def progress(value: float, msg: str) -> None:
-            if progress_callback:
-                progress_callback(min(value, 1.0), msg)
+        callbacks = _RepairCallbacks(report, progress_callback, log_callback)
 
         try:
             if not world_path.exists():
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
-            log(f"开始修复存档: {world_path}")
-
-            # 备份
-            if backup and not self.is_cancelled:
-                self._create_safety_backup(world_path, report, progress, log)
-
-            # 修复区块
-            if fix_chunks and not self.is_cancelled:
-                progress(0.10, "扫描区块文件...")
-                chunk_repairer = ChunkRepairer(self._cancel_event)
-                chunk_repairer.repair_chunks(world_path, report, log, progress)
-
-            # 修复玩家数据
-            if fix_players and not self.is_cancelled:
-                progress(0.75, "修复玩家数据...")
-                player_repairer = PlayerRepairer(self._cancel_event)
-                player_repairer.repair_players(world_path, report, log)
-
-            # 修复 level.dat
-            if fix_level_dat and not self.is_cancelled:
-                progress(0.90, "修复 level.dat...")
-                level_repairer = LevelRepairer(self._cancel_event)
-                level_repairer.repair_level_dat(world_path, report, log)
-
-            if self.is_cancelled:
-                report.cancelled = True
-                log("修复操作已取消", "WARNING")
-
-            progress(1.0, "修复完成")
-            report.success = not self.is_cancelled
-            log(
-                f"修复完成 - 区块: {report.chunks_checked} 检查/{report.chunks_damaged} 损坏, "
-                f"玩家: {report.players_checked} 检查/{report.players_fixed} 修复",
-                "SUCCESS",
+            callbacks.log(f"开始修复存档: {world_path}")
+            self._run_selected_repairs(
+                world_path,
+                report,
+                callbacks,
+                backup,
+                fix_chunks,
+                fix_players,
+                fix_level_dat,
             )
+            self._finish_repair(report, callbacks)
 
         except BackupCancelledError:
             report.cancelled = True
-            log("修复操作已取消", "WARNING")
-        except Exception as e:
+            callbacks.log("修复操作已取消", "WARNING")
+        except Exception as exc:
             report.success = False
-            log(f"修复失败: {e}", "ERROR")
-            logger.error(str(e), module="SaveRepair")
+            callbacks.log(f"修复失败: {exc}", "ERROR")
+            logger.error(str(exc), module="SaveRepair")
 
         report.elapsed_seconds = time.monotonic() - start_time
         return report
+
+    def _run_selected_repairs(
+        self,
+        world_path: Path,
+        report: RepairReport,
+        callbacks: _RepairCallbacks,
+        backup: bool,
+        fix_chunks: bool,
+        fix_players: bool,
+        fix_level_dat: bool,
+    ) -> None:
+        if backup and not self.is_cancelled:
+            self._create_safety_backup(
+                world_path,
+                report,
+                callbacks.progress,
+                callbacks.log,
+            )
+        if fix_chunks and not self.is_cancelled:
+            callbacks.progress(0.10, "扫描区块文件...")
+            chunk_repairer = ChunkRepairer(self._cancel_event)
+            chunk_repairer.repair_chunks(
+                world_path,
+                report,
+                callbacks.log,
+                callbacks.progress,
+            )
+        if fix_players and not self.is_cancelled:
+            callbacks.progress(0.75, "修复玩家数据...")
+            player_repairer = PlayerRepairer(self._cancel_event)
+            player_repairer.repair_players(world_path, report, callbacks.log)
+        if fix_level_dat and not self.is_cancelled:
+            callbacks.progress(0.90, "修复 level.dat...")
+            level_repairer = LevelRepairer(self._cancel_event)
+            level_repairer.repair_level_dat(world_path, report, callbacks.log)
+
+    def _finish_repair(
+        self,
+        report: RepairReport,
+        callbacks: _RepairCallbacks,
+    ) -> None:
+        if self.is_cancelled:
+            report.cancelled = True
+            callbacks.log("修复操作已取消", "WARNING")
+        callbacks.progress(1.0, "修复完成")
+        report.success = not self.is_cancelled
+        callbacks.log(
+            f"修复完成 - 区块: {report.chunks_checked} 检查/{report.chunks_damaged} 损坏, "
+            f"玩家: {report.players_checked} 检查/{report.players_fixed} 修复",
+            "SUCCESS",
+        )
 
     def _create_safety_backup(
         self,

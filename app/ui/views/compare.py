@@ -1,7 +1,7 @@
 """存档对比视图。"""
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import flet as ft
 
@@ -83,48 +83,63 @@ class CompareView(ft.Column):
             if self._comparing:
                 self.app.warn_dialog("提示", "对比正在进行中，请稍候。")
                 return
-            left = Path(self._left_field.value or "")
-            right = Path(self._right_field.value or "")
-            if not (left / "level.dat").exists():
-                self.app.warn_dialog("提示", "请先通过侧边栏设置有效基准存档目录。")
-                return
-            if not (right / "level.dat").exists():
-                self.app.warn_dialog("提示", "请指定包含 level.dat 的有效目标存档目录。")
+            paths = self._validated_compare_paths()
+            if paths is None:
                 return
             self._summary.value = "正在对比，请稍候..."
             self._result.controls.clear()
             self._comparing = True
             self.update()
-
-            def _run():
-                try:
-                    result = self._service.compare_worlds(left, right)
-                    summary = (
-                        f"变更项: {result.summary['changed']} / "
-                        f"{sum(v for k, v in result.summary.items() if k != 'changed')}"
-                    )
-                    groups = [
-                        self._group("WorldInfo 差异", result.world_info),
-                        self._group("玩家数据差异", result.players),
-                        self._group("区域文件差异", result.regions),
-                    ]
-
-                    def _update_ui() -> None:
-                        self._summary.value = summary
-                        self._result.controls.extend(groups)
-                        self._comparing = False
-                        self.update()
-                    run_on_ui(self.app.page, _update_ui)
-                except Exception as ex:
-                    def _handle_error(error: Exception) -> None:
-                        self._comparing = False
-                        self.app.handle_exception(error, title="存档对比失败")
-                    run_on_ui(self.app.page, _handle_error, ex)
-
-            threading.Thread(target=_run, daemon=True).start()
+            threading.Thread(
+                target=self._run_compare,
+                args=paths,
+                daemon=True,
+            ).start()
         except Exception as ex:
-            self._comparing = False
-            self.app.handle_exception(ex, title="存档对比失败")
+            self._handle_compare_error(ex)
+
+    def _validated_compare_paths(self) -> Optional[Tuple[Path, Path]]:
+        left = Path(self._left_field.value or "")
+        right = Path(self._right_field.value or "")
+        if not (left / "level.dat").exists():
+            self.app.warn_dialog("提示", "请先通过侧边栏设置有效基准存档目录。")
+            return None
+        if not (right / "level.dat").exists():
+            self.app.warn_dialog("提示", "请指定包含 level.dat 的有效目标存档目录。")
+            return None
+        return left, right
+
+    def _run_compare(self, left: Path, right: Path) -> None:
+        try:
+            result = self._service.compare_worlds(left, right)
+            total = sum(
+                value
+                for key, value in result.summary.items()
+                if key != "changed"
+            )
+            summary = f"变更项: {result.summary['changed']} / {total}"
+            groups = [
+                self._group("WorldInfo 差异", result.world_info),
+                self._group("玩家数据差异", result.players),
+                self._group("区域文件差异", result.regions),
+            ]
+            run_on_ui(self.app.page, self._finish_compare, summary, groups)
+        except Exception as ex:
+            run_on_ui(self.app.page, self._handle_compare_error, ex)
+
+    def _finish_compare(
+        self,
+        summary: str,
+        groups: List[ft.Container],
+    ) -> None:
+        self._summary.value = summary
+        self._result.controls.extend(groups)
+        self._comparing = False
+        self.update()
+
+    def _handle_compare_error(self, error: Exception) -> None:
+        self._comparing = False
+        self.app.handle_exception(error, title="存档对比失败")
 
     def _group(self, title: str, items: List[CompareItem]) -> ft.Container:
         rows = []

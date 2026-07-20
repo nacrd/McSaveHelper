@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 RegionCoord = Tuple[int, int]
 RgbColor = Tuple[int, int, int]
+RegionBounds = Tuple[int, int, int, int]
 ColorProvider = Callable[[RegionCoord, int], str]
 TaskScheduler = Callable[[Coroutine[object, object, object]], Optional[ScheduledTask]]
 
@@ -179,85 +180,22 @@ class MapSurfaceLayer:
         """Reuse or queue the surface for the latest viewport state."""
         if not self.enabled:
             return []
-        self._scale = max(0.001, float(viewport.scale))
-        self._offset_x = float(viewport.offset_x)
-        self._offset_y = float(viewport.offset_y)
+        self._sync_viewport_geometry(viewport)
         if not data:
             self.clear()
             return []
 
-        pixels_per_region = self._pixels_per_region(viewport.scale)
-        data_revision = self._service.get_data_revision()
-        source_generation = self._service.get_topview_generation()
-        try:
-            visible_bounds = viewport.visible_region_bounds(width, height, margin=0.0)
-        except ValueError:
-            visible_bounds = (0, 0, 0, 0)
-        visible_columns = visible_bounds[1] - visible_bounds[0] + 1
-        visible_rows = visible_bounds[3] - visible_bounds[2] + 1
-        visible_count = max(1, visible_columns * visible_rows)
-        while (
-            pixels_per_region > 16
-            and visible_count * pixels_per_region * pixels_per_region
-            > self._max_pixels
-        ):
-            # Preserve complete viewport coverage on wide/high-DPI windows.
-            # Higher-resolution source tiles remain cached and are reduced
-            # into the frame instead of cropping the world rectangle.
-            pixels_per_region //= 2
-        surface_bounds = self._surface_bounds(
-            viewport,
-            width,
-            height,
-            pixels_per_region,
+        candidate, visible_bounds = self._surface_candidate(
+            viewport, width, height, display_mode, use_topview
         )
-        candidate = MapSurfaceSpec(
-            min_region_x=surface_bounds[0],
-            max_region_x=surface_bounds[1],
-            min_region_z=surface_bounds[2],
-            max_region_z=surface_bounds[3],
-            pixels_per_region=pixels_per_region,
-            display_mode=display_mode,
-            use_topview=use_topview,
-            source_generation=source_generation,
-            data_revision=data_revision,
-        )
+        reused = self._reuse_active_surface(data, candidate, visible_bounds)
+        if reused is not None:
+            return reused
+        reused = self._reuse_pending_surface(data, candidate, visible_bounds)
+        if reused is not None:
+            return reused
 
-        active_spec = self._frame.spec if self._frame else None
-        if (
-            active_spec is not None
-            and self._signature_matches(active_spec, candidate)
-            and self._contains(active_spec, visible_bounds)
-            and not self._dirty
-        ):
-            self._update_geometry(active_spec)
-            surface_data = self._surface_data(data, active_spec)
-            self._visible_regions = set(surface_data)
-            return self._missing_tiles(surface_data, active_spec)
-
-        pending = self._request_spec
-        if (
-            pending is not None
-            and self._signature_matches(pending, candidate)
-            and self._contains(pending, visible_bounds)
-            and not self._dirty
-            and self._rendering
-        ):
-            surface_data = self._surface_data(data, pending)
-            self._visible_regions = set(surface_data)
-            if self._frame is not None:
-                self._update_geometry(self._frame.spec)
-            return self._missing_tiles(surface_data, pending)
-
-        if (
-            active_spec is not None
-            and active_spec.pixels_per_region == pixels_per_region
-            and active_spec.display_mode == display_mode
-            and active_spec.use_topview == use_topview
-            and active_spec.source_generation == source_generation
-            and self._contains(active_spec, visible_bounds)
-        ):
-            candidate = replace(active_spec, data_revision=data_revision)
+        candidate = self._with_active_bounds(candidate, visible_bounds)
 
         surface_data, colors = self._payload(data, candidate, color_for_region)
         self._visible_regions = set(surface_data)
@@ -271,6 +209,122 @@ class MapSurfaceLayer:
             self._update_geometry(self._frame.spec)
 
         return self._missing_tiles(surface_data, candidate)
+
+    def _sync_viewport_geometry(self, viewport: McaViewport) -> None:
+        self._scale = max(0.001, float(viewport.scale))
+        self._offset_x = float(viewport.offset_x)
+        self._offset_y = float(viewport.offset_y)
+
+    def _surface_candidate(
+        self,
+        viewport: McaViewport,
+        width: float,
+        height: float,
+        display_mode: str,
+        use_topview: bool,
+    ) -> Tuple[MapSurfaceSpec, RegionBounds]:
+        visible_bounds = self._visible_bounds(viewport, width, height)
+        pixels_per_region = self._fit_pixels_per_region(viewport.scale, visible_bounds)
+        surface_bounds = self._surface_bounds(viewport, width, height, pixels_per_region)
+        return (
+            MapSurfaceSpec(
+                min_region_x=surface_bounds[0],
+                max_region_x=surface_bounds[1],
+                min_region_z=surface_bounds[2],
+                max_region_z=surface_bounds[3],
+                pixels_per_region=pixels_per_region,
+                display_mode=display_mode,
+                use_topview=use_topview,
+                source_generation=self._service.get_topview_generation(),
+                data_revision=self._service.get_data_revision(),
+            ),
+            visible_bounds,
+        )
+
+    @staticmethod
+    def _visible_bounds(viewport: McaViewport, width: float, height: float) -> RegionBounds:
+        try:
+            return viewport.visible_region_bounds(width, height, margin=0.0)
+        except ValueError:
+            return (0, 0, 0, 0)
+
+    def _fit_pixels_per_region(self, scale: float, visible_bounds: RegionBounds) -> int:
+        pixels_per_region = self._pixels_per_region(scale)
+        visible_columns = visible_bounds[1] - visible_bounds[0] + 1
+        visible_rows = visible_bounds[3] - visible_bounds[2] + 1
+        visible_count = max(1, visible_columns * visible_rows)
+        while pixels_per_region > 16 and (
+            visible_count * pixels_per_region * pixels_per_region > self._max_pixels
+        ):
+            # Preserve complete viewport coverage on wide/high-DPI windows.
+            # Higher-resolution source tiles remain cached and are reduced
+            # into the frame instead of cropping the world rectangle.
+            pixels_per_region //= 2
+        return pixels_per_region
+
+    def _reuse_active_surface(
+        self,
+        data: Mapping[RegionCoord, int],
+        candidate: MapSurfaceSpec,
+        visible_bounds: RegionBounds,
+    ) -> Optional[list[RegionCoord]]:
+        active_spec = self._frame.spec if self._frame else None
+        if active_spec is None or self._dirty:
+            return None
+        if not self._signature_matches(active_spec, candidate):
+            return None
+        if not self._contains(active_spec, visible_bounds):
+            return None
+        self._update_geometry(active_spec)
+        return self._set_visible_regions(data, active_spec)
+
+    def _reuse_pending_surface(
+        self,
+        data: Mapping[RegionCoord, int],
+        candidate: MapSurfaceSpec,
+        visible_bounds: RegionBounds,
+    ) -> Optional[list[RegionCoord]]:
+        pending = self._request_spec
+        if pending is None or self._dirty or not self._rendering:
+            return None
+        if not self._signature_matches(pending, candidate):
+            return None
+        if not self._contains(pending, visible_bounds):
+            return None
+        if self._frame is not None:
+            self._update_geometry(self._frame.spec)
+        return self._set_visible_regions(data, pending)
+
+    def _set_visible_regions(
+        self,
+        data: Mapping[RegionCoord, int],
+        spec: MapSurfaceSpec,
+    ) -> list[RegionCoord]:
+        surface_data = self._surface_data(data, spec)
+        self._visible_regions = set(surface_data)
+        return self._missing_tiles(surface_data, spec)
+
+    def _with_active_bounds(
+        self,
+        candidate: MapSurfaceSpec,
+        visible_bounds: RegionBounds,
+    ) -> MapSurfaceSpec:
+        active_spec = self._frame.spec if self._frame else None
+        if active_spec is None or not self._contains(active_spec, visible_bounds):
+            return candidate
+        if not self._same_surface_format(active_spec, candidate):
+            return candidate
+        return replace(active_spec, data_revision=candidate.data_revision)
+
+    @staticmethod
+    def _same_surface_format(first: MapSurfaceSpec, second: MapSurfaceSpec) -> bool:
+        """True when resolution/mode/source match (ignores data_revision)."""
+        return (
+            first.pixels_per_region == second.pixels_per_region
+            and first.display_mode == second.display_mode
+            and first.use_topview == second.use_topview
+            and first.source_generation == second.source_generation
+        )
 
     def _pixels_per_region(self, scale: float) -> int:
         ladder = (
@@ -372,10 +426,7 @@ class MapSurfaceLayer:
     @staticmethod
     def _signature_matches(first: MapSurfaceSpec, second: MapSurfaceSpec) -> bool:
         return (
-            first.pixels_per_region == second.pixels_per_region
-            and first.display_mode == second.display_mode
-            and first.use_topview == second.use_topview
-            and first.source_generation == second.source_generation
+            MapSurfaceLayer._same_surface_format(first, second)
             and first.data_revision == second.data_revision
         )
 
@@ -468,33 +519,38 @@ class MapSurfaceLayer:
                 request = self._capture_request()
                 if request is None:
                     break
-                frame = await self._compose_request(request)
-                if frame is None:
-                    if request.token != self._token:
-                        continue
-                    break
-                if request.token != self._token:
+                if await self._render_request(request):
                     continue
-                if not self._source_is_current(request.spec):
-                    self._invalidate_current_request()
-                    break
-                if not await self._upload_frame(request, frame):
-                    if request.token != self._token:
-                        continue
-                    break
-                if request.token != self._token or not self._is_active():
-                    continue
-                self._frame = frame
-                self._spec = request.spec
-                self._dirty = False
-                self._blocked_spec = None
-                self._update_geometry(request.spec)
                 break
         finally:
             self._rendering = False
             self._task = None
             if self._is_active() and self._dirty:
                 self._request_rebuild()
+
+    async def _render_request(self, request: _RenderRequest) -> bool:
+        """Render one request and report whether a newer request should retry."""
+        frame = await self._compose_request(request)
+        if frame is None:
+            return request.token != self._token
+        if request.token != self._token:
+            return True
+        if not self._source_is_current(request.spec):
+            self._invalidate_current_request()
+            return False
+        if not await self._upload_frame(request, frame):
+            return request.token != self._token
+        if request.token != self._token or not self._is_active():
+            return True
+        self._store_frame(request, frame)
+        return False
+
+    def _store_frame(self, request: _RenderRequest, frame: MapSurfaceFrame) -> None:
+        self._frame = frame
+        self._spec = request.spec
+        self._dirty = False
+        self._blocked_spec = None
+        self._update_geometry(request.spec)
 
     def _capture_request(self) -> Optional[_RenderRequest]:
         spec = self._request_spec

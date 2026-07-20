@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 import flet as ft
 
 from app.ui.theme import THEME
+from app.controllers.map_controller import MapController
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
 from app.ui.views.explorer.map.fullscreen import MapFullscreenController
@@ -22,6 +23,7 @@ from app.ui.views.explorer.region_tab_chrome import (
 from core.mca.region_selection import format_region_selection
 from core.mca.map_models import MapMarker, MapViewState
 from core.mca.map_search import MapSearchError
+from core.region_utils import DimensionInfo
 
 
 class RegionTabMixin(ExplorerMixinHost):
@@ -712,36 +714,49 @@ class RegionTabMixin(ExplorerMixinHost):
             controller = getattr(self, "_map_controller", None)
             if controller is not None and controller.world_path is None:
                 controller.bind_world(self.world_session.world_path, dimensions)
-            self._dimension_region_dirs.clear()
-            options = []
-            for dim in dimensions:
-                dim_id = dim["id"]
-                dim_name = dim["name"]
-                region_dir = dim["region_dir"]
-                self._dimension_region_dirs[dim_id] = region_dir
-                options.append(ft.dropdown.Option(dim_id, dim_name))
-            if options:
-                controller_dimension = (
-                    controller.state.dimension_id if controller is not None else None
-                )
-                if controller_dimension in self._dimension_region_dirs:
-                    self._current_dimension = controller_dimension
-                elif self._current_dimension not in self._dimension_region_dirs:
-                    self._current_dimension = options[0].key
-            else:
-                self._current_dimension = ""
-            if hasattr(self, "_dimension_dropdown"):
-                self._dimension_dropdown.options = options
-                self._dimension_dropdown.value = self._current_dimension
-                safe_update(self._dimension_dropdown)
-            if (
-                controller is not None
-                and self._current_dimension == controller.state.dimension_id
-                and hasattr(self, "_map_coord_btn")
-            ):
-                self._apply_map_state(controller.state)
+            options = self._build_dimension_options(dimensions)
+            self._select_current_dimension(options, controller)
+            self._update_dimension_dropdown(options)
+            self._restore_controller_map_state(controller)
         except Exception as e:
             self.app.handle_exception(e, title="扫描维度失败")
+
+    def _build_dimension_options(
+        self, dimensions: list[DimensionInfo]
+    ) -> list[ft.dropdown.Option]:
+        self._dimension_region_dirs.clear()
+        options: list[ft.dropdown.Option] = []
+        for dimension in dimensions:
+            dimension_id = str(dimension["id"])
+            self._dimension_region_dirs[dimension_id] = str(dimension["region_dir"])
+            options.append(ft.dropdown.Option(dimension_id, str(dimension["name"])))
+        return options
+
+    def _select_current_dimension(
+        self, options: list[ft.dropdown.Option], controller: Optional[MapController]
+    ) -> None:
+        if not options:
+            self._current_dimension = ""
+            return
+        controller_dimension = controller.state.dimension_id if controller is not None else None
+        if controller_dimension in self._dimension_region_dirs:
+            self._current_dimension = controller_dimension
+        elif self._current_dimension not in self._dimension_region_dirs:
+            self._current_dimension = options[0].key or ""
+
+    def _update_dimension_dropdown(self, options: list[ft.dropdown.Option]) -> None:
+        if hasattr(self, "_dimension_dropdown"):
+            self._dimension_dropdown.options = options
+            self._dimension_dropdown.value = self._current_dimension
+            safe_update(self._dimension_dropdown)
+
+    def _restore_controller_map_state(self, controller: Optional[MapController]) -> None:
+        if (
+            controller is not None
+            and self._current_dimension == controller.state.dimension_id
+            and hasattr(self, "_map_coord_btn")
+        ):
+            self._apply_map_state(controller.state)
 
     def _on_dimension_changed(self, e: Any) -> None:
         try:

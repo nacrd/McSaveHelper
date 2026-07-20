@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from core.mca.heightmaps import (
@@ -84,6 +85,7 @@ _TRANSPARENT_SURFACE_EXACT = frozenset(
 )
 
 
+@lru_cache(maxsize=512)
 def is_transparent_surface_name(name: Optional[str]) -> bool:
     """Return whether a top block should reveal an underlying surface.
 
@@ -115,6 +117,7 @@ def is_transparent_surface_name(name: Optional[str]) -> bool:
     }
 
 
+@lru_cache(maxsize=512)
 def is_air_name(name: Optional[str]) -> bool:
     if not name:
         return True
@@ -414,35 +417,15 @@ class ChunkBlocks:
         return sec
 
     def block_id_at(self, x: int, y: int, z: int) -> Optional[str]:
-        if not (0 <= x < 16 and 0 <= z < 16):
+        if not _is_local_column(x, z):
             return None
         section_y = y // 16
         sec = self._ensure_section(section_y)
         if sec is None:
             return "minecraft:air"
-
         if sec.legacy_blocks is not None:
-            local_y = y - section_y * 16
-            index = local_y * 256 + z * 16 + x
-            try:
-                return f"legacy:{sec.legacy_blocks[index]}"
-            except Exception:
-                return "minecraft:air"
-
-        if not sec.palette:
-            return "minecraft:air"
-        if len(sec.palette) == 1 or sec.data is None:
-            return sec.palette[0]
-
-        local_y = y - section_y * 16
-        index = local_y * 256 + z * 16 + x
-        try:
-            pi = _palette_index(sec.data, index, sec.bits, stretch=sec.stretch)
-        except Exception:
-            return sec.palette[0]
-        if 0 <= pi < len(sec.palette):
-            return sec.palette[pi]
-        return _AIR_BLOCK_ID
+            return _legacy_block_id(sec.legacy_blocks, x, y, z, section_y)
+        return _palette_block_id(sec, x, y, z, section_y)
 
     def count_block_ids(self) -> Counter[str]:
         """Count block IDs in every stored section.
@@ -555,6 +538,55 @@ class ChunkBlocks:
             if not is_air_name(name):
                 return name, y - dy
         return self.block_id_at(x, y, z), y
+
+
+def _is_local_column(x: int, z: int) -> bool:
+    return 0 <= x < 16 and 0 <= z < 16
+
+
+def _block_index(x: int, y: int, z: int, section_y: int) -> int:
+    return (y - section_y * 16) * 256 + z * 16 + x
+
+
+def _legacy_block_id(
+    legacy_blocks: List[int], x: int, y: int, z: int, section_y: int
+) -> str:
+    try:
+        return f"legacy:{legacy_blocks[_block_index(x, y, z, section_y)]}"
+    except (IndexError, TypeError):
+        return _AIR_BLOCK_ID
+
+
+def _palette_block_id(
+    section: _SectionData, x: int, y: int, z: int, section_y: int
+) -> str:
+    if not section.palette:
+        return _AIR_BLOCK_ID
+    if len(section.palette) == 1 or section.data is None:
+        return section.palette[0]
+    palette_index = _read_palette_index(section, x, y, z, section_y)
+    if palette_index is None:
+        return section.palette[0]
+    if 0 <= palette_index < len(section.palette):
+        return section.palette[palette_index]
+    return _AIR_BLOCK_ID
+
+
+def _read_palette_index(
+    section: _SectionData, x: int, y: int, z: int, section_y: int
+) -> Optional[int]:
+    data = section.data
+    if data is None:
+        return None
+    try:
+        return _palette_index(
+            data,
+            _block_index(x, y, z, section_y),
+            section.bits,
+            stretch=section.stretch,
+        )
+    except (IndexError, TypeError, ValueError, OverflowError):
+        return None
 
 
 def get_chunk_blocks(

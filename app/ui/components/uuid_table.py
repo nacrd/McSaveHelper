@@ -57,36 +57,45 @@ class UUIDMappingTable(ft.Column):
         if not path.exists():
             return 0
 
-        loaded: Dict[str, str] = {}
-
-        if path.suffix.lower() == ".csv":
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    reader = csv.reader(f)
-                    for row in reader:
-                        if len(row) >= 2 and row[0].strip() and row[1].strip():
-                            loaded[row[0].strip()] = row[1].strip()
-            except Exception:
-                pass
-        else:
-            # 文本格式 (player_name uuid)
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        parts = line.split()
-                        if len(parts) >= 2:
-                            loaded[parts[0]] = parts[1]
-            except Exception:
-                pass
+        loaded = (
+            self._read_csv_mappings(path)
+            if path.suffix.lower() == ".csv"
+            else self._read_text_mappings(path)
+        )
 
         if loaded:
             self._mappings.update(loaded)
             self._rebuild()
             self._sync()
         return len(loaded)
+
+    @staticmethod
+    def _read_csv_mappings(path: Path) -> Dict[str, str]:
+        loaded: Dict[str, str] = {}
+        try:
+            with path.open("r", encoding="utf-8", newline="") as file:
+                for row in csv.reader(file):
+                    if len(row) < 2:
+                        continue
+                    name, uuid = row[0].strip(), row[1].strip()
+                    if name and uuid:
+                        loaded[name] = uuid
+        except Exception:
+            pass
+        return loaded
+
+    @staticmethod
+    def _read_text_mappings(path: Path) -> Dict[str, str]:
+        loaded: Dict[str, str] = {}
+        try:
+            with path.open("r", encoding="utf-8") as file:
+                for line in file:
+                    parts = line.strip().split()
+                    if len(parts) >= 2 and not line.lstrip().startswith("#"):
+                        loaded[parts[0]] = parts[1]
+        except Exception:
+            pass
+        return loaded
 
     def save_to_file(self, file_path: str) -> int:
         """保存映射到文本文件 (player_name uuid)

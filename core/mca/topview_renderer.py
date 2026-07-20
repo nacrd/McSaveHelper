@@ -553,11 +553,22 @@ def _sample_surface_grid(
         from core.mca.surface import sample_region_surface_colors
 
         failed_chunks: set[Tuple[int, int]] = set()
+
+        # A tile usually reuses a small set of block/biome pairs.  Keep this
+        # cache local to the render so changing the texture JAR cannot leave
+        # stale colors in a process-wide cache.
+        @lru_cache(maxsize=4096)
+        def cached_surface_color(
+            name: str,
+            biome: Optional[str],
+        ) -> Color:
+            return _color_for_surface_sample(name, biome)
+
         grid = sample_region_surface_colors(
             region_path,
             tile_size=tile_size,
             color_for_block=_color_for_block_name,
-            color_for_surface=_color_for_surface_sample,
+            color_for_surface=cached_surface_color,
             cancel_check=cancel_check,
             decode_workers=decode_workers,
             failed_chunks=failed_chunks,
@@ -606,6 +617,47 @@ def _store_cached_tile(
         pass
 
 
+def _load_cached_topview(
+    region_path: Path,
+    tile_size: int,
+    cache_allowed: bool,
+    cancel_check: Optional[Callable[[], bool]],
+    status_out: List[bool],
+) -> Optional[bytes]:
+    if not cache_allowed:
+        return None
+    cached = _load_cached_tile(region_path, tile_size)
+    if not cached or (cancel_check is not None and cancel_check()):
+        return None
+    status_out.append(True)
+    return cached
+
+
+def _render_topview_png(
+    region_path: Path,
+    tile_size: int,
+    cache_allowed: bool,
+    cancel_check: Optional[Callable[[], bool]],
+    decode_workers: Optional[int],
+    status_out: List[bool],
+) -> Optional[bytes]:
+    grid = _sample_surface_grid(
+        region_path,
+        tile_size,
+        cancel_check=cancel_check,
+        decode_workers=decode_workers,
+        status_out=status_out,
+    )
+    if grid is None or (cancel_check is not None and cancel_check()):
+        return None
+    png = _encode_png(grid, tile_size)
+    if png is None or (cancel_check is not None and cancel_check()):
+        return None
+    if cache_allowed and status_out and status_out[-1]:
+        _store_cached_tile(region_path, tile_size, png)
+    return png
+
+
 def render_region_topview(
     region_file: Path | str,
     tile_size: int = DEFAULT_TILE_SIZE,
@@ -630,36 +682,25 @@ def render_region_topview(
     render_status = status_out if status_out is not None else []
 
     cache_allowed = use_disk_cache and not _uses_external_streams(region_path)
-    if cache_allowed:
-        cached = _load_cached_tile(region_path, tile_size)
-        if cached:
-            if cancel_check is not None and cancel_check():
-                return None
-            render_status.append(True)
-            return cached
-
-    grid = _sample_surface_grid(
+    cached = _load_cached_topview(
         region_path,
         tile_size,
-        cancel_check=cancel_check,
-        decode_workers=decode_workers,
-        status_out=render_status,
+        cache_allowed,
+        cancel_check,
+        render_status,
     )
-    if grid is None:
-        return None
-
+    if cached is not None:
+        return cached
     if cancel_check is not None and cancel_check():
         return None
-
-    png = _encode_png(grid, tile_size)
-    if png is None:
-        return None
-    if cancel_check is not None and cancel_check():
-        return None
-    complete = bool(render_status and render_status[-1])
-    if cache_allowed and png and complete:
-        _store_cached_tile(region_path, tile_size, png)
-    return png
+    return _render_topview_png(
+        region_path,
+        tile_size,
+        cache_allowed,
+        cancel_check,
+        decode_workers,
+        render_status,
+    )
 
 
 def render_region_topview_base64(

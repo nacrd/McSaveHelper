@@ -170,42 +170,55 @@ class ExplorerView(
 
     def _switch_tab(self, index: int) -> None:
         try:
-            # 懒加载标签页
-            if not self._tabs_built[index]:
-                if index == 1:
-                    self._build_player_tab()
-                    self._refresh_player_list()
-                elif index == 2:
-                    self._build_region_tab()
-                    self._update_dimension_list()
-                    self._refresh_map()
-                elif index == 3:
-                    self._build_stats_tab()
-                elif index == 4:
-                    self._build_search_tab()
-                elif index == 5:
-                    self._build_nbt_tab()
-                    self._update_nbt_target_options()
-                    self._update_nbt_stage_status()
-                    if self.current_uuid:
-                        self._load_player_data(self.current_uuid)
-                self._tabs_built[index] = True
-
+            self._build_tab_if_needed(index)
             self._tab_index = index
-            for i, lbl in enumerate(self._tab_labels_widgets):
-                selected = i == index
-                lbl.color = (
-                    THEME.text_primary if selected else THEME.text_secondary
-                )
-                if i < len(self._tab_buttons):
-                    self._tab_buttons[i].bgcolor = (
-                        THEME.mc_stone if selected else THEME.bg_secondary
-                    )
-            self._content_box.content = self._tabs_content[index]
-            safe_update(self._content_box)
-            safe_update(self._tab_bar)
+            self._show_selected_tab(index)
         except Exception as e:
             self.app.handle_exception(e)
+
+    def _build_tab_if_needed(self, index: int) -> None:
+        """Build the selected lazy tab once before it is shown."""
+        if self._tabs_built[index]:
+            return
+        builders = {
+            1: self._build_player_tab_content,
+            2: self._build_region_tab_content,
+            3: self._build_stats_tab,
+            4: self._build_search_tab,
+            5: self._build_nbt_tab_content,
+        }
+        builder = builders.get(index)
+        if builder is not None:
+            builder()
+        self._tabs_built[index] = True
+
+    def _build_player_tab_content(self) -> None:
+        self._build_player_tab()
+        self._refresh_player_list()
+
+    def _build_region_tab_content(self) -> None:
+        self._build_region_tab()
+        self._update_dimension_list()
+        self._refresh_map()
+
+    def _build_nbt_tab_content(self) -> None:
+        self._build_nbt_tab()
+        self._update_nbt_target_options()
+        self._update_nbt_stage_status()
+        if self.current_uuid:
+            self._load_player_data(self.current_uuid)
+
+    def _show_selected_tab(self, index: int) -> None:
+        for tab_index, label in enumerate(self._tab_labels_widgets):
+            selected = tab_index == index
+            label.color = THEME.text_primary if selected else THEME.text_secondary
+            if tab_index < len(self._tab_buttons):
+                self._tab_buttons[tab_index].bgcolor = (
+                    THEME.mc_stone if selected else THEME.bg_secondary
+                )
+        self._content_box.content = self._tabs_content[index]
+        safe_update(self._content_box)
+        safe_update(self._tab_bar)
 
     _tag_display_value = staticmethod(tag_display_value)
     _coerce_like_tag = staticmethod(coerce_like_tag)

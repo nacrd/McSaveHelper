@@ -112,9 +112,9 @@ class MapSurfaceRenderer:
         min_z = spec.min_region_z
         with self._lock:
             image = Image.new(
-                "RGB",
+                "RGBA",
                 (spec.pixel_width, spec.pixel_height),
-                (11, 18, 11),
+                (11, 18, 11, 255),
             )
             draw = ImageDraw.Draw(image)
             index = 0
@@ -152,9 +152,7 @@ class MapSurfaceRenderer:
                         fill=_rgb(colors.get(coord, (42, 58, 46))),
                     )
 
-            rgba = image.convert("RGBA")
-            pixels = rgba.tobytes()
-            rgba.close()
+            pixels = image.tobytes()
             image.close()
         return MapSurfaceFrame(
             pixels=pixels,

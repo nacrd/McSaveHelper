@@ -171,30 +171,9 @@ class WritableRegion:
         dest = Path(path) if path is not None else self.path
         if dest is None:
             raise McaError("No destination path for WritableRegion.save()")
-
         dest.parent.mkdir(parents=True, exist_ok=True)
-
-        if backup and dest.is_file():
-            bak = dest.with_suffix(dest.suffix + ".bak")
-            if not bak.exists():
-                try:
-                    shutil.copy2(dest, bak)
-                except OSError as exc:
-                    raise McaError(f"Backup failed for {dest}: {exc}") from exc
-
-        blob = self._serialize()
-        tmp = dest.with_suffix(dest.suffix + ".tmp")
-        try:
-            tmp.write_bytes(blob)
-            os.replace(tmp, dest)
-        except OSError as exc:
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-            raise McaError(f"Failed to write region {dest}: {exc}") from exc
-
+        _create_backup(dest, backup)
+        _replace_file_atomically(dest, self._serialize(), "Failed to write region")
         self.path = dest
         self._deleted.clear()
 
@@ -235,12 +214,41 @@ class WritableRegion:
 
             index = local_chunk_index(cx, cz)
             b_off = index * 4
-            locations[b_off : b_off + 3] = int(next_sector).to_bytes(3, "big")
+            locations[b_off:b_off + 3] = int(next_sector).to_bytes(3, "big")
             locations[b_off + 3] = sectors
-            timestamps[b_off : b_off + 4] = struct.pack(">I", now)
+            timestamps[b_off:b_off + 4] = struct.pack(">I", now)
             next_sector += sectors
 
         return bytes(locations) + bytes(timestamps) + bytes(body)
+
+
+def _create_backup(destination: Path, backup: bool) -> None:
+    if not backup or not destination.is_file():
+        return
+    backup_path = destination.with_suffix(destination.suffix + ".bak")
+    if backup_path.exists():
+        return
+    try:
+        shutil.copy2(destination, backup_path)
+    except OSError as exc:
+        raise McaError(f"Backup failed for {destination}: {exc}") from exc
+
+
+def _replace_file_atomically(destination: Path, data: bytes, error_prefix: str) -> None:
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, destination)
+    except OSError as exc:
+        _remove_temporary_file(temporary)
+        raise McaError(f"{error_prefix} {destination}: {exc}") from exc
+
+
+def _remove_temporary_file(temporary: Path) -> None:
+    try:
+        temporary.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def delete_chunk_entries(
@@ -274,9 +282,9 @@ def delete_chunk_entries(
                 continue
             index = local_chunk_index(cx, cz)
             b = index * 4
-            if loc[b : b + 4] != b"\x00\x00\x00\x00":
-                loc[b : b + 4] = b"\x00\x00\x00\x00"
-                ts[b : b + 4] = b"\x00\x00\x00\x00"
+            if loc[b:b + 4] != b"\x00\x00\x00\x00":
+                loc[b:b + 4] = b"\x00\x00\x00\x00"
+                ts[b:b + 4] = b"\x00\x00\x00\x00"
                 cleared += 1
         f.seek(0)
         f.write(loc)
@@ -295,52 +303,64 @@ def write_chunk_record(
     destination = Path(destination_path)
     destination_cx, destination_cz = destination_coords
     destination_index = local_chunk_index(destination_cx, destination_cz)
+    used_length = _validated_record_length(record)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    data = _load_region_for_chunk_write(destination, backup)
+    destination_sector, copied_sectors = _append_chunk_record(data, record, used_length)
+    _update_chunk_header(data, destination_index, destination_sector, copied_sectors)
+    _replace_file_atomically(destination, bytes(data), "Failed to write chunk into")
+
+
+def _validated_record_length(record: bytes) -> int:
     if len(record) < 5:
         raise McaError("Chunk record is missing its length or compression header")
     payload_length = int.from_bytes(record[:4], "big")
     used_length = 4 + payload_length
     if payload_length < 1 or used_length > len(record):
         raise McaError(f"Invalid chunk record length: {payload_length}")
+    return used_length
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists():
-        data = bytearray(destination.read_bytes())
-        if len(data) < HEADER_SIZE:
-            raise McaError(f"Region file too small: {destination}")
-        if backup:
-            backup_path = destination.with_suffix(destination.suffix + ".bak")
-            if not backup_path.exists():
-                shutil.copy2(destination, backup_path)
-    else:
-        data = bytearray(HEADER_SIZE)
 
-    if len(data) % SECTOR_SIZE:
-        data.extend(b"\x00" * (SECTOR_SIZE - len(data) % SECTOR_SIZE))
+def _load_region_for_chunk_write(destination: Path, backup: bool) -> bytearray:
+    if not destination.exists():
+        return bytearray(HEADER_SIZE)
+    data = bytearray(destination.read_bytes())
+    if len(data) < HEADER_SIZE:
+        raise McaError(f"Region file too small: {destination}")
+    _create_backup(destination, backup)
+    return data
+
+
+def _append_chunk_record(
+    data: bytearray,
+    record: bytes,
+    used_length: int,
+) -> Tuple[int, int]:
+    remainder = len(data) % SECTOR_SIZE
+    if remainder:
+        data.extend(b"\x00" * (SECTOR_SIZE - remainder))
     destination_sector = len(data) // SECTOR_SIZE
     copied_sectors = (used_length + SECTOR_SIZE - 1) // SECTOR_SIZE
     if copied_sectors > 255:
         raise McaError(f"Chunk record needs {copied_sectors} sectors (max 255)")
     data.extend(record[:used_length])
     data.extend(b"\x00" * (copied_sectors * SECTOR_SIZE - used_length))
+    return destination_sector, copied_sectors
 
+
+def _update_chunk_header(
+    data: bytearray,
+    destination_index: int,
+    destination_sector: int,
+    copied_sectors: int,
+) -> None:
     header_offset = destination_index * 4
-    data[header_offset : header_offset + 3] = destination_sector.to_bytes(3, "big")
+    data[header_offset:header_offset + 3] = destination_sector.to_bytes(3, "big")
     data[header_offset + 3] = copied_sectors
     timestamp_offset = LOCATION_TABLE_SIZE + header_offset
-    data[timestamp_offset : timestamp_offset + 4] = struct.pack(
+    data[timestamp_offset:timestamp_offset + 4] = struct.pack(
         ">I", int(time.time()) & 0xFFFFFFFF
     )
-
-    temporary = destination.with_suffix(destination.suffix + ".tmp")
-    try:
-        temporary.write_bytes(data)
-        os.replace(temporary, destination)
-    except OSError as exc:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise McaError(f"Failed to write chunk into {destination}: {exc}") from exc
 
 
 def copy_chunk_record(

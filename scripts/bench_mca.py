@@ -52,7 +52,7 @@ def _synth_region() -> bytes:
     for cx in (0, 1):
         idx = local_chunk_index(cx, 0)
         b = idx * 4
-        header[b : b + 3] = (2).to_bytes(3, "big")
+        header[b:b + 3] = (2).to_bytes(3, "big")
         header[b + 3] = sectors
     return bytes(header) + payload
 

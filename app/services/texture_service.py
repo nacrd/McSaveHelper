@@ -291,52 +291,82 @@ class TextureService:
 
     def _load_asset_index(self) -> None:
         try:
-            resp = requests.get(_ASSET_INDEX_URL, timeout=_REQUEST_TIMEOUT)
-            if resp.status_code != 200:
-                self._asset_index_loaded = True
+            version_url = self._find_latest_version_url()
+            if version_url is None:
                 return
-
-            manifest = resp.json()
-            latest_id = manifest.get("latest", {}).get("release")
-            if not latest_id:
-                self._asset_index_loaded = True
+            asset_index_url = self._find_asset_index_url(version_url)
+            if asset_index_url is None:
                 return
-
-            version_url = None
-            for v in manifest.get("versions", []):
-                if v.get("id") == latest_id:
-                    version_url = v.get("url")
-                    break
-
-            if not version_url:
-                self._asset_index_loaded = True
-                return
-
-            resp2 = requests.get(version_url, timeout=_REQUEST_TIMEOUT)
-            if resp2.status_code != 200:
-                self._asset_index_loaded = True
-                return
-
-            version_data = resp2.json()
-            asset_index_url = version_data.get("assetIndex", {}).get("url")
-            if not asset_index_url:
-                self._asset_index_loaded = True
-                return
-
-            resp3 = requests.get(asset_index_url, timeout=_REQUEST_TIMEOUT)
-            if resp3.status_code != 200:
-                self._asset_index_loaded = True
-                return
-
-            asset_data = resp3.json()
-            objects = asset_data.get("objects", {})
-            self._asset_index = {}
-            for key, info in objects.items():
-                self._asset_index[key] = info.get("hash", "")
-
-            self._asset_index_loaded = True
+            asset_index = self._download_asset_index(asset_index_url)
+            if asset_index is not None:
+                self._asset_index = asset_index
         except Exception:
+            pass
+        finally:
             self._asset_index_loaded = True
+
+    def _find_latest_version_url(self) -> Optional[str]:
+        manifest = self._request_json(_ASSET_INDEX_URL)
+        if manifest is None:
+            return None
+        latest = self._as_json_object(manifest.get("latest"))
+        latest_id = latest.get("release") if latest is not None else None
+        if not isinstance(latest_id, str) or not latest_id:
+            return None
+        versions = manifest.get("versions")
+        if not isinstance(versions, list):
+            return None
+        return self._find_version_url(versions, latest_id)
+
+    def _find_version_url(
+        self,
+        versions: List[object],
+        latest_id: str,
+    ) -> Optional[str]:
+        for version_value in versions:
+            version = self._as_json_object(version_value)
+            if version is None or version.get("id") != latest_id:
+                continue
+            url = version.get("url")
+            return url if isinstance(url, str) and url else None
+        return None
+
+    def _find_asset_index_url(self, version_url: str) -> Optional[str]:
+        version_data = self._request_json(version_url)
+        if version_data is None:
+            return None
+        asset_index = self._as_json_object(version_data.get("assetIndex"))
+        if asset_index is None:
+            return None
+        url = asset_index.get("url")
+        return url if isinstance(url, str) and url else None
+
+    def _download_asset_index(self, asset_index_url: str) -> Optional[Dict[str, str]]:
+        asset_data = self._request_json(asset_index_url)
+        if asset_data is None:
+            return None
+        objects = self._as_json_object(asset_data.get("objects")) or {}
+        asset_index: Dict[str, str] = {}
+        for key, value in objects.items():
+            info = self._as_json_object(value)
+            digest = info.get("hash") if info is not None else None
+            if isinstance(digest, str):
+                asset_index[key] = digest
+        return asset_index
+
+    @staticmethod
+    def _request_json(url: str) -> Optional[Dict[str, object]]:
+        response = requests.get(url, timeout=_REQUEST_TIMEOUT)
+        if response.status_code != 200:
+            return None
+        payload: object = response.json()
+        return TextureService._as_json_object(payload)
+
+    @staticmethod
+    def _as_json_object(value: object) -> Optional[Dict[str, object]]:
+        if not isinstance(value, dict):
+            return None
+        return {str(key): item for key, item in value.items()}
 
     def clear_cache(self, clear_textures: bool = True,
                     clear_jars: bool = False) -> None:
@@ -346,40 +376,60 @@ class TextureService:
             clear_textures: 是否清理纹理缓存（默认 True）
             clear_jars: 是否清理 JAR 文件（默认 False，因为 JAR 较大且重新下载耗时）
         """
+        self._clear_memory_cache()
+        if clear_textures:
+            self._clear_texture_files()
+        if clear_jars:
+            self._clear_jar_files()
+
+    def _clear_memory_cache(self) -> None:
         with self._lock:
             self._memory_cache.clear()
             self._base64_cache.clear()
             self._tried_paths.clear()
 
-        if clear_textures and self._cache_dir.exists():
-            try:
-                deleted_count = 0
-                for f in self._cache_dir.rglob("*.png"):
-                    try:
-                        f.unlink()
-                        deleted_count += 1
-                    except Exception:
-                        pass
-                if deleted_count > 0:
-                    logger.info(f"已清理 {deleted_count} 个纹理缓存文件")
-            except Exception as e:
-                logger.warning(f"清理纹理缓存失败: {e}")
+    def _clear_texture_files(self) -> None:
+        if not self._cache_dir.exists():
+            return
+        try:
+            deleted_count = self._delete_texture_files()
+            if deleted_count > 0:
+                logger.info(f"已清理 {deleted_count} 个纹理缓存文件")
+        except Exception as exc:
+            logger.warning(f"清理纹理缓存失败: {exc}")
 
-        if clear_jars and self._jar_cache_dir.exists():
+    def _delete_texture_files(self) -> int:
+        deleted_count = 0
+        for texture_file in self._cache_dir.rglob("*.png"):
             try:
-                deleted_count = 0
-                deleted_size = 0
-                for jar_file in self._jar_cache_dir.glob("*.jar"):
-                    try:
-                        size = jar_file.stat().st_size
-                        jar_file.unlink()
-                        deleted_count += 1
-                        deleted_size += size
-                    except Exception:
-                        pass
-                if deleted_count > 0:
-                    logger.info(
-                        f"已清理 {deleted_count} 个 JAR 文件 ({
-                            deleted_size / 1024 / 1024:.1f} MB)")
-            except Exception as e:
-                logger.warning(f"清理 JAR 缓存失败: {e}")
+                texture_file.unlink()
+                deleted_count += 1
+            except Exception:
+                pass
+        return deleted_count
+
+    def _clear_jar_files(self) -> None:
+        if not self._jar_cache_dir.exists():
+            return
+        try:
+            deleted_count, deleted_size = self._delete_jar_files()
+            if deleted_count > 0:
+                size_mb = deleted_size / 1024 / 1024
+                logger.info(
+                    f"已清理 {deleted_count} 个 JAR 文件 ({size_mb:.1f} MB)"
+                )
+        except Exception as exc:
+            logger.warning(f"清理 JAR 缓存失败: {exc}")
+
+    def _delete_jar_files(self) -> tuple[int, int]:
+        deleted_count = 0
+        deleted_size = 0
+        for jar_file in self._jar_cache_dir.glob("*.jar"):
+            try:
+                size = jar_file.stat().st_size
+                jar_file.unlink()
+                deleted_count += 1
+                deleted_size += size
+            except Exception:
+                pass
+        return deleted_count, deleted_size

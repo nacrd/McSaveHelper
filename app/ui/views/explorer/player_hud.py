@@ -47,38 +47,35 @@ class PlayerHUDCard(ft.Column):
         if player_data is None:
             return
         try:
-            h = player_data.get("Health")
-            if h is not None:
-                self._attrs["health"].value = f"{int(h)} / 20"
-            f = player_data.get("foodLevel")
-            if f is not None:
-                self._attrs["food"].value = f"{int(f)} / 20"
-            lvl = player_data.get("XpLevel")
-            if lvl is not None:
-                self._attrs["level"].value = str(int(lvl))
-            a = player_data.get("Air")
-            if a is not None:
-                self._attrs["air"].value = str(int(a))
-            dim = player_data.get("Dimension")
-            if dim is not None:
-                ds = str(dim).lower()
-                if "overworld" in ds:
-                    self._attrs["dimension"].value = "主世界"
-                elif "nether" in ds:
-                    self._attrs["dimension"].value = "下界"
-                elif "end" in ds:
-                    self._attrs["dimension"].value = "末地"
-                else:
-                    self._attrs["dimension"].value = ds
-            pos = player_data.get("Pos")
-            if pos is not None and len(pos) >= 3:
-                self._attrs["pos"].value = f"{
-                    float(
-                        pos[0]):.1f}, {
-                    float(
-                        pos[1]):.1f}, {
-                    float(
-                        pos[2]):.1f}"
+            self._set_numeric_attribute(player_data, "Health", "health", " / 20")
+            self._set_numeric_attribute(player_data, "foodLevel", "food", " / 20")
+            self._set_numeric_attribute(player_data, "XpLevel", "level")
+            self._set_numeric_attribute(player_data, "Air", "air")
+            self._set_dimension_attribute(player_data.get("Dimension"))
+            self._set_position_attribute(player_data.get("Pos"))
         except Exception:
             pass
         safe_update(self)
+
+    def _set_numeric_attribute(
+        self, player_data: Any, nbt_key: str, attribute: str, suffix: str = ""
+    ) -> None:
+        value = player_data.get(nbt_key)
+        if value is not None:
+            self._attrs[attribute].value = f"{int(value)}{suffix}"
+
+    def _set_dimension_attribute(self, dimension: Any) -> None:
+        if dimension is None:
+            return
+        dimension_name = str(dimension).lower()
+        labels = (("overworld", "主世界"), ("nether", "下界"), ("end", "末地"))
+        self._attrs["dimension"].value = next(
+            (label for marker, label in labels if marker in dimension_name), dimension_name
+        )
+
+    def _set_position_attribute(self, position: Any) -> None:
+        if position is None or len(position) < 3:
+            return
+        self._attrs["pos"].value = ", ".join(
+            f"{float(position[index]):.1f}" for index in range(3)
+        )

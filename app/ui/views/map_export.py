@@ -1,7 +1,7 @@
 """Map Export View - 地图导出视图"""
 import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 import flet as ft
 
@@ -603,89 +603,62 @@ class MapExportView(ft.Column):
                 log_callback=log_callback,
                 cancel_event=cancel_event,
             )
-
-            def _finish() -> None:
-                if not self._is_current_generation(generation):
-                    return
-                if results["success"]:
-                    self._result_text.value = self.app.translate(
-                        "map_export.completed_report",
-                        (
-                            "导出完成！\n\n✓ 维度: {dimension}\n"
-                            "✓ 输出文件: {output}\n✓ 图像尺寸: {width} x {height}\n"
-                            "✓ 处理区块: {chunks}"
-                        ),
-                        dimension=results["dimension_id"],
-                        output=results["output_path"],
-                        width=results["dimensions"][0],
-                        height=results["dimensions"][1],
-                        chunks=results["chunks_processed"],
-                    )
-                    self._result_text.update()
-                    self.app.hide_progress()
-                    self.app.info_dialog(
-                        self.app.translate("map_export.completed", "完成"),
-                        self.app.translate(
-                            "map_export.completed_message",
-                            "地图导出完成！",
-                        ),
-                    )
-                elif results.get("cancelled"):
-                    self._result_text.value = self.app.translate(
-                        "map_export.cancelled",
-                        "导出已取消",
-                    )
-                    self._result_text.update()
-                    self.app.hide_progress()
-                else:
-                    error = results.get("error") or self.app.translate(
-                        "map_export.see_log",
-                        "请查看日志",
-                    )
-                    self._result_text.value = self.app.translate(
-                        "map_export.failed",
-                        "导出失败: {error}",
-                        error=error,
-                    )
-                    self._result_text.update()
-                    self.app.hide_progress()
-                    self.app.error_dialog(
-                        self.app.translate("map_export.error", "错误"),
-                        self.app.translate(
-                            "map_export.failed_message",
-                            "地图导出失败",
-                        ),
-                    )
-                self._exporting = False
-                self._cancel_event = None
-                self._task_generation += 1
-                self._set_export_controls_enabled(True)
-            self._run_for_generation(generation, _finish)
+            self._run_for_generation(generation, self._finish_export, results)
 
         except Exception as ex:
-            def _error(error: Exception) -> None:
-                if not self._is_current_generation(generation):
-                    return
-                self._result_text.value = self.app.translate(
-                    "map_export.failed",
-                    "导出失败: {error}",
-                    error=error,
-                )
-                self._result_text.update()
-                self.app.hide_progress()
-                self.app.error_dialog(
-                    self.app.translate("map_export.error", "错误"),
-                    self.app.translate(
-                        "map_export.failed",
-                        "导出失败: {error}",
-                        error=error,
-                    ),
-                )
-                self._exporting = False
-                self._cancel_event = None
-                self._task_generation += 1
-                self._set_export_controls_enabled(True)
-            self._run_for_generation(generation, _error, ex)
+            self._run_for_generation(generation, self._finish_export_error, ex)
+
+    def _finish_export(self, results: Mapping[str, Any]) -> None:
+        if results["success"]:
+            self._show_export_success(results)
+        elif results.get("cancelled"):
+            self._result_text.value = self.app.translate("map_export.cancelled", "导出已取消")
+            self._result_text.update()
+            self.app.hide_progress()
+        else:
+            self._show_export_failure(
+                results.get("error")
+                or self.app.translate("map_export.see_log", "请查看日志"),
+                "map_export.failed_message",
+            )
+        self._reset_export_state()
+
+    def _show_export_success(self, results: Mapping[str, Any]) -> None:
+        dimensions = results["dimensions"]
+        self._result_text.value = self.app.translate(
+            "map_export.completed_report",
+            "导出完成！\n\n✓ 维度: {dimension}\n✓ 输出文件: {output}\n"
+            "✓ 图像尺寸: {width} x {height}\n✓ 处理区块: {chunks}",
+            dimension=results["dimension_id"], output=results["output_path"],
+            width=dimensions[0], height=dimensions[1], chunks=results["chunks_processed"],
+        )
+        self._result_text.update()
+        self.app.hide_progress()
+        self.app.info_dialog(
+            self.app.translate("map_export.completed", "完成"),
+            self.app.translate("map_export.completed_message", "地图导出完成！"),
+        )
+
+    def _finish_export_error(self, error: Exception) -> None:
+        self._show_export_failure(error, "map_export.failed")
+        self._reset_export_state()
+
+    def _show_export_failure(self, error: object, message_key: str) -> None:
+        self._result_text.value = self.app.translate(
+            "map_export.failed", "导出失败: {error}", error=error
+        )
+        self._result_text.update()
+        self.app.hide_progress()
+        self.app.error_dialog(
+            self.app.translate("map_export.error", "错误"),
+            self.app.translate(message_key, "地图导出失败", error=error),
+        )
+
+    def _reset_export_state(self) -> None:
+        self._exporting = False
+        self._cancel_event = None
+        self._task_generation += 1
+        self._set_export_controls_enabled(True)
 
     def _is_current_generation(self, generation: int) -> bool:
         return not self._disposed and generation == self._task_generation

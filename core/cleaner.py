@@ -51,21 +51,29 @@ def clean_world(world_path: Path, log: LogCallback) -> None:
 
         for file_name in files:
             file_path = root_path / file_name
-            if should_clean(file_path):
-                try:
-                    file_path.unlink()
-                    cleaned_count += 1
-                except OSError:
-                    pass
+            if should_clean(file_path) and _remove_file(file_path):
+                cleaned_count += 1
 
         for dir_name in dirs:
             dir_path = root_path / dir_name
-            if should_clean(dir_path):
-                try:
-                    shutil.rmtree(dir_path)
-                    cleaned_count += 1
-                except OSError:
-                    pass
+            if should_clean(dir_path) and _remove_directory(dir_path):
+                cleaned_count += 1
 
     if cleaned_count > 0:
         log(f"精简完成，删除了 {cleaned_count} 项", "CLEAN")
+
+
+def _remove_file(path: Path) -> bool:
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _remove_directory(path: Path) -> bool:
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        return False
+    return True

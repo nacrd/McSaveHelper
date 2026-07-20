@@ -19,44 +19,14 @@ def scan_region_meta(region_file: Path) -> Dict[str, Any]:
             from core.mca import NativeRegion
 
             with NativeRegion.from_file(region_file) as region:
-                sample_points = [
-                    (0, 0), (0, 16), (16, 0), (16, 16),
-                    (8, 8), (8, 24), (24, 8), (24, 24),
-                ]
-                for cx, cz in sample_points:
-                    try:
-                        chunk = region.get_chunk(cx, cz)
-                        if chunk is None or chunk.data is None:
-                            continue
-                        chunk_count += 1
-                        collect_biomes(chunk.data, biomes)
-                        collect_structures(
-                            chunk.data,
-                            structures,
-                            structure_positions,
-                        )
-                    except Exception:
-                        continue
+                for cx, cz in _primary_sample_points():
+                    chunk_count += _collect_region_chunk(
+                        region, cx, cz, biomes, structures, structure_positions
+                    )
                 if not biomes and not structures:
-                    for cx in range(0, 32, 4):
-                        for cz in range(0, 32, 4):
-                            if chunk_count >= 16:
-                                break
-                            try:
-                                chunk = region.get_chunk(cx, cz)
-                                if chunk is None or chunk.data is None:
-                                    continue
-                                chunk_count += 1
-                                collect_biomes(chunk.data, biomes)
-                                collect_structures(
-                                    chunk.data,
-                                    structures,
-                                    structure_positions,
-                                )
-                            except Exception:
-                                continue
-                        if chunk_count >= 16:
-                            break
+                    chunk_count += _scan_fallback_chunks(
+                        region, chunk_count, biomes, structures, structure_positions
+                    )
         except Exception:
             pass
 
@@ -73,6 +43,47 @@ def scan_region_meta(region_file: Path) -> Dict[str, Any]:
         "structures": dict(structures.most_common(8)),
         "structure_positions": structure_positions[:12],
     }
+
+
+def _primary_sample_points() -> tuple[tuple[int, int], ...]:
+    return ((0, 0), (0, 16), (16, 0), (16, 16), (8, 8), (8, 24), (24, 8), (24, 24))
+
+
+def _collect_region_chunk(
+    region: Any,
+    chunk_x: int,
+    chunk_z: int,
+    biomes: Counter[str],
+    structures: Counter[str],
+    positions: list[Dict[str, Any]],
+) -> int:
+    try:
+        chunk = region.get_chunk(chunk_x, chunk_z)
+        if chunk is None or chunk.data is None:
+            return 0
+        collect_biomes(chunk.data, biomes)
+        collect_structures(chunk.data, structures, positions)
+        return 1
+    except Exception:
+        return 0
+
+
+def _scan_fallback_chunks(
+    region: Any,
+    initial_count: int,
+    biomes: Counter[str],
+    structures: Counter[str],
+    positions: list[Dict[str, Any]],
+) -> int:
+    found = 0
+    for chunk_x in range(0, 32, 4):
+        for chunk_z in range(0, 32, 4):
+            if initial_count + found >= 16:
+                return found
+            found += _collect_region_chunk(
+                region, chunk_x, chunk_z, biomes, structures, positions
+            )
+    return found
 
 
 def collect_biomes(data: Any, counter: Counter[str]) -> None:
