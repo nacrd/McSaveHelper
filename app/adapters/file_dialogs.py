@@ -159,6 +159,7 @@ class TkFileDialogs:
             try:
                 root.attributes("-topmost", True)
             except Exception:
+                # Some platforms/themes reject -topmost; ignore.
                 pass
             self._ready.set()
 
@@ -169,6 +170,7 @@ class TkFileDialogs:
                 self._handle_request(filedialog, root, request)
         except Exception:
             # Worker failed to start or crashed; unblock any waiters.
+            # Tkinter may raise TclError (subclass of Exception).
             self._ready.set()
             self._drain_pending_with_none()
         finally:
@@ -176,6 +178,7 @@ class TkFileDialogs:
                 try:
                     root.destroy()
                 except Exception:
+                    # Best-effort destroy on the worker thread.
                     pass
 
     def _handle_request(
@@ -199,10 +202,12 @@ class TkFileDialogs:
             else:
                 result = str(selected) if selected else None
         except Exception:
+            # Dialog cancel/error paths vary by platform; return None.
             result = None
         try:
             request.response.put(result)
         except Exception:
+            # Caller may have timed out and abandoned the queue.
             pass
 
     def _drain_pending_with_none(self) -> None:
@@ -216,4 +221,5 @@ class TkFileDialogs:
             try:
                 request.response.put(None)
             except Exception:
+                # Best-effort unblock of timed-out callers.
                 pass

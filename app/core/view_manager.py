@@ -57,7 +57,11 @@ class ViewManager:
             self._update_top_actions(current_view)
             self._notify_save_selected(current_view)
             self._deps.update_page()
+        except (RuntimeError, TypeError, AttributeError, ValueError) as error:
+            self._deps.log(f"加载视图 '{view_id}' 失败: {error}", "ERROR")
+            self._handle_view_error(view_id, error)
         except Exception as error:
+            # View factories/UI may raise Flet-specific errors.
             self._deps.log(f"加载视图 '{view_id}' 失败: {error}", "ERROR")
             self._handle_view_error(view_id, error)
 
@@ -123,6 +127,7 @@ class ViewManager:
         try:
             callback(current_save_path)
         except Exception as error:
+            # View callbacks may raise UI/runtime errors; isolate them.
             self._deps.log(f"同步当前存档失败: {error}", "ERROR")
 
     def _handle_view_error(self, view_id: str, error: Exception) -> None:
@@ -151,6 +156,7 @@ class ViewManager:
             )
             self._deps.update_page()
         except Exception:
+            # Last-resort UI fallback when page is already torn down.
             pass
 
     def notify_current_view_save_selected(self, path: str) -> None:
