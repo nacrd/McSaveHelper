@@ -677,6 +677,7 @@
       "world": "Pos/Spawn",
       "abilities": "Abilities",
       "advanced": "Attrs/Effects"
-    }
+    },
+    "resize_columns": "Drag to resize columns"
   }
 }

@@ -57,6 +57,60 @@ _GAME_TYPE_LABELS = {
     3: ("player.game_type.spectator", "旁观"),
 }
 
+_DEFAULT_COL_WIDTHS = (220.0, 360.0, 480.0)
+_MIN_COL_WIDTHS = (160.0, 260.0, 280.0)
+_SPLITTER_CHROME = 28.0  # two handles + padding budget
+
+
+def resize_adjacent_columns(
+    widths: List[float],
+    mins: List[float],
+    boundary: int,
+    delta: float,
+) -> List[float]:
+    """Return new widths after moving ``delta`` px across ``boundary``.
+
+    Pure helper so column resize math can be unit-tested without Flet.
+    """
+    if boundary < 0 or boundary + 1 >= len(widths):
+        return list(widths)
+    result = list(widths)
+    left_i = boundary
+    right_i = boundary + 1
+    proposed_left = result[left_i] + delta
+    proposed_right = result[right_i] - delta
+    if proposed_left < mins[left_i]:
+        spill = mins[left_i] - proposed_left
+        proposed_left = mins[left_i]
+        proposed_right -= spill
+    if proposed_right < mins[right_i]:
+        spill = mins[right_i] - proposed_right
+        proposed_right = mins[right_i]
+        proposed_left -= spill
+    if proposed_left < mins[left_i] or proposed_right < mins[right_i]:
+        return list(widths)
+    result[left_i] = proposed_left
+    result[right_i] = proposed_right
+    return result
+
+
+def normalize_column_widths(
+    widths: List[float],
+    mins: List[float],
+    available: float,
+) -> List[float]:
+    """Scale widths to ``available`` while keeping each column above its min."""
+    if available <= 0:
+        return list(widths)
+    floor = sum(mins)
+    target = max(floor, available)
+    current = sum(widths) or 1.0
+    scale = target / current
+    scaled = [max(mins[i], w * scale) for i, w in enumerate(widths)]
+    diff = target - sum(scaled)
+    scaled[-1] = max(mins[-1], scaled[-1] + diff)
+    return scaled
+
 
 class PlayerTabMixin(ExplorerMixinHost):
     """Build and handle Explorer player tab interactions."""
@@ -298,37 +352,137 @@ class PlayerTabMixin(ExplorerMixinHost):
         right.controls.append(self._inventory_panel)
         right.controls.append(self._ender_panel)
 
-        # Flexible column widths: avoid fixed widths that collide on narrow UI.
+        # Flexible, user-resizable column widths.
+        self._player_col_widths = list(_DEFAULT_COL_WIDTHS)
+        self._player_col_min = list(_MIN_COL_WIDTHS)
+        self._player_layout_width = 0.0
         self._player_left_panel = ft.Container(
             content=left,
-            expand=2,
+            width=self._player_col_widths[0],
+            expand=False,
             padding=ft.Padding(0, 0, 4, 0),
         )
         self._player_center_panel = ft.Container(
             content=center,
-            expand=4,
+            width=self._player_col_widths[1],
+            expand=False,
             padding=ft.Padding(4, 0, 4, 0),
         )
         self._player_right_panel = ft.Container(
             content=right,
-            expand=5,
+            width=self._player_col_widths[2],
+            expand=False,
             padding=ft.Padding(4, 0, 0, 0),
         )
+        self._player_split_left = self._build_column_splitter(0)
+        self._player_split_right = self._build_column_splitter(1)
         self._player_layout = ft.Row(
             [
                 self._player_left_panel,
+                self._player_split_left,
                 self._player_center_panel,
+                self._player_split_right,
                 self._player_right_panel,
             ],
             spacing=0,
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             expand=True,
         )
         self._tab_player.content = ft.Container(
             content=self._player_layout,
             expand=True,
             padding=ft.Padding(4, 4, 4, 4),
+            on_size_change=self._on_player_layout_size_change,
         )
+
+    def _build_column_splitter(self, boundary: int) -> ft.Control:
+        """Draggable vertical handle between player columns.
+
+        ``boundary`` 0 resizes left/center; 1 resizes center/right.
+        """
+        handle = ft.Container(
+            width=6,
+            bgcolor=THEME.border_light,
+            border_radius=3,
+            margin=ft.Margin(left=2, top=8, right=2, bottom=8),
+            tooltip=self._t("player.resize_columns", "拖拽调节列宽"),
+        )
+
+        def on_enter(_e: Any = None) -> None:
+            handle.bgcolor = THEME.accent
+            safe_update(handle)
+
+        def on_exit(_e: Any = None) -> None:
+            handle.bgcolor = THEME.border_light
+            safe_update(handle)
+
+        def on_update(e: Any) -> None:
+            delta = _drag_delta_x(e)
+            if abs(delta) < 0.5:
+                return
+            self._resize_player_columns(boundary, delta)
+
+        return ft.GestureDetector(
+            content=handle,
+            mouse_cursor=ft.MouseCursor.RESIZE_COLUMN,
+            drag_interval=16,
+            on_enter=on_enter,
+            on_exit=on_exit,
+            on_horizontal_drag_update=on_update,
+            on_pan_update=on_update,
+        )
+
+    def _on_player_layout_size_change(self, e: Any = None) -> None:
+        """Keep column widths within the available layout width."""
+        width = 0.0
+        if e is not None:
+            width = float(getattr(e, "width", 0.0) or 0.0)
+        if width <= 1:
+            return
+        self._player_layout_width = width
+        self._normalize_player_column_widths()
+        self._apply_player_column_widths()
+
+    def _resize_player_columns(self, boundary: int, delta: float) -> None:
+        """Move width between two adjacent columns."""
+        widths = list(
+            getattr(self, "_player_col_widths", list(_DEFAULT_COL_WIDTHS))
+        )
+        mins = list(getattr(self, "_player_col_min", list(_MIN_COL_WIDTHS)))
+        self._player_col_widths = resize_adjacent_columns(
+            widths, mins, boundary, delta
+        )
+        self._apply_player_column_widths()
+
+    def _normalize_player_column_widths(self) -> None:
+        """Scale columns to fill available width while respecting mins."""
+        widths = list(
+            getattr(self, "_player_col_widths", list(_DEFAULT_COL_WIDTHS))
+        )
+        mins = list(getattr(self, "_player_col_min", list(_MIN_COL_WIDTHS)))
+        available = max(
+            sum(mins),
+            float(getattr(self, "_player_layout_width", 0.0)) - _SPLITTER_CHROME,
+        )
+        self._player_col_widths = normalize_column_widths(
+            widths, mins, available
+        )
+
+    def _apply_player_column_widths(self) -> None:
+        widths = getattr(self, "_player_col_widths", None)
+        if not widths or len(widths) < 3:
+            return
+        panels = (
+            getattr(self, "_player_left_panel", None),
+            getattr(self, "_player_center_panel", None),
+            getattr(self, "_player_right_panel", None),
+        )
+        for panel, width in zip(panels, widths):
+            if panel is None:
+                continue
+            panel.width = float(width)
+            panel.expand = False
+            safe_update(panel)
 
     def _chip_button(
         self,
@@ -1198,6 +1352,20 @@ class PlayerTabMixin(ExplorerMixinHost):
         for part in path:
             node = node[part]
         return node
+
+
+def _drag_delta_x(event: Any) -> float:
+    """Extract horizontal drag delta from a Flet drag/pan event."""
+    local_delta = getattr(event, "local_delta", None)
+    if local_delta is not None:
+        return float(getattr(local_delta, "x", 0.0) or 0.0)
+    primary = getattr(event, "primary_delta", None)
+    if primary is not None:
+        return float(primary or 0.0)
+    global_delta = getattr(event, "global_delta", None)
+    if global_delta is not None:
+        return float(getattr(global_delta, "x", 0.0) or 0.0)
+    return 0.0
 
 
 def _coord(value: Any) -> str:
