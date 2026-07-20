@@ -33,7 +33,12 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.ui.utils import ScheduledTask, run_on_ui, safe_update, schedule_coroutine
+from app.ui.utils import (
+    ScheduledTask,
+    run_on_ui,
+    safe_update,
+    schedule_coroutine,
+)
 from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,

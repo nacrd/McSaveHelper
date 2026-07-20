@@ -139,8 +139,13 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._center_section_index = 0
         self._shulker_dialog: Optional[ft.AlertDialog] = None
 
-        # ── Left: search on top, player list immediately under it ──
-        # Keep list top-aligned under the search field (not vertically centered).
+        left = self._build_player_left_column(t)
+        center = self._build_player_center_column(t)
+        right = self._build_player_right_column(t)
+        self._assemble_player_layout(left, center, right)
+
+    def _build_player_left_column(self, t: Any) -> ft.Column:
+        """Search field + player list (top-aligned)."""
         left = ft.Column(
             spacing=8,
             expand=True,
@@ -161,7 +166,6 @@ class PlayerTabMixin(ExplorerMixinHost):
             on_change=self._on_player_filter_changed,
         )
         left.controls.append(self._player_filter)
-        # Secondary action stays under search, above the list.
         left.controls.append(
             btn_ghost(
                 t("explorer.import_usercache", "导入 usercache"),
@@ -176,8 +180,6 @@ class PlayerTabMixin(ExplorerMixinHost):
             alignment=ft.MainAxisAlignment.START,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        # Expand wrapper so leftover height is empty space *below* the tiles,
-        # not gaps that push tiles toward the vertical middle.
         left.controls.append(
             ft.Container(
                 content=self._player_list_column,
@@ -186,8 +188,10 @@ class PlayerTabMixin(ExplorerMixinHost):
                 clip_behavior=ft.ClipBehavior.HARD_EDGE,
             )
         )
+        return left
 
-        # ── Center: HUD + categorized editor sections ─────────
+    def _build_player_center_column(self, t: Any) -> ft.Column:
+        """HUD, section switcher, and categorized edit forms."""
         center = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self._player_hud = PlayerHUDCard(t_cb=self._t)
         center.controls.append(card(self._player_hud, padding=10))
@@ -208,7 +212,6 @@ class PlayerTabMixin(ExplorerMixinHost):
         ]
         center.controls.append(self._responsive_chips(action_controls))
 
-        # Section switcher — one category visible at a time.
         section_defs = (
             (0, "player.section.vitals", "生命/经验"),
             (1, "player.section.world", "坐标/出生"),
@@ -232,7 +235,6 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._effects_list = ft.Column(
             spacing=2, scroll=ft.ScrollMode.AUTO, height=140
         )
-
         self._section_vitals = self._build_section_card(
             t("player.edit.section_vitals", "生命 / 饥饿 / 经验"),
             [
@@ -312,8 +314,10 @@ class PlayerTabMixin(ExplorerMixinHost):
             )
         )
         self._switch_center_section(0)
+        return center
 
-        # ── Right: equipment + inventory + nested container ───
+    def _build_player_right_column(self, t: Any) -> ft.Column:
+        """Equipment, inventory/ender tabs, and nested container preview."""
         right = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO, expand=True)
         self._equipment = EquipmentPreview(
             self.app.item,
@@ -368,7 +372,6 @@ class PlayerTabMixin(ExplorerMixinHost):
         right.controls.append(self._inventory_panel)
         right.controls.append(self._ender_panel)
 
-        # Nested container (shulker etc.) preview uses the empty right-column space.
         self._container_preview_title = ft.Text(
             t("player.container.preview_title", "容器内容"),
             size=13,
@@ -410,8 +413,15 @@ class PlayerTabMixin(ExplorerMixinHost):
             visible=False,
         )
         right.controls.append(self._container_preview_panel)
+        return right
 
-        # Flexible, user-resizable column widths.
+    def _assemble_player_layout(
+        self,
+        left: ft.Column,
+        center: ft.Column,
+        right: ft.Column,
+    ) -> None:
+        """Wire resizable three-column layout into the player tab host."""
         self._player_col_widths = list(_DEFAULT_COL_WIDTHS)
         self._player_col_min = list(_MIN_COL_WIDTHS)
         self._player_layout_width = 0.0
