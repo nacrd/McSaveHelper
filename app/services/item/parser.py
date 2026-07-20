@@ -12,10 +12,18 @@ def parse_item(
     get_item_name: Callable[[str], str],
     get_enchantment_name: Callable[[str], str],
 ) -> ItemInfo:
-    """Parse item data and extract full info.
+    """解析物品数据并提取完整信息。
 
-    Supports both legacy pre-1.20.5 ``tag`` compounds and modern
-    ``components`` maps (1.20.5+), preferring components when present.
+    同时支持旧版 ``tag`` 复合标签与 1.20.5+ ``components`` 映射；
+    二者并存时优先 components，再用 legacy 补齐缺失字段。
+
+    Args:
+        item_data: 原始物品字典。
+        get_item_name: 物品 ID → 显示名。
+        get_enchantment_name: 附魔 ID → 显示名。
+
+    Returns:
+        ItemInfo: 结构化物品信息。
     """
     item_id = str(item_data.get("id", "") or "")
     count = _as_int(item_data.get("count", item_data.get("Count", 1))) or 1
@@ -33,36 +41,36 @@ def parse_item(
     custom_name: Optional[str] = None
     lore: List[str] = []
 
-    # Prefer modern components, fall back to legacy tag.
     if components is not None:
-        try:
-            custom_name, lore, damage, enchantments = _parse_components(
-                components,
-                get_enchantment_name,
-            )
-            if custom_name:
-                display_name = custom_name
-        except (TypeError, ValueError, AttributeError, KeyError):
-            pass
+        custom_name, lore, damage, enchantments = _safe_parse_components(
+            components,
+            get_enchantment_name,
+        )
+        if custom_name:
+            display_name = custom_name
 
-    if tag is not None and (custom_name is None or not enchantments or damage is None):
-        try:
-            legacy = _parse_legacy_tag(tag, get_enchantment_name)
-            if custom_name is None and legacy["custom_name"]:
-                custom_name = legacy["custom_name"]
-                display_name = custom_name
-            if not lore and legacy["lore"]:
-                lore = legacy["lore"]
-            if damage is None and legacy["damage"] is not None:
-                damage = legacy["damage"]
-            if not enchantments and legacy["enchantments"]:
-                enchantments = legacy["enchantments"]
-        except (TypeError, ValueError, AttributeError, KeyError):
-            pass
+    needs_legacy = (
+        tag is not None
+        and (custom_name is None or not enchantments or damage is None)
+    )
+    if needs_legacy:
+        legacy = _safe_parse_legacy_tag(tag, get_enchantment_name)
+        if custom_name is None and legacy["custom_name"]:
+            custom_name = legacy["custom_name"]
+            display_name = custom_name
+        if not lore and legacy["lore"]:
+            lore = legacy["lore"]
+        if damage is None and legacy["damage"] is not None:
+            damage = legacy["damage"]
+        if not enchantments and legacy["enchantments"]:
+            enchantments = legacy["enchantments"]
 
     if damage is not None and max_dur is not None and max_dur > 0:
         remaining = max_dur - damage
-        durability_percent = max(0.0, min(100.0, (remaining / max_dur) * 100.0))
+        durability_percent = max(
+            0.0,
+            min(100.0, (remaining / max_dur) * 100.0),
+        )
 
     return ItemInfo(
         id=item_id,
@@ -78,10 +86,39 @@ def parse_item(
     )
 
 
+def _safe_parse_components(
+    components: Any,
+    get_enchantment_name: Callable[[str], str],
+) -> tuple[Optional[str], List[str], Optional[int], List[Dict[str, Any]]]:
+    """Parse modern components; return empty defaults on structural errors."""
+    try:
+        return _parse_components(components, get_enchantment_name)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        return None, [], None, []
+
+
+def _safe_parse_legacy_tag(
+    tag: Any,
+    get_enchantment_name: Callable[[str], str],
+) -> Dict[str, Any]:
+    """Parse legacy tag; return empty defaults on structural errors."""
+    empty = {
+        "custom_name": None,
+        "lore": [],
+        "damage": None,
+        "enchantments": [],
+    }
+    try:
+        return _parse_legacy_tag(tag, get_enchantment_name)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        return empty
+
+
 def _parse_legacy_tag(
     tag: Any,
     get_enchantment_name: Callable[[str], str],
 ) -> Dict[str, Any]:
+    """Parse pre-1.20.5 item ``tag`` compound."""
     custom_name: Optional[str] = None
     lore: List[str] = []
     damage: Optional[int] = None
@@ -102,7 +139,9 @@ def _parse_legacy_tag(
             custom_name = _clean_text(name_tag)
         lore_tag = display_tag.get("Lore")
         if lore_tag is not None and hasattr(lore_tag, "__iter__"):
-            lore = [_clean_text(line) for line in lore_tag if line is not None]
+            lore = [
+                _clean_text(line) for line in lore_tag if line is not None
+            ]
 
     damage_tag = tag.get("Damage")
     if damage_tag is not None:
