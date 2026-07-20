@@ -1,10 +1,8 @@
 """纹理服务 - 管理 Minecraft 物品纹理的获取、缓存和提供"""
 import base64
 import logging
-import os
 import re
 import threading
-import tempfile
 import zipfile
 from collections import OrderedDict
 from pathlib import Path
@@ -12,6 +10,7 @@ from typing import Callable, Dict, List, Optional
 
 import requests
 
+from core.io_atomic import atomic_write_bytes
 from core.texture.block_guess import (
     guess_is_block,
     resolve_texture_resource_key,
@@ -223,18 +222,7 @@ class TextureService:
             raise ValueError("纹理数据不是受支持的 PNG")
         path = self._safe_cache_path(texture_res)
         path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temp_name = tempfile.mkstemp(
-            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-        )
-        temp_path = Path(temp_name)
-        try:
-            with os.fdopen(fd, "wb") as texture_file:
-                texture_file.write(data)
-                texture_file.flush()
-                os.fsync(texture_file.fileno())
-            os.replace(temp_path, path)
-        finally:
-            temp_path.unlink(missing_ok=True)
+        atomic_write_bytes(path, data)
         return path
 
     def _safe_cache_path(self, texture_res: str) -> Path:

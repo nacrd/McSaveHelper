@@ -247,10 +247,6 @@ class ChunkBiomes:
             return section.biome_at(local_x, section_local_y, local_z)
         return self._legacy_biome_at(local_x, local_z)
 
-    def get(self, local_x: int, world_y: int, local_z: int) -> Optional[str]:
-        """Alias matching the point-reader style used by map renderers."""
-        return self.biome_at(local_x, world_y, local_z)
-
     def _legacy_biome_at(self, local_x: int, local_z: int) -> Optional[str]:
         values = self._legacy_values
         if not values:
@@ -262,20 +258,8 @@ class ChunkBiomes:
         return name or None
 
 
-def get_chunk_biomes(chunk_nbt: Any) -> ChunkBiomes:
-    """Create a lazy biome view for a decoded chunk NBT tree."""
-    return ChunkBiomes(chunk_nbt)
-
-
-def biome_at(chunk_nbt: Any, local_x: int, world_y: int, local_z: int) -> Optional[str]:
-    """Convenience point lookup for callers that do not need a view object."""
-    return ChunkBiomes(chunk_nbt).biome_at(local_x, world_y, local_z)
-
-
 __all__ = [
     "BiomeSection",
     "ChunkBiomes",
-    "biome_at",
     "decode_biome_section",
-    "get_chunk_biomes",
 ]

@@ -33,11 +33,10 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
-from app.ui.utils import ScheduledTask, run_on_ui, schedule_coroutine
+from app.ui.utils import ScheduledTask, run_on_ui, safe_update, schedule_coroutine
 from app.ui.views.explorer.map.color_schemes import (
     BACKGROUND_COLOR,
     EMPTY_REGION_COLOR,
-    ORIGIN_COLOR,
     get_biome_color,
     get_region_color,
     get_region_value_label,
@@ -94,7 +93,6 @@ class McaMapView(ft.Container):
 
     BACKGROUND_COLOR = BACKGROUND_COLOR
     EMPTY_REGION_COLOR = EMPTY_REGION_COLOR
-    ORIGIN_COLOR = ORIGIN_COLOR
     CELL_SIZE = 32
     CELL_GAP = 0
     SURFACE_BUFFER_REGIONS = 2
@@ -286,17 +284,17 @@ class McaMapView(ft.Container):
             if self._surface_enabled:
                 if coord not in self._visible_regions:
                     if retry_deferred:
-                        self._schedule_rebuild()
+                        self._rebuild_scheduler.schedule()
                     return
                 if not self._surface_layer.mark_tile_ready(coord):
                     if retry_deferred:
-                        self._schedule_rebuild()
+                        self._rebuild_scheduler.schedule()
                     return
             elif self._current_data and coord not in self._current_data:
                 if retry_deferred:
-                    self._schedule_rebuild()
+                    self._rebuild_scheduler.schedule()
                 return
-            self._schedule_rebuild()
+            self._rebuild_scheduler.schedule()
         except Exception:
             pass
 
@@ -359,11 +357,7 @@ class McaMapView(ft.Container):
             if schedule_tail and self.page is not None:
                 run_on_ui(cast(ft.Page, self.page), self._rebuild_canvas_safe)
 
-    def _schedule_rebuild(self) -> None:
-        self._rebuild_scheduler.schedule()
 
-    def _cancel_rebuild_timer(self) -> None:
-        self._rebuild_scheduler.cancel()
 
     # ------------------------------------------------------------------ gestures
     def _on_pan_start(self, e: ft.DragStartEvent) -> None:
@@ -376,7 +370,7 @@ class McaMapView(ft.Container):
         self._viewport.pan(dx, dy)
         self._last_x = e.local_position.x
         self._last_y = e.local_position.y
-        self._schedule_rebuild()
+        self._rebuild_scheduler.schedule()
 
     def _on_tap(self, e: ft.TapEvent) -> None:
         local_position = e.local_position
@@ -1012,7 +1006,7 @@ class McaMapView(ft.Container):
             for coord in coords:
                 self._metadata_pending.discard(coord)
             self._surface_layer.mark_dirty()
-            self._schedule_rebuild()
+            self._rebuild_scheduler.schedule()
 
     def _request_visible_tiles(self, missing: List[Tuple[int, int]]) -> None:
         if not self._mounted:
@@ -1064,10 +1058,7 @@ class McaMapView(ft.Container):
             return
         # Assign a fresh list so Flutter never iterates a list mid-mutation.
         self._canvas.shapes = list(shapes)
-        try:
-            self._canvas.update()
-        except RuntimeError:
-            pass
+        safe_update(self._canvas)
 
     def _build_region_cell(
         self,
@@ -1186,7 +1177,7 @@ class McaMapView(ft.Container):
         self._mounted = False
         self._camera.cancel()
         self._metadata_pending.clear()
-        self._cancel_rebuild_timer()
+        self._rebuild_scheduler.cancel()
         self._stop_update_loop()
         # Drop callback so worker threads do not touch a dead view.
         try:
@@ -1435,7 +1426,7 @@ class McaMapView(ft.Container):
             self._sync_view_level_from_scale(notify=False)
         except Exception:
             pass
-        self._schedule_rebuild()
+        self._rebuild_scheduler.schedule()
 
     def _on_camera_complete(self) -> None:
         try:

@@ -19,11 +19,6 @@ def get_region_color(_size: int = 0, _stats: Dict[str, Any] | None = None) -> st
     return REGION_FILL_COLOR
 
 
-# Backward-compatible names used by older call sites during the transition.
-def get_activity_color(size: int, stats: Dict[str, Any]) -> str:
-    return get_region_color(size, stats)
-
-
 def get_biome_color(biome: str) -> str:
     """Biome mode color mapping (reserved for later layers)."""
     biome = biome.lower()

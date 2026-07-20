@@ -9,15 +9,12 @@ from core.mca.block_palette import (
     block_id_at,
     get_world_surface_chunk_blocks,
     is_transparent_surface_name,
-    surface_strata,
     surface_block_id,
 )
 from core.mca.biome_palette import (
     BiomeSection,
     ChunkBiomes,
-    biome_at,
     decode_biome_section,
-    get_chunk_biomes,
 )
 from core.mca.chunk_view import ChunkView, NamedBlock, NativeRegion, section_range_for_chunk
 from core.mca.errors import (
@@ -78,7 +75,6 @@ from core.mca.topview_renderer import (
     PREVIEW_TILE_SIZE,
     ULTRA_TILE_SIZE,
     render_region_topview,
-    render_region_topview_base64,
 )
 from core.mca.viewport import (
     McaMapSelection,
@@ -135,9 +131,7 @@ __all__ = [
     "block_id_at",
     "BiomeSection",
     "ChunkBiomes",
-    "biome_at",
     "decode_biome_section",
-    "get_chunk_biomes",
     "get_world_surface_chunk_blocks",
     "copy_chunk_record",
     "chunk_block_bounds",
@@ -150,13 +144,11 @@ __all__ = [
     "sample_region_surface_colors",
     "sample_region_surface_samples",
     "render_region_topview",
-    "render_region_topview_base64",
     "plan_visible_requests",
     "prioritize_regions",
     "region_block_bounds",
     "section_range_for_chunk",
     "surface_block_id",
-    "surface_strata",
     "is_transparent_surface_name",
     "WORLD_SURFACE_HEIGHTMAP_NAMES",
     "surface_y_from_heightmap",

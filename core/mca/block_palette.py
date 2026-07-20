@@ -597,17 +597,3 @@ def block_id_at(chunk_nbt: Any, x: int, y: int, z: int) -> Optional[str]:
 
 def surface_block_id(chunk_nbt: Any, x: int, z: int) -> Optional[str]:
     return get_chunk_blocks(chunk_nbt).surface_block_id(x, z)
-
-
-def surface_strata(
-    chunk_nbt: Any,
-    x: int,
-    z: int,
-    max_depth: int = 8,
-) -> Tuple[Tuple[str, int], ...]:
-    """Return transparent surface layers plus their first opaque base."""
-    return get_world_surface_chunk_blocks(chunk_nbt).surface_strata(
-        x,
-        z,
-        max_depth=max_depth,
-    )

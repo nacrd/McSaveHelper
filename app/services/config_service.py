@@ -1,15 +1,14 @@
 """配置服务 —— 统一管理持久化配置和运行时迁移参数"""
 import json
-import os
 import shutil
 import threading
-import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 from app.models.config import ApplicationSettings, MigrationConfig
 from core.constants import MinecraftConstants
+from core.io_atomic import atomic_write_text
 from core.logger import logger
 
 
@@ -82,20 +81,7 @@ class ConfigService:
         config_path = self._config_dir / self.CONFIG_FILENAME
         with self._lock:
             content = json.dumps(self._config, indent=2, ensure_ascii=False)
-            fd, temp_name = tempfile.mkstemp(
-                prefix=f".{config_path.name}.",
-                suffix=".tmp",
-                dir=config_path.parent,
-            )
-            temp_path = Path(temp_name)
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as config_file:
-                    config_file.write(content)
-                    config_file.flush()
-                    os.fsync(config_file.fileno())
-                os.replace(temp_path, config_path)
-            finally:
-                temp_path.unlink(missing_ok=True)
+            atomic_write_text(config_path, content)
 
     @staticmethod
     def _defaults() -> Dict[str, Any]:

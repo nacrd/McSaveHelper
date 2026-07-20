@@ -4,12 +4,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import tempfile
 import threading
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterable, List
 
+from core.io_atomic import atomic_write_text
 from core.mca.map_models import MapMarker
 
 
@@ -136,20 +136,7 @@ class MapMarkerService:
         except (TypeError, ValueError) as exc:
             raise MapMarkerServiceError(f"地图标记无法序列化: {exc}") from exc
 
-        descriptor, temp_name = tempfile.mkstemp(
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            dir=self._root,
-        )
-        temp_path = Path(temp_name)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-                stream.write(content)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.replace(temp_path, path)
-        finally:
-            temp_path.unlink(missing_ok=True)
+        atomic_write_text(path, content, newline="\n")
 
     @classmethod
     def _validate_payload(cls, payload: Any) -> List[dict[str, Any]]:

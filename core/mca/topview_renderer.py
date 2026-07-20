@@ -701,16 +701,3 @@ def render_region_topview(
         decode_workers,
         render_status,
     )
-
-
-def render_region_topview_base64(
-    region_file: Path | str,
-    tile_size: int = DEFAULT_TILE_SIZE,
-) -> Optional[str]:
-    """Same as render_region_topview but returns a base64 string for Image.src."""
-    import base64
-
-    raw = render_region_topview(region_file, tile_size=tile_size)
-    if raw is None:
-        return None
-    return base64.b64encode(raw).decode("ascii")

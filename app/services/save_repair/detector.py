@@ -16,6 +16,7 @@ from core.utils import list_player_dat_files
 
 from .level_repairer import LEVEL_DAT_REQUIRED_FIELDS
 from .models import DetectReport, WorldInfo
+from .player_repairer import PLAYER_REQUIRED_FIELDS
 from .validation_utils import (
     count_damaged_chunks,
     validate_player_data,
@@ -300,7 +301,6 @@ class WorldDetector:
             issues: List[str] = []
             try:
                 nbt_data = nbtlib.load(str(player_file))
-                from .player_repairer import PLAYER_REQUIRED_FIELDS
                 issues = validate_player_data(nbt_data, PLAYER_REQUIRED_FIELDS)
             except Exception as e:
                 issues.append(f"无法读取: {e}")
