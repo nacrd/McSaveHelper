@@ -6,8 +6,27 @@ from typing import cast
 
 import nbtlib
 
-from app.services.save_repair.detector import WorldDetector, _read_int_tag
+from app.services.save_repair.detector import (
+    WorldDetector,
+    _read_int_tag,
+    dimension_for_region_parts,
+)
 from app.services.save_repair.models import DetectReport
+
+
+def test_dimension_for_region_parts_known_layouts() -> None:
+    assert dimension_for_region_parts(("region", "r.0.0.mca")) == (
+        "minecraft:overworld"
+    )
+    assert dimension_for_region_parts(("DIM-1", "region", "r.0.0.mca")) == (
+        "minecraft:the_nether"
+    )
+    assert dimension_for_region_parts(("DIM1", "region", "r.0.0.mca")) == (
+        "minecraft:the_end"
+    )
+    assert dimension_for_region_parts(
+        ("dimensions", "minecraft", "foo", "region", "r.0.0.mca")
+    ) == "minecraft:foo"
 
 
 def test_detect_dimensions_includes_overworld_region_layout(tmp_path: Path) -> None:
