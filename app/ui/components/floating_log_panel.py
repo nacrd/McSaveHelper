@@ -428,10 +428,10 @@ class FloatingLogPanel(ft.Container):
             if visible:
                 self._expanded = True
                 self._flush_pending_ui(refresh=False)
-            self._page.update()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        safe_update(self._page)
 
     @property
     def is_visible(self) -> bool:
