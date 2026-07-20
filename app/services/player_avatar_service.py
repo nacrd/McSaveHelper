@@ -131,6 +131,14 @@ class PlayerAvatarService:
         self._enabled = bool(value)
 
     def get_cached_path(self, uuid: str) -> Optional[Path]:
+        """Return a cached face PNG path if present on disk/memory.
+
+        Args:
+            uuid: Player UUID (any common form).
+
+        Returns:
+            Path | None: Local PNG path, or None when missing.
+        """
         norm = normalize_uuid(uuid)
         if not norm:
             return None
@@ -154,7 +162,14 @@ class PlayerAvatarService:
         uuid: str,
         on_loaded: Callable[[Optional[str]], None],
     ) -> None:
-        """Resolve avatar path asynchronously; callback receives path or None."""
+        """异步解析头像路径；回调收到本地路径或 ``None``。
+
+        同一 UUID 的并发请求会合并为一次网络拉取。
+
+        Args:
+            uuid: 玩家 UUID。
+            on_loaded: 完成回调 ``(path_or_none)``。
+        """
         if not self._enabled:
             on_loaded(None)
             return
@@ -186,11 +201,24 @@ class PlayerAvatarService:
         thread.start()
 
     def _fetch_worker(self, norm: str) -> None:
+        """Background worker: fetch/cache avatar and invoke waiters."""
         path: Optional[Path] = None
         try:
             path = self._fetch_and_cache(norm)
+        except (OSError, ValueError, TypeError, RuntimeError) as exc:
+            logger.debug(
+                "avatar fetch failed for %s: %s",
+                norm[:8],
+                type(exc).__name__,
+            )
+            path = None
         except Exception as exc:
-            logger.debug("avatar fetch failed for %s: %s", norm[:8], type(exc).__name__)
+            # Network/PIL boundary: mark failure and continue UI callbacks.
+            logger.debug(
+                "avatar fetch failed for %s: %s",
+                norm[:8],
+                type(exc).__name__,
+            )
             path = None
         with self._lock:
             callbacks = self._inflight.pop(norm, [])
@@ -206,6 +234,7 @@ class PlayerAvatarService:
             try:
                 callback(result)
             except Exception:
+                # UI callbacks must not break sibling waiters.
                 pass
 
     def _fetch_and_cache(self, norm: str) -> Optional[Path]:
