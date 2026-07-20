@@ -35,6 +35,7 @@ class WindowManagerDependencies:
     apply_compact_layout: Callable[[bool], None]
     stop_gui_optimizer: Callable[[], None]
     dispose_views: Callable[[], None]
+    dispose_file_dialogs: Callable[[], None] = lambda: None
 
 
 class WindowManager:
@@ -399,6 +400,7 @@ class WindowManager:
         self._set_closing_flag()
         self._stop_gui_optimizer()
         self._dispose_views()
+        self._dispose_file_dialogs()
         self._shutdown_logger()
         self._destroy_window_async()
 
@@ -418,6 +420,13 @@ class WindowManager:
         """Release resources held by cached views before closing the window."""
         try:
             self._deps.dispose_views()
+        except Exception:
+            pass
+
+    def _dispose_file_dialogs(self) -> None:
+        """Destroy the platform file-dialog host on its owning thread."""
+        try:
+            self._deps.dispose_file_dialogs()
         except Exception:
             pass
 

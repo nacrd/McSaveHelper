@@ -143,6 +143,9 @@ class Application:
 
     def _init_managers(self) -> None:
         """初始化所有管理器"""
+        # 文件对话框适配器（Tk 工作线程，关闭时需显式销毁）
+        self._file_dialogs = TkFileDialogs()
+
         # 窗口管理器
         self.window_manager = WindowManager(WindowManagerDependencies(
             page=self.page,
@@ -152,6 +155,7 @@ class Application:
             ),
             stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
             dispose_views=lambda: self.view_manager.dispose(),
+            dispose_file_dialogs=self._file_dialogs.close,
         ))
         self.window_manager.setup_window()
 
@@ -163,7 +167,7 @@ class Application:
             remove_view=lambda view_id: self.view_manager.remove_view(view_id),
             copy_to_clipboard=self._copy_to_clipboard,
             show_snackbar=self._show_snackbar,
-            file_dialogs=TkFileDialogs(),
+            file_dialogs=self._file_dialogs,
         ))
 
         # 视图管理器
