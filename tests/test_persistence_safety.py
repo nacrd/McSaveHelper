@@ -46,7 +46,7 @@ def test_server_properties_failed_publish_preserves_file(
     original = path.read_bytes()
 
     monkeypatch.setattr(
-        "app.services.server_properties_service.os.replace",
+        "core.io_atomic.os.replace",
         lambda _source, _target: (_ for _ in ()).throw(OSError("disk full")),
     )
     with pytest.raises(OSError, match="disk full"):
