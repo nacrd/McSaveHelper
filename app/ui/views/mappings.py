@@ -59,17 +59,16 @@ class MappingsView(ft.Column):
     def _build(self) -> None:
         self.controls.clear()
 
-        self.controls.append(
-            page_header(
-                self._t(
-                    "mappings.title",
-                    "映射管理"),
-                ft.Text(
-                    "管理 UUID 映射和物品映射，用于存档转换和存档浏览器。",
-                    size=12,
-                    color=THEME.text_muted),
-                icon=IconSet.LINK,
-            ))
+        self._page_header = page_header(
+            self._t("mappings.title", "映射管理"),
+            ft.Text(
+                "管理 UUID 映射和物品映射，用于存档转换和存档浏览器。",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            icon=IconSet.LINK,
+        )
+        self.controls.append(self._page_header)
 
         self._build_uuid_section()
         self._build_item_section()
@@ -147,7 +146,7 @@ class MappingsView(ft.Column):
                 width=150,
                 on_click=self._import_assets,
             ),
-        ], spacing=8)
+        ], spacing=8, wrap=True, run_spacing=8)
         return [
             ft.Container(
                 content=import_row,
@@ -187,7 +186,12 @@ class MappingsView(ft.Column):
             self._item_name_field,
             btn_success("添加", width=80, on_click=self._add_item_mapping),
             self._item_mapping_status,
-        ], spacing=10, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            wrap=True,
+            run_spacing=8,
+        )
         return [
             ft.Container(
                 content=add_row,

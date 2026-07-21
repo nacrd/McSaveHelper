@@ -5,9 +5,10 @@ Biome / structure helpers are reserved for later layers.
 """
 from typing import Any, Dict, Tuple
 
-# Existing region fill (Minecraft grass-like)
-REGION_FILL_COLOR = "#4CAF50"
-REGION_BORDER_COLOR = "#2E7D32"
+# Existing-but-not-yet-rendered regions use a neutral violet placeholder.
+# This stays distinguishable from grass/vegetation for red-green color vision.
+REGION_FILL_COLOR = "#7A6F8F"
+REGION_BORDER_COLOR = "#4E465C"
 EMPTY_REGION_COLOR = "#263426"
 ORIGIN_COLOR = "#7CB34288"
 BACKGROUND_COLOR = "#162016"

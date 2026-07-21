@@ -21,6 +21,7 @@ from app.services.player_service import PlayerService
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card
 from app.ui.components.fields import text_field
+from app.ui.icons import IconSet
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui
 from app.ui.views.explorer.equipment_preview import EquipmentPreview
@@ -169,14 +170,16 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         self._player_filter = text_field(
             label=t("player.filter", "搜索玩家"),
-            expand=True,
+            # ``expand`` in a Column consumes vertical space and pushes the
+            # list down. The list host below is the only vertical expander.
+            expand=False,
             on_change=self._on_player_filter_changed,
         )
         left.controls.append(self._player_filter)
         left.controls.append(
             btn_ghost(
                 t("explorer.import_usercache", "导入 usercache"),
-                height=30,
+                height=44,
                 on_click=self._import_usercache,
             )
         )
@@ -410,7 +413,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
         self._container_preview_close = btn_ghost(
             t("common.close", "关闭"),
-            height=28,
+            height=44,
             on_click=self._close_container_preview,
         )
         self._container_preview_grid = InventoryGrid(
@@ -485,12 +488,48 @@ class PlayerTabMixin(ExplorerMixinHost):
             vertical_alignment=ft.CrossAxisAlignment.STRETCH,
             expand=True,
         )
-        self._tab_player.content = ft.Container(
+        self._player_layout_host = ft.Container(
             content=self._player_layout,
             expand=True,
             padding=ft.Padding(4, 4, 4, 4),
             on_size_change=self._on_player_layout_size_change,
         )
+        self._tab_player.content = self._player_layout_host
+        self._set_player_compact_layout(
+            bool(getattr(self, "_compact_mode", False))
+        )
+
+    def _set_player_compact_layout(self, compact: bool) -> None:
+        """Stack player panels in narrow windows so none are clipped."""
+        host = getattr(self, "_player_layout_host", None)
+        if host is None:
+            return
+        panels = (
+            self._player_left_panel,
+            self._player_center_panel,
+            self._player_right_panel,
+        )
+        self._player_split_left.visible = not compact
+        self._player_split_right.visible = not compact
+        if compact:
+            for panel in panels:
+                panel.width = None
+                panel.height = 360
+                panel.expand = False
+            stacked_controls: list[ft.Control] = list(panels)
+            host.content = ft.Column(
+                stacked_controls,
+                spacing=10,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+        else:
+            for panel in panels:
+                panel.height = None
+            self._apply_player_column_widths()
+            host.content = self._player_layout
+        safe_update(host)
 
     def _build_column_splitter(self, boundary: int) -> ft.Control:
         """Draggable vertical handle between player columns.
@@ -597,7 +636,7 @@ class PlayerTabMixin(ExplorerMixinHost):
     ) -> ft.Control:
         """Compact action chip that can reflow in ResponsiveRow."""
         factory = btn_primary if primary else btn_ghost
-        button = factory(text, height=30, on_click=on_click)
+        button = factory(text, height=44, on_click=on_click)
         # Clear fixed width so ResponsiveRow can size chips without collision.
         button.width = None
         # Give text room; McButton content is centered.
@@ -794,6 +833,12 @@ class PlayerTabMixin(ExplorerMixinHost):
         name_size = 15 if list_width >= 250 else 13
         uuid_size = 11 if list_width >= 250 else 10
         uuid_text = ref.uuid_hyphen or ref.uuid_norm
+        has_known_name = bool(ref.name)
+        player_label = (
+            ref.display_name
+            if has_known_name
+            else self._t("explorer.unknown_player", "未知玩家")
+        )
         return ft.Container(
             content=ft.Row(
                 [
@@ -801,7 +846,7 @@ class PlayerTabMixin(ExplorerMixinHost):
                     ft.Column(
                         [
                             ft.Text(
-                                ref.display_name,
+                                player_label,
                                 size=name_size,
                                 weight=ft.FontWeight.BOLD,
                                 color=THEME.text_primary,
@@ -841,9 +886,22 @@ class PlayerTabMixin(ExplorerMixinHost):
         )
 
     def _create_player_list_avatar(self, ref: Any) -> ft.CircleAvatar:
-        initial = (ref.name or ref.display_name or "?")[:1].upper()
+        has_known_name = bool(ref.name)
+        content: ft.Control
+        if has_known_name:
+            content = ft.Text(
+                ref.name[:1].upper(),
+                size=14,
+                color=THEME.text_primary,
+            )
+        else:
+            content = ft.Icon(
+                IconSet.PERSON,
+                size=18,
+                color=THEME.text_secondary,
+            )
         avatar = ft.CircleAvatar(
-            content=ft.Text(initial, size=14, color=THEME.text_primary),
+            content=content,
             radius=_LIST_AVATAR_SIZE // 2,
             bgcolor=THEME.bg_secondary,
         )

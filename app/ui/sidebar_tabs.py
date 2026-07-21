@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict
 import flet as ft
 
 from app.ui.icons import IconSet
-from app.ui.theme import THEME, mc_border, mc_shadow_glow
+from app.ui.theme import THEME
 
 
 def resolve_tab_icon(tab: Dict[str, Any]) -> ft.IconData:
@@ -83,29 +83,30 @@ def build_tab_collapsed(
         on_hover_collapsed: 悬停回调。
 
     Returns:
-        40x40 图标按钮容器。
+        44x44 图标按钮容器。
     """
     icon_ctrl = ft.Icon(
         icon_name,
         size=20,
-        color=THEME.mc_obsidian if selected else THEME.text_secondary,
+        color=THEME.accent if selected else THEME.text_secondary,
     )
     container = ft.Container(
         content=icon_ctrl,
-        width=40,
-        height=40,
+        width=44,
+        height=44,
         alignment=ft.alignment.Alignment(0, 0),
-        bgcolor=THEME.mc_gold if selected else THEME.bg_card,
-        border=mc_border(2),
+        bgcolor=THEME.bg_elevated if selected else ft.Colors.TRANSPARENT,
+        border=ft.Border.all(
+            1,
+            THEME.accent_dim if selected else ft.Colors.TRANSPARENT,
+        ),
         border_radius=6,
         ink=True,
         on_click=lambda e, tid=tab["id"]: on_select(tid),
         on_hover=lambda e, tid=tab["id"]: on_hover_collapsed(e, tid),
         tooltip=label_text,
-        animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        animate=ft.Animation(140, ft.AnimationCurve.EASE_OUT),
     )
-    if selected:
-        container.shadow = mc_shadow_glow(THEME.shadow_glow, 4)
     return container
 
 
@@ -135,45 +136,44 @@ def build_tab_expanded(
         content=ft.Icon(
             icon_name,
             size=18,
-            color=THEME.mc_obsidian if selected else THEME.text_secondary,
+            color=THEME.accent if selected else THEME.text_muted,
         ),
-        width=34,
-        height=34,
+        width=28,
+        height=28,
         alignment=ft.alignment.Alignment(0, 0),
-        bgcolor=THEME.mc_gold if selected else THEME.bg_secondary,
-        border=mc_border(2),
-        border_radius=4,
+        bgcolor=ft.Colors.TRANSPARENT,
     )
     text_ctrl = ft.Text(
         label_text,
         size=13,
         color=THEME.text_primary if selected else THEME.text_secondary,
-        weight=ft.FontWeight.BOLD if selected else ft.FontWeight.W_500,
-        font_family="monospace",
+        weight=ft.FontWeight.W_600 if selected else ft.FontWeight.W_500,
     )
     marker = ft.Text(
-        "▶" if selected else "",
-        size=10,
-        color=THEME.mc_grass,
+        "•" if selected else "",
+        size=14,
+        color=THEME.accent,
     )
     row = ft.Row(
-        [icon_slot, ft.Column([text_ctrl, marker], spacing=0, expand=True)],
-        spacing=10,
+        [icon_slot, text_ctrl, ft.Container(expand=True), marker],
+        spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
     container = ft.Container(
         content=row,
-        padding=10,
+        height=44,
+        padding=ft.Padding(left=10, right=10, top=6, bottom=6),
         border_radius=6,
-        bgcolor=THEME.mc_stone if selected else THEME.bg_card,
-        border=mc_border(2),
+        bgcolor=THEME.bg_elevated if selected else ft.Colors.TRANSPARENT,
+        border=ft.Border.all(
+            1,
+            THEME.border_standard if selected else ft.Colors.TRANSPARENT,
+        ),
         ink=True,
         on_click=lambda e, tid=tab["id"]: on_select(tid),
         on_hover=lambda e, tid=tab["id"]: on_hover(e, tid),
-        animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        animate=ft.Animation(140, ft.AnimationCurve.EASE_OUT),
     )
-    if selected:
-        container.shadow = mc_shadow_glow(THEME.shadow_glow, 4)
     return container
 
 
@@ -186,10 +186,13 @@ def apply_style_collapsed(container: ft.Container, selected: bool) -> None:
     """
     if container.content and isinstance(container.content, ft.Icon):
         container.content.color = (
-            THEME.mc_obsidian if selected else THEME.text_secondary
+            THEME.accent if selected else THEME.text_secondary
         )
-    container.bgcolor = THEME.mc_gold if selected else THEME.bg_card
-    container.shadow = mc_shadow_glow(THEME.shadow_glow, 4) if selected else None
+    container.bgcolor = THEME.bg_elevated if selected else ft.Colors.TRANSPARENT
+    container.border = ft.Border.all(
+        1,
+        THEME.accent_dim if selected else ft.Colors.TRANSPARENT,
+    )
 
 
 def apply_style_expanded(container: ft.Container, selected: bool) -> None:
@@ -200,29 +203,29 @@ def apply_style_expanded(container: ft.Container, selected: bool) -> None:
         selected: 是否选中。
     """
     row = container.content
-    if isinstance(row, ft.Row) and len(row.controls) >= 2:
+    if isinstance(row, ft.Row) and len(row.controls) >= 4:
         icon_slot = row.controls[0]
-        text_group = row.controls[1]
+        text_ctrl = row.controls[1]
+        marker = row.controls[3]
         if isinstance(icon_slot, ft.Container):
-            icon_slot.bgcolor = THEME.mc_gold if selected else THEME.bg_secondary
             if icon_slot.content and isinstance(icon_slot.content, ft.Icon):
                 icon_slot.content.color = (
-                    THEME.mc_obsidian if selected else THEME.text_secondary
+                    THEME.accent if selected else THEME.text_muted
                 )
-        if isinstance(text_group, ft.Column) and len(text_group.controls) >= 2:
-            text_ctrl = text_group.controls[0]
-            marker = text_group.controls[1]
-            if isinstance(text_ctrl, ft.Text):
-                text_ctrl.color = (
-                    THEME.text_primary if selected else THEME.text_secondary
-                )
-                text_ctrl.weight = (
-                    ft.FontWeight.BOLD if selected else ft.FontWeight.W_500
-                )
-            if isinstance(marker, ft.Text):
-                marker.value = "▶" if selected else ""
-    container.bgcolor = THEME.mc_stone if selected else THEME.bg_card
-    container.shadow = mc_shadow_glow(THEME.shadow_glow, 4) if selected else None
+        if isinstance(text_ctrl, ft.Text):
+            text_ctrl.color = (
+                THEME.text_primary if selected else THEME.text_secondary
+            )
+            text_ctrl.weight = (
+                ft.FontWeight.W_600 if selected else ft.FontWeight.W_500
+            )
+        if isinstance(marker, ft.Text):
+            marker.value = "•" if selected else ""
+    container.bgcolor = THEME.bg_elevated if selected else ft.Colors.TRANSPARENT
+    container.border = ft.Border.all(
+        1,
+        THEME.border_standard if selected else ft.Colors.TRANSPARENT,
+    )
 
 
 def handle_hover_expanded(
@@ -242,20 +245,8 @@ def handle_hover_expanded(
         return
     if hovering:
         container.bgcolor = THEME.bg_card_hover
-        container.shadow = mc_shadow_glow(THEME.shadow_glow, 6)
-        row = container.content
-        if isinstance(row, ft.Row) and len(row.controls) >= 1:
-            icon_slot = row.controls[0]
-            if isinstance(icon_slot, ft.Container):
-                icon_slot.bgcolor = THEME.mc_iron
         return
-    container.bgcolor = THEME.bg_card
-    container.shadow = None
-    row = container.content
-    if isinstance(row, ft.Row) and len(row.controls) >= 1:
-        icon_slot = row.controls[0]
-        if isinstance(icon_slot, ft.Container):
-            icon_slot.bgcolor = THEME.bg_secondary
+    container.bgcolor = ft.Colors.TRANSPARENT
 
 
 def handle_hover_collapsed(
@@ -274,8 +265,6 @@ def handle_hover_collapsed(
     if selected:
         return
     if hovering:
-        container.bgcolor = THEME.mc_iron
-        container.shadow = mc_shadow_glow(THEME.shadow_glow, 4)
+        container.bgcolor = THEME.bg_card_hover
         return
-    container.bgcolor = THEME.bg_card
-    container.shadow = None
+    container.bgcolor = ft.Colors.TRANSPARENT

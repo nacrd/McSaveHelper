@@ -7,7 +7,13 @@ from typing import Optional, Callable, Any, Protocol
 from pathlib import Path
 import flet as ft
 
-from app.ui.theme import THEME, mc_border, get_theme_manager
+from app.models.responsive_layout import (
+    ResponsiveLayout,
+    resolve_responsive_layout,
+)
+from app.ui.icons import IconSet
+from app.ui.theme import THEME, get_theme_manager
+from app.ui.utils import run_on_ui
 from core.logger import logger
 
 
@@ -49,7 +55,8 @@ class WindowManagerDependencies:
     Attributes:
         page: Flet 页面。
         translate: 翻译函数 ``(key, default) -> str``。
-        apply_compact_layout: 窗口变窄时切换紧凑布局。
+        apply_responsive_layout: 将布局配置投影到当前视图。
+        get_sidebar_mode: 获取用户设置的侧栏模式。
         stop_gui_optimizer: 关闭时停止 GUI 优化后台任务。
         dispose_views: 关闭时释放视图资源。
         dispose_file_dialogs: 关闭时销毁 Tk 文件对话框工作线程。
@@ -57,7 +64,8 @@ class WindowManagerDependencies:
 
     page: ft.Page
     translate: Callable[[str, str], str]
-    apply_compact_layout: Callable[[bool], None]
+    apply_responsive_layout: Callable[[ResponsiveLayout], None]
+    get_sidebar_mode: Callable[[], str]
     stop_gui_optimizer: Callable[[], None]
     dispose_views: Callable[[], None]
     dispose_file_dialogs: Callable[[], None] = lambda: None
@@ -86,6 +94,7 @@ class WindowManager:
         self._resize_timer: Optional[Any] = None
         self._maximize_button: Optional[ft.Container] = None
         self._responsive_host: Optional[ResponsiveShellHost] = None
+        self._viewport_size = (1100.0, 820.0)
 
     def attach_responsive_host(self, host: ResponsiveShellHost) -> None:
         """Attach shell controls after Application has built its layout."""
@@ -159,10 +168,10 @@ class WindowManager:
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
             height=44,
-            padding=ft.Padding(left=12, right=12, top=8, bottom=8),
-            bgcolor=THEME.mc_wood,
+            padding=ft.Padding(left=14, right=8, top=4, bottom=4),
+            bgcolor=THEME.bg_secondary,
             border=ft.Border(
-                bottom=ft.BorderSide(3, THEME.mc_grass),
+                bottom=ft.BorderSide(1, THEME.border_subtle),
             ),
         )
 
@@ -175,19 +184,20 @@ class WindowManager:
         return ft.Row(
             [
                 ft.Container(
-                    content=ft.Text("⛏", size=16, color=THEME.mc_gold),
-                    width=32, height=28,
+                    width=8,
+                    height=8,
                     alignment=ft.alignment.Alignment(0, 0),
-                    bgcolor=THEME.bg_secondary,
-                    border=mc_border(2),
+                    bgcolor=THEME.accent,
+                    border_radius=2,
                 ),
                 ft.Text(
                     self._deps.translate(
                         "app.title_bar",
                         "MCSaveHelper ▣ Minecraft Save Toolkit",
                     ),
-                    size=13, color=THEME.text_primary,
-                    weight=ft.FontWeight.BOLD, font_family="monospace",
+                    size=12,
+                    color=THEME.text_secondary,
+                    weight=ft.FontWeight.W_500,
                 ),
             ],
             spacing=10,
@@ -215,51 +225,62 @@ class WindowManager:
             ft.Row: 控制按钮行
         """
         self._maximize_button = self._create_window_button(
-            "□", THEME.mc_stone, self._toggle_maximize
+            IconSet.MAXIMIZE,
+            self._toggle_maximize,
+            "最大化",
         )
 
         return ft.Row(
             [
-                self._create_window_button("—", THEME.mc_stone, self._minimize),
+                self._create_window_button(
+                    IconSet.MINIMIZE,
+                    self._minimize,
+                    "最小化",
+                ),
                 self._maximize_button,
-                self._create_window_button("×", THEME.mc_redstone, self._close),
+                self._create_window_button(
+                    IconSet.CLOSE,
+                    self._close,
+                    "关闭",
+                    is_danger=True,
+                ),
             ],
-            spacing=6,
+            spacing=2,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     def _create_window_button(
         self,
-        text: str,
-        bgcolor: str,
+        icon: ft.IconData,
         on_click: Callable[..., Any],
+        tooltip: str,
+        is_danger: bool = False,
     ) -> ft.Container:
         """创建窗口控制按钮
 
         Args:
-            text: 按钮文本
-            bgcolor: 背景颜色
+            icon: 按钮图标。
             on_click: 点击回调
+            tooltip: 悬停提示。
+            is_danger: 是否为关闭类危险操作。
 
         Returns:
             ft.Container: 按钮容器
         """
         return ft.Container(
-            content=ft.Text(
-                text,
-                size=14,
-                color=THEME.text_primary,
-                weight=ft.FontWeight.BOLD,
-                font_family="monospace",
-                text_align=ft.TextAlign.CENTER,
+            content=ft.Icon(
+                icon,
+                size=15,
+                color=THEME.error if is_danger else THEME.text_secondary,
             ),
-            width=32,
-            height=28,
+            width=44,
+            height=44,
             alignment=ft.alignment.Alignment(0, 0),
-            bgcolor=bgcolor,
-            border=mc_border(2),
+            bgcolor=ft.Colors.TRANSPARENT,
+            border_radius=4,
             on_click=on_click,
             ink=True,
+            tooltip=tooltip,
         )
 
     def _minimize(self, e: ft.ControlEvent) -> None:
@@ -295,12 +316,16 @@ class WindowManager:
         """同步最大化按钮显示状态"""
         try:
             if not self._maximize_button or not isinstance(
-                self._maximize_button.content, ft.Text
+                self._maximize_button.content, ft.Icon
             ):
                 return
 
             is_maximized = getattr(self.page.window, "maximized", False)
-            self._maximize_button.content.value = "❐" if is_maximized else "□"
+            self._maximize_button.content = ft.Icon(
+                IconSet.RESTORE if is_maximized else IconSet.MAXIMIZE,
+                size=15,
+                color=THEME.text_secondary,
+            )
             self._maximize_button.tooltip = "还原" if is_maximized else "最大化"
             self._maximize_button.update()
         except Exception:
@@ -343,12 +368,16 @@ class WindowManager:
             e: 窗口大小变化事件
         """
         try:
+            self._capture_viewport_size(e)
             # 防抖：取消上次延迟更新
             if self._resize_timer is not None:
                 self._resize_timer.cancel()
 
             import threading
-            self._resize_timer = threading.Timer(0.15, self._apply_resize)
+            self._resize_timer = threading.Timer(
+                0.15,
+                self._schedule_resize_apply,
+            )
             self._resize_timer.daemon = True
             self._resize_timer.start()
         except Exception as ex:
@@ -357,11 +386,29 @@ class WindowManager:
                 module="WindowManager",
             )
 
+    def _capture_viewport_size(self, event: Any) -> None:
+        """Capture event dimensions before the debounced callback runs."""
+        window = self.page.window
+        width = float(
+            getattr(event, "width", 0.0)
+            or window.width
+            or self._viewport_size[0]
+        )
+        height = float(
+            getattr(event, "height", 0.0)
+            or window.height
+            or self._viewport_size[1]
+        )
+        self._viewport_size = (width, height)
+
+    def _schedule_resize_apply(self) -> None:
+        """Schedule debounced layout work back onto the Flet UI thread."""
+        run_on_ui(self.page, self._apply_resize)
+
     def _apply_resize(self) -> None:
-        """实际执行窗口大小调整"""
+        """在 UI 线程应用最新窗口尺寸。"""
         try:
-            width = float(self.page.window.width or 1100)
-            height = float(self.page.window.height or 820)
+            width, height = self._viewport_size
 
             self.apply_responsive_layout(width, height)
 
@@ -384,63 +431,50 @@ class WindowManager:
             width: 窗口宽度
             height: 窗口高度
         """
-        compact = width < 980
-        roomy = width >= 1300
+        self._viewport_size = (float(width), float(height))
+        layout = resolve_responsive_layout(width, height)
+        self._apply_shell_layout(layout)
+        self._deps.apply_responsive_layout(layout)
 
-        self._adjust_sidebar_width(compact, roomy)
-        self._adjust_spacing_and_padding(compact)
-        self._adjust_top_actions(compact)
+    def refresh_responsive_layout(self) -> None:
+        """Reapply layout for the current window dimensions and preferences."""
+        width, height = self._read_page_viewport()
+        self.apply_responsive_layout(width, height)
 
-    def _adjust_sidebar_width(self, compact: bool, roomy: bool) -> None:
-        """调整侧边栏宽度 / 折叠状态
-
-        窗口 < 800px 时自动收窄侧边栏，
-        >= 800px 时恢复用户设置的展开状态。
-
-        Args:
-            compact: 是否紧凑模式（窗口 < 980px）
-            roomy: 是否宽松模式（窗口 >= 1300px）
-        """
-        host = self._responsive_host
-        if host is None:
-            return
-        sidebar = host.sidebar
-        # 极窄窗口：自动收窄
-        if compact and (self.page.window.width or 0) < 800:
-            sidebar.set_collapsed(True)
-        else:
-            sidebar.set_collapsed(False)
-            sidebar.set_width(230 if roomy else 205)
-
-    def _adjust_spacing_and_padding(self, compact: bool) -> None:
-        """调整间距和内边距
-
-        Args:
-            compact: 是否紧凑模式
-        """
-        host = self._responsive_host
-        if host is None:
-            return
-        host.main_row.spacing = 6 if compact else 12
-        shell_padding = 6 if compact else 12
-        shell_margin = 4 if compact else 12
-        host.shell.padding = shell_padding
-        host.shell.margin = ft.Margin(
-            left=shell_margin,
-            right=shell_margin,
-            top=0,
-            bottom=shell_margin,
+    def _read_page_viewport(self) -> tuple[float, float]:
+        """Prefer the live page viewport, falling back to the last event size."""
+        width = float(
+            getattr(self.page, "width", 0.0)
+            or self._viewport_size[0]
         )
-        host.scrollable_content.padding = 6 if compact else 14
-        host.content.padding = 8 if compact else 18
+        height = float(
+            getattr(self.page, "height", 0.0)
+            or self._viewport_size[1]
+        )
+        return width, height
 
-    def _adjust_top_actions(self, compact: bool) -> None:
-        """调整顶部操作按钮
+    def _apply_shell_layout(self, layout: ResponsiveLayout) -> None:
+        """将已解析的布局配置应用到壳层控件。
 
         Args:
-            compact: 是否紧凑模式
+            layout: 当前窗口对应的不可变响应式配置。
         """
-        self._deps.apply_compact_layout(compact)
+        host = self._responsive_host
+        if host is None:
+            return
+        host.sidebar.set_width(layout.sidebar_width)
+        host.sidebar.set_collapsed(self._should_collapse_sidebar(layout))
+        host.main_row.spacing = 0
+        host.shell.padding = 0
+        host.shell.margin = 0
+        host.scrollable_content.padding = 0
+        host.content.padding = layout.content_padding
+
+    def _should_collapse_sidebar(self, layout: ResponsiveLayout) -> bool:
+        """Combine viewport constraints with the user's sidebar preference."""
+        if layout.sidebar_collapsed:
+            return True
+        return self._deps.get_sidebar_mode() == "collapsed"
 
     def shutdown(self) -> None:
         """执行应用关闭流程"""

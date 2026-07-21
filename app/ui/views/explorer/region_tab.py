@@ -386,7 +386,7 @@ class RegionTabMixin(ExplorerMixinHost):
             marker_values = controller.markers() if controller is not None else []
         else:
             marker_values = markers
-        rows = [
+        rows: list[ft.Control] = [
             self._build_marker_list_row(marker)
             for marker in marker_values
         ]
@@ -394,7 +394,7 @@ class RegionTabMixin(ExplorerMixinHost):
             rows.append(
                 ft.Text(
                     self.app.translate("map.no_markers", "当前维度没有标记"),
-                    size=10,
+                    size=12,
                     color=THEME.text_muted,
                 )
             )
@@ -631,7 +631,7 @@ class RegionTabMixin(ExplorerMixinHost):
             total = stats.get("total_regions", 0)
             self._region_stats_text.value = f"已生成区域: {total} 个"
             self._region_stats_text.color = THEME.text_primary
-            self._region_status_text.value = "✅ 扫描完成，点击方块查看详情"
+            self._region_status_text.value = "扫描完成：点击方块查看详情"
             self._region_status_text.color = THEME.text_secondary
             safe_update(self._region_stats_text)
             safe_update(self._region_status_text)
@@ -753,18 +753,18 @@ class RegionTabMixin(ExplorerMixinHost):
             self._selected_region_coord = None
             region_dir_str = self._dimension_region_dirs.get(self._current_dimension)
             if not region_dir_str:
-                self._region_stats_text.value = "⚠️ 未找到当前维度的 region 目录"
+                self._region_stats_text.value = "警告：未找到当前维度的 region 目录"
                 self._region_stats_text.color = THEME.warning
                 safe_update(self._region_stats_text)
                 return
             region_dir = Path(region_dir_str)
             if not region_dir.exists():
-                self._region_stats_text.value = "⚠️ region 目录不存在"
+                self._region_stats_text.value = "警告：region 目录不存在"
                 self._region_stats_text.color = THEME.warning
                 safe_update(self._region_stats_text)
                 return
             self._map_service.clear_data()
-            self._region_stats_text.value = "🔄 正在扫描..."
+            self._region_stats_text.value = "正在扫描..."
             self._region_stats_text.color = THEME.accent
             safe_update(self._region_stats_text)
             map_view = self._map_view

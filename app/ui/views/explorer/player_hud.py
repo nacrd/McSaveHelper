@@ -62,7 +62,7 @@ class PlayerHUDCard(ft.Column):
             ("game_type", "player.hud.game_type", "模式", "🎮"),
         )
         secondary = (
-            ("dimension", "explorer.dimension", "维度", "🌍"),
+            ("dimension", "explorer.dimension", "维度", "DIM"),
             ("pos", "explorer.position", "坐标", "📍"),
             ("air", "explorer.air", "氧气", "🌊"),
             ("selected", "player.hud.selected_slot", "选中", "🔢"),

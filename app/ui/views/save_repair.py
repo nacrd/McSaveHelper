@@ -48,17 +48,8 @@ class SaveRepairView(ft.Column):
         self._build_ui()
 
     def get_top_actions(self) -> list[ViewAction]:
-        """返回应用壳层顶栏可消费的视图命令。
-
-        Returns:
-            list[ViewAction]: 检测存档等动作。
-        """
-        return [
-            ViewAction(
-                self.app.translate("top_bar.detect_save", "检测存档"),
-                self._start_detect,
-            )
-        ]
+        """Keep detect/repair commands beside their configuration form."""
+        return []
 
     def _build_ui(self) -> None:
         chrome = build_save_repair_chrome(
@@ -66,6 +57,7 @@ class SaveRepairView(ft.Column):
             on_repair=self._start_repair,
             on_cancel=self._cancel,
         )
+        self._page_header = chrome.page_header
         self._world_path_field = chrome.world_path_field
         self._fix_chunks_checkbox = chrome.fix_chunks_checkbox
         self._fix_players_checkbox = chrome.fix_players_checkbox

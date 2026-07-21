@@ -1,6 +1,8 @@
 """NBT tab mixin for ExplorerView - 三栏布局版本"""
 from typing import Any, List, Optional
 
+import flet as ft
+
 from app.models.nbt_edit import (
     ChunkNbtTarget,
     NbtEditFormat,
@@ -14,6 +16,7 @@ from app.ui.views.explorer.nbt import (
     NbtCommitHandler,
 )
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
+from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.nbt_tab_chrome import (
     NbtTabCallbacks,
     build_nbt_tab_chrome,
@@ -60,6 +63,7 @@ class NbtTabMixin(ExplorerMixinHost):
 
     def _bind_nbt_chrome(self, chrome: Any) -> None:
         """Attach chrome controls to mixin state."""
+        self._nbt_root = chrome.root
         self._nbt_left_panel = chrome.left_panel
         self._nbt_center_panel = chrome.center_panel
         self._nbt_right_panel = chrome.right_panel
@@ -78,6 +82,49 @@ class NbtTabMixin(ExplorerMixinHost):
         self._nbt_stage_status = chrome.stage_status
         self._nbt_stage_list = chrome.stage_list
         self._tab_nbt.content = chrome.root
+        self._set_nbt_compact_layout(
+            bool(getattr(self, "_compact_mode", False))
+        )
+
+    def _set_nbt_compact_layout(self, compact: bool) -> None:
+        """Stack NBT panels in narrow windows and keep each panel scrollable."""
+        root = getattr(self, "_nbt_root", None)
+        if root is None:
+            return
+        left = self._nbt_left_panel
+        center = self._nbt_center_panel
+        right = self._nbt_right_panel
+        if compact:
+            for panel, height in ((left, 420), (center, 420), (right, 300)):
+                panel.width = None
+                panel.height = height
+                panel.expand = False
+            root.content = ft.Column(
+                [left, center, right],
+                spacing=8,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+            root.padding = 6
+        else:
+            left.width = 280
+            left.height = None
+            left.expand = False
+            center.width = None
+            center.height = None
+            center.expand = True
+            right.width = 300
+            right.height = None
+            right.expand = False
+            root.content = ft.Row(
+                [left, center, right],
+                spacing=8,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            )
+            root.padding = 10
+        safe_update(root)
 
     def _wire_nbt_coordinators(self) -> None:
         """Create stage/chunk/data/commit coordinators after chrome exists."""

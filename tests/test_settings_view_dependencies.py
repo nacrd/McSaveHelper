@@ -1,7 +1,10 @@
 """设置快照与设置页端口的回归测试。"""
 from pathlib import Path
 
+import flet as ft
+
 from app.models.config import ApplicationSettings
+from app.models.responsive_layout import resolve_responsive_layout
 from app.services.config_service import ConfigService
 from app.ui.views.settings import SettingsView, SettingsViewDependencies
 
@@ -46,6 +49,28 @@ def test_settings_view_collects_validated_snapshot() -> None:
         max_concurrent=16,
         cleanup_patterns=("*.log", "cache/"),
     )]
+    assert view._save_status_text.value == "已保存"
+
+
+def test_settings_layout_stacks_in_compact_mode() -> None:
+    view = SettingsView(_dependencies([]))
+
+    view.set_compact_mode(True)
+    assert isinstance(view._settings_host.content, ft.Column)
+    assert view._settings_host.content.controls == view._sections
+
+    view.set_compact_mode(False)
+    assert isinstance(view._settings_host.content, ft.Row)
+
+
+def test_settings_layout_uses_one_column_until_roomy_width() -> None:
+    view = SettingsView(_dependencies([]))
+
+    view.set_responsive_layout(resolve_responsive_layout(1100, 820))
+    assert isinstance(view._settings_host.content, ft.Column)
+
+    view.set_responsive_layout(resolve_responsive_layout(1400, 820))
+    assert isinstance(view._settings_host.content, ft.Row)
 
 
 def test_config_service_persists_typed_settings(tmp_path: Path) -> None:

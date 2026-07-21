@@ -87,7 +87,7 @@ def _basic_section(info: WorldInfo, translate: Optional[Translate]) -> InfoSecti
     _append_bool(rows, "⌨️ 允许命令", info.allow_commands, translate)
     _append_bool(
         rows,
-        _tr(translate, "world_info.difficulty_locked", "🔒 难度已锁定"),
+        _tr(translate, "world_info.difficulty_locked", "难度已锁定"),
         info.difficulty_locked,
         translate,
     )
@@ -123,18 +123,18 @@ def _generation_section(
         ))
     if info.spawn_angle is not None:
         rows.append(InfoRow(
-            _tr(translate, "world_info.spawn_angle", "🧭 出生朝向"),
+            _tr(translate, "world_info.spawn_angle", "出生朝向"),
             f"{float(info.spawn_angle):g}°",
         ))
     _append_bool(
         rows,
-        _tr(translate, "world_info.generate_features", "🏛️ 生成结构"),
+        _tr(translate, "world_info.generate_features", "生成结构"),
         info.generate_features,
         translate,
     )
     _append_bool(
         rows,
-        _tr(translate, "world_info.bonus_chest", "🎁 奖励箱"),
+        _tr(translate, "world_info.bonus_chest", "奖励箱"),
         info.bonus_chest,
         translate,
     )
@@ -291,25 +291,25 @@ def _mod_section(
     loaders = list(info.mod_loaders or [])
 
     rows.append(InfoRow(
-        _tr(translate, "world_info.mods_status", "🧩 是否使用模组"),
+        _tr(translate, "world_info.mods_status", "是否使用模组"),
         _mod_status_text(info, mods, loaders, translate),
     ))
     if loaders:
         rows.append(InfoRow(
-            _tr(translate, "world_info.mod_loaders", "⚙️ 模组加载器"),
+            _tr(translate, "world_info.mod_loaders", "模组加载器"),
             ", ".join(loaders),
         ))
     if mods:
         rows.append(InfoRow(
-            _tr(translate, "world_info.mod_list", "📚 模组列表"),
+            _tr(translate, "world_info.mod_list", "模组列表"),
             "\n".join(_format_mod(mod) for mod in mods),
         ))
         rows.append(InfoRow(
-            _tr(translate, "world_info.mod_source", "ℹ️ 清单来源"),
+            _tr(translate, "world_info.mod_source", "清单来源"),
             _mod_source_text(info.mod_list_complete, translate),
         ))
     return _section(
-        _tr(translate, "world_info.mods_section", "🧩 模组信息"),
+        _tr(translate, "world_info.mods_section", "模组信息"),
         rows,
     )
 
@@ -330,18 +330,18 @@ def _world_border_section(
     rows: List[InfoRow] = []
     if info.border_center_x is not None and info.border_center_z is not None:
         rows.append(InfoRow(
-            _tr(translate, "world_info.border_center", "🎯 中心坐标"),
+            _tr(translate, "world_info.border_center", "中心坐标"),
             f"X: {_format_number(info.border_center_x)}  "
             f"Z: {_format_number(info.border_center_z)}",
         ))
     if info.border_size is not None:
         rows.append(InfoRow(
-            _tr(translate, "world_info.border_size", "↔️ 边界直径"),
+            _tr(translate, "world_info.border_size", "边界直径"),
             _format_number(info.border_size),
         ))
     if info.border_warning_blocks is not None:
         rows.append(InfoRow(
-            _tr(translate, "world_info.border_warning", "⚠️ 警告距离"),
+            _tr(translate, "world_info.border_warning", "警告距离"),
             _tr(
                 translate,
                 "world_info.blocks",
@@ -350,7 +350,7 @@ def _world_border_section(
             ),
         ))
     return _section(
-        _tr(translate, "world_info.border_section", "🧱 世界边界"),
+        _tr(translate, "world_info.border_section", "世界边界"),
         rows,
     )
 

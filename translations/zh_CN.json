@@ -27,7 +27,8 @@
     "start_compare": "开始对比",
     "import_lang": "导入语言文件",
     "read_config": "读取配置",
-    "refresh_map": "刷新地图"
+    "refresh_map": "刷新地图",
+    "more_actions": "更多操作"
   },
   "sidebar": {
     "migrator": "存档转换",
@@ -43,27 +44,27 @@
   "world_info": {
     "yes": "是",
     "no": "否",
-    "difficulty_locked": "🔒 难度已锁定",
-    "spawn_angle": "🧭 出生朝向",
-    "generate_features": "🏛️ 生成结构",
-    "bonus_chest": "🎁 奖励箱",
-    "mods_section": "🧩 模组信息",
-    "mods_status": "🧩 是否使用模组",
+    "difficulty_locked": "难度已锁定",
+    "spawn_angle": "出生朝向",
+    "generate_features": "生成结构",
+    "bonus_chest": "奖励箱",
+    "mods_section": "模组信息",
+    "mods_status": "是否使用模组",
     "mods_status_recorded": "是（存档记录了 {count} 个模组）",
     "mods_status_inferred": "是（至少检测到 {count} 个，列表可能不完整）",
     "mods_status_loader_only": "检测到模组加载器，但存档未保存可读取的模组清单",
     "mods_status_no_list": "是（存档未保存可读取的模组清单）",
     "mods_status_clean": "否（未检测到模组）",
     "mods_status_unknown": "未知（存档未提供模组标记）",
-    "mod_loaders": "⚙️ 模组加载器",
-    "mod_list": "📚 模组列表",
-    "mod_source": "ℹ️ 清单来源",
+    "mod_loaders": "模组加载器",
+    "mod_list": "模组列表",
+    "mod_source": "清单来源",
     "mod_source_explicit": "level.dat 中的显式模组清单",
     "mod_source_inferred": "根据存档数据包标识推断，可能不完整",
-    "border_section": "🧱 世界边界",
-    "border_center": "🎯 中心坐标",
-    "border_size": "↔️ 边界直径",
-    "border_warning": "⚠️ 警告距离",
+    "border_section": "世界边界",
+    "border_center": "中心坐标",
+    "border_size": "边界直径",
+    "border_warning": "警告距离",
     "blocks": "{count} 格"
   },
   "map": {
@@ -408,6 +409,11 @@
       "reset": "重置为默认",
       "cancel": "取消"
     },
+    "save_status": {
+      "auto": "更改会自动保存",
+      "saved": "已保存",
+      "failed": "保存失败"
+    },
     "auto_import_mc_lang_ok": "已自动导入 {count} 个 Minecraft 名称（{locale}）"
   },
   "dialogs": {
@@ -501,8 +507,8 @@
     "display_name": "简体中文"
   },
   "stats": {
-    "hint_ready": "设置当前存档后可通过顶栏「开始统计」分析世界数据。",
-    "summary_placeholder": "通过顶栏统计快捷操作分析世界数据。",
+    "hint_ready": "设置当前存档后可通过页面标题栏「开始统计」分析世界数据。",
+    "summary_placeholder": "通过页面标题栏的统计操作分析世界数据。",
     "section_summary": "汇总",
     "section_dimensions": "维度大小",
     "section_playtime": "玩家统计",

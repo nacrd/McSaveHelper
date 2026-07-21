@@ -9,6 +9,7 @@ import flet as ft
 from app.ui.components.buttons import McButton, btn_ghost, btn_primary
 from app.ui.components.cards import card, section_title
 from app.ui.components.fields import checkbox, current_save_field, label, text_field
+from app.ui.icons import IconSet
 from app.ui.theme import THEME, mc_border
 from app.ui.views.migrator_options import (
     PLATFORM_OPTIONS,
@@ -85,34 +86,37 @@ class BatchCardControls:
 
 
 def build_guide_card() -> ft.Container:
-    """Build the migrator usage guide card."""
-    return ft.Container(
-        content=ft.Column(
-            [
-                ft.Text(
-                    '📖 操作指南',
-                    size=13,
-                    weight=ft.FontWeight.BOLD,
-                    color=THEME.text_primary,
-                ),
-                ft.Container(height=8),
-                ft.Text(
-                    (
-                        '1. 设置源存档：在左侧边栏点击「设置当前存档」'
-                        + '\n' + '2. 选择输出目录：点击「浏览」按钮选择目标位置'
-                        + '\n' + '3. 选择目标版本：在版本转换区域选择目标 Minecraft 版本'
-                        + '\n' + '4. 开始转换：点击顶部「开始转换」按钮'
-                        + '\n' + '\n' + '💡 提示：转换前建议备份原始存档'
-                    ),
-                    size=12,
-                    color=THEME.text_secondary,
-                ),
-            ]
-        ),
+    """Build a collapsed-by-default guide for first-time users."""
+    guide_text = ft.Text(
+        "1. 设置当前存档\n"
+        "2. 选择输出目录\n"
+        "3. 选择目标版本\n"
+        "4. 在标题栏开始转换\n\n"
+        "转换前建议先创建备份。",
+        size=12,
+        color=THEME.text_secondary,
+    )
+    tile = ft.ExpansionTile(
+        title="操作指南",
+        subtitle="首次使用可展开查看，转换前建议备份",
+        leading=IconSet.GUIDE,
+        controls=[guide_text],
+        controls_padding=ft.Padding(left=48, right=16, bottom=14, top=0),
+        tile_padding=ft.Padding(left=16, right=16, top=0, bottom=0),
+        min_tile_height=52,
+        expanded=False,
         bgcolor=THEME.bg_secondary,
-        padding=16,
-        border_radius=8,
-        border=ft.Border.all(1, THEME.border_subtle),
+        collapsed_bgcolor=THEME.bg_secondary,
+        text_color=THEME.text_primary,
+        collapsed_text_color=THEME.text_primary,
+        icon_color=THEME.accent,
+        collapsed_icon_color=THEME.accent,
+    )
+    return ft.Container(
+        content=tile,
+        border_radius=6,
+        clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
+        border=ft.Border.all(1, THEME.border_standard),
     )
 
 
@@ -136,7 +140,10 @@ def build_directory_card(
     )
     section = ft.Column(spacing=0)
     section.controls.append(
-        section_title(translate("left_panel.archive_config", "📁 存档配置"))
+        section_title(
+            translate("left_panel.archive_config", "存档配置"),
+            IconSet.FOLDER_OPEN,
+        )
     )
     section.controls.extend(
         _directory_card_body_controls(
@@ -160,9 +167,9 @@ def build_directory_card(
 def _directory_card_body_controls(
     *,
     translate: Translate,
-    src_field: ft.Control,
-    dest_field: ft.Control,
-    name_field: ft.Control,
+    src_field: ft.TextField,
+    dest_field: ft.TextField,
+    name_field: ft.TextField,
     on_browse_dest: SimpleCallback,
 ) -> list[ft.Control]:
     return [
@@ -183,9 +190,9 @@ def _directory_card_body_controls(
                 [
                     dest_field,
                     btn_ghost(
-                        translate("left_panel.browse", "📂 浏览"),
+                        translate("left_panel.browse", "浏览"),
                         width=90,
-                        height=38,
+                        height=44,
                         on_click=lambda _e: on_browse_dest(),
                     ),
                 ],
@@ -208,7 +215,7 @@ def _build_directory_fields(
     world_name: str,
     on_field_change: SimpleCallback,
     on_browse_dest: SimpleCallback,
-) -> tuple[ft.Control, ft.Control, ft.Control]:
+) -> tuple[ft.TextField, ft.TextField, ft.TextField]:
     del on_browse_dest  # used by caller for the browse button
     src_field = current_save_field(
         label="当前源存档",
@@ -250,7 +257,7 @@ def build_version_card(
     strip_cb, replace_cb, advanced = _build_version_advanced_options()
     warn_box = ft.Text("", size=11, color=THEME.warning, visible=False)
     section = ft.Column(spacing=0)
-    section.controls.append(section_title("🔄 版本转换"))
+    section.controls.append(section_title("版本转换", IconSet.SYNC))
     section.controls.append(
         ft.Container(
             content=ft.Text(
@@ -341,8 +348,8 @@ def _build_version_advanced_options(
                 replace_cb,
                 ft.Container(height=8),
                 ft.Text(
-                    "💡 降级到旧版本时，建议启用这些选项以避免兼容性问题",
-                    size=11,
+                    "降级到旧版本时，建议启用这些选项以避免兼容性问题",
+                    size=12,
                     color=THEME.text_muted,
                 ),
             ],
@@ -377,7 +384,10 @@ def build_player_card(
     query_result = ft.Text("在此显示查询结果", size=11, color=THEME.text_muted)
     section = ft.Column(spacing=0)
     section.controls.append(
-        section_title(translate("left_panel.player_config", "👥 玩家配置"))
+        section_title(
+            translate("left_panel.player_config", "玩家配置"),
+            IconSet.PEOPLE,
+        )
     )
     section.controls.extend(
         _player_intro_controls(manual_field)
@@ -446,7 +456,7 @@ def _player_uuid_query_controls(
                     btn_primary(
                         "查询",
                         width=90,
-                        height=38,
+                        height=44,
                         on_click=lambda _e: on_query_uuid(),
                     ),
                 ],
@@ -477,7 +487,10 @@ def build_mode_card(
     """Build the conversion mode selection card."""
     section = ft.Column(spacing=0)
     section.controls.append(
-        section_title(translate("right_panel.mode_settings", "⚙️ 转换模式"))
+        section_title(
+            translate("right_panel.mode_settings", "转换模式"),
+            IconSet.TUNE,
+        )
     )
     section.controls.append(
         ft.Container(
@@ -492,11 +505,11 @@ def build_mode_card(
 
     mode_fast = ft.Radio(
         value="fast",
-        label=translate("right_panel.fast_mode", "⚡ 快速模式"),
+        label=translate("right_panel.fast_mode", "快速模式"),
     )
     mode_full = ft.Radio(
         value="full",
-        label=translate("right_panel.full_mode", "🧠 完整模式"),
+        label=translate("right_panel.full_mode", "完整模式"),
     )
     mode_group = ft.RadioGroup(
         content=ft.Row([mode_fast, mode_full], spacing=30),
@@ -540,7 +553,10 @@ def build_options_card(
     """Build the migration processing options card."""
     section = ft.Column(spacing=0)
     section.controls.append(
-        section_title(translate("right_panel.migration_options", "📦 处理选项"))
+        section_title(
+            translate("right_panel.migration_options", "处理选项"),
+            IconSet.TUNE,
+        )
     )
 
     offline_cb = checkbox(
@@ -588,7 +604,7 @@ def build_batch_card(
 ) -> BatchCardControls:
     """Build the batch processing card."""
     section = ft.Column(spacing=0)
-    section.controls.append(section_title("📦 批量处理"))
+    section.controls.append(section_title("批量处理", IconSet.BATCH))
 
     batch_mode_cb = checkbox(
         translate("right_panel.batch_mode", "启用批量模式（一次处理多个存档）"),
@@ -640,7 +656,7 @@ def _build_batch_detail_controls(
     on_field_change: SimpleCallback,
     on_browse_batch: SimpleCallback,
     on_scan_batch: SimpleCallback,
-) -> tuple[ft.Control, ft.Control, ft.Text, ft.Column]:
+) -> tuple[ft.TextField, McButton, ft.Text, ft.Column]:
     batch_dir_field = text_field(
         label="批量存档目录",
         hint_text="包含多个世界存档的目录",
@@ -648,9 +664,9 @@ def _build_batch_detail_controls(
         on_change=lambda _e: on_field_change(),
     )
     batch_scan_btn = btn_primary(
-        "🔍 扫描",
+        "扫描",
         width=90,
-        height=38,
+        height=44,
         on_click=lambda _e: on_scan_batch(),
     )
     batch_result = ft.Text("", size=11, color=THEME.text_muted)
@@ -660,9 +676,9 @@ def _build_batch_detail_controls(
                 [
                     batch_dir_field,
                     btn_ghost(
-                        "📂 浏览",
+                        "浏览",
                         width=90,
-                        height=38,
+                        height=44,
                         on_click=lambda _e: on_browse_batch(),
                     ),
                     batch_scan_btn,

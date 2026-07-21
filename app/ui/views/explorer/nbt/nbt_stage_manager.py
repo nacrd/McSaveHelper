@@ -166,7 +166,11 @@ class NbtStageManager:
                     first_change = changes[0][1]
                     group_header = ft.Row(
                         [
-                            ft.Text("📁", size=14, color=THEME.accent),
+                            ft.Icon(
+                                IconSet.FOLDER_OPEN,
+                                size=16,
+                                color=THEME.accent,
+                            ),
                             ft.Text(
                                 first_change.target_label,
                                 size=13,

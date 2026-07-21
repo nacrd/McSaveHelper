@@ -8,6 +8,7 @@ from typing import Any, Callable, Optional
 import flet as ft
 
 from app.models.config import ApplicationSettings
+from app.models.responsive_layout import ResponsiveLayout
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
@@ -64,17 +65,77 @@ class SettingsView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(page_header(
+        self._save_status_icon = ft.Icon(
+            IconSet.INFO,
+            size=16,
+            color=THEME.text_muted,
+        )
+        self._save_status_text = ft.Text(
+            self._t("settings.save_status.auto", "更改会自动保存"),
+            size=12,
+            color=THEME.text_muted,
+        )
+        save_status = ft.Row(
+            [self._save_status_icon, self._save_status_text],
+            spacing=5,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self._page_header = page_header(
             "设置",
             ft.Text("管理通用选项、界面偏好、批量处理和清理规则", size=12, color=THEME.text_muted),
             icon=IconSet.SETTINGS,
-        ))
+            status=save_status,
+        )
+        self._sections: list[ft.Control] = []
         self._build_general_card()
         self._build_ui_card()
         self._build_cache_card()
         self._build_batch_card()
         self._build_cleanup_card()
         self._build_action_card()
+        self._settings_left = ft.Column(
+            [self._sections[index] for index in (0, 2, 3)],
+            spacing=0,
+            expand=True,
+        )
+        self._settings_right = ft.Column(
+            [self._sections[index] for index in (1, 4, 5)],
+            spacing=0,
+            expand=True,
+        )
+        self._settings_host = ft.Container()
+        self.controls = [self._page_header, self._settings_host]
+        self.set_compact_mode(False)
+
+    def set_compact_mode(self, compact: bool) -> None:
+        """Use one column in constrained windows and two on desktop."""
+        host = getattr(self, "_settings_host", None)
+        if host is None:
+            return
+        if compact:
+            host.content = ft.Column(
+                list(self._sections),
+                spacing=0,
+            )
+        else:
+            host.content = ft.Row(
+                [self._settings_left, self._settings_right],
+                spacing=16,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            )
+        safe_update(host)
+
+    def set_responsive_layout(self, layout: ResponsiveLayout) -> None:
+        """Choose columns from the real content width left by the sidebar.
+
+        The standard shell still leaves too little horizontal space for two
+        settings cards with form controls.  Reserve the two-column layout for
+        roomy windows so fields and helper text never extend past the viewport.
+
+        Args:
+            layout: Current shell layout resolved from the viewport.
+        """
+        self.set_compact_mode(layout.density != "roomy")
 
     # ─── 通用设置 ───────────────────────────────
 
@@ -107,7 +168,7 @@ class SettingsView(ft.Column):
             padding=ft.Padding(left=16, right=16, bottom=16, top=10),
         ))
 
-        self.controls.append(_collapsible_section(
+        self._sections.append(_collapsible_section(
             self._t("settings.general.title", "通用设置"),
             body,
             expanded=True,  # 默认展开
@@ -127,7 +188,7 @@ class SettingsView(ft.Column):
         body.controls.append(self._build_show_log_panel_row(cfg))
         body.controls.append(self._build_perf_monitor_row(cfg))
         body.controls.append(self._build_perf_interval_row(cfg))
-        self.controls.append(_collapsible_section(
+        self._sections.append(_collapsible_section(
             self._t("settings.ui.title", "界面设置"),
             body,
             expanded=True,
@@ -222,7 +283,7 @@ class SettingsView(ft.Column):
                         self._minecraft_dir_field,
                         btn_ghost(
                             self._t("settings.ui.browse", "浏览"),
-                            height=36,
+                            height=44,
                             on_click=self._browse_minecraft_dir,
                         ),
                     ],
@@ -320,7 +381,7 @@ class SettingsView(ft.Column):
         body.controls.append(self._cache_description())
         body.controls.append(self._cache_summary_block())
         body.controls.append(self._cache_action_row())
-        self.controls.append(_collapsible_section(
+        self._sections.append(_collapsible_section(
             self._t("settings.cache.title", "地图缓存"),
             body,
             expanded=True,
@@ -368,13 +429,13 @@ class SettingsView(ft.Column):
                     btn_ghost(
                         self._t("settings.cache.refresh", "刷新"),
                         width=100,
-                        height=32,
+                        height=44,
                         on_click=lambda e: self._refresh_cache_stats(),
                     ),
                     btn_ghost(
                         self._t("settings.cache.clear", "清理缓存"),
                         width=120,
-                        height=32,
+                        height=44,
                         on_click=lambda e: self._clear_map_cache(),
                     ),
                 ],
@@ -468,7 +529,7 @@ class SettingsView(ft.Column):
             padding=ft.Padding(left=16, right=16, bottom=16),
         ))
 
-        self.controls.append(_collapsible_section(
+        self._sections.append(_collapsible_section(
             self._t("settings.batch.title", "批量处理"),
             body,
             expanded=False,  # 默认收起
@@ -505,13 +566,13 @@ class SettingsView(ft.Column):
         body.controls.append(ft.Container(
             content=btn_ghost(
                 self._t("settings.cleanup.restore_defaults", "恢复默认"),
-                width=120, height=32,
+                width=120, height=44,
                 on_click=lambda e: self._restore_default_cleanup(),
             ),
             padding=ft.Padding(left=16, right=16, bottom=16, top=8),
         ))
 
-        self.controls.append(_collapsible_section(
+        self._sections.append(_collapsible_section(
             self._t("settings.cleanup.title", "清理模式"),
             body,
             expanded=False,
@@ -523,7 +584,7 @@ class SettingsView(ft.Column):
         btn_row = ft.Row([
             ft.Button(
                 content=self._t("settings.actions.reset", "↻ 重置为默认"),
-                width=140, height=38,
+                width=160, height=44,
                 style=ft.ButtonStyle(
                     color=THEME.text_primary, bgcolor=THEME.warning,
                     shape=ft.RoundedRectangleBorder(radius=6),
@@ -533,7 +594,7 @@ class SettingsView(ft.Column):
         ], spacing=10)
         c = card(ft.Column(spacing=0), padding=0)
         c.content = ft.Container(content=btn_row, padding=16)
-        self.controls.append(
+        self._sections.append(
             ft.Container(content=c, padding=ft.Padding(bottom=24)))
 
     # ─── 回调（即时生效 + 自动保存）──────────────
@@ -594,8 +655,38 @@ class SettingsView(ft.Column):
         )
 
     def _persist(self) -> None:
-        """通过配置端口持久化当前设置。"""
-        self._deps.save_settings(self._collect_settings())
+        """Persist settings and expose the result beside the page title."""
+        try:
+            self._deps.save_settings(self._collect_settings())
+        except Exception as error:
+            self._set_save_status(
+                self._t("settings.save_status.failed", "保存失败"),
+                IconSet.ERROR,
+                THEME.error,
+            )
+            self._deps.error_dialog(
+                self._t("dialogs.error", "错误"),
+                str(error),
+            )
+            return
+        self._set_save_status(
+            self._t("settings.save_status.saved", "已保存"),
+            IconSet.SUCCESS,
+            THEME.success,
+        )
+
+    def _set_save_status(
+        self,
+        text: str,
+        icon: ft.IconData,
+        color: str,
+    ) -> None:
+        """Update the persistent settings feedback in one place."""
+        self._save_status_text.value = text
+        self._save_status_text.color = color
+        self._save_status_icon.icon = icon
+        self._save_status_icon.color = color
+        safe_update(self._page_header.status_host)
 
     def _on_version_detection_change(self, value: bool) -> None:
         del value
@@ -625,7 +716,10 @@ class SettingsView(ft.Column):
         del enabled
         self._persist()
 
-    def _browse_minecraft_dir(self, e: ft.ControlEvent = None) -> None:
+    def _browse_minecraft_dir(
+        self,
+        e: Optional[ft.ControlEvent] = None,
+    ) -> None:
         del e
         try:
             path = self._deps.pick_directory()

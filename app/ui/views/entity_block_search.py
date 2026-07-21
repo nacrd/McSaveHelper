@@ -23,6 +23,23 @@ if TYPE_CHECKING:
     from app.application import Application
 
 
+def _icon_heading(icon: ft.IconData, text: str) -> ft.Row:
+    """Build a consistent vector-icon section heading."""
+    return ft.Row(
+        [
+            ft.Icon(icon, size=18, color=THEME.accent),
+            ft.Text(
+                text,
+                size=13,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.text_primary,
+            ),
+        ],
+        spacing=6,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
 class EntityBlockSearchView(ft.Column):
     """实体/方块/容器搜索视图 - 三栏布局：左侧条件 + 中央结果 + 右侧统计"""
 
@@ -97,15 +114,28 @@ class EntityBlockSearchView(ft.Column):
             weight=ft.FontWeight.BOLD,
             color=THEME.text_primary,
         )
+        self._status_icon = ft.Icon(
+            IconSet.INFO,
+            size=18,
+            color=THEME.text_secondary,
+        )
         self._status_summary_text = ft.Text(
             "", size=12, color=THEME.text_secondary)
         self._status_progress = ft.ProgressBar(width=200, visible=False)
 
         # 搜索按钮
         self._search_btn = btn_primary(
-            "🔍 开始搜索", on_click=self._start_search, height=40)
+            "开始搜索",
+            icon=IconSet.SEARCH,
+            on_click=self._start_search,
+            height=44,
+        )
         self._export_btn = btn_ghost(
-            "📊 导出结果", on_click=self._export_results, height=40)
+            "导出结果",
+            icon=IconSet.EXPORT,
+            on_click=self._export_results,
+            height=44,
+        )
 
         # 结果列表容器
         self._results_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
@@ -115,7 +145,7 @@ class EntityBlockSearchView(ft.Column):
         self.controls.clear()
 
         # 顶部标题
-        header = page_header(
+        self._page_header = page_header(
             "实体/方块搜索",
             ft.Text("按维度搜索实体、方块和容器，并查看命中详情", size=12, color=THEME.text_muted),
             icon=IconSet.SEARCH,
@@ -133,33 +163,76 @@ class EntityBlockSearchView(ft.Column):
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
+        layout_host = ft.Container(
+            content=main_row,
+            padding=10,
+            expand=True,
+        )
         self.controls = [
-            header,
+            self._page_header,
             ft.Container(height=4),
-            ft.Container(content=main_row, padding=10, expand=True),
+            layout_host,
         ]
+        self._layout_host = layout_host
+        self._layout_panels = (left_panel, center_panel, right_panel)
+        self.set_compact_mode(self._compact)
+
+    def set_compact_mode(self, compact: bool) -> None:
+        """Stack search panels when the available content width is narrow."""
+        self._compact = compact
+        host = getattr(self, "_layout_host", None)
+        panels = getattr(self, "_layout_panels", None)
+        if host is None or panels is None:
+            return
+        left, center, right = panels
+        if compact:
+            left.width = None
+            right.width = None
+            center.height = 360
+            center.expand = False
+            host.content = ft.Column(
+                [left, center, right],
+                spacing=8,
+                scroll=ft.ScrollMode.AUTO,
+                expand=True,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            )
+            host.padding = 6
+        else:
+            left.width = 280
+            right.width = 280
+            center.height = None
+            center.expand = True
+            host.content = ft.Row(
+                [left, center, right],
+                spacing=8,
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            )
+            host.padding = 10
+        safe_update(host)
 
     # ==================== 左侧搜索条件面板 ====================
 
     def _build_left_panel(self) -> ft.Container:
         """构建左侧搜索条件面板"""
         criteria_section = ft.Column([
-            ft.Text("🔍 搜索条件", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            _icon_heading(IconSet.SEARCH, "搜索条件"),
             self._world_path_field,
             self._search_type_dropdown,
             self._target_field,
-            ft.Text("常用预设（点击填入）", size=10, color=THEME.text_muted),
+            ft.Text("常用预设（点击填入）", size=12, color=THEME.text_muted),
             self._preset_chips,
             ft.Text(
                 "支持通配符 * 和逗号分隔多目标",
-                size=10,
+                size=12,
                 color=THEME.text_muted,
             ),
         ], spacing=8)
 
         dimension_section = ft.Column([
             ft.Divider(height=1, color=THEME.border_light),
-            ft.Text("🌍 维度", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            _icon_heading(IconSet.GLOBE, "维度"),
             self._dim_overworld,
             self._dim_nether,
             self._dim_end,
@@ -233,14 +306,18 @@ class EntityBlockSearchView(ft.Column):
     def _build_right_panel(self) -> ft.Container:
         """构建右侧统计和帮助面板"""
         status_section = ft.Column([
-            ft.Text("📊 搜索状态", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
-            self._status_title_text,
+            _icon_heading(IconSet.STATS, "搜索状态"),
+            ft.Row(
+                [self._status_icon, self._status_title_text],
+                spacing=6,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            ),
             self._status_summary_text,
         ], spacing=6)
 
         help_section = ft.Column([
             ft.Divider(height=1, color=THEME.border_light),
-            ft.Text("ℹ️ 使用帮助", size=13, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+            _icon_heading(IconSet.HELP, "使用帮助"),
             ft.Text(
                 "1. 选择搜索范围（实体/方块/容器）\n"
                 "2. 输入目标 ID\n"
@@ -251,7 +328,7 @@ class EntityBlockSearchView(ft.Column):
                 "• *shulker* — 匹配所有潜影盒\n"
                 "• zombie,cow — 同时搜索多个目标\n"
                 "• * — 搜索所有",
-                size=11,
+                size=12,
                 color=THEME.text_muted,
             ),
         ], spacing=6)
@@ -360,12 +437,18 @@ class EntityBlockSearchView(ft.Column):
         """Toggle busy state widgets for a search run."""
         self._searching = searching
         self._search_btn.disabled = searching
+        self._search_btn.set_text(
+            "搜索中..." if searching else "开始搜索"
+        )
         if searching:
-            self._status_title_text.value = "🔄 搜索中..."
+            self._status_title_text.value = "搜索中..."
             self._status_title_text.color = THEME.mc_gold
+            self._status_icon.icon = IconSet.SYNC
+            self._status_icon.color = THEME.mc_gold
             self._status_progress.visible = True
         safe_update(self._search_btn)
         safe_update(self._status_title_text)
+        safe_update(self._status_icon)
         safe_update(self._status_progress)
 
     def _run_search_worker(self, condition: SearchCondition) -> None:
@@ -401,25 +484,33 @@ class EntityBlockSearchView(ft.Column):
             "dimensions": condition.dimensions,
         }
         self._render_results(result_controls)
-        self._status_title_text.value = "✅ 搜索完成"
+        self._status_title_text.value = "搜索完成"
         self._status_title_text.color = THEME.mc_grass
+        self._status_icon.icon = IconSet.SUCCESS
+        self._status_icon.color = THEME.success
         self._status_summary_text.value = f"找到 {len(results)} 个结果"
         self._status_progress.visible = False
         self._searching = False
         self._search_btn.disabled = False
+        self._search_btn.set_text("开始搜索")
         safe_update(self._status_title_text)
+        safe_update(self._status_icon)
         safe_update(self._status_summary_text)
         safe_update(self._status_progress)
         safe_update(self._search_btn)
 
     def _apply_search_failure(self, exception: Exception) -> None:
-        self._status_title_text.value = "❌ 搜索失败"
+        self._status_title_text.value = "搜索失败"
         self._status_title_text.color = THEME.error
+        self._status_icon.icon = IconSet.ERROR
+        self._status_icon.color = THEME.error
         self._status_summary_text.value = str(exception)
         self._status_progress.visible = False
         self._searching = False
         self._search_btn.disabled = False
+        self._search_btn.set_text("开始搜索")
         safe_update(self._status_title_text)
+        safe_update(self._status_icon)
         safe_update(self._status_summary_text)
         safe_update(self._status_progress)
         safe_update(self._search_btn)

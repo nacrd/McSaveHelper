@@ -26,7 +26,7 @@ REGION_LEGEND = (
     ("#64A4DF", "水体", "海/河"),
     ("#EED6AF", "沙地", "沙漠"),
     ("#808080", "岩石", "石/深板岩"),
-    ("#4CAF50", "占位", "未加载"),
+    ("#7A6F8F", "占位", "未加载"),
     ("#FFD54F", "选中", "边框/标记"),
 )
 REGION_LEGEND_KEYS = (
@@ -86,8 +86,8 @@ def _icon_button(
         bgcolor="#101810DD",
         hover_color=THEME.bg_card_hover,
         tooltip=tooltip,
-        width=40,
-        height=40,
+        width=44,
+        height=44,
         on_click=lambda _event: callback(),
     )
 
@@ -142,7 +142,7 @@ def _build_search_controls(
             "坐标 x,z / x y z / r.x.z / c.x.z / 标记名",
         ),
         width=300,
-        height=42,
+        height=44,
         text_size=12,
         color=THEME.text_primary,
         bgcolor="#101810EE",
@@ -157,8 +157,8 @@ def _build_search_controls(
         bgcolor="#101810EE",
         hover_color=THEME.bg_card_hover,
         tooltip=t("map.search", "搜索地图"),
-        width=40,
-        height=40,
+        width=44,
+        height=44,
         on_click=search_callback,
     )
     return search_field, search_button
@@ -363,7 +363,7 @@ def _build_right_map_toolbar(
 def _build_map_help_bar(t: Translate) -> tuple[ft.Text, ft.Container]:
     help_text = ft.Text(
         t("map.help", REGION_DISPLAY_HELP),
-        size=11,
+        size=12,
         color="#D0D8C8",
         no_wrap=True,
         overflow=ft.TextOverflow.ELLIPSIS,
@@ -373,8 +373,8 @@ def _build_map_help_bar(t: Translate) -> tuple[ft.Text, ft.Container]:
         left=12,
         right=12,
         bottom=12,
-        height=30,
-        padding=ft.Padding(left=10, right=10, top=6, bottom=5),
+        height=36,
+        padding=ft.Padding(left=10, right=10, top=7, bottom=7),
         bgcolor="#0B120BCC",
         border_radius=4,
     )

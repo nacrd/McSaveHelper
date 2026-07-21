@@ -135,7 +135,8 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
     manager = WindowManager(WindowManagerDependencies(
         page=page,
         translate=lambda key, default: default,
-        apply_compact_layout=lambda compact: None,
+        apply_responsive_layout=lambda layout: None,
+        get_sidebar_mode=lambda: "auto",
         stop_gui_optimizer=lambda: disposed.append("optimizer"),
         dispose_views=lambda: disposed.append("views"),
         dispose_file_dialogs=lambda: disposed.append("file_dialogs"),

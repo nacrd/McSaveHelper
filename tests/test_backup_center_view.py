@@ -28,10 +28,9 @@ def test_backup_center_tracks_selected_world_and_renders_records(tmp_path: Path)
     assert len(view._backup_list.controls) == 1
 
 
-def test_backup_center_exposes_create_top_action() -> None:
+def test_backup_center_keeps_creation_next_to_form() -> None:
     view = BackupCenterView(cast(Any, _app(BackupService())))
 
     actions = view.get_top_actions()
 
-    assert len(actions) == 1
-    assert actions[0].label == "创建备份"
+    assert actions == []

@@ -8,10 +8,28 @@ import flet as ft
 
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.fields import text_field
+from app.ui.icons import IconSet
 from app.ui.theme import THEME
 from app.ui.views.explorer.nbt_tree import NBTTreeView
 
 Callback = Callable[..., None]
+
+
+def _nbt_heading(icon: ft.IconData, text: str) -> ft.Row:
+    """Build a vector-icon heading for NBT panels."""
+    return ft.Row(
+        [
+            ft.Icon(icon, size=18, color=THEME.accent),
+            ft.Text(
+                text,
+                size=13,
+                weight=ft.FontWeight.BOLD,
+                color=THEME.text_primary,
+            ),
+        ],
+        spacing=6,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
 
 
 @dataclass(frozen=True)
@@ -208,7 +226,7 @@ def _build_nbt_data_source_section(
                 content=btn_ghost(
                     "玩家",
                     on_click=callbacks.load_player,
-                    height=32,
+                    height=44,
                 ),
                 expand=True,
             ),
@@ -216,7 +234,7 @@ def _build_nbt_data_source_section(
                 content=btn_ghost(
                     "世界",
                     on_click=callbacks.load_level,
-                    height=32,
+                    height=44,
                 ),
                 expand=True,
             ),
@@ -225,12 +243,7 @@ def _build_nbt_data_source_section(
     )
     data_source = ft.Column(
         [
-            ft.Text(
-                "📁 数据源",
-                size=13,
-                weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary,
-            ),
+            _nbt_heading(IconSet.FOLDER_OPEN, "数据源"),
             target_dropdown,
             quick_load_buttons,
         ],
@@ -253,19 +266,14 @@ def _build_nbt_chunk_section(
     world_x_field, world_z_field = _nbt_world_coord_fields()
     chunk_section = ft.Column(
         [
-            ft.Text(
-                "📦 区块",
-                size=13,
-                weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary,
-            ),
+            _nbt_heading(IconSet.PACKAGE, "区块"),
             region_file_field,
             ft.Row([chunk_x_field, chunk_z_field], spacing=6),
             ft.Container(
                 content=btn_ghost(
                     "加载区块",
                     on_click=callbacks.load_chunk,
-                    height=32,
+                    height=44,
                 ),
                 expand=True,
             ),
@@ -276,12 +284,12 @@ def _build_nbt_chunk_section(
                     btn_ghost(
                         "填入",
                         on_click=callbacks.fill_world_coords,
-                        height=30,
+                        height=44,
                     ),
                     btn_primary(
                         "定位加载",
                         on_click=callbacks.load_world_coords,
-                        height=30,
+                        height=44,
                     ),
                 ],
                 spacing=6,
@@ -348,7 +356,7 @@ def _build_nbt_block_section(
     )
     block_query_result = ft.Text(
         "",
-        size=10,
+        size=12,
         color=THEME.text_muted,
         max_lines=2,
     )
@@ -360,19 +368,14 @@ def _build_nbt_block_section(
     )
     block_section = ft.Column(
         [
-            ft.Text(
-                "🧱 方块",
-                size=13,
-                weight=ft.FontWeight.BOLD,
-                color=THEME.text_primary,
-            ),
+            _nbt_heading(IconSet.BLOCK, "方块"),
             ft.Row(
                 [
                     block_y_field,
                     btn_ghost(
                         "查询",
                         on_click=callbacks.query_block,
-                        height=30,
+                        height=44,
                     ),
                 ],
                 spacing=6,
@@ -383,7 +386,7 @@ def _build_nbt_block_section(
                 content=btn_primary(
                     "替换",
                     on_click=callbacks.replace_block,
-                    height=32,
+                    height=44,
                 ),
                 expand=True,
             ),
@@ -447,9 +450,9 @@ def _build_center_panel(
             target_label,
             ft.Container(expand=True),
             search_field,
-            btn_ghost("展开", on_click=callbacks.expand_all, height=32),
-            btn_ghost("折叠", on_click=callbacks.collapse_all, height=32),
-            btn_ghost("导出", on_click=callbacks.export_json, height=32),
+            btn_ghost("展开", on_click=callbacks.expand_all, height=44),
+            btn_ghost("折叠", on_click=callbacks.collapse_all, height=44),
+            btn_ghost("导出", on_click=callbacks.export_json, height=44),
         ],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -491,20 +494,15 @@ def _build_right_panel(callbacks: NbtTabCallbacks) -> _RightPanel:
     stage_list = ft.Column(spacing=6, scroll=ft.ScrollMode.AUTO)
     actions = ft.Row(
         [
-            btn_primary("提交", on_click=callbacks.commit, height=36),
-            btn_ghost("丢弃", on_click=callbacks.discard, height=36),
+            btn_primary("提交", on_click=callbacks.commit, height=44),
+            btn_ghost("丢弃", on_click=callbacks.discard, height=44),
         ],
         spacing=6,
     )
     panel = ft.Container(
         content=ft.Column(
             [
-                ft.Text(
-                    "📋 暂存区",
-                    size=13,
-                    weight=ft.FontWeight.BOLD,
-                    color=THEME.text_primary,
-                ),
+                _nbt_heading(IconSet.LIST, "暂存区"),
                 stage_status,
                 ft.Divider(height=1, color=THEME.border_light),
                 ft.Container(content=stage_list, expand=True),

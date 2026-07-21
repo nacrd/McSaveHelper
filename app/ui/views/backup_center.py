@@ -51,21 +51,12 @@ class BackupCenterView(ft.Column):
         return self.app.translate(f"backup_center.{key}", default)
 
     def get_top_actions(self) -> list[ViewAction]:
-        """返回应用壳层顶栏可消费的视图命令。
-
-        Returns:
-            list[ViewAction]: 创建备份等动作。
-        """
-        return [
-            ViewAction(
-                self.app.translate("top_bar.create_backup", "创建备份"),
-                self._start_create,
-            )
-        ]
+        """Keep creation next to its form instead of duplicating it."""
+        return []
 
     def _build_ui(self) -> None:
         self._build_backup_fields()
-        header = page_header(
+        self._page_header = page_header(
             self._t("title", "备份与恢复"),
             ft.Text(
                 self._t("subtitle", "管理完整世界快照和恢复点"),
@@ -88,11 +79,15 @@ class BackupCenterView(ft.Column):
                     ft.Row(
                         [self._create_button, self._cancel_button],
                         spacing=10,
+                        wrap=True,
+                        run_spacing=8,
                     ),
                     ft.Row(
                         [self._retention_dropdown, self._prune_button],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                        wrap=True,
+                        run_spacing=8,
                     ),
                 ],
                 spacing=12,
@@ -106,8 +101,15 @@ class BackupCenterView(ft.Column):
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            wrap=True,
+            run_spacing=6,
         )
-        self.controls = [header, create_panel, list_heading, self._backup_list]
+        self.controls = [
+            self._page_header,
+            create_panel,
+            list_heading,
+            self._backup_list,
+        ]
         self._show_empty_state()
 
     def _build_backup_fields(self) -> None:
@@ -221,10 +223,14 @@ class BackupCenterView(ft.Column):
                     ft.Row(
                         self._backup_action_buttons(record),
                         spacing=2,
+                        wrap=True,
+                        run_spacing=2,
                     ),
                 ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                wrap=True,
+                run_spacing=8,
             ),
             padding=ft.Padding(left=14, right=8, top=12, bottom=12),
             bgcolor=THEME.bg_card,

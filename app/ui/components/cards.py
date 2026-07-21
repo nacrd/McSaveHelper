@@ -1,17 +1,17 @@
-"""Minecraft-style card layout components"""
+"""Card and empty-state components for application workspaces."""
 import flet as ft
 
-from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.theme import THEME, mc_border
 from flet import Icons
+
+from app.ui.icons import IconSet
 
 
 def card(
     content: ft.Control,
     padding: int = 20,
 ) -> ft.Container:
-    """Create a Minecraft-style card with beveled borders and shadow
-
-    Modernized with rounded corners and better styling.
+    """Create a restrained card for one cohesive content group.
 
     Args:
         content: Card content
@@ -26,19 +26,20 @@ def card(
     return ft.Container(
         content=inner,
         bgcolor=THEME.bg_card,
-        border=mc_border(),
-        border_radius=8,
-        shadow=mc_shadow(),
-        animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
+        border=mc_border(1),
+        border_radius=6,
     )
 
 
-def section_title(text: str, icon: str = "▣") -> ft.Container:
-    """Create a section title with Minecraft-style decorations
+def section_title(
+    text: str,
+    icon: ft.IconData = IconSet.SECTION,
+) -> ft.Container:
+    """Create a compact section title.
 
     Args:
         text: Section title text
-        icon: Decorative icon (default: "▣")
+        icon: Leading vector icon.
 
     Returns:
         ft.Container: Section title container
@@ -47,26 +48,28 @@ def section_title(text: str, icon: str = "▣") -> ft.Container:
         content=ft.Row(
             [
                 ft.Container(
-                    content=ft.Text(icon, size=14, color=THEME.text_primary),
-                    width=26,
-                    height=26,
+                    content=ft.Icon(
+                        icon,
+                        size=16,
+                        color=THEME.text_invert,
+                    ),
+                    width=28,
+                    height=28,
                     alignment=ft.alignment.Alignment(0, 0),
-                    bgcolor=THEME.mc_grass,
-                    border=mc_border(1),
+                    bgcolor=THEME.accent,
                     border_radius=4,
                 ),
                 ft.Text(
                     text,
                     size=14,
-                    weight=ft.FontWeight.BOLD,
+                    weight=ft.FontWeight.W_600,
                     color=THEME.text_primary,
-                    font_family="monospace",
                 ),
             ],
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
         ),
-        padding=ft.Padding(left=20, right=20, top=16, bottom=12),
+        padding=ft.Padding(left=16, right=16, top=14, bottom=10),
     )
 
 
@@ -90,13 +93,13 @@ def placeholder(
     return ft.Container(
         content=ft.Column(
             controls=[
-                ft.Icon(icon, size=48, color=THEME.text_secondary),
+                ft.Icon(icon, size=36, color=THEME.text_muted),
                 ft.Container(height=10),
                 ft.Text(
                     title,
                     size=16,
-                    weight=ft.FontWeight.BOLD,
-                    color=THEME.text_secondary,
+                    weight=ft.FontWeight.W_600,
+                    color=THEME.text_primary,
                     text_align=ft.TextAlign.CENTER,
                 ),
                 ft.Container(height=6),
@@ -113,7 +116,7 @@ def placeholder(
         padding=ft.Padding(left=20, right=20, top=30, bottom=30),
         bgcolor=THEME.bg_card,
         border=mc_border(1),
-        border_radius=8,
+        border_radius=6,
         height=height,
         alignment=ft.alignment.Alignment(0, 0),
     )

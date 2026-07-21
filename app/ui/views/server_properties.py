@@ -59,21 +59,34 @@ class ServerPropertiesView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(
-            page_header(
-                "server.properties 编辑器",
-                ft.Text(
-                    "读取、编辑并保存 Minecraft 服务器配置文件",
-                    size=12,
-                    color=THEME.text_muted),
-                icon=IconSet.CLIPBOARD,
-            ))
+        self._page_header = page_header(
+            "server.properties 编辑器",
+            ft.Text(
+                "读取、编辑并保存 Minecraft 服务器配置文件",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            icon=IconSet.CLIPBOARD,
+        )
+        self.controls.append(self._page_header)
         self._path_field = text_field(
             label="服务器根目录或 server.properties",
             hint_text="选择服务器根目录")
         self.controls.append(card(ft.Column([
-            ft.Row([self._path_field, btn_ghost("浏览", width=90, on_click=self._pick)], spacing=10),
-            ft.Text("选择路径后，可通过顶栏“读取配置”加载 server.properties。", size=11, color=THEME.text_muted),
+            ft.Row(
+                [
+                    self._path_field,
+                    btn_ghost("浏览", width=90, on_click=self._pick),
+                ],
+                spacing=10,
+                wrap=True,
+                run_spacing=8,
+            ),
+            ft.Text(
+                "选择路径后，可通过标题栏“读取配置”加载 server.properties。",
+                size=12,
+                color=THEME.text_muted,
+            ),
         ], spacing=10), padding=16))
         self._form = ft.Column(spacing=10)
         self.controls.append(card(ft.Column([section_title("配置项"), self._form, btn_success(
@@ -122,7 +135,12 @@ class ServerPropertiesView(ft.Column):
             self._form.controls.append(ft.Row([
                 control,
                 ft.Text(desc, size=11, color=THEME.text_muted),
-            ], spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER))
+            ],
+                spacing=14,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                wrap=True,
+                run_spacing=6,
+            ))
         safe_update(self)
 
     def _save(self, e: ft.ControlEvent) -> None:

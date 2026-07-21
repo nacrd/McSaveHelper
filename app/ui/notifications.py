@@ -63,15 +63,20 @@ class NotificationManager:
         if _is_closing():
             return
 
-        # 根据类型选择颜色
+        icon_map = {
+            NotificationType.SUCCESS: ft.Icons.CHECK_CIRCLE,
+            NotificationType.ERROR: ft.Icons.ERROR,
+            NotificationType.WARNING: ft.Icons.WARNING,
+            NotificationType.INFO: ft.Icons.INFO,
+        }
         color_map = {
             NotificationType.SUCCESS: THEME.success,
             NotificationType.ERROR: THEME.error,
             NotificationType.WARNING: THEME.warning,
             NotificationType.INFO: THEME.info,
         }
-
-        bgcolor = color_map.get(notification_type, THEME.info)
+        icon = icon_map.get(notification_type, ft.Icons.INFO)
+        status_color = color_map.get(notification_type, THEME.info)
 
         # 创建操作按钮
         action = None
@@ -84,8 +89,14 @@ class NotificationManager:
         # 显示 SnackBar
         try:
             snackbar = ft.SnackBar(
-                content=ft.Text(message, color="white"),
-                bgcolor=bgcolor,
+                content=ft.Row(
+                    [
+                        ft.Icon(icon, color=status_color, size=20),
+                        ft.Text(message, color=THEME.text_primary),
+                    ],
+                    spacing=10,
+                ),
+                bgcolor=THEME.log_bg,
                 duration=duration_ms,
                 action=action,
             )

@@ -12,7 +12,7 @@ from app.ui.components.floating_log_panel import (
 )
 from app.ui.icons import IconSet
 from app.ui.sidebar import Sidebar
-from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.theme import THEME
 
 
 Translate = Callable[..., str]
@@ -30,8 +30,7 @@ class ApplicationShellDependencies:
     on_recent_save_select: Callable[[str], None]
     recent_saves: Sequence[Dict[str, Any]]
     show_log_panel: bool
-    top_actions: ft.Row
-    progress_control: ft.Control
+    progress_control: ft.Container
     title_bar: ft.Control
 
 
@@ -83,32 +82,24 @@ def build_application_shell(
     """Assemble the visual shell without coordinating application services."""
     tab_defs = build_tab_definitions(dependencies.translate)
     content = ft.Container(
-        padding=20,
-        bgcolor=THEME.bg_card,
-        border=mc_border(3),
-        border_radius=8,
+        padding=24,
+        bgcolor=THEME.bg_primary,
         expand=True,
     )
     sidebar = _build_shell_sidebar(dependencies, tab_defs)
-    top_bar = _build_top_bar(dependencies.translate, dependencies.top_actions)
     scrollable_content = ft.Container(
         content=content,
-        padding=16,
-        expand=True,
-    )
-    content_area = ft.Column(
-        [top_bar, scrollable_content],
-        spacing=0,
+        padding=0,
         expand=True,
     )
     floating_log_panel, log_button = _build_shell_log_controls(dependencies)
     right_panel = ft.Stack(
-        [content_area, floating_log_panel, log_button],
+        [scrollable_content, floating_log_panel, log_button],
         expand=True,
     )
     main_row = ft.Row(
         [sidebar, right_panel],
-        spacing=14,
+        spacing=0,
         vertical_alignment=ft.CrossAxisAlignment.START,
         expand=True,
     )
@@ -164,108 +155,19 @@ def _build_shell_log_controls(
     return floating_log_panel, log_button
 
 
-def _build_top_bar(translate: Translate, top_actions: ft.Row) -> ft.Container:
-    identity = _build_top_bar_identity(translate)
-    header = ft.Container(
-        content=ft.Row(
-            [identity, top_actions],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
-        padding=ft.Padding(left=20, right=20, top=14, bottom=14),
-        bgcolor=THEME.mc_wood,
-    )
-    grass_strip = ft.Container(
-        height=6,
-        bgcolor=THEME.mc_grass,
-        border_radius=ft.BorderRadius(
-            top_left=8,
-            top_right=8,
-            bottom_left=0,
-            bottom_right=0,
-        ),
-    )
-    return ft.Container(
-        content=ft.Column([grass_strip, header], spacing=0),
-        bgcolor=THEME.mc_wood,
-        border=mc_border(3),
-        border_radius=8,
-    )
-
-
-def _build_top_bar_identity(translate: Translate) -> ft.Row:
-    return ft.Row(
-        [
-            ft.Container(
-                content=ft.Icon(
-                    IconSet.PICKAXE,
-                    size=24,
-                    color=THEME.mc_gold,
-                ),
-                width=48,
-                height=48,
-                alignment=ft.alignment.Alignment(0, 0),
-                bgcolor=THEME.bg_secondary,
-                border=mc_border(2),
-                border_radius=8,
-            ),
-            ft.Column(
-                [
-                    ft.Text(
-                        "MCSaveHelper",
-                        size=20,
-                        weight=ft.FontWeight.BOLD,
-                        color=THEME.text_primary,
-                        font_family="monospace",
-                    ),
-                    ft.Text(
-                        translate("app.subtitle", "存档管理工具"),
-                        size=11,
-                        color=THEME.mc_grass,
-                        font_family="monospace",
-                    ),
-                ],
-                spacing=3,
-            ),
-        ],
-        spacing=14,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-    )
-
-
 def _build_content_shell(main_row: ft.Row) -> ft.Container:
     return ft.Container(
         content=main_row,
-        padding=14,
-        margin=ft.Margin(left=14, right=14, top=0, bottom=14),
         bgcolor=THEME.bg_primary,
-        border=ft.Border(
-            left=ft.BorderSide(4, THEME.border_light),
-            top=ft.BorderSide(0, ft.Colors.TRANSPARENT),
-            right=ft.BorderSide(4, THEME.border_dark),
-            bottom=ft.BorderSide(4, THEME.border_dark),
-        ),
-        border_radius=10,
-        shadow=mc_shadow(6),
         expand=True,
     )
 
 
-def _build_bottom_bar(progress_control: ft.Control) -> ft.Container:
-    return ft.Container(
-        content=ft.Container(
-            content=progress_control,
-            padding=ft.Padding(left=20, right=20, top=10, bottom=10),
-            bgcolor=THEME.mc_wood,
-            border_radius=6,
-        ),
-        bgcolor=THEME.mc_wood,
-        border=ft.Border(
-            left=ft.BorderSide(3, THEME.border_light),
-            top=ft.BorderSide(0, ft.Colors.TRANSPARENT),
-            right=ft.BorderSide(3, THEME.border_dark),
-            bottom=ft.BorderSide(3, THEME.border_dark),
-        ),
-        border_radius=8,
-        margin=ft.Margin(left=14, right=14, top=0, bottom=14),
+def _build_bottom_bar(progress_control: ft.Container) -> ft.Container:
+    """Style the progress host without adding an always-visible wrapper."""
+    progress_control.padding = ft.Padding(left=20, right=20, top=8, bottom=8)
+    progress_control.bgcolor = THEME.bg_secondary
+    progress_control.border = ft.Border(
+        top=ft.BorderSide(1, THEME.border_subtle),
     )
+    return progress_control

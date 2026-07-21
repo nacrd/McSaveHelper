@@ -105,7 +105,7 @@ class FloatingLogPanel(ft.Container):
         self._build_header_buttons()
         header = ft.Container(
             content=self._build_header_row(title),
-            height=38,
+            height=52,
             padding=ft.Padding(left=12, right=8, top=4, bottom=4),
             bgcolor=THEME.mc_coal,
             border_radius=ft.BorderRadius(
@@ -183,7 +183,10 @@ class FloatingLogPanel(ft.Container):
         return ft.Container(
             content=ft.Icon(icon, size=size, color=color),
             on_click=on_click,
-            padding=4,
+            width=44,
+            height=44,
+            alignment=ft.Alignment(0, 0),
+            ink=True,
             border_radius=4,
             tooltip=tooltip,
         )

@@ -25,15 +25,15 @@ def format_version_label(name: str, version_id: int, note: str = "") -> str:
 def mode_description(mode: str) -> str:
     """Return the human-readable description for a conversion mode."""
     if mode == "fast":
-        return '⚡ 快速模式：仅复制UUID文件，速度最快'
-    return '🧠 完整模式：深度 NBT 修补 + 版本转换 + 物品ID迁移'
+        return '快速模式：仅复制 UUID 文件，速度最快'
+    return '完整模式：深度 NBT 修补 + 版本转换 + 物品 ID 迁移'
 
 
 def version_downgrade_warning(target_version: int) -> Optional[str]:
     """Return a warning message when the target data version is a large drop."""
     if target_version < RISKY_DOWNGRADE_VERSION:
         return (
-            f"⚠️ 降到 ID {target_version} 是较大跨度，"
+            f"警告：降到 ID {target_version} 是较大跨度，"
             + '部分新版本数据可能丢失。请确保已备份存档。'
         )
     return None

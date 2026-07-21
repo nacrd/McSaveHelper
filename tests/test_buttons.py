@@ -1,5 +1,10 @@
 """按钮组件测试。"""
+from typing import cast
+
+import flet as ft
+
 from app.ui.components.buttons import McButton, btn_ghost, btn_primary
+from app.ui.theme import THEME
 
 
 def test_primary_button_disabled_state_updates_content():
@@ -35,3 +40,18 @@ def test_button_reset_scheduling_is_safe_without_page_or_event_loop():
     btn._schedule_reset_pressed_state()
 
     assert btn._is_pressed is False
+
+
+def test_button_uses_focusable_surface_and_visible_focus_ring():
+    btn = btn_primary("键盘操作")
+
+    assert isinstance(btn.content, ft.Button)
+    btn._handle_focus(cast(ft.Event[ft.Button], None))
+
+    assert btn._is_focused is True
+    assert btn.border is not None
+    assert btn.border.left.color == THEME.focus_ring
+
+    btn._handle_blur(cast(ft.Event[ft.Button], None))
+    assert btn._is_focused is False
+    assert btn.border.left.color == THEME.border_standard

@@ -13,6 +13,7 @@ class WorldInfoTabMixin(ExplorerMixinHost):
     def _build_world_info_tab(self) -> None:
         self._world_info_panel = WorldInfoPanel(
             self.app.translate,
+            on_select_save=self.app.save_context_manager.on_import_save,
             on_backup_click=self._create_backup,
             on_restore_click=self._restore_backup,
         )

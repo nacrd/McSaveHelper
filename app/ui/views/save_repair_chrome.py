@@ -9,7 +9,7 @@ import flet as ft
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card, section_title
 from app.ui.components.fields import checkbox, current_save_field
-from app.ui.components.layout import page_header
+from app.ui.components.layout import PageHeader, page_header
 from app.ui.icons import IconSet
 from app.ui.theme import THEME, mc_border
 
@@ -20,6 +20,7 @@ EventCallback = Callable[[Any], None]
 class SaveRepairChrome:
     """存档修复页控件束。"""
     controls: List[ft.Control]
+    page_header: PageHeader
     world_path_field: Any
     fix_chunks_checkbox: Any
     fix_players_checkbox: Any
@@ -56,6 +57,7 @@ def build_save_repair_chrome(
             cards["log_card"],
             cards["info_card"],
         ],
+        page_header=cards["header"],
         world_path_field=fields["world_path_field"],
         fix_chunks_checkbox=fields["fix_chunks_checkbox"],
         fix_players_checkbox=fields["fix_players_checkbox"],
@@ -175,6 +177,8 @@ def _build_save_repair_config_card(fields: dict[str, Any]) -> ft.Control:
                         fields["cancel_button"],
                     ],
                     spacing=12,
+                    wrap=True,
+                    run_spacing=8,
                 ),
                 ft.Container(height=12),
                 section_title("修复选项"),

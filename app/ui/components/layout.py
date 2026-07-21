@@ -1,4 +1,4 @@
-"""Shared layout helpers for Minecraft-style application pages."""
+"""Shared layout helpers for application workspaces."""
 from __future__ import annotations
 
 from typing import Callable, Iterable, List, NamedTuple
@@ -16,67 +16,158 @@ class TabSpec(NamedTuple):
     icon: ft.IconData
 
 
+class PageHeader(ft.Container):
+    """Page title and contextual command host."""
+
+    def __init__(
+        self,
+        title: str,
+        subtitle: ft.Control,
+        icon: ft.IconData,
+        actions: ft.Control | None = None,
+        status: ft.Control | None = None,
+    ) -> None:
+        """Build a responsive header with commands adjacent to its title."""
+        self.action_row = ft.Row(
+            spacing=6,
+            alignment=ft.MainAxisAlignment.END,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            wrap=True,
+            run_spacing=6,
+        )
+        if actions is not None:
+            self.action_row.controls = [actions]
+        self.status_host = ft.Container(
+            content=status,
+            visible=status is not None,
+        )
+        self._trailing = ft.Row(
+            [self.status_host, self.action_row],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.END,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            wrap=True,
+            run_spacing=6,
+        )
+        self._identity = _build_page_identity(title, subtitle, icon)
+        super().__init__(
+            content=ft.Row(
+                [self._identity, self._trailing],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                wrap=True,
+                run_spacing=10,
+            ),
+            padding=ft.Padding(left=0, right=0, top=0, bottom=14),
+            border=ft.Border(
+                bottom=ft.BorderSide(1, THEME.border_subtle),
+            ),
+        )
+
+    def set_compact_layout(self, compact: bool) -> None:
+        """Keep title, status, and commands visible in constrained widths.
+
+        Args:
+            compact: Whether the header should stack its trailing controls.
+        """
+        if compact:
+            self._trailing.alignment = ft.MainAxisAlignment.START
+            self.content = ft.Column(
+                [self._identity, self._trailing],
+                spacing=8,
+            )
+            return
+        self._trailing.alignment = ft.MainAxisAlignment.END
+        self.content = ft.Row(
+            [self._identity, self._trailing],
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            wrap=True,
+            run_spacing=10,
+        )
+
+
+def _build_page_identity(
+    title: str,
+    subtitle: ft.Control,
+    icon: ft.IconData,
+) -> ft.Row:
+    """Build the stable identity group shared by page headers."""
+    return ft.Row(
+        [
+            ft.Container(
+                content=ft.Icon(icon, size=20, color=THEME.accent),
+                width=40,
+                height=40,
+                alignment=ft.Alignment(0, 0),
+                bgcolor=THEME.bg_elevated,
+                border=ft.Border.all(1, THEME.border_standard),
+                border_radius=6,
+            ),
+            ft.Column(
+                [
+                    ft.Text(
+                        title,
+                        size=20,
+                        weight=ft.FontWeight.W_600,
+                        color=THEME.text_primary,
+                    ),
+                    subtitle,
+                ],
+                spacing=2,
+            ),
+        ],
+        spacing=12,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
 def page_header(
     title: str,
     subtitle: ft.Control,
     icon: ft.IconData = IconSet.SETTINGS,
     actions: ft.Control | None = None,
-) -> ft.Container:
+    status: ft.Control | None = None,
+) -> PageHeader:
     """Create the shared page title bar used by full-page views."""
-    return ft.Container(content=ft.Row([ft.Row([ft.Icon(icon,
-                                                        size=26,
-                                                        color=THEME.mc_gold),
-                                                ft.Column([ft.Text(title,
-                                                                   size=22,
-                                                                   weight=ft.FontWeight.BOLD,
-                                                                   color=THEME.text_primary,
-                                                                   font_family="monospace",
-                                                                   ),
-                                                           subtitle,
-                                                           ],
-                                                          spacing=0,
-                                                          ),
-                                                ],
-                                               spacing=10,
-                                               vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                               ),
-                                        actions or ft.Container(),
-                                        ],
-                                       vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                                       alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                       ),
-                        padding=ft.Padding(left=16,
-                                           right=16,
-                                           top=14,
-                                           bottom=14),
-                        bgcolor=THEME.mc_dirt,
-                        border=mc_border(2),
-                        )
+    return PageHeader(title, subtitle, icon, actions, status)
 
 
-def panel(content: ft.Control, padding: int = 10,
-          bgcolor: str | None = None) -> ft.Container:
+def panel(
+    content: ft.Control,
+    padding: int = 12,
+    bgcolor: str | None = None,
+) -> ft.Container:
     """Create a bordered layout panel for grouping page sections."""
     return ft.Container(
         content=content,
         padding=padding,
-        bgcolor=bgcolor or THEME.bg_secondary,
-        border=mc_border(2),
+        bgcolor=bgcolor or THEME.bg_card,
+        border=mc_border(1),
+        border_radius=6,
     )
 
 
 def section_header(title: str, subtitle: str = "") -> ft.Row:
     """Create a compact section header with optional helper text."""
     controls: List[ft.Control] = [
-        ft.Container(width=4, height=20, bgcolor=THEME.mc_grass),
-        ft.Text(title, size=14, weight=ft.FontWeight.BOLD, color=THEME.text_primary),
+        ft.Container(width=3, height=18, bgcolor=THEME.accent, border_radius=2),
+        ft.Text(
+            title,
+            size=14,
+            weight=ft.FontWeight.W_600,
+            color=THEME.text_primary,
+        ),
     ]
     if subtitle:
         controls.append(ft.Text(subtitle, size=12, color=THEME.text_muted))
     return ft.Row(
         controls,
         spacing=8,
-        vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        wrap=True,
+        run_spacing=4,
+    )
 
 
 def segmented_tab_bar(
@@ -99,31 +190,44 @@ def segmented_tab_bar(
             size=12,
             weight=ft.FontWeight.BOLD,
             color=THEME.text_primary if selected else THEME.text_secondary,
-            font_family="monospace",
         )
         button = ft.Container(
-            content=ft.Column(
+            content=ft.Row(
                 [
-                    ft.Icon(tab.icon, size=20),
+                    ft.Icon(
+                        tab.icon,
+                        size=17,
+                        color=THEME.accent if selected else THEME.text_muted,
+                    ),
                     label,
                 ],
-                spacing=2,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=7,
+                alignment=ft.MainAxisAlignment.CENTER,
+                vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            width=88,
-            height=60,
+            width=100,
+            height=44,
             alignment=ft.Alignment(0, 0),
-            padding=ft.Padding(left=6, right=6, top=6, bottom=6),
-            bgcolor=THEME.mc_stone if selected else THEME.bg_secondary,
-            border=mc_border(3),
+            padding=ft.Padding(left=10, right=10, top=6, bottom=6),
+            bgcolor=THEME.bg_elevated if selected else ft.Colors.TRANSPARENT,
+            border=ft.Border.all(
+                1,
+                THEME.border_standard if selected else ft.Colors.TRANSPARENT,
+            ),
+            border_radius=6,
             on_click=lambda e, i=idx: on_select(i),
+            ink=True,
         )
         labels.append(label)
         buttons.append(button)
         controls.append(button)
 
-    row = ft.Row(controls, spacing=8)
-    indicator = ft.Container(height=4, bgcolor=THEME.mc_grass)
-    bar = panel(ft.Column([row, indicator], spacing=8),
-                padding=10, bgcolor=THEME.mc_coal)
+    row = ft.Row(controls, spacing=4, scroll=ft.ScrollMode.AUTO)
+    bar = ft.Container(
+        content=row,
+        padding=4,
+        bgcolor=THEME.bg_secondary,
+        border=ft.Border.all(1, THEME.border_subtle),
+        border_radius=6,
+    )
     return bar, row, buttons, labels

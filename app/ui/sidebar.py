@@ -11,7 +11,7 @@ import flet as ft
 
 from app.ui.utils import safe_update
 
-from app.ui.theme import THEME, mc_border
+from app.ui.theme import THEME
 from app.ui.sidebar_tabs import (
     apply_style_collapsed,
     apply_style_expanded,
@@ -47,8 +47,8 @@ class Sidebar(ft.Container):
         collapsed: Whether to start in collapsed state (default False).
     """
 
-    COLLAPSED_WIDTH = 60
-    EXPANDED_WIDTH = 220
+    COLLAPSED_WIDTH = 68
+    EXPANDED_WIDTH = 248
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class Sidebar(ft.Container):
         on_recent_save_select: Optional[Callable[[str], None]] = None,
         recent_saves: Optional[List[Dict[str, Any]]] = None,
         default_tab: Optional[str] = None,
-        width: int = 220,
+        width: int = 248,
         collapsed: bool = False,
     ) -> None:
         """构建应用侧边栏。"""
@@ -80,11 +80,11 @@ class Sidebar(ft.Container):
         super().__init__(
             content=self._build_root_column(collapsed),
             width=self.COLLAPSED_WIDTH if collapsed else self._sidebar_width,
-            bgcolor=THEME.bg_primary,
+            bgcolor=THEME.bg_secondary,
             border=ft.Border(
                 left=_EMPTY_BORDER_SIDE,
                 top=_EMPTY_BORDER_SIDE,
-                right=ft.BorderSide(3, THEME.bg_secondary),
+                right=ft.BorderSide(1, THEME.border_subtle),
                 bottom=_EMPTY_BORDER_SIDE,
             ),
             animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
@@ -118,7 +118,7 @@ class Sidebar(ft.Container):
         self._collapsed = collapsed
         self._sidebar_width = self.COLLAPSED_WIDTH if collapsed else width
         self._tab_col: ft.ListView = ft.ListView(
-            spacing=6 if collapsed else 8,
+            spacing=4,
             padding=0,
             expand=True,
             auto_scroll=False,
@@ -126,7 +126,7 @@ class Sidebar(ft.Container):
         self._recent_save_col: ft.Column = ft.Column(spacing=6)
         self._recent_expanded: bool = False
         self._recent_arrow: ft.Text = ft.Text(
-            "▶", size=10, color=THEME.text_secondary, font_family="monospace",
+            "▶", size=9, color=THEME.text_muted,
         )
         self._recent_body: ft.Container = ft.Container(
             content=self._recent_save_col,
@@ -136,7 +136,6 @@ class Sidebar(ft.Container):
             "未设置当前存档",
             size=12,
             color=THEME.text_muted,
-            font_family="monospace",
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
@@ -151,10 +150,10 @@ class Sidebar(ft.Container):
             ft.Container(
                 content=self._tab_col,
                 padding=ft.Padding(
-                    left=6 if collapsed else 12,
-                    right=6 if collapsed else 12,
-                    top=10,
-                    bottom=8,
+                    left=12 if collapsed else 14,
+                    right=12 if collapsed else 14,
+                    top=12,
+                    bottom=10,
                 ),
                 expand=True,
             )
@@ -178,7 +177,9 @@ class Sidebar(ft.Container):
     def _rebuild_header(self) -> None:
         """Build the header section (branding + current save + recent saves)."""
         if self._collapsed:
-            self._header_container.content = build_header_collapsed()
+            self._header_container.content = build_header_collapsed(
+                self._handle_set_current_save,
+            )
         else:
             self._header_container.content = build_header_expanded(
                 current_save_name=self._current_save_name,
@@ -311,15 +312,16 @@ class Sidebar(ft.Container):
         # Rebuild all sections
         self._rebuild_all()
         # Update tab col padding
-        self._tab_col.spacing = 6 if collapsed else 8
+        self._tab_col.spacing = 4
         # Update parent padding on the tab container
         try:
             tab_parent = self._tab_col.parent
             if tab_parent and isinstance(tab_parent, ft.Container):
                 tab_parent.padding = ft.Padding(
-                    left=6 if collapsed else 12,
-                    right=6 if collapsed else 12,
-                    top=10, bottom=8,
+                    left=12 if collapsed else 14,
+                    right=12 if collapsed else 14,
+                    top=12,
+                    bottom=10,
                 )
         except Exception:
             # UI best-effort: control may already be unmounted.
@@ -344,7 +346,6 @@ class Sidebar(ft.Container):
                     "暂无最近存档",
                     size=11,
                     color=THEME.text_muted,
-                    font_family="monospace",
                 )
             )
             return
@@ -362,12 +363,11 @@ class Sidebar(ft.Container):
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Icon(IconSet.FOLDER, size=14, color=THEME.mc_grass),
+                    ft.Icon(IconSet.FOLDER, size=14, color=THEME.accent),
                     ft.Text(
                         save_name,
                         size=11,
                         color=THEME.text_secondary,
-                        font_family="monospace",
                         no_wrap=True,
                         overflow=ft.TextOverflow.ELLIPSIS,
                         expand=True,
@@ -376,10 +376,10 @@ class Sidebar(ft.Container):
                 spacing=8,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.Padding(left=10, right=10, top=8, bottom=8),
-            border_radius=5,
-            bgcolor=THEME.bg_secondary,
-            border=mc_border(1),
+            padding=ft.Padding(left=10, right=10, top=7, bottom=7),
+            border_radius=6,
+            bgcolor=THEME.bg_primary,
+            border=ft.Border.all(1, THEME.border_subtle),
             ink=True,
             tooltip=save_path,
             on_click=lambda e, sid=save_id: self._safe_select_recent_save(sid),

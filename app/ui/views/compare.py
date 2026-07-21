@@ -46,15 +46,16 @@ class CompareView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(
-            page_header(
-                "存档对比",
-                ft.Text(
-                    "比较两个世界的 level.dat、玩家数据和区域文件差异",
-                    size=12,
-                    color=THEME.text_muted),
-                icon=IconSet.BALANCE,
-            ))
+        self._page_header = page_header(
+            "存档对比",
+            ft.Text(
+                "比较两个世界的 level.dat、玩家数据和区域文件差异",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            icon=IconSet.BALANCE,
+        )
+        self.controls.append(self._page_header)
 
         self._left_field = current_save_field(
             label="基准存档", hint_text="请通过侧边栏「设置当前存档」设置基准存档")
@@ -64,9 +65,11 @@ class CompareView(ft.Column):
                                     btn_ghost("浏览对比目标",
                                               width=120,
                                               on_click=lambda e: self._pick(self._right_field))],
-                                   spacing=10),
-                            ft.Text("设置两份存档后，可通过顶栏“开始对比”执行。",
-                                    size=11,
+                                   spacing=10,
+                                   wrap=True,
+                                   run_spacing=8),
+                            ft.Text("设置两份存档后，可通过标题栏“开始对比”执行。",
+                                    size=12,
                                     color=THEME.text_muted),
                             ],
                            spacing=10)

@@ -5,6 +5,7 @@ from typing import Callable, List, Mapping, Optional
 from app.presenters.world_info_presenter import build_world_info_sections
 from app.ui.theme import THEME, mc_border
 from app.ui.icons import IconSet
+from app.ui.components.buttons import btn_primary
 from app.ui.components.cards import card, placeholder
 
 from core.omni.world_session import WorldInfo
@@ -17,6 +18,7 @@ class WorldInfoPanel(ft.Column):
     def __init__(
         self,
         t_cb: Optional[Callable[..., str]] = None,
+        on_select_save: Optional[Callable[[], None]] = None,
         on_backup_click: Optional[Callable] = None,
         on_restore_click: Optional[Callable] = None,
     ) -> None:
@@ -24,13 +26,14 @@ class WorldInfoPanel(ft.Column):
         super().__init__(spacing=12, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._t = t_cb or (lambda k, d="", **kw: d)
+        self._on_select_save = on_select_save
         self._on_backup_click = on_backup_click
         self._on_restore_click = on_restore_click
 
         # 美化的占位符
         self._placeholder = ft.Container(
             content=ft.Column([
-                ft.Text("📦", size=48, text_align=ft.TextAlign.CENTER),
+                ft.Icon(IconSet.PACKAGE, size=44, color=THEME.text_muted),
                 ft.Container(height=12),
                 ft.Text(
                     "请先设置当前存档以查看信息",
@@ -41,10 +44,17 @@ class WorldInfoPanel(ft.Column):
                 ),
                 ft.Container(height=8),
                 ft.Text(
-                    "通过侧边栏「设置当前存档」选择 Minecraft 世界目录",
+                    "选择包含 level.dat 的 Minecraft 世界目录",
                     size=13,
                     color=THEME.text_muted,
                     text_align=ft.TextAlign.CENTER,
+                ),
+                ft.Container(height=8),
+                btn_primary(
+                    "选择存档",
+                    icon=IconSet.FOLDER_OPEN,
+                    height=44,
+                    on_click=self._handle_select_save,
                 ),
             ], horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             padding=ft.Padding(left=20, right=20, top=40, bottom=40),
@@ -52,6 +62,12 @@ class WorldInfoPanel(ft.Column):
             border=mc_border(2),
         )
         self.controls = [self._placeholder]
+
+    def _handle_select_save(self, event: ft.ControlEvent) -> None:
+        """Open the shared current-save picker from the empty state."""
+        del event
+        if self._on_select_save is not None:
+            self._on_select_save()
 
     def update_info(
         self,
@@ -95,7 +111,7 @@ class WorldInfoPanel(ft.Column):
                 color=THEME.text_primary,
                 on_click=self._on_restore_click,
             ),
-        ], spacing=12)
+        ], spacing=12, wrap=True, run_spacing=8)
         return card(
             ft.Column([
                 ft.Text(

@@ -27,7 +27,8 @@
     "start_compare": "Start Compare",
     "import_lang": "Import Lang File",
     "read_config": "Read Config",
-    "refresh_map": "Refresh Map"
+    "refresh_map": "Refresh Map",
+    "more_actions": "More actions"
   },
   "sidebar": {
     "migrator": "Batch Migration",
@@ -43,27 +44,27 @@
   "world_info": {
     "yes": "Yes",
     "no": "No",
-    "difficulty_locked": "🔒 Difficulty Locked",
-    "spawn_angle": "🧭 Spawn Angle",
-    "generate_features": "🏛️ Generate Structures",
-    "bonus_chest": "🎁 Bonus Chest",
-    "mods_section": "🧩 Mods",
-    "mods_status": "🧩 Uses Mods",
+    "difficulty_locked": "Difficulty Locked",
+    "spawn_angle": "Spawn Angle",
+    "generate_features": "Generate Structures",
+    "bonus_chest": "Bonus Chest",
+    "mods_section": "Mods",
+    "mods_status": "Uses Mods",
     "mods_status_recorded": "Yes ({count} mods recorded by the save)",
     "mods_status_inferred": "Yes (at least {count} detected; list may be incomplete)",
     "mods_status_loader_only": "A mod loader was detected, but no readable mod list was saved",
     "mods_status_no_list": "Yes (the save does not contain a readable mod list)",
     "mods_status_clean": "No mods detected",
     "mods_status_unknown": "Unknown (the save does not contain a mod marker)",
-    "mod_loaders": "⚙️ Mod Loaders",
-    "mod_list": "📚 Mod List",
-    "mod_source": "ℹ️ List Source",
+    "mod_loaders": "Mod Loaders",
+    "mod_list": "Mod List",
+    "mod_source": "List Source",
     "mod_source_explicit": "Explicit mod list in level.dat",
     "mod_source_inferred": "Inferred from save data-pack identifiers; may be incomplete",
-    "border_section": "🧱 World Border",
-    "border_center": "🎯 Center",
-    "border_size": "↔️ Diameter",
-    "border_warning": "⚠️ Warning Distance",
+    "border_section": "World Border",
+    "border_center": "Center",
+    "border_size": "Diameter",
+    "border_warning": "Warning Distance",
     "blocks": "{count} blocks"
   },
   "map": {
@@ -408,6 +409,11 @@
       "reset": "Reset to Defaults",
       "cancel": "Cancel"
     },
+    "save_status": {
+      "auto": "Changes save automatically",
+      "saved": "Saved",
+      "failed": "Save failed"
+    },
     "auto_import_mc_lang_ok": "Auto-imported {count} Minecraft names ({locale})"
   },
   "dialogs": {
@@ -501,8 +507,8 @@
     "display_name": "English (US)"
   },
   "stats": {
-    "hint_ready": "Set a current save, then use Start Analysis in the top bar.",
-    "summary_placeholder": "Use Start Analysis in the top bar to analyze world data.",
+    "hint_ready": "Set a current save, then use Start Analysis in the page header.",
+    "summary_placeholder": "Use the page-header analysis action to inspect world data.",
     "section_summary": "Summary",
     "section_dimensions": "Dimension Size",
     "section_playtime": "Player Stats",

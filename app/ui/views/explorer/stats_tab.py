@@ -67,7 +67,7 @@ class StatsTabMixin(ExplorerMixinHost):
         self._stats_status = ft.Text(
             self._t(
                 "stats.hint_ready",
-                "设置当前存档后可通过顶栏「开始统计」分析世界数据。",
+                "设置当前存档后可通过页面标题栏「开始统计」分析世界数据。",
             ),
             size=12,
             color=THEME.text_muted,
@@ -88,7 +88,7 @@ class StatsTabMixin(ExplorerMixinHost):
         self._stats_summary = ft.Text(
             self._t(
                 "stats.summary_placeholder",
-                "通过顶栏统计快捷操作分析世界数据。",
+                "通过页面标题栏的统计操作分析世界数据。",
             ),
             size=12,
             color=THEME.text_muted,

@@ -97,24 +97,49 @@ class MigratorView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
-        self.controls.append(
-            page_header(
-                "存档转换",
-                ft.Text(
-                    "跨版本迁移世界、玩家数据、UUID 和资源映射",
-                    size=12,
-                    color=THEME.text_muted,
-                ),
-                icon=IconSet.PACKAGE,
-            )
+        self._page_header = page_header(
+            "存档转换",
+            ft.Text(
+                "跨版本迁移世界、玩家数据、UUID 和资源映射",
+                size=12,
+                color=THEME.text_muted,
+            ),
+            icon=IconSet.PACKAGE,
         )
+        self.controls.append(self._page_header)
         self.controls.append(build_guide_card())
+        self._left_content = self._build_left()
+        self._right_content = self._build_right()
+        self._content_gap = ft.Container(width=24)
         content = ft.Row(
-            [self._build_left(), ft.Container(width=24), self._build_right()],
+            [self._left_content, self._content_gap, self._right_content],
             expand=True,
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
-        self.controls.append(content)
+        self._content_host = ft.Container(content=content)
+        self.controls.append(self._content_host)
+
+    def set_compact_mode(self, compact: bool) -> None:
+        """Stack migration cards vertically when two columns cannot fit."""
+        host = getattr(self, "_content_host", None)
+        if host is None:
+            return
+        if compact:
+            self._left_content.expand = False
+            self._right_content.expand = False
+            host.content = ft.Column(
+                [self._left_content, self._right_content],
+                spacing=16,
+            )
+        else:
+            self._left_content.expand = True
+            self._right_content.expand = True
+            host.content = ft.Row(
+                [self._left_content, self._content_gap, self._right_content],
+                expand=True,
+                vertical_alignment=ft.CrossAxisAlignment.START,
+            )
+        safe_update(host)
 
     def _build_left(self) -> ft.Column:
         mc = self.app.config.migration

@@ -1,4 +1,4 @@
-"""Minecraft 风格按钮组件。"""
+"""应用命令按钮组件。"""
 import asyncio
 from typing import Optional, Callable, Any, cast
 
@@ -10,10 +10,7 @@ from app.ui.theme import THEME
 
 
 class McButton(ft.Container):
-    """Minecraft 风格按钮：支持禁用态与悬停/按下动画。
-
-    保留斜切边框与圆角，点击时短暂反转边框并压暗背景。
-    """
+    """支持禁用态与悬停/按下反馈的命令按钮。"""
 
     def __init__(
         self,
@@ -21,7 +18,7 @@ class McButton(ft.Container):
         bgcolor: str,
         on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
         width: Optional[int] = None,
-        height: int = 42,
+        height: int = 44,
         icon: Optional[ft.IconData] = None,
         text_color: Optional[str] = None,
     ) -> None:
@@ -32,7 +29,7 @@ class McButton(ft.Container):
             bgcolor: 基础背景色（十六进制）。
             on_click: 点击回调。
             width: 可选固定宽度。
-            height: 高度，默认 42。
+            height: 高度，默认 44。
             icon: 可选前置图标。
             text_color: 可选文字颜色。
         """
@@ -48,24 +45,33 @@ class McButton(ft.Container):
         self._disabled = False
         self._is_pressed = False
         self._is_focused = False
-
-        super().__init__(
+        self._button = ft.Button(
             content=self._build_content(),
             width=width,
             height=height,
-            bgcolor=bgcolor,
-            border=ft.Border(
-                left=ft.BorderSide(2, THEME.border_light),
-                top=ft.BorderSide(2, THEME.border_light),
-                right=ft.BorderSide(2, THEME.border_dark),
-                bottom=ft.BorderSide(2, THEME.border_dark),
+            elevation=0,
+            style=ft.ButtonStyle(
+                padding=0,
+                bgcolor=ft.Colors.TRANSPARENT,
+                overlay_color=ft.Colors.TRANSPARENT,
+                shape=ft.RoundedRectangleBorder(radius=6),
             ),
+            on_click=self._handle_click,
+            on_hover=self._handle_hover,
+            on_focus=self._handle_focus,
+            on_blur=self._handle_blur,
+        )
+
+        super().__init__(
+            content=self._button,
+            width=width,
+            height=height,
+            bgcolor=bgcolor,
+            border=ft.Border.all(1, THEME.border_standard),
             border_radius=6,
             alignment=ft.alignment.Alignment(0, 0),
-            on_click=self._handle_click,  # type: ignore[arg-type]
-            on_hover=self._handle_hover,  # type: ignore[arg-type]
-            ink=True,
-            animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
+            tooltip=None,
+            animate=ft.Animation(120, ft.AnimationCurve.EASE_OUT),
         )
 
     def _adjust_brightness(self, color: str, factor: float) -> str:
@@ -93,7 +99,7 @@ class McButton(ft.Container):
         except (ValueError, TypeError, IndexError):
             return color
 
-    def _handle_hover(self, e: ft.ControlEvent) -> None:
+    def _handle_hover(self, e: ft.Event[ft.Button]) -> None:
         """Handle hover event with visual feedback"""
         if self._disabled:
             return
@@ -104,9 +110,9 @@ class McButton(ft.Container):
                 self.bgcolor = self._bgcolor_hover
                 self.shadow = ft.BoxShadow(
                     spread_radius=0,
-                    blur_radius=4,
+                    blur_radius=8,
                     color=THEME.shadow,
-                    offset=ft.Offset(2, 2),
+                    offset=ft.Offset(0, 2),
                 )
             else:
                 # Normal state
@@ -124,16 +130,10 @@ class McButton(ft.Container):
             return
 
         try:
-            # Pressed state - darker color and inverted border
             self._is_pressed = True
             self.bgcolor = self._bgcolor_pressed
             self.shadow = None  # Remove shadow when pressed
-            self.border = ft.Border(
-                left=ft.BorderSide(2, THEME.border_dark),
-                top=ft.BorderSide(2, THEME.border_dark),
-                right=ft.BorderSide(2, THEME.border_light),
-                bottom=ft.BorderSide(2, THEME.border_light),
-            )
+            self.border = ft.Border.all(1, THEME.border_dark)
             safe_update(self)
 
             # Execute click handler even if the visual update failed because the
@@ -148,6 +148,23 @@ class McButton(ft.Container):
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+
+    def _handle_focus(self, event: ft.Event[ft.Button]) -> None:
+        """Show a visible focus ring for keyboard navigation."""
+        del event
+        if self._disabled:
+            return
+        self._is_focused = True
+        self.border = ft.Border.all(THEME.focus_ring_width, THEME.focus_ring)
+        safe_update(self)
+
+    def _handle_blur(self, event: ft.Event[ft.Button]) -> None:
+        """Restore the normal border when keyboard focus leaves."""
+        del event
+        self._is_focused = False
+        if not self._is_pressed:
+            self.border = ft.Border.all(1, THEME.border_standard)
+        safe_update(self)
 
     def _schedule_reset_pressed_state(self) -> None:
         try:
@@ -184,11 +201,9 @@ class McButton(ft.Container):
         """Restore default colors/borders after press animation."""
         self._is_pressed = False
         self.bgcolor = self._bgcolor
-        self.border = ft.Border(
-            left=ft.BorderSide(2, THEME.border_light),
-            top=ft.BorderSide(2, THEME.border_light),
-            right=ft.BorderSide(2, THEME.border_dark),
-            bottom=ft.BorderSide(2, THEME.border_dark),
+        self.border = ft.Border.all(
+            THEME.focus_ring_width if self._is_focused else 1,
+            THEME.focus_ring if self._is_focused else THEME.border_standard,
         )
         self.shadow = None
 
@@ -206,7 +221,8 @@ class McButton(ft.Container):
             size=13,
             weight=ft.FontWeight.BOLD,
             color=text_color,
-            font_family="monospace",
+            no_wrap=True,
+            overflow=ft.TextOverflow.ELLIPSIS,
         ))
 
         return ft.Row(
@@ -230,7 +246,8 @@ class McButton(ft.Container):
         """
         self._disabled = value
         self.opacity = 0.5 if value else 1.0
-        self.content = self._build_content()
+        self._button.disabled = value
+        self._button.content = self._build_content()
 
     def set_text(self, text: str) -> None:
         """更新按钮文案并重建内容。
@@ -239,7 +256,7 @@ class McButton(ft.Container):
             text: 新文案。
         """
         self._text = text
-        self.content = self._build_content()
+        self._button.content = self._build_content()
 
     def set_on_click(
             self, on_click: Optional[Callable[[ft.ControlEvent], Any]]) -> None:
@@ -256,7 +273,7 @@ def _mc_button(
     bgcolor: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 42,
+    height: int = 44,
     icon: Optional[ft.IconData] = None,
     text_color: Optional[str] = None,
 ) -> McButton:
@@ -267,7 +284,7 @@ def _mc_button(
         bgcolor: 背景色。
         on_click: 点击回调。
         width: 可选宽度。
-        height: 高度，默认 42。
+        height: 高度，默认 44。
         icon: 可选图标。
         text_color: 可选文字色。
 
@@ -281,7 +298,7 @@ def btn_primary(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 42,
+    height: int = 44,
     icon: Optional[ft.IconData] = None,
 ) -> McButton:
     """主按钮（草地绿）。
@@ -290,20 +307,29 @@ def btn_primary(
         text: 按钮文案。
         on_click: 点击回调。
         width: 可选宽度。
-        height: 高度，默认 42。
+        height: 高度，默认 44。
         icon: 可选图标。
 
     Returns:
         主色 ``McButton``。
     """
-    return _mc_button(text, THEME.mc_grass, on_click, width, height, icon)
+    return _mc_button(
+        text,
+        THEME.accent,
+        on_click,
+        width,
+        height,
+        icon,
+        THEME.text_invert,
+    )
 
 
 def btn_ghost(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 42,
+    height: int = 44,
+    icon: Optional[ft.IconData] = None,
 ) -> McButton:
     """次要按钮（石头灰）。
 
@@ -311,20 +337,29 @@ def btn_ghost(
         text: 按钮文案。
         on_click: 点击回调。
         width: 可选宽度。
-        height: 高度，默认 42。
+        height: 高度，默认 44。
+        icon: 可选前置图标。
 
     Returns:
         次要色 ``McButton``。
     """
-    return _mc_button(text, THEME.mc_stone, on_click, width,
-                      height, text_color=THEME.text_primary)
+    return _mc_button(
+        text,
+        THEME.bg_elevated,
+        on_click,
+        width,
+        height,
+        icon,
+        text_color=THEME.text_primary,
+    )
 
 
 def btn_success(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 42,
+    height: int = 44,
+    icon: Optional[ft.IconData] = None,
 ) -> McButton:
     """成功按钮（绿宝石色）。
 
@@ -332,19 +367,29 @@ def btn_success(
         text: 按钮文案。
         on_click: 点击回调。
         width: 可选宽度。
-        height: 高度，默认 42。
+        height: 高度，默认 44。
+        icon: 可选前置图标。
 
     Returns:
         成功色 ``McButton``。
     """
-    return _mc_button(text, THEME.mc_emerald, on_click, width, height)
+    return _mc_button(
+        text,
+        THEME.success,
+        on_click,
+        width,
+        height,
+        icon,
+        text_color=THEME.text_invert,
+    )
 
 
 def btn_danger(
     text: str,
     on_click: Optional[Callable[[ft.ControlEvent], Any]] = None,
     width: Optional[int] = None,
-    height: int = 42,
+    height: int = 44,
+    icon: Optional[ft.IconData] = None,
 ) -> McButton:
     """危险按钮（红石红）。
 
@@ -352,9 +397,17 @@ def btn_danger(
         text: 按钮文案。
         on_click: 点击回调。
         width: 可选宽度。
-        height: 高度，默认 42。
+        height: 高度，默认 44。
+        icon: 可选前置图标。
 
     Returns:
         危险色 ``McButton``。
     """
-    return _mc_button(text, THEME.mc_redstone, on_click, width, height)
+    return _mc_button(
+        text,
+        THEME.mc_redstone,
+        on_click,
+        width,
+        height,
+        icon,
+    )

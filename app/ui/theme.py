@@ -96,70 +96,70 @@ class ThemeColors:
 # ════════════════════════════════════════════
 
 DARK_THEME = ThemeColors(
-    # Backgrounds
-    bg_primary="#1B1B2F",
-    bg_secondary="#16162A",
-    bg_card="#272745",
-    bg_card_hover="#2F2F4D",
-    bg_elevated="#2C2C48",
-    # Borders
-    border_light="#4A4A6A",
-    border_dark="#0D0D1A",
-    border_standard="#3A3A5A",
-    border_subtle="#2A2A45",
-    border_glow="#5DFDFE",
-    # Accents
-    accent="#55FF55",
-    accent_hover="#7AFF7A",
-    accent_dim="#3DCC3D",
+    # Neutral workspace surfaces
+    bg_primary="#111513",
+    bg_secondary="#171C19",
+    bg_card="#1D231F",
+    bg_card_hover="#252D28",
+    bg_elevated="#29312C",
+    # Quiet separators and focus treatment
+    border_light="#3B463F",
+    border_dark="#090C0A",
+    border_standard="#647269",
+    border_subtle="#3D4A42",
+    border_glow="#63D5E5",
+    # Product accent
+    accent="#63C174",
+    accent_hover="#78D28A",
+    accent_dim="#438A52",
     # Status
-    success="#55FF55",
-    warning="#FFB833",
-    error="#FF6B6B",
-    info="#55AAFF",
+    success="#3FBF8A",
+    warning="#E5B454",
+    error="#E06C75",
+    info="#63D5E5",
     # Text
-    text_primary="#FFFFFF",
-    text_secondary="#D0D0E0",
-    text_muted="#9A9AB0",
-    text_disabled="#5A5A70",
-    text_invert="#1B1B2F",
+    text_primary="#F2F5F3",
+    text_secondary="#C3CBC6",
+    text_muted="#AAB7AF",
+    text_disabled="#59635D",
+    text_invert="#0E1510",
     # Terminal
-    terminal_green="#55FF55",
-    terminal_yellow="#FFB833",
-    terminal_red="#FF6B6B",
-    terminal_blue="#5599FF",
-    terminal_cyan="#55FFFF",
-    terminal_purple="#AA77FF",
+    terminal_green="#78D28A",
+    terminal_yellow="#E5B454",
+    terminal_red="#E06C75",
+    terminal_blue="#72A7E5",
+    terminal_cyan="#63D5E5",
+    terminal_purple="#B19CD9",
     # Minecraft blocks
-    mc_stone="#6B6B8A",
-    mc_dirt="#8B6B3A",
-    mc_grass="#5DAA3A",
-    mc_wood="#7A5A3A",
-    mc_diamond="#5DFDFE",
-    mc_gold="#FFD700",
-    mc_iron="#C8C8DC",
-    mc_coal="#2A2A3A",
-    mc_emerald="#17DD62",
-    mc_redstone="#DD2222",
-    mc_obsidian="#0F0F1E",
-    mc_nether="#8B2222",
-    mc_end="#7A5AAA",
+    mc_stone="#58635D",
+    mc_dirt="#715A45",
+    mc_grass="#63C174",
+    mc_wood="#202722",
+    mc_diamond="#63D5E5",
+    mc_gold="#E5B454",
+    mc_iron="#AEB8B2",
+    mc_coal="#171C19",
+    mc_emerald="#50B86A",
+    mc_redstone="#D75A64",
+    mc_obsidian="#0A0D0B",
+    mc_nether="#7F4148",
+    mc_end="#786A91",
     # Effects
-    shadow="rgba(0, 0, 0, 0.65)",
-    shadow_glow="rgba(93, 253, 254, 0.15)",
-    shadow_accent="rgba(85, 255, 85, 0.2)",
+    shadow="rgba(0, 0, 0, 0.28)",
+    shadow_glow="rgba(99, 213, 229, 0.14)",
+    shadow_accent="rgba(99, 193, 116, 0.18)",
     # Focus
-    focus_ring="#5DFDFE",
-    focus_ring_width=3,
+    focus_ring="#63D5E5",
+    focus_ring_width=2,
     # Backward compat aliases
-    border_tertiary="#4A4A6A",
-    accent_light="#7AFF7A",
-    success_light="#7AFF7A",
-    warning_light="#FFCC44",
-    error_light="#FF8888",
-    text_quaternary="#3A3A5A",
-    log_bg="#16162A",
-    log_border="#2A2A45",
+    border_tertiary="#3B463F",
+    accent_light="#78D28A",
+    success_light="#78D28A",
+    warning_light="#F0C66B",
+    error_light="#EA8991",
+    text_quaternary="#59635D",
+    log_bg="#0D110F",
+    log_border="#28312B",
     # Mode
     mode="dark",
 )
@@ -170,32 +170,32 @@ DARK_THEME = ThemeColors(
 # ════════════════════════════════════════════
 
 LIGHT_THEME = ThemeColors(
-    # Backgrounds — warm parchment palette
-    bg_primary="#F0EBE0",
-    bg_secondary="#E5DFD2",
+    # Neutral daylight workspace surfaces
+    bg_primary="#F3F6F4",
+    bg_secondary="#E9EEEB",
     bg_card="#FFFFFF",
-    bg_card_hover="#F8F6F0",
+    bg_card_hover="#F0F5F1",
     bg_elevated="#FFFFFF",
-    # Borders — earthy tones
-    border_light="#D8D0C0",
-    border_dark="#A09880",
-    border_standard="#C0B8A8",
-    border_subtle="#E0D8C8",
-    border_glow="#3AB8E8",
+    # Borders
+    border_light="#D8E0DB",
+    border_dark="#AEB9B2",
+    border_standard="#7D8C82",
+    border_subtle="#A8B5AD",
+    border_glow="#168FA3",
     # Accents
-    accent="#3AAA3A",
-    accent_hover="#4CC84C",
-    accent_dim="#2A8A2A",
+    accent="#347A45",
+    accent_hover="#408F53",
+    accent_dim="#2C663A",
     # Status
-    success="#3AAA3A",
-    warning="#D4920A",
-    error="#CC3333",
-    info="#3388CC",
+    success="#147A5B",
+    warning="#8A5A08",
+    error="#B64049",
+    info="#0B7182",
     # Text
-    text_primary="#2C2416",
-    text_secondary="#5A4E3A",
-    text_muted="#8A7E6A",
-    text_disabled="#B0A890",
+    text_primary="#172019",
+    text_secondary="#425047",
+    text_muted="#59685F",
+    text_disabled="#9CA7A0",
     text_invert="#FFFFFF",
     # Terminal
     terminal_green="#2A8A2A",
@@ -205,35 +205,35 @@ LIGHT_THEME = ThemeColors(
     terminal_cyan="#228888",
     terminal_purple="#7744AA",
     # Minecraft blocks — same iconic colors, adjusted for light bg
-    mc_stone="#8A8A9A",
-    mc_dirt="#8B6B3A",
-    mc_grass="#4A9A30",
-    mc_wood="#7A5A3A",
-    mc_diamond="#2AB8D0",
-    mc_gold="#CC9900",
-    mc_iron="#8A8A98",
-    mc_coal="#555555",
-    mc_emerald="#10BB55",
-    mc_redstone="#CC2222",
-    mc_obsidian="#3A3A4A",
-    mc_nether="#8B2222",
-    mc_end="#7A5AAA",
+    mc_stone="#7D8981",
+    mc_dirt="#785D47",
+    mc_grass="#347A45",
+    mc_wood="#E9EEEB",
+    mc_diamond="#168FA3",
+    mc_gold="#A86F12",
+    mc_iron="#7D8981",
+    mc_coal="#D8E0DB",
+    mc_emerald="#2E8A4B",
+    mc_redstone="#B64049",
+    mc_obsidian="#172019",
+    mc_nether="#8F4650",
+    mc_end="#6F5A88",
     # Effects — softer shadows for light bg
-    shadow="rgba(0, 0, 0, 0.10)",
-    shadow_glow="rgba(58, 184, 232, 0.12)",
-    shadow_accent="rgba(58, 170, 58, 0.12)",
+    shadow="rgba(19, 32, 23, 0.10)",
+    shadow_glow="rgba(22, 143, 163, 0.12)",
+    shadow_accent="rgba(52, 122, 69, 0.12)",
     # Focus
-    focus_ring="#3AB8E8",
-    focus_ring_width=3,
+    focus_ring="#168FA3",
+    focus_ring_width=2,
     # Backward compat aliases
-    border_tertiary="#D8D0C0",
-    accent_light="#4CC84C",
-    success_light="#4CC84C",
-    warning_light="#E0A820",
-    error_light="#DD5555",
-    text_quaternary="#B0A890",
-    log_bg="#E5DFD2",
-    log_border="#E0D8C8",
+    border_tertiary="#7D8C82",
+    accent_light="#408F53",
+    success_light="#408F53",
+    warning_light="#C58A2A",
+    error_light="#CA5A63",
+    text_quaternary="#9CA7A0",
+    log_bg="#172019",
+    log_border="#7D8C82",
     # Mode
     mode="light",
 )
@@ -385,7 +385,7 @@ def get_theme_manager() -> ThemeManager:
 # ════════════════════════════════════════════
 
 def mc_border(width: int = 2) -> ft.Border:
-    """Create a Minecraft-style beveled border (light top/left, dark bottom/right)
+    """Create a uniform border for workspace surfaces.
 
     Args:
         width: Border width in pixels (default: 2)
@@ -393,16 +393,11 @@ def mc_border(width: int = 2) -> ft.Border:
     Returns:
         ft.Border: Beveled border with highlight and shadow
     """
-    return ft.Border(
-        left=ft.BorderSide(width, THEME.border_light),
-        top=ft.BorderSide(width, THEME.border_light),
-        right=ft.BorderSide(width, THEME.border_dark),
-        bottom=ft.BorderSide(width, THEME.border_dark),
-    )
+    return ft.Border.all(width, THEME.border_standard)
 
 
 def mc_border_inverse(width: int = 2) -> ft.Border:
-    """Create an inverted Minecraft-style border (pressed button effect)
+    """Create a stronger pressed-state border.
 
     Args:
         width: Border width in pixels (default: 2)
@@ -410,16 +405,11 @@ def mc_border_inverse(width: int = 2) -> ft.Border:
     Returns:
         ft.Border: Inverted beveled border for pressed states
     """
-    return ft.Border(
-        left=ft.BorderSide(width, THEME.border_dark),
-        top=ft.BorderSide(width, THEME.border_dark),
-        right=ft.BorderSide(width, THEME.border_light),
-        bottom=ft.BorderSide(width, THEME.border_light),
-    )
+    return ft.Border.all(width, THEME.border_dark)
 
 
 def mc_border_glow(width: int = 2) -> ft.Border:
-    """Create a glowing Minecraft-style border (diamond effect)
+    """Create a focus border.
 
     Args:
         width: Border width in pixels (default: 2)
@@ -427,12 +417,7 @@ def mc_border_glow(width: int = 2) -> ft.Border:
     Returns:
         ft.Border: Glowing border for highlights and focus states
     """
-    return ft.Border(
-        left=ft.BorderSide(width, THEME.border_glow),
-        top=ft.BorderSide(width, THEME.border_glow),
-        right=ft.BorderSide(width, THEME.border_glow),
-        bottom=ft.BorderSide(width, THEME.border_glow),
-    )
+    return ft.Border.all(width, THEME.border_glow)
 
 
 # ════════════════════════════════════════════
@@ -440,7 +425,7 @@ def mc_border_glow(width: int = 2) -> ft.Border:
 # ════════════════════════════════════════════
 
 def mc_shadow(offset: int = 4) -> ft.BoxShadow:
-    """Create a Minecraft-style drop shadow
+    """Create a soft elevation shadow.
 
     Args:
         offset: Shadow offset in pixels (default: 4)
@@ -450,9 +435,9 @@ def mc_shadow(offset: int = 4) -> ft.BoxShadow:
     """
     return ft.BoxShadow(
         spread_radius=0,
-        blur_radius=0,
+        blur_radius=max(8, offset * 3),
         color=THEME.shadow,
-        offset=ft.Offset(offset, offset),
+        offset=ft.Offset(0, max(1, offset // 2)),
     )
 
 

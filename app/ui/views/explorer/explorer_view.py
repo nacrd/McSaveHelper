@@ -76,45 +76,54 @@ class ExplorerView(
         return self.app.translate
 
     def get_top_actions(self) -> list[ViewAction]:
-        """Declare Explorer commands consumed by the application shell."""
-        return [
-            ViewAction(
-                self._t("top_bar.start_stats", "开始统计"),
-                self._analyze_world_stats,
-            ),
-            ViewAction(
-                self._t("top_bar.open_search", "打开搜索"),
-                self._start_entity_block_search,
-            ),
-            ViewAction(
-                self._t("top_bar.refresh_map", "刷新地图"),
-                lambda event: self._refresh_map(),
-            ),
-            ViewAction(
-                self._t("top_bar.start_export", "开始导出"),
-                self._start_map_export,
-            ),
-            ViewAction(
-                self._t("top_bar.stage_player", "暂存玩家"),
-                self._stage_player_edit_form,
-            ),
-            ViewAction(
-                self._t("top_bar.commit_changes", "提交变更"),
-                self._commit_nbt_changes,
-            ),
-            ViewAction(
-                self._t("top_bar.discard_changes", "丢弃暂存"),
-                self._discard_nbt_changes,
-                "danger",
-            ),
-        ]
+        """Declare only commands relevant to the selected Explorer tab."""
+        actions_by_tab = {
+            1: [
+                ViewAction(
+                    self._t("top_bar.stage_player", "暂存玩家"),
+                    self._stage_player_edit_form,
+                ),
+            ],
+            2: [
+                ViewAction(
+                    self._t("top_bar.refresh_map", "刷新地图"),
+                    lambda event: self._refresh_map(),
+                ),
+                ViewAction(
+                    self._t("top_bar.start_export", "开始导出"),
+                    self._start_map_export,
+                ),
+            ],
+            3: [
+                ViewAction(
+                    self._t("top_bar.start_stats", "开始统计"),
+                    self._analyze_world_stats,
+                ),
+            ],
+            5: [
+                ViewAction(
+                    self._t("top_bar.commit_changes", "提交变更"),
+                    self._commit_nbt_changes,
+                ),
+                ViewAction(
+                    self._t("top_bar.discard_changes", "丢弃暂存"),
+                    self._discard_nbt_changes,
+                    "danger",
+                ),
+            ],
+        }
+        return actions_by_tab.get(self._tab_index, [])
 
     def _build(self) -> None:
         self.controls.clear()
         self._world_label = ft.Text(
             "未设置当前存档", size=12, color=THEME.text_muted,
         )
-        toolbar = page_header("存档浏览器", self._world_label, icon=IconSet.EXPLORE)
+        self._page_header = page_header(
+            "存档浏览器",
+            self._world_label,
+            icon=IconSet.EXPLORE,
+        )
         self._init_tab_containers()
         self._build_tab_bar()
         self._content_box = panel(
@@ -122,7 +131,7 @@ class ExplorerView(
             padding=10,
         )
         self._content_box.expand = True
-        self.controls.append(toolbar)
+        self.controls.append(self._page_header)
         col_tabs = ft.Column([self._tab_bar, self._content_box], spacing=8)
         col_tabs.expand = True
         self.controls.append(col_tabs)
@@ -179,6 +188,7 @@ class ExplorerView(
             self._build_tab_if_needed(index)
             self._tab_index = index
             self._show_selected_tab(index)
+            self.app.view_manager.refresh_current_actions()
         except Exception as e:
             self.app.handle_exception(e)
 
@@ -219,9 +229,20 @@ class ExplorerView(
             selected = tab_index == index
             label.color = THEME.text_primary if selected else THEME.text_secondary
             if tab_index < len(self._tab_buttons):
-                self._tab_buttons[tab_index].bgcolor = (
-                    THEME.mc_stone if selected else THEME.bg_secondary
+                button = self._tab_buttons[tab_index]
+                button.bgcolor = (
+                    THEME.bg_elevated if selected else ft.Colors.TRANSPARENT
                 )
+                button.border = ft.Border.all(
+                    1,
+                    THEME.border_standard
+                    if selected
+                    else ft.Colors.TRANSPARENT,
+                )
+                if isinstance(button.content, ft.Row):
+                    icon = button.content.controls[0]
+                    if isinstance(icon, ft.Icon):
+                        icon.color = THEME.accent if selected else THEME.text_muted
         self._content_box.content = self._tabs_content[index]
         safe_update(self._content_box)
         safe_update(self._tab_bar)
@@ -240,8 +261,8 @@ class ExplorerView(
             return
         self._compact_mode = compact
         try:
-            tab_width = 68 if compact else 88
-            tab_height = 52 if compact else 60
+            tab_width = 82 if compact else 100
+            tab_height = 38 if compact else 40
             for idx, btn in enumerate(self._tab_buttons):
                 btn.width = tab_width
                 btn.height = tab_height
@@ -250,17 +271,21 @@ class ExplorerView(
                     left=6, right=6, top=6, bottom=6)
                 if idx < len(self._tab_labels_widgets):
                     self._tab_labels_widgets[idx].size = 10 if compact else 12
-            self._tab_labels_row.spacing = 4 if compact else 8
+            self._tab_labels_row.spacing = 3 if compact else 4
             self._tab_bar.padding = ft.Padding(
-                left=6, right=6, top=6, bottom=6) if compact else ft.Padding(
-                left=10, right=10, top=10, bottom=10)
+                left=3, right=3, top=3, bottom=3) if compact else ft.Padding(
+                    left=4, right=4, top=4, bottom=4)
             self._content_box.padding = ft.Padding(
                 left=6, right=6, top=6, bottom=6) if compact else ft.Padding(
                 left=10, right=10, top=10, bottom=10)
             if hasattr(self, '_player_left_panel'):
-                self._player_left_panel.width = 300 if compact else 340
+                self._set_player_compact_layout(compact)
             if hasattr(self, '_region_side_panel'):
                 self._region_side_panel.width = 240 if compact else 280
+            if hasattr(self, '_nbt_root'):
+                self._set_nbt_compact_layout(compact)
+            if hasattr(self, '_entity_block_search_view'):
+                self._entity_block_search_view.set_compact_mode(compact)
             if self._map_view is not None and hasattr(
                     self._map_view, 'resize_map'):
                 # Prefer expand/on_resize; only seed a larger fallback size.
@@ -272,7 +297,9 @@ class ExplorerView(
 
     def _build_search_tab(self) -> None:
         self._entity_block_search_view = EntityBlockSearchView(
-            self.app, compact=True)
+            self.app,
+            compact=self._compact_mode,
+        )
         self._tab_search.content = self._entity_block_search_view
 
     def on_save_selected(self, path: str) -> None:
@@ -362,7 +389,7 @@ class ExplorerView(
         if generation != self._world_load_generation:
             return
         if isinstance(error, FileNotFoundError):
-            self._world_label.value = "❌ 无效的存档目录"
+            self._world_label.value = "存档无效"
             self._world_label.color = THEME.error
             title = "无效的存档"
             message = (
@@ -370,7 +397,7 @@ class ExplorerView(
                 f"{error}\n\n请确保选择包含 level.dat 的存档根目录"
             )
         elif isinstance(error, RuntimeError):
-            self._world_label.value = "❌ NBT 解析失败"
+            self._world_label.value = "NBT 解析失败"
             self._world_label.color = THEME.error
             title = "NBT 解析失败"
             message = (
@@ -379,7 +406,7 @@ class ExplorerView(
                 "• 不支持的 Minecraft 版本\n• 文件被其他程序占用"
             )
         else:
-            self._world_label.value = "❌ 加载存档失败"
+            self._world_label.value = "加载存档失败"
             self._world_label.color = THEME.warning
             title = "加载存档失败"
             message = f"{type(error).__name__}: {error}"

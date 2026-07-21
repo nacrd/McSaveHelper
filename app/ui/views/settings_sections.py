@@ -4,6 +4,7 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui.theme import THEME, mc_border
+from app.ui.icons import IconSet
 from app.ui.utils import safe_update
 
 
@@ -57,9 +58,13 @@ def _build_section_title_bar(title: str, arrow: ft.Icon) -> ft.Container:
     title_row = ft.Row(
         [
             ft.Container(
-                content=ft.Text("▣", size=13, color=THEME.text_primary),
-                width=24,
-                height=24,
+                content=ft.Icon(
+                    IconSet.SECTION,
+                    size=16,
+                    color=THEME.text_invert,
+                ),
+                width=28,
+                height=28,
                 alignment=ft.alignment.Alignment(0, 0),
                 bgcolor=THEME.mc_grass,
                 border_radius=4,
@@ -70,7 +75,6 @@ def _build_section_title_bar(title: str, arrow: ft.Icon) -> ft.Container:
                 size=14,
                 weight=ft.FontWeight.BOLD,
                 color=THEME.text_primary,
-                font_family="monospace",
                 expand=True,
             ),
             arrow,

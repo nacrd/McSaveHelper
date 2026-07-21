@@ -1,4 +1,4 @@
-"""Minecraft-style input field components"""
+"""Input field components shared by application views."""
 from typing import Optional, Callable, Any, List, Union
 
 import flet as ft
@@ -42,12 +42,12 @@ def text_field(
         password=password,
         read_only=read_only,
         border_color=THEME.border_standard,
-        focused_border_color=THEME.mc_diamond,
+        focused_border_color=THEME.focus_ring,
         text_size=13,
         color=THEME.text_primary,
-        bgcolor=THEME.bg_secondary,
+        bgcolor=THEME.bg_card,
         border_radius=6,
-        cursor_color=THEME.mc_diamond,
+        cursor_color=THEME.focus_ring,
         label_style=ft.TextStyle(color=THEME.text_secondary, size=12),
         hint_style=ft.TextStyle(color=THEME.text_muted, size=12),
         content_padding=ft.Padding(left=14, right=14, top=10, bottom=10),
@@ -98,8 +98,8 @@ def checkbox(
         label=label,
         value=value,
         on_change=on_change,
-        check_color=THEME.bg_primary,
-        fill_color=THEME.mc_grass,
+        check_color=THEME.text_invert,
+        fill_color=THEME.accent,
         label_style=ft.TextStyle(size=13, color=THEME.text_secondary),
     )
 
@@ -119,8 +119,7 @@ def label(text: str, icon: str = "") -> ft.Text:
         display_text,
         size=12,
         weight=ft.FontWeight.BOLD,
-        color=THEME.mc_gold,
-        font_family="monospace",
+        color=THEME.text_secondary,
     )
 
 
@@ -165,9 +164,9 @@ def dropdown(
         label=label,
         hint_text=hint_text,
         on_select=on_change,
-        bgcolor=THEME.bg_secondary,
+        bgcolor=THEME.bg_card,
         border_color=THEME.border_standard,
-        focused_border_color=THEME.mc_diamond,
+        focused_border_color=THEME.focus_ring,
         color=THEME.text_primary,
         text_size=text_size,
         border_radius=border_radius,

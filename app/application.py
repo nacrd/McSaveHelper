@@ -158,8 +158,11 @@ class Application:
         self.window_manager = WindowManager(WindowManagerDependencies(
             page=self.page,
             translate=self._t,
-            apply_compact_layout=(
-                lambda compact: self.view_manager.apply_compact_layout(compact)
+            apply_responsive_layout=(
+                lambda layout: self.view_manager.apply_responsive_layout(layout)
+            ),
+            get_sidebar_mode=(
+                lambda: self.config.get_settings().sidebar_mode
             ),
             stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
             dispose_views=lambda: self.view_manager.dispose(),
@@ -191,6 +194,7 @@ class Application:
             ),
             update_page=self.page.update,
             log=self.log,
+            translate=self._t,
         ))
 
         # 进度管理器
@@ -266,13 +270,11 @@ class Application:
         self.i18n.set_language(language)
 
     def _set_sidebar_mode(self, mode: str) -> None:
-        """通过侧边栏公开命令应用固定展开模式。"""
+        """应用侧栏偏好，同时保留窄窗口的强制折叠约束。"""
+        del mode
         if not hasattr(self, "_sidebar"):
             return
-        if mode == "collapsed":
-            self._sidebar.set_collapsed(True)
-        elif mode == "expanded":
-            self._sidebar.set_collapsed(False)
+        self.window_manager.refresh_responsive_layout()
 
     def _set_log_panel_visible(self, visible: bool) -> None:
         """同步日志入口和悬浮面板可见性。"""
@@ -461,12 +463,6 @@ class Application:
 
     def _build_ui(self) -> None:
         """构建并绑定应用主壳层。"""
-        self._top_actions = ft.Row(
-            spacing=10,
-            scroll=ft.ScrollMode.AUTO,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        self._top_actions.visible = False
         shell = build_application_shell(ApplicationShellDependencies(
             page=self.page,
             translate=self._t,
@@ -481,7 +477,6 @@ class Application:
                 "show_log_panel",
                 True,
             ),
-            top_actions=self._top_actions,
             progress_control=self.progress_manager.create_progress_ui(),
             title_bar=self.window_manager.build_title_bar(),
         ))
@@ -493,10 +488,7 @@ class Application:
         self._log_fab = shell.log_button
         self._main_row = shell.main_row
         self._shell = shell.shell
-        self.view_manager.attach_host(ViewHost(
-            content=shell.content,
-            top_actions=self._top_actions,
-        ))
+        self.view_manager.attach_host(ViewHost(content=shell.content))
         self.window_manager.attach_responsive_host(ResponsiveShellHost(
             sidebar=self._sidebar,
             main_row=self._main_row,
@@ -504,6 +496,7 @@ class Application:
             scrollable_content=self._scrollable_content,
             content=self._content,
         ))
+        self.window_manager.refresh_responsive_layout()
         self.page.add(shell.frame)
 
     def _on_tabs_reorder(self, tabs: list) -> None:

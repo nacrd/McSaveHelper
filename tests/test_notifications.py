@@ -27,8 +27,10 @@ def test_notification_manager_uses_dialog_control_api() -> None:
 
     assert isinstance(page.shown[0], ft.SnackBar)
     snackbar_content = page.shown[0].content
-    assert isinstance(snackbar_content, ft.Text)
-    assert snackbar_content.value == "完成"
+    assert isinstance(snackbar_content, ft.Row)
+    assert isinstance(snackbar_content.controls[0], ft.Icon)
+    assert isinstance(snackbar_content.controls[1], ft.Text)
+    assert snackbar_content.controls[1].value == "完成"
     assert page.shown[1] is loading
     assert manager._current_dialog is loading
 

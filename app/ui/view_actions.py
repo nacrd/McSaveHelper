@@ -7,7 +7,7 @@ import flet as ft
 
 @dataclass(frozen=True)
 class ViewAction:
-    """视图暴露给顶栏的命令描述符。
+    """视图暴露给页面标题栏的命令描述符。
 
     Attributes:
         label: 按钮文案。

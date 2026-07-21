@@ -7,6 +7,7 @@ from typing import Callable, Optional, Tuple
 import flet as ft
 
 from app.ui.components.buttons import btn_ghost, btn_primary
+from app.ui.icons import IconSet
 from app.ui.theme import THEME, mc_border
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.views.explorer.map.mca_map_view import McaMapView
@@ -233,18 +234,21 @@ class MapFullscreenController:
                     on_click=lambda e: self._refresh(),
                 ),
                 btn_ghost(
-                    "🔍+",
-                    width=52,
+                    "放大",
+                    width=80,
+                    icon=ft.Icons.ZOOM_IN,
                     on_click=lambda e: self._zoom_in(),
                 ),
                 btn_ghost(
-                    "🔍−",
-                    width=52,
+                    "缩小",
+                    width=80,
+                    icon=ft.Icons.ZOOM_OUT,
                     on_click=lambda e: self._zoom_out(),
                 ),
                 btn_ghost(
-                    "🏠",
-                    width=52,
+                    "复位",
+                    width=80,
+                    icon=IconSet.REFRESH,
                     on_click=lambda e: self._reset(),
                 ),
                 btn_ghost(

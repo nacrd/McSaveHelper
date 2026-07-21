@@ -7,6 +7,7 @@ import flet as ft
 
 from app.ui.theme import THEME
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
+from app.ui.icons import IconSet
 from app.ui.utils import safe_update as _safe_update
 
 
@@ -147,10 +148,26 @@ class UUIDMappingTable(ft.Column):
         # 操作按钮
         tb = ft.Row(
             [
-                btn_primary("+ 添加一行", on_click=lambda e: self._add_row()),
-                btn_ghost("📁 导入名单", on_click=lambda e: self._import_file()),
-                btn_ghost("💾 导出名单", on_click=lambda e: self._export_file()),
-                btn_danger("🗑️ 清空", on_click=lambda e: self._clear_all()),
+                btn_primary(
+                    "添加一行",
+                    icon=ft.Icons.ADD,
+                    on_click=lambda e: self._add_row(),
+                ),
+                btn_ghost(
+                    "导入名单",
+                    icon=IconSet.IMPORT,
+                    on_click=lambda e: self._import_file(),
+                ),
+                btn_ghost(
+                    "导出名单",
+                    icon=IconSet.EXPORT,
+                    on_click=lambda e: self._export_file(),
+                ),
+                btn_danger(
+                    "清空",
+                    icon=IconSet.DELETE,
+                    on_click=lambda e: self._clear_all(),
+                ),
             ],
             spacing=10,
         )
@@ -163,7 +180,7 @@ class UUIDMappingTable(ft.Column):
         nf = ft.TextField(
             value=player_name,
             border_color=THEME.border_standard,
-            text_size=13, height=40,
+            text_size=13, height=44,
             bgcolor=THEME.bg_secondary,
             border_radius=0,
         )
@@ -172,7 +189,7 @@ class UUIDMappingTable(ft.Column):
         uf = ft.TextField(
             value=uuid,
             border_color=THEME.border_standard,
-            text_size=13, height=40,
+            text_size=13, height=44,
             bgcolor=THEME.bg_secondary,
             border_radius=0,
         )
