@@ -10,6 +10,7 @@ from app.bootstrap.services import (
 )
 from app.services.config_service import ConfigService
 from app.services.backup_service import BackupService
+from app.services.cache_registry import CacheRegistry
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.save_repair_service import SaveRepairService
 from app.services.i18n_service import I18nService
@@ -34,6 +35,7 @@ def test_service_container_builds_in_dependency_order() -> None:
     save_repair = cast(SaveRepairService, object())
     world_writes = cast(WorldWriteCoordinator, object())
     execution_runtime = cast(ExecutionRuntime, object())
+    cache_registry = cast(CacheRegistry, object())
     world_indexes = cast(
         WorldIndexRegistry,
         SimpleNamespace(invalidate=lambda world: None),
@@ -69,8 +71,12 @@ def test_service_container_builds_in_dependency_order() -> None:
         events.append("item")
         return item
 
-    def create_texture():
-        events.append("texture")
+    def create_texture(received_runtime, received_cache_registry):
+        events.append((
+            "texture",
+            received_runtime,
+            received_cache_registry,
+        ))
         return texture
 
     def create_world_writes():
@@ -80,6 +86,10 @@ def test_service_container_builds_in_dependency_order() -> None:
     def create_execution_runtime():
         events.append("execution_runtime")
         return execution_runtime
+
+    def create_cache_registry():
+        events.append("cache_registry")
+        return cache_registry
 
     def create_world_indexes():
         events.append("world_indexes")
@@ -118,6 +128,7 @@ def test_service_container_builds_in_dependency_order() -> None:
             uuid=create_uuid,
             item=create_item,
             texture=create_texture,
+            cache_registry=create_cache_registry,
             execution_runtime=create_execution_runtime,
             world_indexes=create_world_indexes,
             world_transactions=create_world_transactions,
@@ -137,6 +148,7 @@ def test_service_container_builds_in_dependency_order() -> None:
     assert services.save_repair is save_repair
     assert services.world_writes is world_writes
     assert services.execution_runtime is execution_runtime
+    assert services.cache_registry is cache_registry
     assert services.world_indexes is world_indexes
     assert services.world_transactions is world_transactions
     assert events == [
@@ -145,12 +157,13 @@ def test_service_container_builds_in_dependency_order() -> None:
         "world_writes",
         ("backup", world_writes),
         "execution_runtime",
+        "cache_registry",
         "world_indexes",
         ("world_transactions", world_writes, backup),
         ("migration", config, backup, world_transactions),
         "uuid",
         "item",
-        "texture",
+        ("texture", execution_runtime, cache_registry),
         ("save_repair", backup, world_transactions),
     ]
 

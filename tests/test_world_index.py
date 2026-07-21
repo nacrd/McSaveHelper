@@ -52,6 +52,31 @@ def test_builder_returns_deterministic_immutable_world_snapshot(
     assert snapshot.probe.fingerprint
 
 
+def test_builder_reuses_scanned_region_files_for_dimension_index(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    world = _world(tmp_path)
+    calls = 0
+    from core import scanner as scanner_module
+    from core import world_index as world_index_module
+
+    original = scanner_module.scan_region_dir
+
+    def scan_once(region_dir: Path) -> list[Path]:
+        nonlocal calls
+        calls += 1
+        return original(region_dir)
+
+    monkeypatch.setattr(scanner_module, "scan_region_dir", scan_once)
+    monkeypatch.setattr(world_index_module, "scan_region_dir", scan_once)
+
+    snapshot = WorldIndexBuilder().build(world)
+
+    assert calls == 1
+    assert snapshot.dimensions[0].region_files == snapshot.region_files
+
+
 def test_registry_reuses_snapshot_until_relevant_file_changes(
     tmp_path: Path,
 ) -> None:

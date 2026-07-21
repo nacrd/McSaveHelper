@@ -1,6 +1,8 @@
 import pytest
+import flet as ft
 
 from app.core.view_catalog import ViewCatalog
+from app.ui.feature_registry import DEFAULT_FEATURE_REGISTRY, FeatureDescriptor, FeatureRegistry
 from app.ui.view_catalog import create_default_view_catalog
 
 
@@ -37,3 +39,36 @@ def test_default_catalog_contains_all_sidebar_views() -> None:
         "mappings",
         "settings",
     }
+
+
+def test_feature_registry_keeps_sidebar_and_view_catalog_in_lockstep() -> None:
+    registry = FeatureRegistry((
+        FeatureDescriptor(
+            "first",
+            "sidebar.first",
+            "第一个",
+            ft.Icons.LOOKS_ONE,
+            "module.first",
+            "FirstView",
+        ),
+        FeatureDescriptor(
+            "second",
+            "sidebar.second",
+            "第二个",
+            ft.Icons.LOOKS_TWO,
+            "module.second",
+            "SecondView",
+        ),
+    ))
+
+    tabs = registry.sidebar_definitions(lambda _key, default: default)
+    catalog = registry.create_view_catalog()
+
+    assert [tab["id"] for tab in tabs] == ["first", "second"]
+    assert catalog.view_ids == ("first", "second")
+
+
+def test_default_feature_registry_matches_default_view_catalog() -> None:
+    assert tuple(
+        feature.view_id for feature in DEFAULT_FEATURE_REGISTRY.features
+    ) == create_default_view_catalog().view_ids

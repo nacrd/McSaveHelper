@@ -249,3 +249,29 @@ def test_block_guess_and_resource_resolution_are_pure() -> None:
         prefer_block=False,
         asset_keys=None,
     ) == "textures/item/diamond_sword.png"
+
+
+def test_async_texture_load_uses_owned_fallback_runtime(
+    monkeypatch: Any,
+) -> None:
+    service = TextureService()
+    loaded = threading.Event()
+    worker_names: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "get_texture_base64",
+        lambda item_id: worker_names.append(threading.current_thread().name)
+        or f"data:{item_id}",
+    )
+    try:
+        service.load_textures_async(
+            ["minecraft:stone"],
+            lambda _item_id, _uri: loaded.set(),
+        )
+
+        assert loaded.wait(1)
+        assert worker_names[0].startswith("mcsavehelper-io-")
+    finally:
+        service.close()
+
+    assert service._execution_runtime.is_closed is True

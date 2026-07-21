@@ -27,6 +27,10 @@ class WorldTransactionCancelledError(WorldTransactionError):
     """事务在发布前安全检查点观察到取消请求时抛出。"""
 
 
+class WorldTransactionMutationError(WorldTransactionError):
+    """业务变更明确拒绝发布时抛出，保留调用方的结构化结果。"""
+
+
 @dataclass(frozen=True)
 class WorldTransactionResult(Generic[ResultT]):
     """成功发布后的业务结果和安全备份信息。"""
@@ -183,7 +187,10 @@ class WorldTransactionService:
             publish_directory_tree(prepared, world)
             self._invalidate_world(world)
             return WorldTransactionResult(value, world, backup)
-        except WorldTransactionCancelledError:
+        except (
+            WorldTransactionCancelledError,
+            WorldTransactionMutationError,
+        ):
             raise
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             raise WorldTransactionError(
@@ -243,6 +250,7 @@ class WorldTransactionService:
 __all__ = [
     "WorldTransactionCancelledError",
     "WorldTransactionError",
+    "WorldTransactionMutationError",
     "WorldTransactionResult",
     "WorldTransactionService",
 ]

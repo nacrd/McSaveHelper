@@ -403,6 +403,12 @@
       "max_concurrent": "Max Concurrent Tasks (1-16)",
       "preserve_structure": "Preserve Original File Structure"
     },
+    "cache": {
+      "title": "Application Cache",
+      "description": "Manage world indexes, textures, and map rendering caches in one place. Memory is budgeted, while map tiles remain on disk for faster reopening.",
+      "refresh": "Refresh",
+      "clear": "Clear Cache"
+    },
     "uuid": {
       "title": "Custom UUID Mapping",
       "description": "Add player name to UUID mappings here, used for player data conversion in offline mode."

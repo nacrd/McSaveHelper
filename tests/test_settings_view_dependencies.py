@@ -6,6 +6,7 @@ import flet as ft
 from app.models.config import ApplicationSettings
 from app.models.responsive_layout import resolve_responsive_layout
 from app.services.config_service import ConfigService
+from app.services.cache_registry import CacheRegistry
 from app.ui.views.settings import SettingsView, SettingsViewDependencies
 
 
@@ -30,6 +31,13 @@ def _dependencies(saved: list[ApplicationSettings]) -> SettingsViewDependencies:
         info_dialog=lambda title, message: None,
         error_dialog=lambda title, message: None,
         pick_directory=lambda: None,
+        cache_snapshot=CacheRegistry().stats,
+        clear_caches=lambda: {
+            "deleted_files": 0,
+            "freed_bytes": 0,
+            "memory_chunks_cleared": 0,
+        },
+        cache_path=lambda: "",
     )
 
 

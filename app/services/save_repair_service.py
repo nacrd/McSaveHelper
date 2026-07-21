@@ -20,6 +20,7 @@ from app.services.world_write_coordinator import WorldOperationBusyError
 from app.services.world_transaction import (
     WorldTransactionCancelledError,
     WorldTransactionError,
+    WorldTransactionMutationError,
     WorldTransactionService,
 )
 from core.logger import logger
@@ -44,7 +45,7 @@ _ISSUE_LEVELS = {
 }
 
 
-class _RepairMutationFailed(RuntimeError):
+class _RepairMutationFailed(WorldTransactionMutationError):
     """携带暂存修复报告并阻止事务发布。"""
 
     def __init__(self, report: RepairReport) -> None:
@@ -292,7 +293,6 @@ class SaveRepairService:
         Returns:
             RepairReport 修复报告
         """
-        self._cancel_event.clear()
         report = RepairReport()
         start_time = time.monotonic()
         callbacks = _RepairCallbacks(report, progress_callback, log_callback)

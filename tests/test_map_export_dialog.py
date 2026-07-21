@@ -7,11 +7,13 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 from app.application import Application
+from app.services.execution_runtime import ExecutionRuntime
 from app.ui.views.explorer.map.export_dialog import (
     MapExportDialog,
     MapExportSession,
 )
 from app.ui.views.explorer.region_tab import RegionTabMixin
+from core.omni.world_session import WorldSession
 
 
 class _App:
@@ -24,6 +26,7 @@ class _App:
         self.warnings: list[tuple[str, str]] = []
         self.errors: list[tuple[str, str]] = []
         self.infos: list[tuple[str, str]] = []
+        self.execution_runtime = ExecutionRuntime()
 
     @staticmethod
     def translate(key: str, default: str = "", **kwargs: object) -> str:
@@ -128,7 +131,10 @@ def test_region_tab_open_export_uses_map_context(tmp_path: Path) -> None:
     app = _App()
     tab = RegionTabMixin()
     tab.app = cast(Any, app)
-    tab.world_session = SimpleNamespace(world_path=tmp_path / "world")
+    tab.world_session = cast(
+        WorldSession,
+        SimpleNamespace(world_path=tmp_path / "world"),
+    )
     tab._current_dimension = "nether"
     tab._selected_region_coord = (1, 2)
     dialog = MagicMock()

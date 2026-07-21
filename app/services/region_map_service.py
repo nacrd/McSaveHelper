@@ -4,16 +4,29 @@
 提供异步、非阻塞的区域文件扫描能力，
 支持进度追踪和数据查询。
 """
-import os
-import threading
 import asyncio
 import hashlib
+import threading
 from collections import OrderedDict, deque
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Deque, Dict, Tuple, Optional
+from typing import Any, Callable, Deque, Dict, Tuple, Optional
 from dataclasses import dataclass
 
+from app.services.cache_registry import (
+    CachePolicy,
+    CacheRegistration,
+    CacheRegistry,
+    CacheStats,
+)
+from app.services.execution_runtime import (
+    ExecutionLane,
+    ExecutionRuntime,
+    OperationHandle,
+    CancellationToken,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
 from core.region_utils import parse_region_coords, scan_region_dir
 from core.mca.errors import McaError
 from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
@@ -64,23 +77,40 @@ class RegionMapService:
         except RuntimeError:
             pass
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        execution_runtime: Optional[ExecutionRuntime] = None,
+        cache_registry: Optional[CacheRegistry] = None,
+    ) -> None:
         """初始化内部状态"""
         self._init_scan_state()
         self._init_topview_state()
         self._init_topview_workers()
+        self._execution_runtime = execution_runtime or ExecutionRuntime()
+        self._owns_execution_runtime = execution_runtime is None
+        self._topview_handles: set[OperationHandle[None]] = set()
+        self._cache_registration: Optional[CacheRegistration] = None
+        if cache_registry is not None:
+            self._cache_registration = cache_registry.register_external(
+                f"map.topview.{id(self)}",
+                CachePolicy(self.TOPVIEW_QUEUE_LIMIT, self.TOPVIEW_MEMORY_LIMIT),
+                self._topview_cache_stats,
+                self._clear_topview_memory_cache,
+            )
 
     def _init_scan_state(self) -> None:
         self._mca_data: Dict[Tuple[int, int], int] = {}
         self._region_meta: Dict[Tuple[int, int], Dict[str, Any]] = {}
         # Metadata is intentionally loaded on demand.  Keep in-flight loads
         # per coordinate so two UI consumers cannot parse the same MCA twice.
-        self._region_meta_tasks: Dict[Tuple[int, int], asyncio.Task] = {}
+        self._region_meta_tasks: Dict[
+            Tuple[int, int], OperationHandle[Dict[str, Any]]
+        ] = {}
         # region 坐标 → mca 文件路径（俯视图渲染用）
         self._region_paths: Dict[Tuple[int, int], str] = {}
         self._is_scanning: bool = False
         self._scan_progress: float = 0.0
-        self._scan_task: Optional[asyncio.Task] = None
+        self._scan_task: Optional[asyncio.Task[Any]] = None
         self._scan_generation: int = 0
         self._data_revision: int = 0
         self._closed: bool = False
@@ -126,34 +156,56 @@ class RegionMapService:
         self._tile_ready_callback: Optional[Any] = None
 
     def _init_topview_workers(self) -> None:
-        # Bounded topview queue: rendering also performs limited parallel chunk
-        # decoding, so keep the outer pool small to avoid nested thread storms.
-        cpu = os.cpu_count() or 2
-        self._topview_max_workers: int = min(2, max(1, cpu // 2))
+        # 渲染统一使用应用计算通道，局部并发上限仅用于请求泵的可见预算。
+        self._topview_max_workers: int = 2
         self._topview_active: int = 0
         self._topview_cancel_event = threading.Event()
         self._topview_queue: Deque[
             Tuple[Tuple[int, int], str, int, int, threading.Event, int]
         ] = deque()
-        self._topview_executor: Optional[ThreadPoolExecutor] = None
+        self._topview_executor: Optional[ExecutionRuntime] = None
 
-    def _ensure_topview_executor(self) -> ThreadPoolExecutor:
-        # Serialize creation with close().  close() may be called from the UI
-        # while a worker is submitting the next visible tile.
+    def _ensure_topview_executor(self) -> ExecutionRuntime:
+        """返回统一计算运行时，保留旧测试/兼容入口名称。"""
         with self._data_lock:
             if self._closed:
                 raise RuntimeError("区域地图服务已关闭")
-            if self._topview_executor is None:
-                self._topview_executor = ThreadPoolExecutor(
-                    max_workers=self._topview_max_workers,
-                    thread_name_prefix="topview",
-                )
-            return self._topview_executor
+            self._topview_executor = self._execution_runtime
+            return self._execution_runtime
 
     @property
     def is_scanning(self) -> bool:
         """当前是否正在扫描"""
         return self._is_scanning
+
+    @property
+    def execution_runtime(self) -> ExecutionRuntime:
+        """返回本地图会话使用的统一后台运行时。"""
+        return self._execution_runtime
+
+    def _topview_cache_stats(self) -> CacheStats:
+        """返回本地图会话的内存瓦片缓存统计。"""
+        with self._data_lock:
+            return CacheStats(
+                name=f"map.topview.{id(self)}",
+                entries=len(self._topview_tiles),
+                bytes_used=self._topview_memory_bytes,
+                max_entries=self.TOPVIEW_QUEUE_LIMIT,
+                max_bytes=self.TOPVIEW_MEMORY_LIMIT,
+                hits=0,
+                misses=0,
+                evictions=0,
+            )
+
+    def _clear_topview_memory_cache(self) -> None:
+        """在注册表清理请求中仅释放可重建的瓦片内存。"""
+        with self._data_lock:
+            self._topview_tiles.clear()
+            self._topview_memory_bytes = 0
+            self._topview_tile_sizes.clear()
+            self._topview_tile_complete.clear()
+            self._topview_tile_revisions.clear()
+            self._data_revision += 1
 
     @property
     def scan_progress(self) -> float:
@@ -215,15 +267,17 @@ class RegionMapService:
         coord: Tuple[int, int],
         path: str,
         generation: int,
-        task: asyncio.Task,
+        handle: OperationHandle[Dict[str, Any]],
     ) -> None:
         """Publish or discard an on-demand parse and release its task."""
         try:
-            meta = task.result()
-        except (asyncio.CancelledError, Exception):
+            meta = handle.result()
+        except (OSError, RuntimeError, ValueError, TypeError):
+            meta = None
+        except Exception:
             meta = None
         with self._data_lock:
-            if self._region_meta_tasks.get(coord) is task:
+            if self._region_meta_tasks.get(coord) is handle:
                 self._region_meta_tasks.pop(coord, None)
             if (
                 meta is not None
@@ -260,8 +314,13 @@ class RegionMapService:
         if not path:
             return {}
 
-        task = self._get_or_create_region_meta_task(coord, path, generation, task)
-        meta = await self._await_region_meta_task(coord, task)
+        handle = self._get_or_create_region_meta_task(
+            coord,
+            path,
+            generation,
+            task,
+        )
+        meta = await self._await_region_meta_task(coord, handle)
         return self._store_region_meta_if_current(
             coord,
             path,
@@ -274,18 +333,24 @@ class RegionMapService:
         coord: Tuple[int, int],
         path: str,
         generation: int,
-        task: Optional[Any],
-    ) -> Any:
+        task: Optional[OperationHandle[Dict[str, Any]]],
+    ) -> OperationHandle[Dict[str, Any]]:
         if task is not None:
             return task
-        task = asyncio.create_task(
-            asyncio.to_thread(scan_region_meta, Path(path))
-        )
+        try:
+            handle = self._execution_runtime.submit(
+                "load_region_meta",
+                lambda token: self._load_region_meta(token, path),
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.INTERACTIVE,
+            )
+        except (RuntimeClosedError, TaskQueueFullError):
+            return self._completed_empty_meta_handle()
         with self._data_lock:
             existing = self._region_meta_tasks.get(coord)
             if existing is None:
-                self._region_meta_tasks[coord] = task
-                task.add_done_callback(
+                self._region_meta_tasks[coord] = handle
+                handle.add_done_callback(
                     lambda completed: self._finish_region_meta_task(
                         coord,
                         path,
@@ -293,20 +358,44 @@ class RegionMapService:
                         completed,
                     )
                 )
-                return task
-            task.cancel()
+                return handle
+            handle.cancel()
             return existing
+
+    @staticmethod
+    def _load_region_meta(
+        token: CancellationToken,
+        path: str,
+    ) -> Dict[str, Any]:
+        """在受限计算通道解析一份 MCA 元数据。"""
+        token.raise_if_cancelled()
+        return scan_region_meta(Path(path))
+
+    @staticmethod
+    def _completed_empty_meta_handle() -> OperationHandle[Dict[str, Any]]:
+        """为饱和时的可重试元数据请求创建空完成结果。"""
+        from concurrent.futures import Future
+
+        future: Future[Dict[str, Any]] = Future()
+        future.set_result({})
+        return OperationHandle(
+            operation="load_region_meta",
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
+            _future=future,
+            _token=CancellationToken(),
+        )
 
     async def _await_region_meta_task(
         self,
         coord: Tuple[int, int],
-        task: Any,
+        handle: OperationHandle[Dict[str, Any]],
     ) -> Dict[str, Any]:
         try:
             # One caller cancelling its UI operation must not cancel a shared
             # parse still awaited by another consumer. Lifecycle methods can
             # still cancel the underlying task explicitly.
-            meta = await asyncio.shield(task)
+            meta = await asyncio.shield(handle.wait_async())
         except asyncio.CancelledError:
             raise
         except (OSError, ValueError, TypeError, RuntimeError, KeyError):
@@ -317,8 +406,10 @@ class RegionMapService:
         finally:
             with self._data_lock:
                 current = self._region_meta_tasks.get(coord)
-                if current is task and current is not None and current.done():
+                if current is not None and current is handle and current.done:
                     self._region_meta_tasks.pop(coord, None)
+        if handle.cancelled:
+            raise asyncio.CancelledError
         return dict(meta or {})
 
     def _store_region_meta_if_current(
@@ -340,7 +431,7 @@ class RegionMapService:
 
     def clear_data(self) -> None:
         """清空所有缓存数据"""
-        meta_tasks: list[asyncio.Task]
+        meta_tasks: list[OperationHandle[Dict[str, Any]]]
         with self._data_lock:
             self._scan_generation += 1
             self._data_revision += 1
@@ -376,11 +467,8 @@ class RegionMapService:
             self._cached_stats = None
             self._cached_data_snapshot = None
             self._cached_snapshot_count = -1
-        # ``to_thread`` cannot interrupt an already-running native parse, but
-        # cancelling its asyncio wrapper prevents a late result from keeping
-        # references alive or being published to the new world.
-        for task in meta_tasks:
-            self._cancel_asyncio_task(task)
+        for meta_handle in meta_tasks:
+            meta_handle.cancel()
         # A new scan represents a new world/dimension, so release old-world
         # compact surface entries instead of carrying them into the next map.
         try:
@@ -789,11 +877,51 @@ class RegionMapService:
             return
         for job in jobs:
             try:
-                executor.submit(self._render_topview_worker, *job)
+                handle = executor.submit(
+                    "render_topview_tile",
+                    self._make_topview_work(job),
+                    lane=ExecutionLane.CPU,
+                    priority=TaskPriority.VISIBLE,
+                )
+                self._track_topview_handle(handle)
             except (RuntimeError, ValueError):
                 self._rollback_topview_jobs([job])
             except Exception:
                 self._rollback_topview_jobs([job])
+
+    def _run_topview_job(
+        self,
+        token: CancellationToken,
+        render_job: Tuple[Tuple[int, int], str, int, int, threading.Event, int],
+    ) -> None:
+        """运行时适配：取消时通知旧队列协议并执行一个瓦片任务。"""
+        if token.is_cancelled:
+            render_job[4].set()
+        self._render_topview_worker(*render_job)
+
+    def _track_topview_handle(self, handle: OperationHandle[None]) -> None:
+        """登记瓦片任务，并在完成回调中以同一锁安全移除。"""
+        with self._data_lock:
+            if self._closed:
+                handle.cancel()
+                return
+            self._topview_handles.add(handle)
+        handle.add_done_callback(self._discard_topview_handle)
+
+    def _discard_topview_handle(self, handle: OperationHandle[None]) -> None:
+        """后台完成回调：释放任务身份，不直接触碰 UI。"""
+        with self._data_lock:
+            self._topview_handles.discard(handle)
+
+    def _make_topview_work(
+        self,
+        render_job: Tuple[Tuple[int, int], str, int, int, threading.Event, int],
+    ) -> Callable[[CancellationToken], None]:
+        """将旧队列任务绑定为统一运行时可提交的单参数函数。"""
+        def work(token: CancellationToken) -> None:
+            self._run_topview_job(token, render_job)
+
+        return work
 
     def _rollback_topview_jobs(
         self,
@@ -1172,7 +1300,7 @@ class RegionMapService:
         scan_generation = await self._prepare_silent_scan()
         try:
             region_path = Path(region_dir)
-            mca_files = await asyncio.to_thread(scan_region_dir, region_path)
+            mca_files = await self._scan_region_directory(region_path)
             self._total_count = len(mca_files)
             if not mca_files:
                 self._finish_silent_scan(scan_generation)
@@ -1221,6 +1349,27 @@ class RegionMapService:
                 continue
             except Exception:
                 continue
+
+    async def _scan_region_directory(self, region_path: Path) -> list[Path]:
+        """通过受限 I/O 通道枚举目录，不创建默认线程池。"""
+        handle = self._execution_runtime.submit(
+            "scan_region_directory",
+            lambda token: self._load_region_paths(token, region_path),
+            lane=ExecutionLane.IO,
+            priority=TaskPriority.VISIBLE,
+        )
+        return await handle.wait_async()
+
+    @staticmethod
+    def _load_region_paths(
+        token: CancellationToken,
+        region_path: Path,
+    ) -> list[Path]:
+        """在 I/O 通道扫描 region 目录并在结果发布前检查取消。"""
+        token.raise_if_cancelled()
+        paths = scan_region_dir(region_path)
+        token.raise_if_cancelled()
+        return paths
 
     def _record_scanned_region(
         self,
@@ -1309,12 +1458,20 @@ class RegionMapService:
             self._topview_failure_counts.clear()
             self._topview_tile_revisions.clear()
             self._topview_tile_complete.clear()
-        for task in meta_tasks:
-            self._cancel_asyncio_task(task)
-        executor = self._topview_executor
-        self._topview_executor = None
-        if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+        for meta_handle in meta_tasks:
+            meta_handle.cancel()
+        with self._data_lock:
+            handles = tuple(self._topview_handles)
+            self._topview_handles.clear()
+            self._topview_executor = None
+        for topview_handle in handles:
+            topview_handle.cancel()
+        registration = self._cache_registration
+        self._cache_registration = None
+        if registration is not None:
+            registration.close()
+        if self._owns_execution_runtime:
+            self._execution_runtime.shutdown(wait=False)
 
     async def start_scan_async(self, region_dir: str) -> None:
         """

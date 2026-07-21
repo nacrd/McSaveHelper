@@ -84,6 +84,7 @@ from core.mca.viewport import (
 )
 
 if TYPE_CHECKING:
+    from app.services.execution_runtime import ExecutionRuntime
     from app.services.region_map_service import RegionMapService
 
 
@@ -112,6 +113,7 @@ class McaMapView(ft.Container):
     def __init__(
         self,
         map_service: RegionMapService,
+        execution_runtime: Optional[ExecutionRuntime] = None,
         on_selection_changed: Optional[MapSelectionCallback] = None,
         on_marker_selected: Optional[MapMarkerCallback] = None,
         width: int = 700,
@@ -122,6 +124,7 @@ class McaMapView(ft.Container):
 
         Args:
             map_service: 区域扫描/瓦片服务；由 Explorer 会话持有生命周期。
+            execution_runtime: 应用级有界后台运行时。
             on_selection_changed: 区域/区块选择变化回调（UI 线程）。
             on_marker_selected: 标记被点中时的回调。
             width: 初始宽度像素。
@@ -130,6 +133,9 @@ class McaMapView(ft.Container):
         """
         super().__init__(**kwargs)
         self._service = map_service
+        self._execution_runtime = (
+            execution_runtime or map_service.execution_runtime
+        )
         self._on_selection_changed = on_selection_changed
         self._on_marker_selected = on_marker_selected
         self._init_viewport_state()
@@ -213,6 +219,7 @@ class McaMapView(ft.Container):
 
         self._surface_layer = MapSurfaceLayer(
             self._service,
+            execution_runtime=self._execution_runtime,
             schedule_task=self._schedule_task,
             request_rebuild=self._request_rebuild,
             is_active=self._surface_is_active,

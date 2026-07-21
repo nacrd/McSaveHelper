@@ -57,6 +57,7 @@ class RegionTabMixin(ExplorerMixinHost):
         try:
             self._map_view = McaMapView(
                 map_service=self._map_service,
+                execution_runtime=self.app.execution_runtime,
                 on_selection_changed=self._on_region_selected,
                 on_marker_selected=self._on_map_marker_selected,
                 width=900,

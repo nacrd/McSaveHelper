@@ -94,6 +94,21 @@ _CHUNK_LRU_EPOCH = 0
 # Keep the compact derived cache bounded while preserving full tile sampling
 # precision. Values are only strings/coordinates, never complete NBT trees.
 _CHUNK_LRU_MAX = 4096
+_CHUNK_LRU_MAX_BYTES = 128 * 1024 * 1024
+_CHUNK_LRU_BYTES = 0
+
+
+def _estimate_surface_samples_bytes(samples: SurfaceSamples) -> int:
+    """保守估算紧凑地表采样映射的内存占用。"""
+    total = 64
+    for position, value in samples.items():
+        total += 80 + len(position) * 16
+        if isinstance(value, str):
+            total += len(value)
+        elif isinstance(value, tuple):
+            total += 24 * len(value)
+            total += sum(len(item) for item in value if isinstance(item, str))
+    return total
 
 
 def _coarse_edge(tile_size: int) -> int:
@@ -136,16 +151,24 @@ def _lru_merge(
     expected_epoch: int,
 ) -> SurfaceSamples:
     """Atomically merge samples unless the cache was cleared meanwhile."""
+    global _CHUNK_LRU_BYTES
     with _CHUNK_LRU_LOCK:
         if expected_epoch != _CHUNK_LRU_EPOCH:
             return dict(sampled)
         existing = _CHUNK_LRU.get(key, {})
+        if existing:
+            _CHUNK_LRU_BYTES -= _estimate_surface_samples_bytes(existing)
         merged = dict(existing)
         merged.update(sampled)
         _CHUNK_LRU[key] = merged
+        _CHUNK_LRU_BYTES += _estimate_surface_samples_bytes(merged)
         _CHUNK_LRU.move_to_end(key)
-        while len(_CHUNK_LRU) > _CHUNK_LRU_MAX:
-            _CHUNK_LRU.popitem(last=False)
+        while (
+            len(_CHUNK_LRU) > _CHUNK_LRU_MAX
+            or _CHUNK_LRU_BYTES > _CHUNK_LRU_MAX_BYTES
+        ):
+            _old_key, old_samples = _CHUNK_LRU.popitem(last=False)
+            _CHUNK_LRU_BYTES -= _estimate_surface_samples_bytes(old_samples)
         return merged
 
 
@@ -1049,9 +1072,10 @@ def _colorize_surface_row(
 
 def clear_chunk_decode_cache() -> None:
     """Drop process-level decoded chunk cache (tests / memory pressure)."""
-    global _CHUNK_LRU_EPOCH
+    global _CHUNK_LRU_BYTES, _CHUNK_LRU_EPOCH
     with _CHUNK_LRU_LOCK:
         _CHUNK_LRU.clear()
+        _CHUNK_LRU_BYTES = 0
         _CHUNK_LRU_EPOCH += 1
 
 
@@ -1059,3 +1083,9 @@ def chunk_decode_cache_size() -> int:
     """Number of entries in the process-level chunk decode LRU."""
     with _CHUNK_LRU_LOCK:
         return len(_CHUNK_LRU)
+
+
+def chunk_decode_cache_bytes() -> int:
+    """返回紧凑地表采样 LRU 的估算字节数。"""
+    with _CHUNK_LRU_LOCK:
+        return _CHUNK_LRU_BYTES

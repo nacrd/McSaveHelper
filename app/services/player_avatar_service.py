@@ -10,6 +10,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from app.services.execution_runtime import ExecutionRuntime, TaskPriority
 from core.io_atomic import atomic_write_bytes
 from core.uuid_utils import normalize_uuid
 
@@ -125,6 +126,7 @@ class PlayerAvatarService:
         cache_dir: Optional[Path] = None,
         *,
         enabled: bool = True,
+        execution_runtime: Optional[ExecutionRuntime] = None,
     ) -> None:
         """初始化头像缓存目录与内存索引。
 
@@ -143,6 +145,9 @@ class PlayerAvatarService:
         self._lock = threading.Lock()
         self._inflight: Dict[str, list[Callable[[Optional[str]], None]]] = {}
         self._failed: set[str] = set()
+        self._execution_runtime = execution_runtime or ExecutionRuntime()
+        self._owns_execution_runtime = execution_runtime is None
+        self._closed = False
 
     @property
     def enabled(self) -> bool:
@@ -194,7 +199,7 @@ class PlayerAvatarService:
             uuid: 玩家 UUID。
             on_loaded: 完成回调 ``(path_or_none)``。
         """
-        if not self._enabled:
+        if self._closed or not self._enabled:
             on_loaded(None)
             return
         norm = normalize_uuid(uuid)
@@ -216,13 +221,23 @@ class PlayerAvatarService:
                 return
             self._inflight[norm] = [on_loaded]
 
-        thread = threading.Thread(
-            target=self._fetch_worker,
-            args=(norm,),
-            name=f"avatar-{norm[:8]}",
-            daemon=True,
+        self._execution_runtime.submit(
+            "fetch_player_avatar",
+            lambda token: self._fetch_worker(norm),
+            priority=TaskPriority.VISIBLE,
         )
-        thread.start()
+
+    def close(self) -> None:
+        """停止自有后台任务并丢弃不再需要的内存状态；可重复调用。"""
+        if self._closed:
+            return
+        self._closed = True
+        with self._lock:
+            self._memory.clear()
+            self._inflight.clear()
+            self._failed.clear()
+        if self._owns_execution_runtime:
+            self._execution_runtime.shutdown(wait=False)
 
     def _fetch_worker(self, norm: str) -> None:
         """Background worker: fetch/cache avatar and invoke waiters."""

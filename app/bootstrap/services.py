@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from app.services.backup_service import BackupService
+from app.services.cache_registry import CacheRegistry
 from app.services.config_service import ConfigService
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.i18n_service import I18nService
@@ -50,6 +51,7 @@ class AppServices:
     execution_runtime: ExecutionRuntime
     world_indexes: WorldIndexRegistry
     world_transactions: WorldTransactionService
+    cache_registry: CacheRegistry
 
 
 @dataclass(frozen=True)
@@ -64,7 +66,10 @@ class ServiceFactories:
     ] = MigrationService
     uuid: Callable[[], UUIDService] = UUIDService
     item: Callable[[], ItemService] = ItemService
-    texture: Callable[[], TextureService] = TextureService
+    texture: Callable[
+        [ExecutionRuntime, CacheRegistry], TextureService
+    ] = TextureService
+    cache_registry: Callable[[], CacheRegistry] = CacheRegistry
     execution_runtime: Callable[[], ExecutionRuntime] = ExecutionRuntime
     world_indexes: Callable[[], WorldIndexRegistry] = WorldIndexRegistry
     world_transactions: Callable[
@@ -99,6 +104,7 @@ def create_app_services(
         "execution_runtime",
         selected.execution_runtime,
     )
+    cache_registry = _create("cache_registry", selected.cache_registry)
     world_indexes = _create("world_indexes", selected.world_indexes)
     world_transactions = _create(
         "world_transactions",
@@ -116,7 +122,12 @@ def create_app_services(
     )
     uuid = _create("uuid", selected.uuid)
     item = _create("item", selected.item)
-    texture = _create("texture", selected.texture)
+    texture = _create(
+        "texture",
+        selected.texture,
+        execution_runtime,
+        cache_registry,
+    )
     save_repair = _create(
         "save_repair",
         selected.save_repair,
@@ -136,4 +147,5 @@ def create_app_services(
         execution_runtime=execution_runtime,
         world_indexes=world_indexes,
         world_transactions=world_transactions,
+        cache_registry=cache_registry,
     )

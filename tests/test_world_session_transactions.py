@@ -45,6 +45,23 @@ def test_session_accepts_matching_shared_world_index(tmp_path: Path) -> None:
     assert session.get_dimensions() == []
 
 
+def test_session_uses_indexed_dimensions_without_rescanning(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    region = world / "region"
+    region.mkdir()
+    (region / "r.0.0.mca").write_bytes(b"region")
+    snapshot = WorldIndexBuilder().build(world)
+    session = WorldSession(world, index_snapshot=snapshot)
+
+    def reject_scan(region_files):
+        del region_files
+        raise AssertionError("不应重新扫描维度")
+
+    session._scanner.scan_dimensions = reject_scan
+
+    assert session.get_dimensions()[0]["id"] == "overworld"
+
+
 def test_session_rejects_index_from_another_world(tmp_path: Path) -> None:
     world = _world(tmp_path)
     other_root = tmp_path / "other-root"

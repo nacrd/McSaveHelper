@@ -28,6 +28,7 @@ def test_surface_leaf_lod_only_activates_at_high_zoom() -> None:
     service = RegionMapService()
     layer = MapSurfaceLayer(
         service,
+        execution_runtime=service._execution_runtime,
         schedule_task=lambda _coro: None,
         request_rebuild=lambda: None,
         is_active=lambda: False,
@@ -48,6 +49,7 @@ def test_leaf_surface_accepts_256_parent_until_focus_tile_is_ready() -> None:
     service._topview_tile_sizes[coord] = 256
     layer = MapSurfaceLayer(
         service,
+        execution_runtime=service._execution_runtime,
         schedule_task=lambda _coro: None,
         request_rebuild=lambda: None,
         is_active=lambda: False,
@@ -65,6 +67,7 @@ def test_wide_view_reduces_surface_lod_without_cropping() -> None:
     service = RegionMapService()
     layer = MapSurfaceLayer(
         service,
+        execution_runtime=service._execution_runtime,
         schedule_task=lambda _coro: None,
         request_rebuild=lambda: None,
         is_active=lambda: False,
@@ -117,6 +120,7 @@ def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
 
         layer = MapSurfaceLayer(
             service,
+            execution_runtime=service._execution_runtime,
             schedule_task=schedule,
             request_rebuild=lambda: None,
             is_active=lambda: active,
@@ -165,6 +169,7 @@ def test_surface_layer_ignores_tile_callbacks_outside_buffer() -> None:
     service = RegionMapService()
     layer = MapSurfaceLayer(
         service,
+        execution_runtime=service._execution_runtime,
         schedule_task=lambda _coro: None,
         request_rebuild=lambda: None,
         is_active=lambda: False,

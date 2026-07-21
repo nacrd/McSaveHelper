@@ -438,6 +438,13 @@ class ExplorerView(
         self._task_scope.close()
         if hasattr(self, "_entity_block_search_view"):
             self._entity_block_search_view.dispose()
+        avatar_service = getattr(
+            self,
+            "_player_avatar_service_instance",
+            None,
+        )
+        if avatar_service is not None:
+            avatar_service.close()
         self._dispose_region_tab()
         self._map_service.close()
 

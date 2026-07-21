@@ -108,7 +108,7 @@ class WorldIndexBuilder:
             "*.json",
         )
         usercache = tuple(sorted(scanned["usercache"].items()))
-        dimensions = self._build_dimensions(world)
+        dimensions = self._build_dimensions(world, region_files)
         stamped_paths = self._stamped_paths(
             world,
             player_files=(path for _, path in player_files),
@@ -163,16 +163,26 @@ class WorldIndexBuilder:
     def _build_dimensions(
         self,
         world: Path,
+        region_files: tuple[Path, ...],
     ) -> tuple[WorldDimensionIndex, ...]:
-        """构造带区域文件列表的维度索引。"""
+        """按已扫描文件分组构造维度索引，避免再次枚举目录。"""
+        files_by_directory: dict[Path, list[Path]] = {}
+        for region_file in region_files:
+            files_by_directory.setdefault(region_file.parent, []).append(
+                region_file
+            )
         return tuple(
-            self._build_dimension(dimension)
+            self._build_dimension(
+                dimension,
+                tuple(files_by_directory.get(dimension.region_dir, ())),
+            )
             for dimension in discover_dimension_region_dirs(world)
         )
 
     @staticmethod
     def _build_dimension(
         dimension: DimensionRegionDirectory,
+        region_files: tuple[Path, ...],
     ) -> WorldDimensionIndex:
         """把底层维度目录转换为不可变索引项。"""
         return WorldDimensionIndex(
@@ -180,7 +190,7 @@ class WorldIndexBuilder:
             name=dimension.name,
             region_dir=dimension.region_dir,
             coordinate_scale=dimension.coordinate_scale,
-            region_files=tuple(scan_region_dir(dimension.region_dir)),
+            region_files=region_files,
         )
 
     def _stamped_paths(

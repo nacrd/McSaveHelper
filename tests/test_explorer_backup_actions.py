@@ -2,16 +2,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from app.services.execution_runtime import OperationScope
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
 
 
-class _ImmediateThread:
-    def __init__(self, target, daemon: bool) -> None:
-        del daemon
-        self._target = target
-
-    def start(self) -> None:
-        self._target()
+class _ImmediateScope:
+    def submit(self, operation, work, **kwargs) -> None:
+        del operation, kwargs
+        work(None)
 
 
 def test_explorer_quick_backup_uses_managed_backup_service(
@@ -26,6 +24,7 @@ def test_explorer_quick_backup_uses_managed_backup_service(
             return SimpleNamespace(backup_path=tmp_path / "backup")
 
     host = WorldInfoTabMixin()
+    host._task_scope = cast(OperationScope, _ImmediateScope())
     host.world_session = cast(Any, SimpleNamespace(world_path=tmp_path / "world"))
     host.app = cast(Any, SimpleNamespace(
         page=None,
@@ -36,10 +35,7 @@ def test_explorer_quick_backup_uses_managed_backup_service(
         handle_exception=lambda error, title: None,
         hide_progress=lambda: None,
     ))
-    monkeypatch.setattr(
-        "app.ui.views.explorer.world_info_tab.threading.Thread",
-        _ImmediateThread,
-    )
+    del monkeypatch
 
     host._create_backup()
 

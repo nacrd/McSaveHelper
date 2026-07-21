@@ -6,12 +6,16 @@ geometry updates while the user pans or zooms.
 """
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Callable, Coroutine, Dict, Mapping, Optional, Tuple
 
 import flet as ft
 
+from app.services.execution_runtime import (
+    ExecutionLane,
+    ExecutionRuntime,
+    TaskPriority,
+)
 from app.ui.utils import ScheduledTask, safe_update
 from app.ui.views.explorer.map.surface_renderer import (
     MapSurfaceFrame,
@@ -59,6 +63,7 @@ class MapSurfaceLayer:
         self,
         service: RegionMapService,
         *,
+        execution_runtime: ExecutionRuntime,
         schedule_task: TaskScheduler,
         request_rebuild: Callable[[], None],
         is_active: Callable[[], bool],
@@ -72,6 +77,7 @@ class MapSurfaceLayer:
 
         Args:
             service: 区域地图数据与俯视瓦片服务。
+            execution_runtime: 应用级有界后台运行时。
             schedule_task: 将协程调度到 UI 任务循环。
             request_rebuild: 需要重绘时回调宿主。
             is_active: 图层所属页面是否仍活跃。
@@ -82,6 +88,7 @@ class MapSurfaceLayer:
             max_pixels: 表面像素预算上限。
         """
         self._service = service
+        self._execution_runtime = execution_runtime
         self._schedule_task = schedule_task
         self._request_rebuild = request_rebuild
         self._is_active = is_active
@@ -651,15 +658,23 @@ class MapSurfaceLayer:
         request: _RenderRequest,
     ) -> Optional[MapSurfaceFrame]:
         try:
-            return await asyncio.to_thread(
-                self._renderer.compose,
-                request.spec,
-                request.data,
-                request.tile_bytes,
-                request.tile_revisions,
-                request.colors,
-                cancel_check=lambda: not self._request_is_current(request),
+            handle = self._execution_runtime.submit(
+                "compose_map_surface",
+                lambda token: self._renderer.compose(
+                    request.spec,
+                    request.data,
+                    request.tile_bytes,
+                    request.tile_revisions,
+                    request.colors,
+                    cancel_check=lambda: (
+                        token.is_cancelled
+                        or not self._request_is_current(request)
+                    ),
+                ),
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.VISIBLE,
             )
+            return await handle.wait_async()
         except Exception:
             if self._request_token_matches(request):
                 self._blocked_spec = request.spec

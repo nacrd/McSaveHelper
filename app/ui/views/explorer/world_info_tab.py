@@ -1,7 +1,7 @@
 """World info tab mixin for ExplorerView."""
-import threading
 from typing import Any
 
+from app.services.execution_runtime import TaskPriority
 from app.ui.utils import run_on_ui
 from app.ui.views.explorer.world_info_panel import WorldInfoPanel
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
@@ -60,7 +60,11 @@ class WorldInfoTabMixin(ExplorerMixinHost):
                 finally:
                     run_on_ui(self.app.page, self.app.hide_progress)
 
-            threading.Thread(target=worker, daemon=True).start()
+            self._task_scope.submit(
+                "quick_backup",
+                lambda token: worker(),
+                priority=TaskPriority.INTERACTIVE,
+            )
         except Exception as ex:
             self.app.handle_exception(ex, title="创建备份失败")
 

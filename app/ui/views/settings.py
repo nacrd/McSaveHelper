@@ -21,6 +21,8 @@ from app.ui.utils import safe_update
 
 Translate = Callable[..., str]
 DialogCallback = Callable[[str, str], None]
+CacheSnapshot = Callable[[], Any]
+CacheClear = Callable[[], dict[str, int]]
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,9 @@ class SettingsViewDependencies:
     info_dialog: DialogCallback
     error_dialog: DialogCallback
     pick_directory: Callable[[], Optional[str]]
+    cache_snapshot: CacheSnapshot
+    clear_caches: CacheClear
+    cache_path: Callable[[], str]
 
 
 class SettingsView(ft.Column):
@@ -382,7 +387,7 @@ class SettingsView(ft.Column):
         body.controls.append(self._cache_summary_block())
         body.controls.append(self._cache_action_row())
         self._sections.append(_collapsible_section(
-            self._t("settings.cache.title", "地图缓存"),
+            self._t("settings.cache.title", "应用缓存"),
             body,
             expanded=True,
         ))
@@ -392,8 +397,8 @@ class SettingsView(ft.Column):
             content=ft.Text(
                 self._t(
                     "settings.cache.description",
-                    "区域地图俯视图会缓存到本地磁盘，加快再次打开速度。"
-                    " 可在此查看占用空间并清理。",
+                    "统一管理世界索引、纹理和地图渲染缓存；内存受总预算约束，"
+                    "地图瓦片仍持久化到本地以加快再次打开。",
                 ),
                 size=12,
                 color=THEME.text_muted,
@@ -446,25 +451,22 @@ class SettingsView(ft.Column):
 
     def _cache_summary_text(self) -> str:
         try:
-            from core.mca.tile_cache import get_cache_stats
             from app.ui.utils import format_size
 
-            s = get_cache_stats()
-            size_txt = format_size(int(s.get("total_bytes", 0) or 0))
-            files = int(s.get("file_count", 0) or 0)
-            mem = int(s.get("memory_chunks", 0) or 0)
+            snapshot = self._deps.cache_snapshot()
+            used = format_size(int(snapshot.bytes_used))
+            budget = format_size(int(snapshot.budget_bytes))
+            regions = len(snapshot.regions)
             return (
-                f"磁盘: {size_txt} · {files} 个瓦片文件"
-                f"  |  内存解码缓存: {mem} 个 chunk"
+                f"应用缓存: {used} / {budget}"
+                f"  |  {regions} 个受管分区"
             )
         except Exception as ex:
             return f"无法读取缓存信息: {ex}"
 
     def _cache_path_text(self) -> str:
         try:
-            from core.mca.tile_cache import get_cache_stats
-
-            return f"路径: {get_cache_stats().get('path', '')}"
+            return f"地图瓦片路径: {self._deps.cache_path()}"
         except Exception:
             return "路径: —"
 
@@ -480,10 +482,9 @@ class SettingsView(ft.Column):
 
     def _clear_map_cache(self) -> None:
         try:
-            from core.mca.tile_cache import clear_all_caches
             from app.ui.utils import format_size
 
-            result = clear_all_caches()
+            result = self._deps.clear_caches()
             deleted = int(result.get("deleted_files", 0) or 0)
             freed = format_size(int(result.get("freed_bytes", 0) or 0))
             mem = int(result.get("memory_chunks_cleared", 0) or 0)

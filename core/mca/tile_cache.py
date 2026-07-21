@@ -148,9 +148,14 @@ def get_cache_stats() -> Dict[str, Any]:
         pass
 
     mem_entries = 0
+    mem_bytes = 0
     try:
-        from core.mca.surface import chunk_decode_cache_size
+        from core.mca.surface import (
+            chunk_decode_cache_bytes,
+            chunk_decode_cache_size,
+        )
         mem_entries = int(chunk_decode_cache_size())
+        mem_bytes = int(chunk_decode_cache_bytes())
     except (ImportError, TypeError, ValueError, AttributeError, RuntimeError):
         mem_entries = 0
     except Exception:
@@ -163,6 +168,7 @@ def get_cache_stats() -> Dict[str, Any]:
         "max_files": _MAX_FILES,
         "algo_version": ALGO_VERSION,
         "memory_chunks": mem_entries,
+        "memory_bytes": mem_bytes,
     }
 
 

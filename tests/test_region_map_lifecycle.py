@@ -192,7 +192,7 @@ def test_close_releases_executor_and_rejects_new_scan(tmp_path) -> None:
 
     assert service._closed is True
     assert service._topview_executor is None
-    assert executor._shutdown is True
+    assert executor.is_closed is True
     with pytest.raises(RuntimeError, match="已关闭"):
         asyncio.run(service.start_silent_scan(str(tmp_path)))
 

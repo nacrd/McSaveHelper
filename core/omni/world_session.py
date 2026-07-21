@@ -52,6 +52,7 @@ class WorldSession:
         self._write_lease_factory = write_lease_factory
         self._backup_callback = backup_callback
         self._transaction_callback = transaction_callback
+        self._index_snapshot = index_snapshot
 
         self._scanner = WorldScanner(self.world_path, self.log)
         self._nbt_loader = NbtLoader(self.world_path, self.log)
@@ -114,7 +115,17 @@ class WorldSession:
         Returns:
             维度信息列表，每项包含 id, name, region_dir
         """
-        return self._scanner.scan_dimensions(self._region_files)
+        if self._index_snapshot is None:
+            return self._scanner.scan_dimensions(self._region_files)
+        return [
+            {
+                "id": dimension.id,
+                "name": dimension.name,
+                "region_dir": str(dimension.region_dir),
+                "coordinate_scale": dimension.coordinate_scale,
+            }
+            for dimension in self._index_snapshot.dimensions
+        ]
 
     # ════════════════════════════════════════════
     #  玩家数据访问
@@ -375,6 +386,7 @@ class WorldSession:
             log=self.log,
             write_lease_factory=self._write_lease_factory,
             backup_callback=self._backup_callback,
+            index_snapshot=self._index_snapshot,
             transaction_callback=self._transaction_callback,
         )
 

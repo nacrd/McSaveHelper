@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import flet as ft
 
@@ -97,7 +97,7 @@ class NbtCommitHandler:
 
     def _build_commit_preview_content(
         self,
-        changes: List[Any],
+        changes: Sequence[NbtChange],
     ) -> ft.Column:
         summary_controls: List[ft.Control] = []
         for index, change in enumerate(changes[:80]):

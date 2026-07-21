@@ -4,7 +4,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import threading
 from pathlib import Path
+from typing import cast
 
 from PIL import Image
 
@@ -67,9 +69,11 @@ def test_crop_face_png_from_synthetic_skin() -> None:
     assert face_bytes.startswith(b"\x89PNG")
     with Image.open(io.BytesIO(face_bytes)) as face:
         assert face.size == (32, 32)
-        pixel = face.getpixel((0, 0))
+        rgba = face.convert("RGBA")
+        pixel = cast(tuple[int, int, int, int], rgba.getpixel((0, 0)))
         assert pixel[0] > 200  # red channel
-        assert face.getpixel((16, 16))[0] > 200
+        center = cast(tuple[int, int, int, int], rgba.getpixel((16, 16)))
+        assert center[0] > 200
 
 
 def test_get_cached_path_reads_disk(tmp_path: Path) -> None:
@@ -98,3 +102,30 @@ def test_invalid_uuid_callback_none(tmp_path: Path) -> None:
     results: list[object] = []
     service.load_avatar_async("not-a-uuid", lambda path: results.append(path))
     assert results == [None]
+
+
+def test_avatar_fetch_uses_owned_fallback_runtime(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    service = PlayerAvatarService(cache_dir=tmp_path, enabled=True)
+    fetched = threading.Event()
+    worker_names: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "_fetch_and_cache",
+        lambda _uuid: worker_names.append(threading.current_thread().name)
+        or None,
+    )
+    try:
+        service.load_avatar_async(
+            "11111111222233334444555555555555",
+            lambda _path: fetched.set(),
+        )
+
+        assert fetched.wait(1)
+        assert worker_names[0].startswith("mcsavehelper-io-")
+    finally:
+        service.close()
+
+    assert service._execution_runtime.is_closed is True

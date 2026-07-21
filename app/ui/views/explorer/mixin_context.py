@@ -11,6 +11,7 @@ from app.models.nbt_edit import (
     NbtStageStore,
     NbtTarget,
 )
+from app.services.execution_runtime import OperationScope
 from app.services.region_map_service import RegionMapService
 from app.controllers.map_controller import MapController
 from core.omni.world_session import WorldSession
@@ -39,6 +40,8 @@ class ExplorerMixinHost:
     _current_dimension: str
     _dimension_region_dirs: Dict[str, str]
     _selected_region_coord: Optional[Tuple[int, int]]
+    _tabs_built: list[bool]
+    _task_scope: OperationScope
 
     _nbt_stage_store: NbtStageStore
     _map_service: RegionMapService
@@ -58,6 +61,11 @@ class ExplorerMixinHost:
     _chunk_z_field: ft.TextField
     _world_x_field: ft.TextField
     _world_z_field: ft.TextField
+
+    @property
+    def _t(self) -> Any:
+        """返回应用翻译回调。"""
+        return self.app.translate
 
     def _load_player_data(self, uuid: str) -> None:
         raise NotImplementedError

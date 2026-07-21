@@ -403,6 +403,12 @@
       "max_concurrent": "最大并发处理数 (1‑16)",
       "preserve_structure": "保留原始文件结构"
     },
+    "cache": {
+      "title": "应用缓存",
+      "description": "统一管理世界索引、纹理和地图渲染缓存；内存受总预算约束，地图瓦片仍持久化到本地以加快再次打开。",
+      "refresh": "刷新",
+      "clear": "清理缓存"
+    },
     "uuid": {
       "title": "自定义 UUID 映射",
       "description": "在此添加玩家名与 UUID 的映射，用于离线模式下的玩家数据转换。"

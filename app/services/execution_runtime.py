@@ -153,6 +153,18 @@ class OperationHandle(Generic[ResultT]):
         """
         return self._future.result(timeout=timeout)
 
+    async def wait_async(self) -> ResultT:
+        """在调用方事件循环中异步等待已提交任务。
+
+        不会创建新的工作线程；工作始终仍由提交时选定的运行时通道执行。
+
+        Returns:
+            后台操作返回的值。
+        """
+        import asyncio
+
+        return await asyncio.wrap_future(self._future)
+
     def add_done_callback(
         self,
         callback: Callable[[OperationHandle[ResultT]], None],

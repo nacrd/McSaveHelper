@@ -227,7 +227,9 @@ class EquipmentPreview(ft.Column):
             size=12,
             color=THEME.text_muted,
         )
-        equip_cells = [self._slot_rows[slot] for slot in self._slot_order]
+        equip_cells: list[ft.Control] = [
+            self._slot_rows[slot] for slot in self._slot_order
+        ]
         self.controls = [
             title,
             ft.Row(

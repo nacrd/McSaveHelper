@@ -1,7 +1,6 @@
 """Stats tab mixin for ExplorerView."""
-import threading
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import flet as ft
 import flet.canvas as cv
@@ -9,6 +8,7 @@ import flet.canvas as cv
 from app.ui.theme import THEME
 from app.ui.components.cards import card
 from app.ui.utils import run_on_ui
+from app.services.execution_runtime import ExecutionLane, TaskPriority
 from app.ui.views.explorer.utils import safe_update, format_size
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.services.world_stats_service import (
@@ -264,7 +264,7 @@ class StatsTabMixin(ExplorerMixinHost):
         self,
         items: List[Tuple[str, int]],
         total: int,
-        colors: List[str],
+        colors: Sequence[str],
     ) -> List[cv.Shape]:
         shapes: List[cv.Shape] = []
         start = -90.0
@@ -667,7 +667,12 @@ class StatsTabMixin(ExplorerMixinHost):
                 name_map=name_map,
             )
 
-        threading.Thread(target=run, daemon=True).start()
+        self._task_scope.submit(
+            "analyze_world_stats",
+            lambda token: run(),
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
+        )
 
     def _stats_name_map(self) -> dict[str, str | None]:
         """Prefer the already-loaded WorldSession name map."""

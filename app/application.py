@@ -178,8 +178,10 @@ class Application:
             stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
             dispose_views=lambda: self.view_manager.dispose(),
             dispose_file_dialogs=self._file_dialogs.close,
+            close_texture_service=self.texture.close,
             shutdown_execution_runtime=self.execution_runtime.shutdown,
             close_world_indexes=self.services.world_indexes.close,
+            close_cache_registry=self.services.cache_registry.close,
         ))
         self.window_manager.setup_window()
 
@@ -266,7 +268,31 @@ class Application:
             info_dialog=self.info_dialog,
             error_dialog=self.error_dialog,
             pick_directory=self.pick_directory,
+            cache_snapshot=self.services.cache_registry.stats,
+            clear_caches=self._clear_application_caches,
+            cache_path=self._map_cache_path,
         ))
+
+    def _clear_application_caches(self) -> dict[str, int]:
+        """清理应用内存缓存与持久化地图瓦片，返回 UI 摘要。"""
+        from core.mca.tile_cache import clear_all_caches
+
+        self.services.cache_registry.clear_all()
+        result = clear_all_caches()
+        return {
+            "deleted_files": int(result.get("deleted_files", 0) or 0),
+            "freed_bytes": int(result.get("freed_bytes", 0) or 0),
+            "memory_chunks_cleared": int(
+                result.get("memory_chunks_cleared", 0) or 0
+            ),
+        }
+
+    @staticmethod
+    def _map_cache_path() -> str:
+        """返回地图瓦片持久化目录，避免设置页反向依赖 core。"""
+        from core.mca.tile_cache import cache_dir
+
+        return str(cache_dir())
 
     def _apply_theme(self, theme: str) -> None:
         """将已持久化的主题选择应用到 Flet 壳层。"""
@@ -991,7 +1017,10 @@ class Application:
         """Create a map service owned by one Explorer view lifecycle."""
         from app.services.region_map_service import RegionMapService
 
-        return RegionMapService()
+        return RegionMapService(
+            self.execution_runtime,
+            cache_registry=self.services.cache_registry,
+        )
 
     @property
     def selected_view_id(self) -> Optional[str]:
