@@ -18,6 +18,7 @@ from .action_executor import ActionExecutor
 from ..region_utils import DimensionInfo
 from ..types import LogCallback
 from core.nbt import Compound
+from core.world_index import WorldIndexSnapshot
 
 
 class WorldSession:
@@ -31,6 +32,10 @@ class WorldSession:
             Callable[[Path], AbstractContextManager[Any]]
         ] = None,
         backup_callback: Optional[Callable[[Path], Path]] = None,
+        index_snapshot: Optional[WorldIndexSnapshot] = None,
+        transaction_callback: Optional[
+            Callable[[Path, Callable[[Path], None]], Any]
+        ] = None,
     ) -> None:
         """初始化会话：扫描目录、加载 level.dat 并装配队列。
 
@@ -39,11 +44,14 @@ class WorldSession:
             log: 日志回调 ``(message, level)``。
             write_lease_factory: 可选写租约工厂，用于提交阶段互斥。
             backup_callback: 可选提交前备份钩子，返回备份路径。
+            index_snapshot: 可选共享只读索引，避免重复目录扫描。
+            transaction_callback: 可选统一世界事务提交端口。
         """
         self.world_path = world_path.resolve()
         self.log = log or (lambda msg, lvl="INFO": None)
         self._write_lease_factory = write_lease_factory
         self._backup_callback = backup_callback
+        self._transaction_callback = transaction_callback
 
         self._scanner = WorldScanner(self.world_path, self.log)
         self._nbt_loader = NbtLoader(self.world_path, self.log)
@@ -57,11 +65,21 @@ class WorldSession:
         tracker = get_tracker()
 
         with tracker.track("存档加载", {"world": self.world_path.name}):
-            scan_result = self._scanner.scan_all()
-            self._player_files = scan_result["player_files"]
-            self._region_files = scan_result["region_files"]
-            self._data_files = scan_result["data_files"]
-            usercache = scan_result["usercache"]
+            if index_snapshot is None:
+                scan_result = self._scanner.scan_all()
+                self._player_files = scan_result["player_files"]
+                self._region_files = scan_result["region_files"]
+                self._data_files = scan_result["data_files"]
+                usercache = scan_result["usercache"]
+            else:
+                self._validate_index_snapshot(index_snapshot)
+                self._player_files = index_snapshot.player_file_map()
+                self._region_files = {
+                    key: value
+                    for key, value in index_snapshot.region_file_map().items()
+                }
+                self._data_files = list(index_snapshot.data_files)
+                usercache = index_snapshot.usercache_map()
 
             self._player_manager.initialize_names(
                 self._player_files,
@@ -315,6 +333,24 @@ class WorldSession:
         """
         actions = self._action_queue.get_queue()
         target = (dest_path or self.world_path).resolve()
+        if (
+            self._transaction_callback is not None
+            and actions
+            and target == self.world_path
+        ):
+            try:
+                self._transaction_callback(
+                    target,
+                    lambda staged: self._executor.apply_actions(
+                        actions,
+                        staged,
+                    ),
+                )
+                self._action_queue.clear_queue()
+                return True
+            except Exception as exc:
+                self.log(f"存档事务提交失败: {exc}", "ERROR")
+                return False
         lease = (
             self._write_lease_factory(target)
             if self._write_lease_factory
@@ -339,7 +375,18 @@ class WorldSession:
             log=self.log,
             write_lease_factory=self._write_lease_factory,
             backup_callback=self._backup_callback,
+            transaction_callback=self._transaction_callback,
         )
+
+    def _validate_index_snapshot(
+        self,
+        snapshot: WorldIndexSnapshot,
+    ) -> None:
+        """拒绝把其他世界的索引错误注入当前会话。"""
+        if snapshot.world_path != self.world_path:
+            raise ValueError(
+                f"世界索引路径不匹配: {snapshot.world_path} != {self.world_path}"
+            )
 
     # ════════════════════════════════════════════
     #  工具方法

@@ -3,13 +3,16 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from app.services.backup_service import BackupService
+from app.services.execution_runtime import ExecutionRuntime
 from app.ui.views.backup_center import BackupCenterView
 
 
 def _app(service: BackupService) -> Any:
+    runtime = ExecutionRuntime()
     return SimpleNamespace(
         services=SimpleNamespace(backup=service),
         translate=lambda key, default: default,
+        execution_runtime=runtime,
     )
 
 

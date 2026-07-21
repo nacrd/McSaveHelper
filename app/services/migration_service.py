@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
+from app.services.world_transaction import WorldTransactionService
 from core.batch_processor import (
     BatchCancelledError,
     BatchProcessor,
@@ -106,16 +107,19 @@ class MigrationService:
     def __init__(
         self,
         config: ConfigService,
-        backup_service: Optional[BackupService] = None,
+        backup_service: BackupService,
+        world_transactions: WorldTransactionService,
     ) -> None:
         """注入配置与备份能力；批量处理器按需创建。
 
         Args:
             config: 应用配置（目标版本、清理策略等）。
-            backup_service: 可选共享备份服务；缺省新建实例。
+            backup_service: 应用共享备份服务。
+            world_transactions: 应用共享世界发布事务。
         """
         self._config: ConfigService = config
-        self._backup_service = backup_service or BackupService()
+        self._backup_service = backup_service
+        self._world_transactions = world_transactions
         self._batch_processor: Optional[BatchProcessor] = None
         self._batch_worlds: List[Path] = []
         self._scan_result: str = ""
@@ -379,7 +383,6 @@ class MigrationService:
         manual = list(options.manual_names)
         with self._backup_service.exclusive_operation(output_path):
             self._raise_if_batch_cancelled(cancel_event)
-            self._backup_existing_destination_if_needed(output_path, log_cb)
             staging_root = Path(tempfile.mkdtemp(
                 prefix=f".mcsavehelper_migrate_{world_name}_",
                 dir=dest_path,
@@ -447,7 +450,7 @@ class MigrationService:
         log_cb: LogCallback,
         cancel_event: Optional[threading.Event],
     ) -> None:
-        from core.utils import publish_directory_tree, update_server_properties
+        from core.utils import update_server_properties
 
         if not (prepared_world / "level.dat").is_file():
             raise RuntimeError("迁移产物无效：缺少 level.dat")
@@ -461,24 +464,20 @@ class MigrationService:
                 "版本/平台转换失败，请查看日志获取详细信息"
             )
         self._raise_if_batch_cancelled(cancel_event)
-        publish_directory_tree(prepared_world, output_path)
-        update_server_properties(dest_path, world_name, log_cb)
-
-    def _backup_existing_destination_if_needed(
-        self,
-        output_path: Path,
-        log_cb: LogCallback,
-    ) -> None:
-        if not (output_path / "level.dat").is_file():
-            return
-        backup_record = self._backup_service.create_backup(
+        backup_record = self._world_transactions.publish_prepared(
+            prepared_world,
             output_path,
-            label="迁移覆盖前自动备份",
+            backup_label="迁移覆盖前自动备份",
+            cancel_check=(
+                cancel_event.is_set if cancel_event is not None else None
+            ),
         )
-        log_cb(
-            f"已备份现有目标: {backup_record.backup_path}",
-            "BACKUP",
-        )
+        if backup_record is not None:
+            log_cb(
+                f"已备份现有目标: {backup_record.backup_path}",
+                "BACKUP",
+            )
+        update_server_properties(dest_path, world_name, log_cb)
 
     def _run_migration_modes(
         self,

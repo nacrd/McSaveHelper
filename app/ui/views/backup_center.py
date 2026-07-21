@@ -1,7 +1,6 @@
 """Managed backup and restore center."""
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -13,6 +12,7 @@ from app.services.backup_service import (
     BackupService,
     BackupVerification,
 )
+from app.services.execution_runtime import TaskPriority
 from app.ui.components.buttons import btn_danger, btn_primary
 from app.ui.components.cards import card, placeholder
 from app.ui.components.fields import current_save_field, dropdown, text_field
@@ -43,6 +43,9 @@ class BackupCenterView(ft.Column):
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO, expand=True)
         self.app = app
         self.service = service or app.services.backup
+        self._task_scope = app.execution_runtime.create_scope(
+            "backup_center_view"
+        )
         self._busy = False
         self._generation = 0
         self._build_ui()
@@ -535,7 +538,11 @@ class BackupCenterView(ft.Column):
                 run_on_ui(self.app.page, self.app.hide_progress)
                 run_on_ui(self.app.page, self._set_busy, False)
 
-        threading.Thread(target=worker, daemon=True).start()
+        self._task_scope.submit(
+            "backup_operation",
+            lambda token: worker(),
+            priority=TaskPriority.INTERACTIVE,
+        )
 
     def _finish_success(
         self,
@@ -566,6 +573,7 @@ class BackupCenterView(ft.Column):
     def _cancel(self, event: ft.ControlEvent) -> None:
         del event
         self.service.cancel()
+        self._task_scope.cancel_all()
         self._cancel_button.disabled = True
         safe_update(self._cancel_button)
 
@@ -578,3 +586,8 @@ class BackupCenterView(ft.Column):
         self._generation += 1
         self._world_path_field.value = path
         self._refresh()
+
+    def dispose(self) -> None:
+        """取消备份操作并释放页面任务作用域。"""
+        self.service.cancel()
+        self._task_scope.close()

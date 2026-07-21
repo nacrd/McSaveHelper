@@ -17,6 +17,7 @@ from core.region_utils import (
 from core.scanner import scan_all_regions
 from core.types import LogCallback
 from core.utils import find_stats_dirs
+from core.world_index import WorldIndexSnapshot
 
 
 def _default_log(msg: str, lvl: str = "INFO") -> None:
@@ -175,6 +176,7 @@ class WorldStatsService:
         world_path: Path,
         progress_callback: Optional[StatsProgressCallback] = None,
         name_map: Optional[Dict[str, Optional[str]]] = None,
+        index_snapshot: Optional[WorldIndexSnapshot] = None,
     ) -> WorldStatistics:
         """分析存档并返回完整统计。
 
@@ -182,6 +184,7 @@ class WorldStatsService:
             world_path: 世界根目录。
             progress_callback: 可选进度回调 ``(0..1, stage)``。
             name_map: 可选 UUID→玩家名映射，优先于 usercache。
+            index_snapshot: 可选共享世界目录索引。
 
         Returns:
             WorldStatistics: 维度、玩家与区域汇总结果。
@@ -192,7 +195,10 @@ class WorldStatsService:
         with tracker.track("存档统计分析", {"world": world_path.name}):
             stats = WorldStatistics()
             self._report_progress(progress_callback, 0.02, "dimensions")
-            stats.dimension_stats = self.collect_dimension_sizes(world_path)
+            stats.dimension_stats = self.collect_dimension_sizes(
+                world_path,
+                index_snapshot=index_snapshot,
+            )
             self._report_progress(progress_callback, 0.08, "players")
             stats.player_stats = self.collect_player_playtimes(
                 world_path,
@@ -200,7 +206,11 @@ class WorldStatsService:
             )
             self._report_progress(progress_callback, 0.12, "scanning")
 
-            region_files = scan_all_regions(world_path)
+            region_files = (
+                list(index_snapshot.region_files)
+                if index_snapshot is not None
+                else scan_all_regions(world_path)
+            )
             stats.total_regions = len(region_files)
             tracker.increment_files(len(region_files))
             block_counter, entity_counter = self._analyze_all_regions(
@@ -313,9 +323,13 @@ class WorldStatsService:
     def collect_dimension_sizes(
         self,
         world_path: Path,
+        *,
+        index_snapshot: Optional[WorldIndexSnapshot] = None,
     ) -> List[DimensionSizeStats]:
         """按维度汇总区域文件数与字节数（轻量，不读区块内容）。"""
         results: List[DimensionSizeStats] = []
+        if index_snapshot is not None:
+            return self._dimension_sizes_from_index(index_snapshot)
         for dimension in discover_dimension_region_dirs(world_path):
             region_files = scan_region_dir(dimension.region_dir)
             total_bytes = 0
@@ -332,6 +346,28 @@ class WorldStatsService:
                     total_bytes=total_bytes,
                 )
             )
+        results.sort(key=lambda item: (-item.total_bytes, item.dimension_id))
+        return results
+
+    @staticmethod
+    def _dimension_sizes_from_index(
+        snapshot: WorldIndexSnapshot,
+    ) -> List[DimensionSizeStats]:
+        """从共享索引汇总维度文件数与字节数。"""
+        results = []
+        for dimension in snapshot.dimensions:
+            total_bytes = 0
+            for region_path in dimension.region_files:
+                try:
+                    total_bytes += region_path.stat().st_size
+                except OSError:
+                    continue
+            results.append(DimensionSizeStats(
+                dimension_id=dimension.id,
+                display_name=dimension.name,
+                region_count=len(dimension.region_files),
+                total_bytes=total_bytes,
+            ))
         results.sort(key=lambda item: (-item.total_bytes, item.dimension_id))
         return results
 

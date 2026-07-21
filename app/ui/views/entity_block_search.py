@@ -1,5 +1,4 @@
 """Entity/Block Search View - 实体/方块搜索视图（三栏布局重构版）"""
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
 
@@ -16,6 +15,7 @@ from app.services.entity_block_search_service import (
     EntityBlockSearchService,
     SearchResult,
 )
+from app.services.execution_runtime import ExecutionLane, TaskPriority
 from app.services.entity_block_search.constants import get_preset_options
 from app.services.entity_block_search.models import SearchCondition
 
@@ -66,6 +66,9 @@ class EntityBlockSearchView(ft.Column):
         self.app = app
         self._compact = compact
         self.service = EntityBlockSearchService()
+        self._task_scope = app.execution_runtime.create_scope(
+            "entity_block_search_view"
+        )
         self.expand = True
 
         self._searching = False
@@ -397,11 +400,12 @@ class EntityBlockSearchView(ft.Column):
             return
 
         self._set_searching_ui(True)
-        threading.Thread(
-            target=self._run_search_worker,
-            args=(condition,),
-            daemon=True,
-        ).start()
+        self._task_scope.submit(
+            "search",
+            lambda token: self._run_search_worker(condition),
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
+        )
 
     def _build_search_condition(self) -> SearchCondition | None:
         """Validate form inputs and return a search condition."""
@@ -607,3 +611,7 @@ class EntityBlockSearchView(ft.Column):
                     "导出成功", f"已导出 {len(self._search_results)} 个结果到：\n{path}")
         except Exception as ex:
             self.app.handle_exception(ex, title="导出失败")
+
+    def dispose(self) -> None:
+        """取消搜索任务并阻止页面释放后的新提交。"""
+        self._task_scope.close()

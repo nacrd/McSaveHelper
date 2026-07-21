@@ -7,6 +7,8 @@ from typing import Any, Iterator, cast
 import flet as ft
 
 from app.services.backup_service import BackupRecord, BackupService
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.world_index_service import WorldIndexRegistry
 from app.ui.views.backup_center import BackupCenterView
 from app.ui.views.compare import CompareView
 from app.ui.views.mappings import MappingsView
@@ -17,7 +19,11 @@ def _app(**values: object) -> Any:
     defaults: dict[str, object] = {
         "log": lambda message, level="INFO": None,
         "translate": lambda key, default: default,
-        "services": SimpleNamespace(backup=BackupService()),
+        "services": SimpleNamespace(
+            backup=BackupService(),
+            world_indexes=WorldIndexRegistry(),
+        ),
+        "execution_runtime": ExecutionRuntime(),
     }
     defaults.update(values)
     return SimpleNamespace(**defaults)

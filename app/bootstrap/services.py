@@ -2,17 +2,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Optional
 
-from app.services.config_service import ConfigService
 from app.services.backup_service import BackupService
-from app.services.save_repair_service import SaveRepairService
+from app.services.config_service import ConfigService
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.i18n_service import I18nService
 from app.services.item_service import ItemService
 from app.services.migration_service import MigrationService
+from app.services.save_repair_service import SaveRepairService
 from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
 from app.services.world_write_coordinator import WorldWriteCoordinator
+from app.services.world_index_service import WorldIndexRegistry
+from app.services.world_transaction import WorldTransactionService
 
 
 class ServiceInitializationError(RuntimeError):
@@ -43,6 +47,9 @@ class AppServices:
     backup: BackupService
     save_repair: SaveRepairService
     world_writes: WorldWriteCoordinator
+    execution_runtime: ExecutionRuntime
+    world_indexes: WorldIndexRegistry
+    world_transactions: WorldTransactionService
 
 
 @dataclass(frozen=True)
@@ -52,16 +59,22 @@ class ServiceFactories:
     config: Callable[[], ConfigService] = ConfigService
     i18n: Callable[[ConfigService], I18nService] = I18nService
     migration: Callable[
-        [ConfigService, BackupService],
+        [ConfigService, BackupService, WorldTransactionService],
         MigrationService,
     ] = MigrationService
     uuid: Callable[[], UUIDService] = UUIDService
     item: Callable[[], ItemService] = ItemService
     texture: Callable[[], TextureService] = TextureService
+    execution_runtime: Callable[[], ExecutionRuntime] = ExecutionRuntime
+    world_indexes: Callable[[], WorldIndexRegistry] = WorldIndexRegistry
+    world_transactions: Callable[
+        [WorldWriteCoordinator, BackupService, Callable[[Path], None]],
+        WorldTransactionService,
+    ] = WorldTransactionService
     world_writes: Callable[[], WorldWriteCoordinator] = WorldWriteCoordinator
     backup: Callable[[WorldWriteCoordinator], BackupService] = BackupService
     save_repair: Callable[
-        [BackupService],
+        [BackupService, WorldTransactionService],
         SaveRepairService,
     ] = SaveRepairService
 
@@ -82,11 +95,34 @@ def create_app_services(
     i18n = _create("i18n", selected.i18n, config)
     world_writes = _create("world_writes", selected.world_writes)
     backup = _create("backup", selected.backup, world_writes)
-    migration = _create("migration", selected.migration, config, backup)
+    execution_runtime = _create(
+        "execution_runtime",
+        selected.execution_runtime,
+    )
+    world_indexes = _create("world_indexes", selected.world_indexes)
+    world_transactions = _create(
+        "world_transactions",
+        selected.world_transactions,
+        world_writes,
+        backup,
+        world_indexes.invalidate,
+    )
+    migration = _create(
+        "migration",
+        selected.migration,
+        config,
+        backup,
+        world_transactions,
+    )
     uuid = _create("uuid", selected.uuid)
     item = _create("item", selected.item)
     texture = _create("texture", selected.texture)
-    save_repair = _create("save_repair", selected.save_repair, backup)
+    save_repair = _create(
+        "save_repair",
+        selected.save_repair,
+        backup,
+        world_transactions,
+    )
     return AppServices(
         config=config,
         i18n=i18n,
@@ -97,4 +133,7 @@ def create_app_services(
         backup=backup,
         save_repair=save_repair,
         world_writes=world_writes,
+        execution_runtime=execution_runtime,
+        world_indexes=world_indexes,
+        world_transactions=world_transactions,
     )

@@ -2,7 +2,6 @@
 
 支持存档检测（只读诊断）和存档修复（修改文件）。
 """
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,6 +20,7 @@ from app.services.save_repair_service import (
     RepairReport,
     DetectReport,
 )
+from app.services.execution_runtime import ExecutionLane, TaskPriority
 
 if TYPE_CHECKING:
     from app.application import Application
@@ -43,6 +43,9 @@ class SaveRepairView(ft.Column):
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
         self.service = service or app.services.save_repair
+        self._task_scope = app.execution_runtime.create_scope(
+            "save_repair_view"
+        )
         self.expand = True
         self._busy = False
         self._build_ui()
@@ -110,11 +113,12 @@ class SaveRepairView(ft.Column):
         self._world_info_card.visible = False
         safe_update(self._world_info_card)
 
-        threading.Thread(
-            target=self._detect_thread,
-            args=(world_path,),
-            daemon=True,
-        ).start()
+        self._task_scope.submit(
+            "detect_world",
+            lambda token: self._detect_thread(world_path),
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
+        )
 
     def _start_repair(self, e: ft.ControlEvent) -> None:
         if self._busy:
@@ -139,14 +143,16 @@ class SaveRepairView(ft.Column):
             "backup": bool(self._backup_checkbox.value),
         }
 
-        threading.Thread(
-            target=self._repair_thread,
-            args=(world_path, repair_options),
-            daemon=True,
-        ).start()
+        self._task_scope.submit(
+            "repair_world",
+            lambda token: self._repair_thread(world_path, repair_options),
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
+        )
 
     def _cancel(self, e: ft.ControlEvent) -> None:
         self.service.cancel()
+        self._task_scope.cancel_all()
         self._cancel_btn.disabled = True
         safe_update(self._cancel_btn)
 
@@ -290,3 +296,8 @@ class SaveRepairView(ft.Column):
         safe_update(self._world_path_field)
         safe_update(self._world_info_card)
         safe_update(self._detect_result_card)
+
+    def dispose(self) -> None:
+        """取消检测/修复任务并释放页面作用域。"""
+        self.service.cancel()
+        self._task_scope.close()

@@ -7,6 +7,8 @@ import pytest
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
 from app.services.migration_service import MigrationOptions, MigrationService
+from app.services.world_transaction import WorldTransactionService
+from app.services.world_write_coordinator import WorldWriteCoordinator
 
 
 def test_migration_options_parses_manual_names() -> None:
@@ -26,9 +28,11 @@ def test_migration_options_parses_manual_names() -> None:
 
 
 def _service(tmp_path: Path) -> tuple[MigrationService, BackupService]:
-    backup = BackupService()
+    coordinator = WorldWriteCoordinator()
+    backup = BackupService(coordinator)
+    transaction = WorldTransactionService(coordinator, backup)
     config = ConfigService(tmp_path / "config")
-    return MigrationService(config, backup), backup
+    return MigrationService(config, backup, transaction), backup
 
 
 def test_single_migration_builds_in_staging_and_backs_up_existing_target(

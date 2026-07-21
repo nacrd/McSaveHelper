@@ -153,6 +153,8 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
         stop_gui_optimizer=lambda: disposed.append("optimizer"),
         dispose_views=lambda: disposed.append("views"),
         dispose_file_dialogs=lambda: disposed.append("file_dialogs"),
+        shutdown_execution_runtime=lambda: disposed.append("runtime"),
+        close_world_indexes=lambda: disposed.append("world_indexes"),
     ))
 
     with patch("app.ui.utils.set_app_closing"), patch(
@@ -163,3 +165,5 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
     assert "optimizer" in disposed
     assert "views" in disposed
     assert "file_dialogs" in disposed
+    assert "runtime" in disposed
+    assert "world_indexes" in disposed

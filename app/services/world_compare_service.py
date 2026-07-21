@@ -7,11 +7,12 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from core.omni.world_session import WorldSession
 from core.scanner import scan_all_regions
 from core.types import LogCallback
+from core.world_index import WorldIndexSnapshot
 
 
 def _default_log(msg: str, lvl: str = "INFO") -> None:
@@ -42,13 +43,19 @@ class WorldCompareResult:
 class WorldCompareService:
     """对比两个 Java 版世界目录的元数据与区域签名。"""
 
-    def __init__(self, log: Optional[LogCallback] = None) -> None:
+    def __init__(
+        self,
+        log: Optional[LogCallback] = None,
+        index_provider: Optional[Callable[[Path], WorldIndexSnapshot]] = None,
+    ) -> None:
         """初始化对比服务。
 
         Args:
             log: 可选日志回调。
+            index_provider: 可选共享世界索引读取端口。
         """
         self.log: LogCallback = log or _default_log
+        self._index_provider = index_provider
 
     def compare_worlds(
         self,
@@ -64,12 +71,27 @@ class WorldCompareService:
         Returns:
             WorldCompareResult: 世界信息、玩家与区域差异汇总。
         """
-        left = WorldSession(left_path, log=self.log)
-        right = WorldSession(right_path, log=self.log)
+        left_index = self._get_index(left_path)
+        right_index = self._get_index(right_path)
+        left = WorldSession(
+            left_path,
+            log=self.log,
+            index_snapshot=left_index,
+        )
+        right = WorldSession(
+            right_path,
+            log=self.log,
+            index_snapshot=right_index,
+        )
 
         world_info = self._compare_world_info(left, right)
         players = self._compare_players(left, right)
-        regions = self._compare_regions(left_path, right_path)
+        regions = self._compare_regions(
+            left_path,
+            right_path,
+            left_index,
+            right_index,
+        )
         comparisons = world_info + players + regions
         changed = sum(1 for item in comparisons if not item.same)
         return WorldCompareResult(
@@ -128,15 +150,25 @@ class WorldCompareService:
         self,
         left_path: Path,
         right_path: Path,
+        left_index: Optional[WorldIndexSnapshot] = None,
+        right_index: Optional[WorldIndexSnapshot] = None,
     ) -> List[CompareItem]:
         """Compare MCA files by relative path using size+sha256 signatures."""
         left_regions = {
             path.relative_to(left_path).as_posix(): self._file_signature(path)
-            for path in scan_all_regions(left_path)
+            for path in (
+                left_index.region_files
+                if left_index is not None
+                else scan_all_regions(left_path)
+            )
         }
         right_regions = {
             path.relative_to(right_path).as_posix(): self._file_signature(path)
-            for path in scan_all_regions(right_path)
+            for path in (
+                right_index.region_files
+                if right_index is not None
+                else scan_all_regions(right_path)
+            )
         }
         keys = sorted(set(left_regions) | set(right_regions))
         return [
@@ -148,6 +180,12 @@ class WorldCompareService:
             )
             for key in keys
         ]
+
+    def _get_index(self, world_path: Path) -> Optional[WorldIndexSnapshot]:
+        """通过注入端口读取共享索引，未配置时保持兼容路径。"""
+        if self._index_provider is None:
+            return None
+        return self._index_provider(world_path)
 
     def _player_summary(
         self,
@@ -199,6 +237,7 @@ class WorldCompareService:
 
 def get_world_compare_service(
     log: Optional[LogCallback] = None,
+    index_provider: Optional[Callable[[Path], WorldIndexSnapshot]] = None,
 ) -> WorldCompareService:
     """返回绑定到调用方日志回调的对比服务实例。
 
@@ -208,4 +247,4 @@ def get_world_compare_service(
     Returns:
         WorldCompareService: 新服务实例。
     """
-    return WorldCompareService(log=log)
+    return WorldCompareService(log=log, index_provider=index_provider)

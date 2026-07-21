@@ -72,6 +72,25 @@ class ActionExecutor:
             self._log(f"提交失败，原存档保持不变: {exc}", "ERROR")
             return False
 
+    def apply_actions(
+        self,
+        actions: List[Action],
+        prepared_world: Path,
+    ) -> None:
+        """把队列操作应用到调用方拥有的暂存世界。
+
+        Args:
+            actions: 已验证的操作列表。
+            prepared_world: 世界事务创建的完整暂存副本。
+        """
+        with PerfTimer("action_executor.execute_queue"):
+            for index, action in enumerate(actions):
+                self._execute_action(action, prepared_world)
+                self._log(
+                    f"操作 {index + 1}/{len(actions)} 执行成功",
+                    "ACTION",
+                )
+
     def _create_backup(self, target_world: Path) -> None:
         if self._backup_callback:
             backup_path = self._backup_callback(target_world)

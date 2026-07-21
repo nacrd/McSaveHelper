@@ -6,6 +6,7 @@ import pytest
 
 from app.services.world_write_coordinator import WorldWriteCoordinator
 from core.omni.world_session import WorldSession
+from core.world_index import WorldIndexBuilder
 
 
 def _world(tmp_path: Path) -> Path:
@@ -32,6 +33,51 @@ def test_failed_later_action_does_not_publish_earlier_action(tmp_path: Path) -> 
     assert not (world / "marker.txt").exists()
     assert session.get_queue_size() == 2
     assert not list(tmp_path.glob(".mcsavehelper_commit_*"))
+
+
+def test_session_accepts_matching_shared_world_index(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    snapshot = WorldIndexBuilder().build(world)
+
+    session = WorldSession(world, index_snapshot=snapshot)
+
+    assert session.get_player_uuids() == []
+    assert session.get_dimensions() == []
+
+
+def test_session_rejects_index_from_another_world(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    other_root = tmp_path / "other-root"
+    other_root.mkdir()
+    other = _world(other_root)
+    snapshot = WorldIndexBuilder().build(other)
+
+    with pytest.raises(ValueError, match="索引路径不匹配"):
+        WorldSession(world, index_snapshot=snapshot)
+
+
+def test_session_uses_injected_world_transaction_for_commit(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    calls: list[Path] = []
+
+    def transact(target: Path, mutation) -> None:
+        calls.append(target)
+        mutation(target)
+
+    session = WorldSession(world, transaction_callback=transact)
+    session.queue_custom(
+        lambda target: (target / "marker.txt").write_text(
+            "committed",
+            encoding="utf-8",
+        )
+    )
+
+    assert session.commit() is True
+    assert calls == [world.resolve()]
+    assert (world / "marker.txt").read_text(encoding="utf-8") == "committed"
+    assert session.get_queue_size() == 0
 
 
 def test_publish_failure_keeps_original_world(

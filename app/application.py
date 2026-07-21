@@ -16,7 +16,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, List, Dict
+from typing import TYPE_CHECKING, Callable, Optional, List, Dict
 import flet as ft
 
 from core.logger import LogLevel, logger, setup_default_logging
@@ -25,6 +25,14 @@ from app.bootstrap.services import AppServices, create_app_services
 from app.adapters.file_dialogs import FileType, TkFileDialogs
 from app.models.save_context import CurrentSaveContext
 from app.models.save_store import CurrentSaveStore, RecentSave
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    OperationHandle,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
 from app.controllers.migration_controller import (
     MigrationController,
     MigrationControllerDependencies,
@@ -57,6 +65,7 @@ from app.core.save_context_manager import SaveContextManager
 if TYPE_CHECKING:
     from app.services.config_service import ConfigService
     from app.services.i18n_service import I18nService
+    from app.services.execution_runtime import ExecutionRuntime
     from app.services.item_service import ItemService
     from app.services.migration_service import MigrationService
     from app.services.region_map_service import RegionMapService
@@ -86,6 +95,7 @@ class Application:
         self._auto_lang_import_path: Optional[str] = None
         self._auto_lang_import_generation: int = 0
         self._auto_lang_import_lock = threading.Lock()
+        self._auto_lang_import_task: Optional[OperationHandle[None]] = None
 
         # 全局异常兜底
         page.on_error = self._on_page_error
@@ -116,6 +126,7 @@ class Application:
                 update_progress=self.update_progress,
                 set_progress_label=self.set_progress_label,
                 set_progress_value=self.set_progress_value,
+                start_worker=self._start_migration_worker,
             )
         )
 
@@ -167,6 +178,8 @@ class Application:
             stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
             dispose_views=lambda: self.view_manager.dispose(),
             dispose_file_dialogs=self._file_dialogs.close,
+            shutdown_execution_runtime=self.execution_runtime.shutdown,
+            close_world_indexes=self.services.world_indexes.close,
         ))
         self.window_manager.setup_window()
 
@@ -364,18 +377,26 @@ class Application:
             self._auto_lang_import_generation += 1
             generation = self._auto_lang_import_generation
 
-        thread = threading.Thread(
-            target=self._auto_import_mc_language_worker,
-            args=(save_path, generation),
-            name="auto-import-mc-lang",
-            daemon=True,
-        )
-        thread.start()
+        previous_task = self._auto_lang_import_task
+        if previous_task is not None:
+            previous_task.cancel()
+        try:
+            self._auto_lang_import_task = self.execution_runtime.submit(
+                "auto_import_minecraft_language",
+                lambda token: self._auto_import_mc_language_worker(
+                    save_path,
+                    generation,
+                    token,
+                ),
+            )
+        except (RuntimeClosedError, TaskQueueFullError) as exc:
+            self._handle_auto_import_failure(save_path, generation, exc)
 
     def _auto_import_mc_language_worker(
         self,
         save_path: str,
         generation: int,
+        cancellation: Optional[CancellationToken] = None,
     ) -> None:
         """解析 .minecraft 并导入 UI 语言对应的原版语言表。
 
@@ -383,6 +404,8 @@ class Application:
             save_path: 触发导入的存档绝对路径。
             generation: 调度时捕获的代数；过期结果会被丢弃。
         """
+        if cancellation is not None and cancellation.is_cancelled:
+            return
         try:
             locale = self.item.normalize_locale(self.i18n.current_language)
             configured = self.config.get_minecraft_dir()
@@ -400,7 +423,10 @@ class Application:
             self._handle_auto_import_failure(save_path, generation, exc)
             return
 
-        if not self._is_auto_import_current(save_path, generation):
+        if (
+            cancellation is not None
+            and cancellation.is_cancelled
+        ) or not self._is_auto_import_current(save_path, generation):
             return
 
         if result.count <= 0:
@@ -456,6 +482,35 @@ class Application:
     def _sync_config_to_migration(self) -> None:
         """同步配置到迁移参数"""
         self.migration_controller.sync_config_to_migration()
+
+    def _start_migration_worker(
+        self,
+        operation: str,
+        target: Callable[[str], None],
+        destination: str,
+    ) -> OperationHandle[None]:
+        """通过应用运行时启动迁移控制器的外层后台操作。"""
+        return self.execution_runtime.submit(
+            operation,
+            lambda cancellation: self._run_migration_target(
+                target,
+                destination,
+                cancellation,
+            ),
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
+        )
+
+    @staticmethod
+    def _run_migration_target(
+        target: Callable[[str], None],
+        destination: str,
+        cancellation: CancellationToken,
+    ) -> None:
+        """在任务开始与结束的安全点检查迁移取消请求。"""
+        cancellation.raise_if_cancelled()
+        target(destination)
+        cancellation.raise_if_cancelled()
 
     # ════════════════════════════════════════════
     #  UI 构建
@@ -926,6 +981,11 @@ class Application:
     def texture(self) -> TextureService:
         """方块/物品贴图导入与查询服务。"""
         return self.services.texture
+
+    @property
+    def execution_runtime(self) -> ExecutionRuntime:
+        """应用级有界后台任务运行时。"""
+        return self.services.execution_runtime
 
     def create_region_map_service(self) -> RegionMapService:
         """Create a map service owned by one Explorer view lifecycle."""

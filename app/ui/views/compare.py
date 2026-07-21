@@ -1,11 +1,11 @@
 """存档对比视图。"""
-import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import flet as ft
 
 from app.services.world_compare_service import CompareItem, get_world_compare_service
+from app.services.execution_runtime import TaskPriority
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
@@ -31,7 +31,11 @@ class CompareView(ft.Column):
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app = app
-        self._service = get_world_compare_service(log=app.log)
+        self._task_scope = app.execution_runtime.create_scope("compare_view")
+        self._service = get_world_compare_service(
+            log=app.log,
+            index_provider=app.services.world_indexes.get,
+        )
         self._comparing = False
         self._build()
 
@@ -110,11 +114,11 @@ class CompareView(ft.Column):
             self._result.controls.clear()
             self._comparing = True
             self.update()
-            threading.Thread(
-                target=self._run_compare,
-                args=paths,
-                daemon=True,
-            ).start()
+            self._task_scope.submit(
+                "compare_worlds",
+                lambda token: self._run_compare(*paths),
+                priority=TaskPriority.INTERACTIVE,
+            )
         except Exception as ex:
             self._handle_compare_error(ex)
 
@@ -198,3 +202,7 @@ class CompareView(ft.Column):
             # UI best-effort: control may already be unmounted.
             pass
         safe_update(self._left_field)
+
+    def dispose(self) -> None:
+        """取消页面拥有的对比任务；可重复调用。"""
+        self._task_scope.close()

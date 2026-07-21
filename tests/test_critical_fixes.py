@@ -174,7 +174,17 @@ class TestSaveNbtResourceManagement:
         from app.services.migration_service import MigrationService
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            service = MigrationService(ConfigService(Path(tmpdir) / "config"))
+            from app.services.backup_service import BackupService
+            from app.services.world_transaction import WorldTransactionService
+            from app.services.world_write_coordinator import WorldWriteCoordinator
+
+            coordinator = WorldWriteCoordinator()
+            backup = BackupService(coordinator)
+            service = MigrationService(
+                ConfigService(Path(tmpdir) / "config"),
+                backup,
+                WorldTransactionService(coordinator, backup),
+            )
             logs = []
 
             ok = service._apply_version_conversion(

@@ -1,5 +1,4 @@
 """Explorer View - 存档浏览器主视图"""
-import threading
 import flet as ft
 from typing import TYPE_CHECKING, Any, Optional, Dict, Tuple
 from pathlib import Path
@@ -33,6 +32,7 @@ from app.ui.views.explorer.explorer_helpers import (
     world_coords_to_region_chunk,
 )
 from app.controllers.map_controller import MapController
+from app.services.execution_runtime import TaskPriority
 
 
 class ExplorerView(
@@ -63,6 +63,9 @@ class ExplorerView(
         self._current_chunk_target: Optional[ChunkNbtTarget] = None
         self._nbt_stage_store = NbtStageStore()
         self._map_service = self.app.create_region_map_service()
+        self._task_scope = self.app.execution_runtime.create_scope(
+            "explorer_view"
+        )
         self._map_controller = MapController()
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
@@ -340,11 +343,15 @@ class ExplorerView(
             self._world_load_generation += 1
             generation = self._world_load_generation
 
-            threading.Thread(
-                target=self._load_world_worker,
-                args=(str(path), generation),
-                daemon=True,
-            ).start()
+            self._task_scope.cancel_all()
+            self._task_scope.submit(
+                "load_world",
+                lambda token: self._load_world_worker(
+                    str(path),
+                    generation,
+                ),
+                priority=TaskPriority.VISIBLE,
+            )
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
 
@@ -365,6 +372,14 @@ class ExplorerView(
         return WorldSession(
             path,
             log=log or self.app.log,
+            index_snapshot=self.app.services.world_indexes.get(path),
+            transaction_callback=lambda world, mutation: (
+                self.app.services.world_transactions.mutate(
+                    world,
+                    mutation,
+                    backup_label="NBT 提交前自动备份",
+                )
+            ),
             write_lease_factory=self.app.services.world_writes.reserve,
             backup_callback=lambda world: (
                 self.app.services.backup.create_backup(
@@ -420,6 +435,9 @@ class ExplorerView(
 
     def dispose(self) -> None:
         """Release session-scoped background resources."""
+        self._task_scope.close()
+        if hasattr(self, "_entity_block_search_view"):
+            self._entity_block_search_view.dispose()
         self._dispose_region_tab()
         self._map_service.close()
 

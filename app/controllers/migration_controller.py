@@ -1,10 +1,9 @@
 """Migration task orchestration with explicit application ports."""
 from __future__ import annotations
 
-import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from app.services.config_service import ConfigService
 from app.services.migration_service import MigrationService
@@ -15,22 +14,8 @@ Translate = Callable[..., str]
 DialogCallback = Callable[..., None]
 ExceptionCallback = Callable[..., None]
 WorkerTarget = Callable[[str], None]
-WorkerStarter = Callable[[WorkerTarget, str], None]
-
-
-def start_daemon_worker(target: WorkerTarget, argument: str) -> None:
-    """在守护线程中启动迁移 worker。
-
-    Args:
-        target: 线程目标，接收目标目录字符串。
-        argument: 目标输出目录。
-    """
-    threading.Thread(
-        target=target,
-        args=(argument,),
-        name="migration-worker",
-        daemon=True,
-    ).start()
+WorkerHandle = Any
+WorkerStarter = Callable[[str, WorkerTarget, str], WorkerHandle]
 
 
 @dataclass(frozen=True)
@@ -51,7 +36,7 @@ class MigrationControllerDependencies:
     update_progress: ProgressCallback
     set_progress_label: Callable[[str], None]
     set_progress_value: Callable[[float], None]
-    start_worker: WorkerStarter = start_daemon_worker
+    start_worker: WorkerStarter
 
 
 class MigrationController:
@@ -65,6 +50,7 @@ class MigrationController:
         """
         self.dependencies = dependencies
         self._operation_started_at: dict[str, float] = {}
+        self._active_operation: Optional[WorkerHandle] = None
 
     @property
     def config(self) -> ConfigService:
@@ -132,7 +118,11 @@ class MigrationController:
             target = (
                 self.run_batch_thread if run_batch else self.run_single_thread
             )
-            deps.start_worker(target, destination)
+            self._active_operation = deps.start_worker(
+                operation_id,
+                target,
+                destination,
+            )
         except Exception as exc:
             # UI 入口边界：恢复按钮并使能。
             deps.handle_exception(exc, title="启动转换失败")

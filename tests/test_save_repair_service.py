@@ -5,12 +5,23 @@ from typing import Any
 from app.services.backup_service import BackupError, BackupRecord, BackupService
 from app.services.save_repair.models import IssueLevel
 from app.services.save_repair_service import SaveRepairService
+from app.services.world_transaction import WorldTransactionService
+from app.services.world_write_coordinator import WorldWriteCoordinator
 
 
 class _FailingBackupService(BackupService):
     def create_backup(self, *args: Any, **kwargs: Any) -> BackupRecord:
         del args, kwargs
         raise BackupError("disk full")
+
+
+def _service(
+    backup: BackupService | None = None,
+) -> SaveRepairService:
+    coordinator = WorldWriteCoordinator()
+    selected_backup = backup or BackupService(coordinator)
+    transaction = WorldTransactionService(coordinator, selected_backup)
+    return SaveRepairService(selected_backup, transaction)
 
 
 def test_repair_aborts_before_mutation_when_backup_fails(
@@ -39,7 +50,8 @@ def test_repair_aborts_before_mutation_when_backup_fails(
         "app.services.save_repair_service.LevelRepairer",
         UnexpectedRepairer,
     )
-    service = SaveRepairService(_FailingBackupService())
+    failing_backup = _FailingBackupService(WorldWriteCoordinator())
+    service = _service(failing_backup)
 
     report = service.repair_world(world, backup=True)
 
@@ -57,7 +69,7 @@ def test_repair_without_mutation_options_reports_success(tmp_path: Path) -> None
     world.mkdir()
     (world / "level.dat").write_bytes(b"level")
 
-    report = SaveRepairService().repair_world(
+    report = _service().repair_world(
         world,
         fix_chunks=False,
         fix_players=False,
@@ -74,8 +86,13 @@ def test_repair_fails_cleanly_while_another_backup_operation_is_reserved(
     world = tmp_path / "world"
     world.mkdir()
     (world / "level.dat").write_bytes(b"level")
-    backup_service = BackupService()
-    service = SaveRepairService(backup_service)
+    coordinator = WorldWriteCoordinator()
+    backup_service = BackupService(coordinator)
+    transaction = WorldTransactionService(
+        coordinator,
+        backup_service,
+    )
+    service = SaveRepairService(backup_service, transaction)
     result = []
 
     with backup_service.exclusive_operation(world):

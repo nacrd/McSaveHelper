@@ -60,6 +60,8 @@ class WindowManagerDependencies:
         stop_gui_optimizer: 关闭时停止 GUI 优化后台任务。
         dispose_views: 关闭时释放视图资源。
         dispose_file_dialogs: 关闭时销毁 Tk 文件对话框工作线程。
+        shutdown_execution_runtime: 关闭应用级后台任务运行时。
+        close_world_indexes: 关闭共享世界只读索引缓存。
     """
 
     page: ft.Page
@@ -69,6 +71,8 @@ class WindowManagerDependencies:
     stop_gui_optimizer: Callable[[], None]
     dispose_views: Callable[[], None]
     dispose_file_dialogs: Callable[[], None] = lambda: None
+    shutdown_execution_runtime: Callable[[], None] = lambda: None
+    close_world_indexes: Callable[[], None] = lambda: None
 
 
 class WindowManager:
@@ -486,6 +490,8 @@ class WindowManager:
         self._stop_gui_optimizer()
         self._dispose_views()
         self._dispose_file_dialogs()
+        self._shutdown_execution_runtime()
+        self._close_world_indexes()
         self._shutdown_logger()
         self._destroy_window_async()
 
@@ -513,6 +519,21 @@ class WindowManager:
         """Destroy the platform file-dialog host on its owning thread."""
         try:
             self._deps.dispose_file_dialogs()
+        except Exception:
+            pass
+
+    def _shutdown_execution_runtime(self) -> None:
+        """取消并关闭应用持有的后台执行器。"""
+        try:
+            self._deps.shutdown_execution_runtime()
+        except Exception:
+            # 关闭流程必须继续执行，运行时清理失败只影响后台资源。
+            pass
+
+    def _close_world_indexes(self) -> None:
+        """关闭应用作用域的世界索引缓存。"""
+        try:
+            self._deps.close_world_indexes()
         except Exception:
             pass
 
