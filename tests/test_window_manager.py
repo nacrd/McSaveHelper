@@ -62,7 +62,7 @@ def test_responsive_layout_uses_attached_shell_host() -> None:
     page.window.width = 1400
     manager.apply_responsive_layout(1400, 900)
     assert sidebar.collapsed is False
-    assert sidebar.width == 280
+    assert sidebar.width == 240
     assert content.padding == 28
     assert compact_modes[-1].density == "roomy"
 
@@ -92,7 +92,7 @@ def test_responsive_layout_preserves_collapsed_user_preference() -> None:
     manager.apply_responsive_layout(1200, 820)
 
     assert sidebar.collapsed is True
-    assert sidebar.width == 248
+    assert sidebar.width == 224
 
 
 def test_refresh_responsive_layout_reads_current_window_size() -> None:

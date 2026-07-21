@@ -1,7 +1,7 @@
 """Card and empty-state components for application workspaces."""
 import flet as ft
 
-from app.ui.theme import THEME, mc_border
+from app.ui.theme import THEME, TEXT_BODY_SIZE, mc_border
 from flet import Icons
 
 from app.ui.icons import IconSet
@@ -61,7 +61,7 @@ def section_title(
                 ),
                 ft.Text(
                     text,
-                    size=14,
+                    size=TEXT_BODY_SIZE,
                     weight=ft.FontWeight.W_600,
                     color=THEME.text_primary,
                 ),
@@ -105,7 +105,7 @@ def placeholder(
                 ft.Container(height=6),
                 ft.Text(
                     subtitle,
-                    size=13,
+                    size=TEXT_BODY_SIZE,
                     color=THEME.text_muted,
                     text_align=ft.TextAlign.CENTER,
                 ),

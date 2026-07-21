@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Optional, Dict, Tuple
 from pathlib import Path
 
 from app.ui.theme import THEME
+from app.ui.theme import TEXT_CAPTION_SIZE, TEXT_SECONDARY_SIZE
 from app.models.nbt_edit import (
     ChunkNbtTarget,
     NbtEditFormat,
@@ -262,7 +263,7 @@ class ExplorerView(
         self._compact_mode = compact
         try:
             tab_width = 82 if compact else 100
-            tab_height = 38 if compact else 40
+            tab_height = 44
             for idx, btn in enumerate(self._tab_buttons):
                 btn.width = tab_width
                 btn.height = tab_height
@@ -270,7 +271,11 @@ class ExplorerView(
                     left=4, right=4, top=4, bottom=4) if compact else ft.Padding(
                     left=6, right=6, top=6, bottom=6)
                 if idx < len(self._tab_labels_widgets):
-                    self._tab_labels_widgets[idx].size = 10 if compact else 12
+                    self._tab_labels_widgets[idx].size = (
+                        TEXT_CAPTION_SIZE
+                        if compact
+                        else TEXT_SECONDARY_SIZE
+                    )
             self._tab_labels_row.spacing = 3 if compact else 4
             self._tab_bar.padding = ft.Padding(
                 left=3, right=3, top=3, bottom=3) if compact else ft.Padding(

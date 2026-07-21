@@ -3,7 +3,12 @@ from typing import Optional, Callable, Any, List, Union
 
 import flet as ft
 
-from app.ui.theme import THEME
+from app.ui.theme import (
+    THEME,
+    TEXT_BODY_SIZE,
+    TEXT_LABEL_SIZE,
+    TEXT_SECONDARY_SIZE,
+)
 
 
 def text_field(
@@ -43,13 +48,19 @@ def text_field(
         read_only=read_only,
         border_color=THEME.border_standard,
         focused_border_color=THEME.focus_ring,
-        text_size=13,
+        text_size=TEXT_BODY_SIZE,
         color=THEME.text_primary,
         bgcolor=THEME.bg_card,
         border_radius=6,
         cursor_color=THEME.focus_ring,
-        label_style=ft.TextStyle(color=THEME.text_secondary, size=12),
-        hint_style=ft.TextStyle(color=THEME.text_muted, size=12),
+        label_style=ft.TextStyle(
+            color=THEME.text_secondary,
+            size=TEXT_LABEL_SIZE,
+        ),
+        hint_style=ft.TextStyle(
+            color=THEME.text_muted,
+            size=TEXT_SECONDARY_SIZE,
+        ),
         content_padding=ft.Padding(left=14, right=14, top=10, bottom=10),
     )
     tf.expand = expand
@@ -100,7 +111,10 @@ def checkbox(
         on_change=on_change,
         check_color=THEME.text_invert,
         fill_color=THEME.accent,
-        label_style=ft.TextStyle(size=13, color=THEME.text_secondary),
+        label_style=ft.TextStyle(
+            size=TEXT_BODY_SIZE,
+            color=THEME.text_secondary,
+        ),
     )
 
 
@@ -117,7 +131,7 @@ def label(text: str, icon: str = "") -> ft.Text:
     display_text = f"{icon} {text}" if icon else text
     return ft.Text(
         display_text,
-        size=12,
+        size=TEXT_LABEL_SIZE,
         weight=ft.FontWeight.BOLD,
         color=THEME.text_secondary,
     )
@@ -168,10 +182,16 @@ def dropdown(
         border_color=THEME.border_standard,
         focused_border_color=THEME.focus_ring,
         color=THEME.text_primary,
-        text_size=text_size,
+        text_size=max(text_size, TEXT_BODY_SIZE),
         border_radius=border_radius,
-        label_style=ft.TextStyle(color=THEME.text_secondary, size=12),
-        hint_style=ft.TextStyle(color=THEME.text_muted, size=12),
+        label_style=ft.TextStyle(
+            color=THEME.text_secondary,
+            size=TEXT_LABEL_SIZE,
+        ),
+        hint_style=ft.TextStyle(
+            color=THEME.text_muted,
+            size=TEXT_SECONDARY_SIZE,
+        ),
         content_padding=ft.Padding(left=14, right=14, top=10, bottom=10),
     )
     dd.expand = expand

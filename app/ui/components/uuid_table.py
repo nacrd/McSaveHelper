@@ -5,7 +5,7 @@ from typing import Dict, List, Optional, Callable
 
 import flet as ft
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, TEXT_LABEL_SIZE
 from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
 from app.ui.icons import IconSet
 from app.ui.utils import safe_update as _safe_update
@@ -131,9 +131,11 @@ class UUIDMappingTable(ft.Column):
             content=ft.Row(
                 [
                     ft.Text("玩家名", weight=ft.FontWeight.BOLD, expand=2,
-                            color=THEME.text_secondary, size=12),
+                            color=THEME.text_secondary,
+                            size=TEXT_LABEL_SIZE),
                     ft.Text("UUID", weight=ft.FontWeight.BOLD, expand=3,
-                            color=THEME.text_secondary, size=12),
+                            color=THEME.text_secondary,
+                            size=TEXT_LABEL_SIZE),
                 ],
                 spacing=8,
             ),

@@ -31,6 +31,14 @@
     "more_actions": "更多操作"
   },
   "sidebar": {
+    "current_save": "当前存档",
+    "no_current_save": "未设置当前存档",
+    "set_current_save": "设置当前存档",
+    "recent_saves": "最近存档",
+    "no_recent_saves": "暂无最近存档",
+    "unnamed_save": "未命名存档",
+    "expand": "展开侧边栏",
+    "collapse": "收起侧边栏",
     "migrator": "存档转换",
     "explorer": "存档浏览器",
     "save_repair": "存档修复",

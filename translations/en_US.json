@@ -31,6 +31,14 @@
     "more_actions": "More actions"
   },
   "sidebar": {
+    "current_save": "Current Save",
+    "no_current_save": "No current save",
+    "set_current_save": "Set Current Save",
+    "recent_saves": "Recent Saves",
+    "no_recent_saves": "No recent saves",
+    "unnamed_save": "Unnamed Save",
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
     "migrator": "Batch Migration",
     "explorer": "Save Explorer",
     "compare": "Save Compare",

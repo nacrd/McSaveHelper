@@ -39,6 +39,11 @@ def test_short_wide_window_reduces_vertical_density_only() -> None:
 
     assert layout.density == "roomy"
     assert layout.sidebar_collapsed is False
-    assert layout.sidebar_width == 280
+    assert layout.sidebar_width == 240
     assert layout.is_compact is True
     assert layout.content_padding == 14
+
+
+def test_expanded_sidebar_stays_compact_across_desktop_widths() -> None:
+    assert resolve_responsive_layout(1100, 820).sidebar_width == 224
+    assert resolve_responsive_layout(1400, 820).sidebar_width == 240

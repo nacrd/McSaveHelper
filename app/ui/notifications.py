@@ -9,7 +9,7 @@
 from typing import Optional, Callable, List
 from enum import Enum
 import flet as ft
-from app.ui.theme import THEME
+from app.ui.theme import THEME, TEXT_SECONDARY_SIZE
 
 
 def _is_closing() -> bool:
@@ -385,7 +385,7 @@ class ProgressDialog:
 
         self.status_text = ft.Text(
             "",
-            size=12,
+            size=TEXT_SECONDARY_SIZE,
             color=THEME.text_secondary,
             text_align=ft.TextAlign.CENTER,
         )
@@ -500,7 +500,7 @@ def _destructive_content(
             ft.Divider(),
             ft.Text(
                 "此操作不可撤销！",
-                size=12,
+                size=TEXT_SECONDARY_SIZE,
                 color=THEME.error,
                 weight=ft.FontWeight.BOLD,
             ),

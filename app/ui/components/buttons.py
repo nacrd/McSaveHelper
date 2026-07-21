@@ -6,7 +6,7 @@ import flet as ft
 
 from app.ui.utils import safe_update
 
-from app.ui.theme import THEME
+from app.ui.theme import THEME, TEXT_BODY_SIZE
 
 
 class McButton(ft.Container):
@@ -218,7 +218,7 @@ class McButton(ft.Container):
             controls.append(ft.Container(width=0))
         controls.append(ft.Text(
             self._text,
-            size=13,
+            size=TEXT_BODY_SIZE,
             weight=ft.FontWeight.BOLD,
             color=text_color,
             no_wrap=True,

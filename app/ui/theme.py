@@ -9,6 +9,14 @@ from typing import Callable, List, Optional
 import flet as ft
 
 
+# Shared type scale for controls that appear across multiple views. Individual
+# data visualizations may use smaller labels, but normal UI copy should not.
+TEXT_BODY_SIZE = 14
+TEXT_SECONDARY_SIZE = 13
+TEXT_CAPTION_SIZE = 12
+TEXT_LABEL_SIZE = 13
+
+
 @dataclass(frozen=True)
 class ThemeColors:
     """Minecraft-inspired color palette"""
@@ -121,7 +129,7 @@ DARK_THEME = ThemeColors(
     text_primary="#F2F5F3",
     text_secondary="#C3CBC6",
     text_muted="#AAB7AF",
-    text_disabled="#59635D",
+    text_disabled="#718078",
     text_invert="#0E1510",
     # Terminal
     terminal_green="#78D28A",
@@ -194,8 +202,8 @@ LIGHT_THEME = ThemeColors(
     # Text
     text_primary="#172019",
     text_secondary="#425047",
-    text_muted="#59685F",
-    text_disabled="#9CA7A0",
+    text_muted="#4E5E54",
+    text_disabled="#7A867F",
     text_invert="#FFFFFF",
     # Terminal
     terminal_green="#2A8A2A",

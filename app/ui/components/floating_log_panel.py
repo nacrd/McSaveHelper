@@ -5,7 +5,13 @@ from typing import Any, Callable
 
 import flet as ft
 
-from app.ui.theme import THEME, mc_border, mc_shadow
+from app.ui.theme import (
+    THEME,
+    TEXT_CAPTION_SIZE,
+    TEXT_SECONDARY_SIZE,
+    mc_border,
+    mc_shadow,
+)
 from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.components.floating_position import (
@@ -69,7 +75,7 @@ class FloatingLogPanel(ft.Container):
         )
         self._status_text = ft.Text(
             "",
-            size=10,
+            size=TEXT_CAPTION_SIZE,
             color=THEME.text_secondary,
         )
         self._build_header_controls(title)
@@ -157,7 +163,7 @@ class FloatingLogPanel(ft.Container):
                 ),
                 ft.Text(
                     title,
-                    size=12,
+                    size=TEXT_SECONDARY_SIZE,
                     color=THEME.mc_gold,
                     weight=ft.FontWeight.BOLD,
                 ),
@@ -417,7 +423,7 @@ class FloatingLogPanel(ft.Container):
             ft.Text(
                 message,
                 color=color_map.get(level, THEME.text_primary),
-                size=11,
+                size=TEXT_CAPTION_SIZE,
                 font_family="monospace",
             )
             for message, level in batch

@@ -136,6 +136,7 @@ def _build_shell_sidebar(
         on_recent_save_select=dependencies.on_recent_save_select,
         recent_saves=list(dependencies.recent_saves),
         default_tab="explorer",
+        translate=dependencies.translate,
     )
 
 

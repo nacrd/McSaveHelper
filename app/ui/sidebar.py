@@ -48,7 +48,7 @@ class Sidebar(ft.Container):
     """
 
     COLLAPSED_WIDTH = 68
-    EXPANDED_WIDTH = 248
+    EXPANDED_WIDTH = 224
 
     def __init__(
         self,
@@ -60,8 +60,9 @@ class Sidebar(ft.Container):
         on_recent_save_select: Optional[Callable[[str], None]] = None,
         recent_saves: Optional[List[Dict[str, Any]]] = None,
         default_tab: Optional[str] = None,
-        width: int = 248,
+        width: int = 224,
         collapsed: bool = False,
+        translate: Optional[Callable[[str, str], str]] = None,
     ) -> None:
         """构建应用侧边栏。"""
         self._init_state(
@@ -75,6 +76,7 @@ class Sidebar(ft.Container):
             default_tab=default_tab,
             width=width,
             collapsed=collapsed,
+            translate=translate,
         )
         self._rebuild_all()
         super().__init__(
@@ -103,6 +105,7 @@ class Sidebar(ft.Container):
         default_tab: Optional[str],
         width: int,
         collapsed: bool,
+        translate: Optional[Callable[[str, str], str]],
     ) -> None:
         self._tabs: List[Dict[str, Any]] = list(tabs)
         self._on_tab_select: Callable[[str], None] = on_tab_select
@@ -111,6 +114,7 @@ class Sidebar(ft.Container):
         self._on_set_current_save = on_set_current_save
         self._on_recent_save_select = on_recent_save_select
         self._recent_saves: List[Dict[str, Any]] = list(recent_saves or [])
+        self._translate = translate or (lambda _key, default: default)
         self._selected_id: Optional[str] = default_tab or (
             tabs[0]["id"] if tabs else None
         )
@@ -123,25 +127,37 @@ class Sidebar(ft.Container):
             expand=True,
             auto_scroll=False,
         )
-        self._recent_save_col: ft.Column = ft.Column(spacing=6)
+        self._recent_save_col: ft.ListView = ft.ListView(
+            spacing=6,
+            padding=0,
+            height=40,
+        )
         self._recent_expanded: bool = False
-        self._recent_arrow: ft.Text = ft.Text(
-            "▶", size=9, color=THEME.text_muted,
+        self._recent_arrow: ft.Icon = ft.Icon(
+            IconSet.CHEVRON_RIGHT,
+            size=18,
+            color=THEME.text_secondary,
         )
         self._recent_body: ft.Container = ft.Container(
             content=self._recent_save_col,
             visible=self._recent_expanded,
         )
         self._current_save_name = ft.Text(
-            "未设置当前存档",
-            size=12,
-            color=THEME.text_muted,
+            self._t("sidebar.no_current_save", "未设置当前存档"),
+            size=13,
+            weight=ft.FontWeight.W_600,
+            color=THEME.text_secondary,
             no_wrap=True,
             overflow=ft.TextOverflow.ELLIPSIS,
         )
         self._header_container = ft.Container(expand=False)
         self._footer_container = ft.Container(expand=False)
         self._toggle_btn = ft.Container(expand=False)
+        self._current_save_path: Optional[str] = None
+
+    def _t(self, key: str, default: str) -> str:
+        """Translate one sidebar label with a stable fallback."""
+        return self._translate(key, default)
 
     def _build_root_column(self, collapsed: bool) -> ft.Column:
         col = ft.Column(spacing=0, expand=True)
@@ -179,6 +195,11 @@ class Sidebar(ft.Container):
         if self._collapsed:
             self._header_container.content = build_header_collapsed(
                 self._handle_set_current_save,
+                recent_menu=self._build_collapsed_recent_menu(),
+                set_current_tooltip=self._t(
+                    "sidebar.set_current_save",
+                    "设置当前存档",
+                ),
             )
         else:
             self._header_container.content = build_header_expanded(
@@ -187,6 +208,18 @@ class Sidebar(ft.Container):
                 recent_body=self._recent_body,
                 on_set_current_save=self._handle_set_current_save,
                 on_toggle_recent=self._toggle_recent,
+                current_save_label=self._t(
+                    "sidebar.current_save",
+                    "当前存档",
+                ),
+                set_current_label=self._t(
+                    "sidebar.set_current_save",
+                    "设置当前存档",
+                ),
+                recent_saves_label=self._t(
+                    "sidebar.recent_saves",
+                    "最近存档",
+                ),
             )
         self._header_container.padding = 0
 
@@ -200,6 +233,10 @@ class Sidebar(ft.Container):
         self._toggle_btn.content = build_toggle_button(
             collapsed=self._collapsed,
             on_toggle=lambda e: self._handle_toggle(),
+            tooltip=self._t(
+                "sidebar.expand" if self._collapsed else "sidebar.collapse",
+                "展开侧边栏" if self._collapsed else "收起侧边栏",
+            ),
         )
 
     # ════════════════════════════════════════════
@@ -344,47 +381,190 @@ class Sidebar(ft.Container):
             self._recent_save_col.controls.append(
                 ft.Text(
                     "暂无最近存档",
-                    size=11,
-                    color=THEME.text_muted,
+                    size=12,
+                    color=THEME.text_secondary,
                 )
             )
+            self._recent_save_col.height = 36
             return
         for save in self._recent_saves[:5]:
             self._recent_save_col.controls.append(
                 self._build_recent_save_item(save)
             )
+        self._recent_save_col.height = min(
+            190,
+            len(self._recent_save_col.controls) * 58,
+        )
 
     def _build_recent_save_item(self, save: Dict[str, Any]) -> ft.Container:
         """Build a single recent save item."""
         save_id = str(save.get("id") or save.get("path") or save.get("name") or "")
         save_name = str(save.get("name") or save.get("label") or save_id or "未命名存档")
         save_path = str(save.get("path") or save_id)
+        is_current = self._paths_match(save_path, self._current_save_path)
 
         return ft.Container(
             content=ft.Row(
                 [
-                    ft.Icon(IconSet.FOLDER, size=14, color=THEME.accent),
-                    ft.Text(
-                        save_name,
-                        size=11,
-                        color=THEME.text_secondary,
-                        no_wrap=True,
-                        overflow=ft.TextOverflow.ELLIPSIS,
+                    ft.Container(
+                        content=ft.Icon(
+                            IconSet.FOLDER_OPEN if is_current else IconSet.FOLDER,
+                            size=17,
+                            color=THEME.accent,
+                        ),
+                        width=28,
+                        height=28,
+                        alignment=ft.Alignment(0, 0),
+                        bgcolor=(
+                            THEME.accent_dim
+                            if is_current
+                            else THEME.bg_elevated
+                        ),
+                        border_radius=5,
+                    ),
+                    ft.Column(
+                        [
+                            ft.Text(
+                                save_name,
+                                size=12,
+                                weight=ft.FontWeight.W_600,
+                                color=THEME.text_primary,
+                                no_wrap=True,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                            ft.Text(
+                                save_path,
+                                size=11,
+                                color=THEME.text_secondary,
+                                no_wrap=True,
+                                overflow=ft.TextOverflow.ELLIPSIS,
+                            ),
+                        ],
+                        spacing=1,
                         expand=True,
                     ),
+                    *(
+                        [ft.Icon(IconSet.SUCCESS, size=16, color=THEME.success)]
+                        if is_current
+                        else []
+                    ),
                 ],
-                spacing=8,
+                spacing=7,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
             ),
-            padding=ft.Padding(left=10, right=10, top=7, bottom=7),
+            padding=ft.Padding(left=7, right=7, top=7, bottom=7),
             border_radius=6,
-            bgcolor=THEME.bg_primary,
-            border=ft.Border.all(1, THEME.border_subtle),
+            bgcolor=THEME.bg_elevated if is_current else THEME.bg_primary,
+            border=ft.Border.all(
+                1,
+                THEME.accent_dim if is_current else THEME.border_standard,
+            ),
             ink=True,
             tooltip=save_path,
             on_click=lambda e, sid=save_id: self._safe_select_recent_save(sid),
             animate=ft.Animation(150, ft.AnimationCurve.EASE_OUT),
         )
+
+    def _build_collapsed_recent_menu(self) -> ft.Container:
+        """Build a usable recent-save chooser for the icon rail."""
+        menu_items: List[ft.PopupMenuItem] = []
+        for save in self._recent_saves[:5]:
+            save_id = str(
+                save.get("id")
+                or save.get("path")
+                or save.get("name")
+                or ""
+            )
+            save_name = str(
+                save.get("name")
+                or save.get("label")
+                or self._t("sidebar.unnamed_save", "未命名存档")
+            )
+            save_path = str(save.get("path") or save_id)
+            menu_items.append(
+                ft.PopupMenuItem(
+                    content=self._build_recent_menu_label(
+                        save_name,
+                        save_path,
+                    ),
+                    on_click=lambda event, sid=save_id: (
+                        self._safe_select_recent_save(sid)
+                    ),
+                )
+            )
+        if not menu_items:
+            menu_items.append(
+                ft.PopupMenuItem(
+                    content=ft.Text(
+                        self._t("sidebar.no_recent_saves", "暂无最近存档"),
+                        size=12,
+                        color=THEME.text_secondary,
+                    ),
+                    disabled=True,
+                )
+            )
+        menu = ft.PopupMenuButton(
+            items=menu_items,
+            icon=IconSet.HISTORY,
+            bgcolor=THEME.bg_card,
+            icon_color=THEME.text_secondary,
+            shadow_color=THEME.shadow,
+            elevation=8,
+            shape=ft.RoundedRectangleBorder(radius=6),
+            tooltip=self._t("sidebar.recent_saves", "最近存档"),
+            width=44,
+            height=44,
+        )
+        return ft.Container(
+            content=menu,
+            width=44,
+            height=44,
+            alignment=ft.Alignment(0, 0),
+            bgcolor=THEME.bg_elevated,
+            border=ft.Border.all(1, THEME.border_standard),
+            border_radius=6,
+        )
+
+    @staticmethod
+    def _build_recent_menu_label(name: str, path: str) -> ft.Row:
+        """Build a readable two-line label for a collapsed recent item."""
+        return ft.Row(
+            [
+                ft.Icon(IconSet.FOLDER, size=18, color=THEME.accent),
+                ft.Column(
+                    [
+                        ft.Text(
+                            name,
+                            size=13,
+                            weight=ft.FontWeight.W_600,
+                            color=THEME.text_primary,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                        ft.Text(
+                            path,
+                            size=11,
+                            color=THEME.text_secondary,
+                            max_lines=1,
+                            overflow=ft.TextOverflow.ELLIPSIS,
+                        ),
+                    ],
+                    spacing=1,
+                ),
+            ],
+            width=240,
+            spacing=9,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+
+    @staticmethod
+    def _paths_match(left: str, right: Optional[str]) -> bool:
+        """Compare serialized Windows paths without touching the filesystem."""
+        if not left or not right:
+            return False
+        normalized_left = left.replace("/", "\\").rstrip("\\").casefold()
+        normalized_right = right.replace("/", "\\").rstrip("\\").casefold()
+        return normalized_left == normalized_right
 
     # ════════════════════════════════════════════
     #  Recent saves expand/collapse
@@ -394,7 +574,11 @@ class Sidebar(ft.Container):
         """Toggle the recent saves section expanded/collapsed."""
         self._recent_expanded = not self._recent_expanded
         self._recent_body.visible = self._recent_expanded
-        self._recent_arrow.value = "▼" if self._recent_expanded else "▶"
+        self._recent_arrow.icon = (
+            IconSet.CHEVRON_DOWN
+            if self._recent_expanded
+            else IconSet.CHEVRON_RIGHT
+        )
         safe_update(self._recent_body)
         safe_update(self._recent_arrow)
 
@@ -404,7 +588,7 @@ class Sidebar(ft.Container):
             return
         self._recent_expanded = True
         self._recent_body.visible = True
-        self._recent_arrow.value = "▼"
+        self._recent_arrow.icon = IconSet.CHEVRON_DOWN
         safe_update(self._recent_body)
         safe_update(self._recent_arrow)
 
@@ -447,6 +631,8 @@ class Sidebar(ft.Container):
         """Update the recent saves list."""
         self._recent_saves = list(saves or [])
         self._rebuild_recent_saves()
+        if self._collapsed:
+            self._rebuild_header()
         safe_update(self._recent_save_col)
 
     def set_current_save_name(
@@ -458,11 +644,17 @@ class Sidebar(ft.Container):
                 self._current_save_name.value = name
                 self._current_save_name.color = THEME.mc_gold
                 self._current_save_name.tooltip = path or name
+                self._current_save_path = path
                 self._expand_recent()
             else:
-                self._current_save_name.value = "未设置当前存档"
-                self._current_save_name.color = THEME.text_muted
+                self._current_save_name.value = self._t(
+                    "sidebar.no_current_save",
+                    "未设置当前存档",
+                )
+                self._current_save_name.color = THEME.text_secondary
                 self._current_save_name.tooltip = None
+                self._current_save_path = None
+            self._rebuild_recent_saves()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
@@ -505,7 +697,7 @@ class Sidebar(ft.Container):
             width: New width in pixels.
         """
         try:
-            self._sidebar_width = max(180, min(320, width))
+            self._sidebar_width = max(200, min(280, width))
             if not self._collapsed:
                 self.width = self._sidebar_width
                 self.update()

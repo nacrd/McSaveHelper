@@ -5,7 +5,7 @@ from typing import Callable, Iterable, List, NamedTuple
 
 import flet as ft
 
-from app.ui.theme import THEME, mc_border
+from app.ui.theme import THEME, TEXT_SECONDARY_SIZE, mc_border
 from app.ui.icons import IconSet
 
 
@@ -28,6 +28,10 @@ class PageHeader(ft.Container):
         status: ft.Control | None = None,
     ) -> None:
         """Build a responsive header with commands adjacent to its title."""
+        if isinstance(subtitle, ft.Text):
+            current_size = float(subtitle.size or 0)
+            if current_size < TEXT_SECONDARY_SIZE:
+                subtitle.size = TEXT_SECONDARY_SIZE
         self.action_row = ft.Row(
             spacing=6,
             alignment=ft.MainAxisAlignment.END,
@@ -147,7 +151,13 @@ def section_header(title: str, subtitle: str = "") -> ft.Row:
         ),
     ]
     if subtitle:
-        controls.append(ft.Text(subtitle, size=12, color=THEME.text_muted))
+        controls.append(
+            ft.Text(
+                subtitle,
+                size=TEXT_SECONDARY_SIZE,
+                color=THEME.text_muted,
+            )
+        )
     return ft.Row(
         controls,
         spacing=8,
@@ -172,7 +182,7 @@ def segmented_tab_bar(
         selected = idx == selected_index
         label = ft.Text(
             tab.label,
-            size=12,
+            size=TEXT_SECONDARY_SIZE,
             weight=ft.FontWeight.BOLD,
             color=THEME.text_primary if selected else THEME.text_secondary,
         )

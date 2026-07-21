@@ -14,6 +14,8 @@ _EMPTY_BORDER_SIDE = ft.BorderSide(0, ft.Colors.TRANSPARENT)
 
 def build_header_collapsed(
     on_set_current_save: Callable[..., None],
+    recent_menu: ft.Control | None = None,
+    set_current_tooltip: str = "设置当前存档",
 ) -> ft.Container:
     """Collapsed header with brand and persistent save-selection command."""
     return ft.Container(
@@ -41,15 +43,16 @@ def build_header_collapsed(
                     bgcolor=THEME.accent,
                     border_radius=6,
                     ink=True,
-                    tooltip="设置当前存档",
+                    tooltip=set_current_tooltip,
                     on_click=on_set_current_save,
                 ),
+                *([recent_menu] if recent_menu is not None else []),
             ],
             spacing=8,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
         ),
         alignment=ft.alignment.Alignment(0, 0),
-        height=112,
+        height=164 if recent_menu is not None else 112,
         padding=ft.Padding(top=8, bottom=8, left=0, right=0),
         bgcolor=THEME.bg_secondary,
         border=ft.Border(
@@ -64,10 +67,13 @@ def build_header_collapsed(
 def build_header_expanded(
     *,
     current_save_name: ft.Text,
-    recent_arrow: ft.Text,
+    recent_arrow: ft.Icon,
     recent_body: ft.Container,
     on_set_current_save: Callable[..., None],
     on_toggle_recent: Callable[..., None],
+    current_save_label: str = "当前存档",
+    set_current_label: str = "设置当前存档",
+    recent_saves_label: str = "最近存档",
 ) -> ft.Container:
     """Expanded sidebar header: brand, current save, and recent list."""
     return ft.Container(
@@ -77,18 +83,25 @@ def build_header_expanded(
                 [
                     _build_brand_row(),
                     ft.Container(height=16),
-                    _build_current_save_block(current_save_name),
-                    _build_set_current_save_button(on_set_current_save),
+                    _build_current_save_block(
+                        current_save_name,
+                        current_save_label,
+                    ),
+                    _build_set_current_save_button(
+                        on_set_current_save,
+                        set_current_label,
+                    ),
                     _build_recent_saves_block(
                         recent_arrow,
                         recent_body,
                         on_toggle_recent,
+                        recent_saves_label,
                     ),
                 ],
             ),
             spacing=0,
         ),
-        padding=ft.Padding(left=16, right=16, top=17, bottom=16),
+        padding=ft.Padding(left=14, right=14, top=14, bottom=14),
         bgcolor=THEME.bg_secondary,
         border=ft.Border(
             left=_EMPTY_BORDER_SIDE,
@@ -122,8 +135,8 @@ def _build_brand_row() -> ft.Row:
                     ),
                     ft.Text(
                         "Minecraft Save Toolkit",
-                        size=10,
-                        color=THEME.text_muted,
+                        size=11,
+                        color=THEME.text_secondary,
                     ),
                 ],
                 spacing=2,
@@ -135,7 +148,10 @@ def _build_brand_row() -> ft.Row:
     )
 
 
-def _build_current_save_block(current_save_name: ft.Text) -> ft.Container:
+def _build_current_save_block(
+    current_save_name: ft.Text,
+    label: str,
+) -> ft.Container:
     return ft.Container(
         content=ft.Column(
             [
@@ -145,8 +161,8 @@ def _build_current_save_block(current_save_name: ft.Text) -> ft.Container:
                             IconSet.SAVE, size=14, color=THEME.mc_grass,
                         ),
                         ft.Text(
-                            "当前存档",
-                            size=11,
+                            label,
+                            size=12,
                             weight=ft.FontWeight.W_600,
                             color=THEME.text_secondary,
                             font_family="monospace",
@@ -168,6 +184,7 @@ def _build_current_save_block(current_save_name: ft.Text) -> ft.Container:
 
 def _build_set_current_save_button(
     on_set_current_save: Callable[..., None],
+    label: str,
 ) -> ft.Container:
     return ft.Container(
         content=ft.Row(
@@ -178,7 +195,7 @@ def _build_set_current_save_button(
                     color=THEME.text_invert,
                 ),
                 ft.Text(
-                    "设置当前存档",
+                    label,
                     size=12,
                     weight=ft.FontWeight.W_600,
                     color=THEME.text_invert,
@@ -198,9 +215,10 @@ def _build_set_current_save_button(
 
 
 def _build_recent_saves_block(
-    recent_arrow: ft.Text,
+    recent_arrow: ft.Icon,
     recent_body: ft.Container,
     on_toggle_recent: Callable[..., None],
+    label: str,
 ) -> ft.Container:
     return ft.Container(
         content=ft.Column(
@@ -210,12 +228,12 @@ def _build_recent_saves_block(
                         [
                             ft.Icon(
                                 IconSet.CLOCK,
-                                size=12,
-                                color=THEME.text_muted,
+                                size=16,
+                                color=THEME.text_secondary,
                             ),
                             ft.Text(
-                                "最近存档",
-                                size=11,
+                                label,
+                                size=12,
                                 weight=ft.FontWeight.W_600,
                                 color=THEME.text_secondary,
                             ),
@@ -267,10 +285,13 @@ def build_toggle_button(
     *,
     collapsed: bool,
     on_toggle: Callable[..., None],
+    tooltip: str | None = None,
 ) -> ft.Container:
     """构建侧栏折叠/展开切换按钮。"""
     icon = IconSet.ARROW_RIGHT if collapsed else IconSet.ARROW_LEFT
-    tooltip = "展开侧边栏" if collapsed else "收起侧边栏"
+    resolved_tooltip = tooltip or (
+        "展开侧边栏" if collapsed else "收起侧边栏"
+    )
     return ft.Container(
         content=ft.Icon(icon, size=16, color=THEME.text_secondary),
         alignment=ft.alignment.Alignment(0, 0),
@@ -286,5 +307,5 @@ def build_toggle_button(
         ),
         ink=True,
         on_click=on_toggle,
-        tooltip=tooltip,
+        tooltip=resolved_tooltip,
     )
