@@ -91,8 +91,9 @@ def test_service_container_builds_in_dependency_order() -> None:
         events.append("cache_registry")
         return cache_registry
 
-    def create_world_indexes():
+    def create_world_indexes(cache_registry):
         events.append("world_indexes")
+        assert cache_registry is not None
         return world_indexes
 
     def create_world_transactions(

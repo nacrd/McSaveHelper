@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 
+from app.services.cache_registry import CacheRegistry
 from app.services.world_index_service import (
     WorldIndexRegistry,
     WorldIndexRegistryClosedError,
@@ -155,3 +156,20 @@ def test_registry_lru_invalidation_and_close(tmp_path: Path) -> None:
 def test_builder_rejects_non_world(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="有效 Minecraft 存档"):
         WorldIndexBuilder().build(tmp_path)
+
+
+def test_registry_registers_with_cache_registry(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    registry = CacheRegistry(budget_bytes=8 * 256 * 1024)
+    index_registry = WorldIndexRegistry(cache_registry=registry, max_entries=2)
+
+    snapshot = index_registry.get(world)
+    stats = registry.stats()
+    names = [item.name for item in stats.regions]
+    assert "world.index" in names
+    assert snapshot.world_path == world.resolve()
+
+    index_registry.close()
+    names_after = [item.name for item in registry.stats().regions]
+    assert "world.index" not in names_after
+    registry.close()

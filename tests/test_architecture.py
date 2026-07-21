@@ -276,8 +276,15 @@ def test_migration_controller_does_not_hold_application() -> None:
 
 
 def test_region_map_service_is_not_a_global_singleton() -> None:
-    service_path = PROJECT_ROOT / "app" / "services" / "region_map_service.py"
-    source = service_path.read_text(encoding="utf-8")
+    shim_path = PROJECT_ROOT / "app" / "services" / "region_map_service.py"
+    service_path = (
+        PROJECT_ROOT / "app" / "services" / "region_map" / "service.py"
+    )
+    source = (
+        shim_path.read_text(encoding="utf-8")
+        + "\n"
+        + service_path.read_text(encoding="utf-8")
+    )
 
     assert "def __new__" not in source
     assert "_region_map_service_instance" not in source

@@ -9,6 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from app.services.cache_registry import (
+    CachePolicy,
+    CacheRegistration,
+    CacheRegistry,
+    CacheStats,
+)
 from core.world_index import WorldIndexBuilder, WorldIndexSnapshot
 
 
@@ -31,16 +37,22 @@ class WorldIndexCacheStats:
 class WorldIndexRegistry:
     """按规范化世界路径缓存不可变索引并合并并发构建。"""
 
+    # 每个条目预算为近似元数据占用，用于全局缓存注册表预留。
+    ENTRY_BUDGET_BYTES = 256 * 1024
+    CACHE_NAME = "world.index"
+
     def __init__(
         self,
         builder: Optional[WorldIndexBuilder] = None,
         max_entries: int = 8,
+        cache_registry: Optional[CacheRegistry] = None,
     ) -> None:
         """创建有界索引注册表。
 
         Args:
             builder: 可替换扫描器，主要用于测试。
             max_entries: 最多保留的世界快照数量。
+            cache_registry: 可选的应用缓存预算注册表。
         """
         if max_entries < 1:
             raise ValueError("世界索引缓存至少保留一个条目")
@@ -54,6 +66,17 @@ class WorldIndexRegistry:
         self._misses = 0
         self._builds = 0
         self._evictions = 0
+        self._cache_registration: Optional[CacheRegistration] = None
+        if cache_registry is not None:
+            self._cache_registration = cache_registry.register_external(
+                self.CACHE_NAME,
+                CachePolicy(
+                    max_entries,
+                    max_entries * self.ENTRY_BUDGET_BYTES,
+                ),
+                self._cache_stats,
+                self.clear,
+            )
 
     def get(
         self,
@@ -149,6 +172,22 @@ class WorldIndexRegistry:
             if not future.done():
                 future.set_exception(error)
 
+    def _cache_stats(self) -> CacheStats:
+        """向缓存注册表暴露可观测统计。"""
+        with self._lock:
+            # 世界索引快照大小因存档而异；使用条目预算近似字节占用。
+            approx_bytes = len(self._entries) * self.ENTRY_BUDGET_BYTES
+            return CacheStats(
+                name=self.CACHE_NAME,
+                entries=len(self._entries),
+                bytes_used=approx_bytes,
+                max_entries=self._max_entries,
+                max_bytes=self._max_entries * self.ENTRY_BUDGET_BYTES,
+                hits=self._hits,
+                misses=self._misses,
+                evictions=self._evictions,
+            )
+
     def invalidate(self, world_path: Path | str) -> None:
         """显式丢弃一个世界的缓存快照。"""
         key = os.path.normcase(
@@ -183,6 +222,8 @@ class WorldIndexRegistry:
             self._entries.clear()
             futures = tuple(self._inflight.values())
             self._inflight.clear()
+            registration = self._cache_registration
+            self._cache_registration = None
         for future in futures:
             if not future.done():
                 future.set_exception(
@@ -190,6 +231,8 @@ class WorldIndexRegistry:
                         "世界索引注册表已经关闭"
                     )
                 )
+        if registration is not None:
+            registration.close()
 
     def _ensure_open_locked(self) -> None:
         """在锁内拒绝关闭后的读取。"""

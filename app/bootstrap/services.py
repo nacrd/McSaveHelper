@@ -54,6 +54,11 @@ class AppServices:
     cache_registry: CacheRegistry
 
 
+def _default_world_indexes(cache_registry: CacheRegistry) -> WorldIndexRegistry:
+    """默认工厂：把世界索引接入应用缓存预算。"""
+    return WorldIndexRegistry(cache_registry=cache_registry)
+
+
 @dataclass(frozen=True)
 class ServiceFactories:
     """可替换的服务工厂表，便于测试注入替身。"""
@@ -71,7 +76,9 @@ class ServiceFactories:
     ] = TextureService
     cache_registry: Callable[[], CacheRegistry] = CacheRegistry
     execution_runtime: Callable[[], ExecutionRuntime] = ExecutionRuntime
-    world_indexes: Callable[[], WorldIndexRegistry] = WorldIndexRegistry
+    world_indexes: Callable[[CacheRegistry], WorldIndexRegistry] = (
+        _default_world_indexes
+    )
     world_transactions: Callable[
         [WorldWriteCoordinator, BackupService, Callable[[Path], None]],
         WorldTransactionService,
@@ -105,7 +112,11 @@ def create_app_services(
         selected.execution_runtime,
     )
     cache_registry = _create("cache_registry", selected.cache_registry)
-    world_indexes = _create("world_indexes", selected.world_indexes)
+    world_indexes = _create(
+        "world_indexes",
+        selected.world_indexes,
+        cache_registry,
+    )
     world_transactions = _create(
         "world_transactions",
         selected.world_transactions,

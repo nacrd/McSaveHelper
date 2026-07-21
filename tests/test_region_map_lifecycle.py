@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.services import region_map_service as region_map_module
+from app.services.region_map import topview as region_map_topview
 from app.services.region_map_service import RegionMapService
 
 
@@ -232,7 +232,7 @@ def test_failed_tile_retries_once_then_stops_rebuild_loop(
     callbacks = []
     service.set_tile_ready_callback(callbacks.append)
     monkeypatch.setattr(
-        region_map_module,
+        region_map_topview,
         "render_region_topview",
         lambda *_args, **_kwargs: None,
     )
