@@ -211,25 +211,33 @@ class BackupCenterView(ft.Column):
     def _backup_row(self, record: BackupRecord) -> ft.Container:
         status_color = THEME.success if record.valid else THEME.error
         status_icon = IconSet.SUCCESS if record.valid else IconSet.ERROR
-        return ft.Container(
+        status = ft.Container(
+            content=ft.Icon(status_icon, size=24, color=status_color),
+            col={"xs": 2, "sm": 1},
+            alignment=ft.Alignment(0, 0),
+        )
+        description = ft.Container(
+            content=ft.Column(
+                self._backup_description_controls(record),
+                spacing=3,
+            ),
+            col={"xs": 10, "sm": 7},
+        )
+        actions = ft.Container(
             content=ft.Row(
-                [
-                    ft.Icon(status_icon, size=24, color=status_color),
-                    ft.Column(
-                        self._backup_description_controls(record),
-                        spacing=3,
-                        expand=True,
-                    ),
-                    ft.Row(
-                        self._backup_action_buttons(record),
-                        spacing=2,
-                        wrap=True,
-                        run_spacing=2,
-                    ),
-                ],
+                self._backup_action_buttons(record),
+                spacing=2,
+                wrap=True,
+                run_spacing=2,
+            ),
+            col={"xs": 12, "sm": 4},
+        )
+        return ft.Container(
+            content=ft.ResponsiveRow(
+                [status, description, actions],
+                columns=12,
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                wrap=True,
                 run_spacing=8,
             ),
             padding=ft.Padding(left=14, right=8, top=12, bottom=12),

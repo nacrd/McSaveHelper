@@ -71,15 +71,17 @@ class ServerPropertiesView(ft.Column):
         self.controls.append(self._page_header)
         self._path_field = text_field(
             label="服务器根目录或 server.properties",
-            hint_text="选择服务器根目录")
+            hint_text="选择服务器根目录",
+            expand=False,
+        )
+        self._path_field.col = {"xs": 12, "sm": 10}
+        browse_button = btn_ghost("浏览", on_click=self._pick)
+        browse_button.col = {"xs": 12, "sm": 2}
         self.controls.append(card(ft.Column([
-            ft.Row(
-                [
-                    self._path_field,
-                    btn_ghost("浏览", width=90, on_click=self._pick),
-                ],
+            ft.ResponsiveRow(
+                [self._path_field, browse_button],
+                columns=12,
                 spacing=10,
-                wrap=True,
                 run_spacing=8,
             ),
             ft.Text(
@@ -123,6 +125,7 @@ class ServerPropertiesView(ft.Column):
                 control = dropdown(
                     options=[ft.dropdown.Option(v) for v in ENUM_PROPERTIES[key]],
                     value=value,
+                    expand=False,
                     width=220,
                 )
             else:

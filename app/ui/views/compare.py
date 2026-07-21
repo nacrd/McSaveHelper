@@ -59,15 +59,24 @@ class CompareView(ft.Column):
 
         self._left_field = current_save_field(
             label="基准存档", hint_text="请通过侧边栏「设置当前存档」设置基准存档")
-        self._right_field = text_field(label="目标存档", hint_text="指定要对比的目标存档目录")
+        self._right_field = text_field(
+            label="目标存档",
+            hint_text="指定要对比的目标存档目录",
+            expand=False,
+        )
+        self._right_field.col = {"xs": 12, "sm": 9}
+        browse_button = btn_ghost(
+            "浏览对比目标",
+            on_click=lambda e: self._pick(self._right_field),
+        )
+        browse_button.col = {"xs": 12, "sm": 3}
         picker = ft.Column([self._left_field,
-                            ft.Row([self._right_field,
-                                    btn_ghost("浏览对比目标",
-                                              width=120,
-                                              on_click=lambda e: self._pick(self._right_field))],
-                                   spacing=10,
-                                   wrap=True,
-                                   run_spacing=8),
+                            ft.ResponsiveRow(
+                                [self._right_field, browse_button],
+                                columns=12,
+                                spacing=10,
+                                run_spacing=8,
+                            ),
                             ft.Text("设置两份存档后，可通过标题栏“开始对比”执行。",
                                     size=12,
                                     color=THEME.text_muted),
