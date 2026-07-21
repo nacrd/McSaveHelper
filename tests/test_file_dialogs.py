@@ -46,12 +46,27 @@ def test_close_is_idempotent_and_destroys_root() -> None:
 
     with tk_patch, fd_patch:
         dialogs = TkFileDialogs()
+        dialogs._ensure_worker_started()
         assert dialogs._ready.wait(timeout=2.0)
         dialogs.close()
         dialogs.close()  # second close must not raise
 
         assert root.destroyed is True
+        assert dialogs._thread is not None
         assert not dialogs._thread.is_alive()
+
+
+def test_construction_and_close_do_not_create_tcl_interpreter() -> None:
+    root = _FakeRoot()
+    fake_dialog = MagicMock()
+    tk_patch, fd_patch = _patch_tk(root, fake_dialog)
+
+    with tk_patch as tk_factory, fd_patch:
+        dialogs = TkFileDialogs()
+        dialogs.close()
+
+    tk_factory.assert_not_called()
+    assert dialogs._thread is None
 
 
 def test_pick_directory_returns_none_after_close() -> None:
@@ -61,7 +76,6 @@ def test_pick_directory_returns_none_after_close() -> None:
 
     with tk_patch, fd_patch:
         dialogs = TkFileDialogs()
-        assert dialogs._ready.wait(timeout=2.0)
         dialogs.close()
 
         assert dialogs.pick_directory("x") is None
@@ -82,9 +96,9 @@ def test_pick_directory_delegates_to_tk_on_worker_thread() -> None:
     with tk_patch, fd_patch:
         dialogs = TkFileDialogs()
         try:
-            assert dialogs._ready.wait(timeout=2.0)
             selected = dialogs.pick_directory("选择目录")
             assert selected == "C:/worlds/demo"
+            assert dialogs._thread is not None
             assert worker_ids == [dialogs._thread.ident]
             fake_dialog.askdirectory.assert_called_once()
             call_kwargs = fake_dialog.askdirectory.call_args.kwargs
@@ -104,7 +118,6 @@ def test_pick_file_and_save_file_pass_filters() -> None:
     with tk_patch, fd_patch:
         dialogs = TkFileDialogs()
         try:
-            assert dialogs._ready.wait(timeout=2.0)
             assert dialogs.pick_file("open", [("DAT", "*.dat")]) == "in.dat"
             assert (
                 dialogs.save_file("save", ".dat", [("DAT", "*.dat")])

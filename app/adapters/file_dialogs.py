@@ -1,13 +1,14 @@
 """Native desktop file-dialog adapter.
 
-Tkinter roots must be created and destroyed on the same thread. Creating a
-fresh ``Tk()`` on the Flet UI thread and letting process exit destroy it
-elsewhere triggers::
+Tkinter roots must be created and destroyed on the same thread. The adapter
+starts its Tk worker lazily so applications that never open a native picker do
+not create a Tcl interpreter merely by starting. Letting process exit destroy
+an interpreter elsewhere triggers::
 
     Tcl_AsyncDelete: async handler deleted by the wrong thread
 
-This adapter keeps a single hidden Tk root on a dedicated worker thread for
-the whole process lifetime and shuts it down explicitly via :meth:`close`.
+Once needed, a single hidden Tk root stays on its dedicated worker thread and
+is shut down explicitly via :meth:`close`.
 """
 from __future__ import annotations
 
@@ -108,24 +109,23 @@ class TkFileDialogs:
     _JOIN_TIMEOUT_S = 5.0
 
     def __init__(self) -> None:
-        """启动守护工作线程并等待 Tk root 就绪。"""
+        """Prepare lazy Tk worker state without creating a Tcl interpreter."""
         self._closed = False
         self._ready = threading.Event()
         self._requests: "queue.Queue[Optional[_DialogRequest]]" = queue.Queue()
-        self._thread = threading.Thread(
-            target=self._run_worker,
-            name="tk-file-dialogs",
-            daemon=True,
-        )
-        self._thread.start()
+        self._startup_lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
 
     def close(self) -> None:
         """停止 Tk 工作线程并销毁 root（幂等）。"""
         if self._closed:
             return
         self._closed = True
+        thread = self._thread
+        if thread is None:
+            return
         self._requests.put(None)
-        self._thread.join(timeout=self._JOIN_TIMEOUT_S)
+        thread.join(timeout=self._JOIN_TIMEOUT_S)
 
     def pick_directory(self, title: str) -> Optional[str]:
         """在 Tk 线程上选择目录。
@@ -224,6 +224,7 @@ class TkFileDialogs:
     def _show(self, method_name: str, **options: Any) -> Any:
         if self._closed:
             return None
+        self._ensure_worker_started()
         if not self._ready.wait(timeout=self._STARTUP_TIMEOUT_S):
             return None
         if self._closed:
@@ -235,6 +236,21 @@ class TkFileDialogs:
             return response.get(timeout=self._DIALOG_TIMEOUT_S)
         except queue.Empty:
             return None
+
+    def _ensure_worker_started(self) -> None:
+        """Create the Tk worker once, only when the first picker is opened."""
+        if self._closed or self._thread is not None:
+            return
+        with self._startup_lock:
+            if self._closed or self._thread is not None:
+                return
+            thread = threading.Thread(
+                target=self._run_worker,
+                name="tk-file-dialogs",
+                daemon=True,
+            )
+            self._thread = thread
+            thread.start()
 
     def _run_worker(self) -> None:
         root = None

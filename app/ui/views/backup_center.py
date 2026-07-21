@@ -79,15 +79,13 @@ class BackupCenterView(ft.Column):
                     ft.Row(
                         [self._create_button, self._cancel_button],
                         spacing=10,
-                        wrap=True,
-                        run_spacing=8,
+                        scroll=ft.ScrollMode.AUTO,
                     ),
                     ft.Row(
                         [self._retention_dropdown, self._prune_button],
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                        wrap=True,
-                        run_spacing=8,
+                        scroll=ft.ScrollMode.AUTO,
                     ),
                 ],
                 spacing=12,
@@ -101,8 +99,6 @@ class BackupCenterView(ft.Column):
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            wrap=True,
-            run_spacing=6,
         )
         self.controls = [
             self._page_header,
@@ -211,34 +207,24 @@ class BackupCenterView(ft.Column):
     def _backup_row(self, record: BackupRecord) -> ft.Container:
         status_color = THEME.success if record.valid else THEME.error
         status_icon = IconSet.SUCCESS if record.valid else IconSet.ERROR
-        status = ft.Container(
-            content=ft.Icon(status_icon, size=24, color=status_color),
-            col={"xs": 2, "sm": 1},
-            alignment=ft.Alignment(0, 0),
+        description = ft.Column(
+            self._backup_description_controls(record),
+            spacing=3,
+            expand=True,
         )
-        description = ft.Container(
-            content=ft.Column(
-                self._backup_description_controls(record),
-                spacing=3,
-            ),
-            col={"xs": 10, "sm": 7},
-        )
-        actions = ft.Container(
-            content=ft.Row(
-                self._backup_action_buttons(record),
-                spacing=2,
-                wrap=True,
-                run_spacing=2,
-            ),
-            col={"xs": 12, "sm": 4},
+        actions = ft.Row(
+            self._backup_action_buttons(record),
+            spacing=2,
         )
         return ft.Container(
-            content=ft.ResponsiveRow(
-                [status, description, actions],
-                columns=12,
+            content=ft.Row(
+                [
+                    ft.Icon(status_icon, size=24, color=status_color),
+                    description,
+                    actions,
+                ],
                 spacing=12,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                run_spacing=8,
             ),
             padding=ft.Padding(left=14, right=8, top=12, bottom=12),
             bgcolor=THEME.bg_card,

@@ -92,7 +92,9 @@ def test_view_manager_projects_view_actions_and_save_context() -> None:
     manager.apply_compact_layout(True)
     assert actions.spacing == 5
     assert getattr(actions.controls[0], "height") == 44
-    assert isinstance(view._page_header.content, ft.Column)
+    assert isinstance(view._page_header.content, ft.Row)
+    assert view._page_header.content.wrap is False
+    assert view._page_header.action_row.wrap is False
     assert view.compact_modes == [False, True]
 
     manager.apply_responsive_layout(resolve_responsive_layout(1400, 820))
@@ -100,6 +102,7 @@ def test_view_manager_projects_view_actions_and_save_context() -> None:
     assert getattr(actions.controls[0], "height") == 44
     assert getattr(actions.controls[0], "width") == 86
     assert isinstance(view._page_header.content, ft.Row)
+    assert view._page_header.content.wrap is False
     assert view.compact_modes[-1] is False
 
     manager.notify_current_view_save_selected("D:/other")

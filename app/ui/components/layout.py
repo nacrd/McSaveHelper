@@ -32,8 +32,6 @@ class PageHeader(ft.Container):
             spacing=6,
             alignment=ft.MainAxisAlignment.END,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            wrap=True,
-            run_spacing=6,
         )
         if actions is not None:
             self.action_row.controls = [actions]
@@ -46,18 +44,17 @@ class PageHeader(ft.Container):
             spacing=10,
             alignment=ft.MainAxisAlignment.END,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            wrap=True,
-            run_spacing=6,
         )
         self._identity = _build_page_identity(title, subtitle, icon)
+        self._identity.expand = True
+        self._layout = ft.Row(
+            [self._identity, self._trailing],
+            spacing=10,
+            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         super().__init__(
-            content=ft.Row(
-                [self._identity, self._trailing],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                wrap=True,
-                run_spacing=10,
-            ),
+            content=self._layout,
             padding=ft.Padding(left=0, right=0, top=0, bottom=14),
             border=ft.Border(
                 bottom=ft.BorderSide(1, THEME.border_subtle),
@@ -70,20 +67,10 @@ class PageHeader(ft.Container):
         Args:
             compact: Whether the header should stack its trailing controls.
         """
-        if compact:
-            self._trailing.alignment = ft.MainAxisAlignment.START
-            self.content = ft.Column(
-                [self._identity, self._trailing],
-                spacing=8,
-            )
-            return
-        self._trailing.alignment = ft.MainAxisAlignment.END
-        self.content = ft.Row(
-            [self._identity, self._trailing],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            wrap=True,
-            run_spacing=10,
+        self._trailing.alignment = (
+            ft.MainAxisAlignment.START
+            if compact
+            else ft.MainAxisAlignment.END
         )
 
 
@@ -165,8 +152,6 @@ def section_header(title: str, subtitle: str = "") -> ft.Row:
         controls,
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        wrap=True,
-        run_spacing=4,
     )
 
 

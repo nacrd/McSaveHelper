@@ -9,6 +9,7 @@ import flet as ft
 from app.services.backup_service import BackupRecord, BackupService
 from app.ui.views.backup_center import BackupCenterView
 from app.ui.views.compare import CompareView
+from app.ui.views.mappings import MappingsView
 from app.ui.views.server_properties import ServerPropertiesView
 
 
@@ -44,12 +45,20 @@ def _assert_wrap_children_do_not_expand(root: ft.Control) -> None:
         assert not expanded_children
 
 
+def _assert_no_wrap_layouts(root: ft.Control) -> None:
+    for control in _walk_controls(root):
+        assert not isinstance(control, ft.ResponsiveRow)
+        if isinstance(control, ft.Row):
+            assert control.wrap is False
+
+
 def test_path_forms_do_not_put_expanded_fields_in_wraps() -> None:
     compare_view = CompareView(cast(Any, _app()))
     properties_view = ServerPropertiesView(cast(Any, _app()))
 
     _assert_wrap_children_do_not_expand(compare_view)
     _assert_wrap_children_do_not_expand(properties_view)
+    _assert_no_wrap_layouts(properties_view)
 
 
 def test_backup_row_does_not_mix_wrap_and_flex_parent_data() -> None:
@@ -65,4 +74,27 @@ def test_backup_row_does_not_mix_wrap_and_flex_parent_data() -> None:
         backup_path=Path("C:/backups/test"),
     )
 
-    _assert_wrap_children_do_not_expand(view._backup_row(record))
+    row = view._backup_row(record)
+    _assert_wrap_children_do_not_expand(row)
+    _assert_no_wrap_layouts(row)
+
+
+def test_reported_top_level_pages_do_not_use_wrap_layouts() -> None:
+    app = cast(
+        Any,
+        _app(
+            item=SimpleNamespace(
+                get_custom_item_mappings=lambda: {},
+            ),
+            config=SimpleNamespace(custom_uuid_mappings={}),
+            update_uuid_mappings=lambda mappings: None,
+        ),
+    )
+    views = (
+        BackupCenterView(app),
+        MappingsView(app),
+        ServerPropertiesView(app),
+    )
+
+    for view in views:
+        _assert_no_wrap_layouts(view)

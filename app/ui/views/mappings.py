@@ -146,7 +146,7 @@ class MappingsView(ft.Column):
                 width=150,
                 on_click=self._import_assets,
             ),
-        ], spacing=8, wrap=True, run_spacing=8)
+        ], spacing=8, scroll=ft.ScrollMode.AUTO)
         return [
             ft.Container(
                 content=import_row,
@@ -189,8 +189,7 @@ class MappingsView(ft.Column):
         ],
             spacing=10,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            wrap=True,
-            run_spacing=8,
+            scroll=ft.ScrollMode.AUTO,
         )
         return [
             ft.Container(
@@ -366,7 +365,7 @@ class MappingsView(ft.Column):
         """Top-bar entry — same unified assets importer."""
         self._import_assets(e)
 
-    def _import_assets(self, e: ft.ControlEvent = None) -> None:
+    def _import_assets(self, e: Optional[ft.ControlEvent] = None) -> None:
         """Unified multi-select language + jar texture importer."""
         try:
             title = self._t(
@@ -419,11 +418,17 @@ class MappingsView(ft.Column):
         )
         self._item_mapping_status.color = THEME.mc_grass
 
-    def _import_from_local_minecraft(self, e: ft.ControlEvent = None) -> None:
+    def _import_from_local_minecraft(
+        self,
+        e: Optional[ft.ControlEvent] = None,
+    ) -> None:
         """Back-compat: unified importer with empty selection falls back to local."""
         self._import_assets(e)
 
-    def _import_from_jar_file(self, e: ft.ControlEvent = None) -> None:
+    def _import_from_jar_file(
+        self,
+        e: Optional[ft.ControlEvent] = None,
+    ) -> None:
         """Back-compat alias for the unified assets importer."""
         self._import_assets(e)
 
