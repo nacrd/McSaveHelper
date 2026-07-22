@@ -1,18 +1,31 @@
 """Managed backup and restore center."""
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 import flet as ft
 
+from app.controllers.backup_operation_controller import (
+    BackupOperationBusyError,
+    BackupOperationController,
+    BackupOperationRequest,
+    BackupOperationUiPorts,
+)
 from app.services.backup_service import (
     BackupError,
     BackupRecord,
     BackupService,
     BackupVerification,
 )
-from app.services.execution_runtime import TaskPriority
+from app.services.execution_runtime import (
+    CancellationToken,
+    OperationCancelledError,
+    OperationHandle,
+    ExecutionLane,
+    TaskPriority,
+)
 from app.ui.components.buttons import btn_danger, btn_primary
 from app.ui.components.cards import card, placeholder
 from app.ui.components.fields import current_save_field, dropdown, text_field
@@ -43,12 +56,24 @@ class BackupCenterView(ft.Column):
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO, expand=True)
         self.app = app
         self.service = service or app.services.backup
-        self._task_scope = app.execution_runtime.create_scope(
-            "backup_center_view"
-        )
+        self._task_scope = app.execution_runtime.create_scope("backup_center_view")
         self._busy = False
-        self._generation = 0
+        self._refresh_generation = 0
         self._build_ui()
+        self._operation_controller = BackupOperationController(
+            self._task_scope,
+            BackupOperationUiPorts(
+                dispatch=lambda callback: self._post_to_ui(callback),
+                get_world_path=self._current_world_path,
+                show_progress=lambda task: self.app.show_progress(task),
+                update_progress=lambda task, value: self.app.update_progress_with_task(
+                    task, value
+                ),
+                hide_progress=lambda: self.app.hide_progress(),
+                set_busy=self._set_busy,
+                set_cancel_pending=self._set_cancel_pending,
+            ),
+        )
 
     def _t(self, key: str, default: str) -> str:
         return self.app.translate(f"backup_center.{key}", default)
@@ -159,10 +184,16 @@ class BackupCenterView(ft.Column):
 
     def _selected_world(self) -> Path:
         value = str(self._world_path_field.value or "").strip()
-        world = Path(value) if value else Path()
-        if not value or not (world / "level.dat").is_file():
+        if not value:
             raise ValueError(self._t("select_valid_save", "请先选择有效存档"))
-        return world
+        # World validation (including level.dat I/O) belongs to BackupService's
+        # worker operation; the Flet event handler only normalizes the value.
+        return Path(value)
+
+    def _current_world_path(self) -> Optional[Path]:
+        """返回当前字段中的世界身份，空字段不触发用户提示。"""
+        value = str(self._world_path_field.value or "").strip()
+        return Path(value) if value else None
 
     def _refresh(self, event: Optional[ft.ControlEvent] = None) -> None:
         del event
@@ -173,21 +204,57 @@ class BackupCenterView(ft.Column):
             self._show_empty_state()
             safe_update(self)
             return
+        self._refresh_generation += 1
+        generation = self._refresh_generation
         try:
-            records = self.service.list_backups(world)
-        except Exception as exc:
-            self._summary.value = self._t("load_failed", "备份列表加载失败")
-            self._backup_list.controls = [
-                placeholder(
-                    icon=IconSet.ERROR,
-                    title=self._t("load_failed", "备份列表加载失败"),
-                    subtitle=str(exc),
-                    height=130,
+            handle = self._task_scope.submit(
+                "list_backups",
+                lambda token: self.service.list_backups(world),
+                lane=ExecutionLane.IO,
+                priority=TaskPriority.VISIBLE,
+            )
+            handle.add_done_callback(
+                lambda completed: self._finish_refresh(
+                    completed,
+                    world,
+                    generation,
                 )
-            ]
-            safe_update(self)
-            return
+            )
+        except Exception as exc:
+            self._post_to_ui(self._apply_refresh_failure, exc, generation)
 
+    def _finish_refresh(
+        self,
+        handle: OperationHandle[list[BackupRecord]],
+        world: Path,
+        generation: int,
+    ) -> None:
+        if handle.cancelled:
+            return
+        try:
+            records = handle.result()
+        except (CancelledError, OperationCancelledError):
+            return
+        except Exception as exc:
+            self._post_to_ui(self._apply_refresh_failure, exc, generation)
+            return
+        self._post_to_ui(
+            self._apply_refresh_success,
+            records,
+            world,
+            generation,
+        )
+
+    def _apply_refresh_success(
+        self,
+        records: list[BackupRecord],
+        world: Path,
+        generation: int,
+    ) -> None:
+        if generation != self._refresh_generation:
+            return
+        if str(self._world_path_field.value or "").strip() != str(world):
+            return
         self._summary.value = self._t("count", "共 {count} 个恢复点").format(
             count=len(records)
         )
@@ -195,6 +262,20 @@ class BackupCenterView(ft.Column):
             self._backup_list.controls = [self._backup_row(item) for item in records]
         else:
             self._show_empty_state()
+        safe_update(self)
+
+    def _apply_refresh_failure(self, error: Exception, generation: int) -> None:
+        if generation != self._refresh_generation:
+            return
+        self._summary.value = self._t("load_failed", "备份列表加载失败")
+        self._backup_list.controls = [
+            placeholder(
+                icon=IconSet.ERROR,
+                title=self._t("load_failed", "备份列表加载失败"),
+                subtitle=str(error),
+                height=130,
+            )
+        ]
         safe_update(self)
 
     def _show_empty_state(self) -> None:
@@ -315,7 +396,12 @@ class BackupCenterView(ft.Column):
         self._run_operation(
             world,
             self._t("creating", "正在创建备份..."),
-            lambda progress: self.service.create_backup(world, label, progress),
+            lambda token, progress: self.service.create_backup(
+                world,
+                label,
+                progress,
+                cancel_check=lambda: token.is_cancelled,
+            ),
             self._t("create_success", "备份创建完成"),
             clear_label=True,
         )
@@ -337,10 +423,11 @@ class BackupCenterView(ft.Column):
             lambda: self._run_operation(
                 world,
                 self._t("restoring", "正在恢复备份..."),
-                lambda progress: self.service.restore_backup(
+                lambda token, progress: self.service.restore_backup(
                     world,
                     record.backup_id,
                     progress,
+                    cancel_check=lambda: token.is_cancelled,
                 ),
                 self._t("restore_success", "备份恢复完成"),
             ),
@@ -363,7 +450,12 @@ class BackupCenterView(ft.Column):
             lambda: self._run_operation(
                 world,
                 self._t("deleting", "正在删除备份..."),
-                lambda progress: self._delete_record(world, record, progress),
+                lambda token, progress: self._delete_record(
+                    world,
+                    record,
+                    progress,
+                    token,
+                ),
                 self._t("delete_success", "备份已删除"),
             ),
             destructive=True,
@@ -376,11 +468,15 @@ class BackupCenterView(ft.Column):
             self.app.warn_dialog(self._t("notice", "提示"), str(exc))
             return
 
-        def verify(progress: Callable[[float, str], None]) -> BackupVerification:
+        def verify(
+            token: CancellationToken,
+            progress: Callable[[float, str], None],
+        ) -> BackupVerification:
             result = self.service.verify_backup(
                 world,
                 record.backup_id,
                 progress,
+                cancel_check=lambda: token.is_cancelled,
             )
             if not result.valid:
                 details = "; ".join(result.issues[:3])
@@ -412,10 +508,11 @@ class BackupCenterView(ft.Column):
             lambda: self._run_operation(
                 world,
                 self._t("pruning", "正在清理旧恢复点..."),
-                lambda progress: self._prune_records(
+                lambda token, progress: self._prune_records(
                     world,
                     keep_latest,
                     progress,
+                    token,
                 ),
                 self._prune_message,
             ),
@@ -427,9 +524,14 @@ class BackupCenterView(ft.Column):
         world: Path,
         keep_latest: int,
         progress: Callable[[float, str], None],
+        token: CancellationToken,
     ) -> object:
         progress(0.1, self._t("pruning", "正在清理旧恢复点..."))
-        removed = self.service.prune_backups(world, keep_latest)
+        removed = self.service.prune_backups(
+            world,
+            keep_latest,
+            cancel_check=lambda: token.is_cancelled,
+        )
         progress(1.0, self._t("prune_success", "旧恢复点清理完成"))
         return removed
 
@@ -458,9 +560,14 @@ class BackupCenterView(ft.Column):
         world: Path,
         record: BackupRecord,
         progress: Callable[[float, str], None],
+        token: CancellationToken,
     ) -> None:
         progress(0.2, self._t("deleting", "正在删除备份..."))
-        self.service.delete_backup(world, record.backup_id)
+        self.service.delete_backup(
+            world,
+            record.backup_id,
+            cancel_check=lambda: token.is_cancelled,
+        )
         progress(1.0, self._t("delete_success", "备份已删除"))
 
     def _show_confirmation(
@@ -502,64 +609,56 @@ class BackupCenterView(ft.Column):
         self,
         world: Path,
         task_name: str,
-        operation: Callable[[Callable[[float, str], None]], object],
+        operation: Callable[
+            [CancellationToken, Callable[[float, str], None]],
+            object,
+        ],
         success_message: str | Callable[[object], str],
         clear_label: bool = False,
     ) -> None:
         if self._busy:
             return
-        self._set_busy(True)
-        generation = self._generation
-
-        def worker() -> None:
-            try:
-                run_on_ui(self.app.page, self.app.show_progress, task_name)
-
-                def progress(value: float, message: str) -> None:
-                    run_on_ui(
-                        self.app.page,
-                        self.app.update_progress_with_task,
-                        message,
-                        value,
-                    )
-
-                result = operation(progress)
-                run_on_ui(
-                    self.app.page,
-                    self._finish_success,
-                    generation,
-                    success_message,
-                    result,
-                    clear_label,
+        try:
+            self._operation_controller.start(
+                BackupOperationRequest(
+                    world_path=world,
+                    task_name=task_name,
+                    operation=operation,
+                    on_success=lambda result: self._finish_success(
+                        success_message,
+                        result,
+                        clear_label,
+                    ),
+                    on_error=self._finish_error,
                 )
-            except Exception as exc:
-                run_on_ui(self.app.page, self._finish_error, exc)
-            finally:
-                run_on_ui(self.app.page, self.app.hide_progress)
-                run_on_ui(self.app.page, self._set_busy, False)
-
-        self._task_scope.submit(
-            "backup_operation",
-            lambda token: worker(),
-            priority=TaskPriority.INTERACTIVE,
-        )
+            )
+        except BackupOperationBusyError:
+            return
+        except Exception as exc:
+            self._finish_error(exc)
 
     def _finish_success(
         self,
-        generation: int,
         message: str | Callable[[object], str],
         result: object,
         clear_label: bool,
     ) -> None:
         if clear_label:
             self._label_field.value = ""
-        if generation == self._generation:
-            self._refresh()
+        self._refresh()
         resolved_message = message(result) if callable(message) else message
         self.app.info_dialog(self._t("completed", "完成"), resolved_message)
 
     def _finish_error(self, error: Exception) -> None:
         self.app.handle_exception(error, title=self._t("operation_failed", "备份操作失败"))
+
+    def _post_to_ui(self, callback: Callable[..., object], *args: object) -> None:
+        """投递 UI 回调；无页面测试环境直接执行。"""
+        page = getattr(self.app, "page", None)
+        if page is None:
+            callback(*args)
+            return
+        run_on_ui(page, callback, *args)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -570,12 +669,14 @@ class BackupCenterView(ft.Column):
         self._cancel_button.disabled = not busy
         safe_update(self)
 
-    def _cancel(self, event: ft.ControlEvent) -> None:
-        del event
-        self.service.cancel()
-        self._task_scope.cancel_all()
+    def _set_cancel_pending(self) -> None:
+        """取消请求发出后禁用按钮，等待安全检查点确认。"""
         self._cancel_button.disabled = True
         safe_update(self._cancel_button)
+
+    def _cancel(self, event: ft.ControlEvent) -> None:
+        del event
+        self._operation_controller.cancel()
 
     def on_save_selected(self, path: str) -> None:
         """响应侧边栏「当前存档」变更并刷新备份列表。
@@ -583,11 +684,14 @@ class BackupCenterView(ft.Column):
         Args:
             path: 新选中的世界目录路径。
         """
-        self._generation += 1
+        self._task_scope.cancel_all()
+        self._operation_controller.invalidate()
+        self._refresh_generation += 1
         self._world_path_field.value = path
         self._refresh()
 
     def dispose(self) -> None:
         """取消备份操作并释放页面任务作用域。"""
-        self.service.cancel()
+        self._operation_controller.close()
+        self._refresh_generation += 1
         self._task_scope.close()

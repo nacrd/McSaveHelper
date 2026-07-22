@@ -1,21 +1,61 @@
 """Migration task orchestration with explicit application ports."""
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, Callable, Optional
 
+from app.controllers.migration_lifecycle import (
+    MigrationAlreadyRunning,
+    MigrationLifecycle,
+    MigrationUiPublisher,
+    MigrationWorkerAdapter,
+    WorkerStarter,
+    WorkerTarget,
+)
+from app.controllers.migration_presenter import (
+    MigrationPresentationPorts,
+    MigrationResultPresenter,
+)
 from app.services.config_service import ConfigService
+from app.services.execution_runtime import (
+    CancellationToken,
+    OperationCancelledError,
+    OperationHandle,
+)
 from app.services.migration_service import MigrationService
+from core.batch_processor import BatchCancelledError
 from core.types import LogCallback, ProgressCallback
 
 
 Translate = Callable[..., str]
 DialogCallback = Callable[..., None]
 ExceptionCallback = Callable[..., None]
-WorkerTarget = Callable[[str], None]
-WorkerHandle = Any
-WorkerStarter = Callable[[str, WorkerTarget, str], WorkerHandle]
+UiPost = Callable[[Callable[[], None]], None]
+
+
+def _run_immediately(callback: Callable[[], None]) -> None:
+    """Default UI port used by isolated controller tests."""
+    callback()
+
+
+@dataclass(frozen=True)
+class MigrationRequest:
+    """Immutable configuration captured before a worker is submitted."""
+
+    destination: str
+    src_path: str
+    world_name: str
+    mode: str
+    offline: bool
+    clean: bool
+    pure_clean: bool
+    target_platform: str
+    target_version: str
+    manual_names: str
+    batch: bool
+    max_concurrent: int
+    batch_worlds: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -37,10 +77,16 @@ class MigrationControllerDependencies:
     set_progress_label: Callable[[str], None]
     set_progress_value: Callable[[float], None]
     start_worker: WorkerStarter
+    post_ui: UiPost = _run_immediately
 
 
 class MigrationController:
-    """协调迁移用例，不直接持有 Application 对象。"""
+    """协调迁移用例，不直接持有 Application 对象。
+
+    Worker callbacks never touch the UI ports directly.  They first pass
+    through ``post_ui`` and validate the request generation again when the
+    queued callback is executed.
+    """
 
     def __init__(self, dependencies: MigrationControllerDependencies) -> None:
         """初始化控制器。
@@ -49,8 +95,28 @@ class MigrationController:
             dependencies: 应用侧显式端口集合。
         """
         self.dependencies = dependencies
-        self._operation_started_at: dict[str, float] = {}
-        self._active_operation: Optional[WorkerHandle] = None
+        self._lifecycle = MigrationLifecycle[MigrationRequest]()
+        self._ui = MigrationUiPublisher(
+            self._lifecycle,
+            dependencies.post_ui,
+        )
+        self._presenter = MigrationResultPresenter(
+            MigrationPresentationPorts(
+                translate=dependencies.translate,
+                error_dialog=dependencies.error_dialog,
+                handle_exception=dependencies.handle_exception,
+                show_success=dependencies.show_success,
+                log=dependencies.log,
+                log_header=dependencies.log_header,
+                set_progress_label=dependencies.set_progress_label,
+            ),
+            self._ui.publish,
+        )
+
+    @property
+    def _active_operation(self) -> Optional[OperationHandle[None]]:
+        """兼容已有生命周期诊断测试的只读句柄视图。"""
+        return self._lifecycle.active_operation
 
     @property
     def config(self) -> ConfigService:
@@ -65,15 +131,6 @@ class MigrationController:
     def _t(self, key: str, default: str = "", **kwargs: Any) -> str:
         return self.dependencies.translate(key, default, **kwargs)
 
-    def _start_timing(self, operation_id: str) -> None:
-        self._operation_started_at[operation_id] = time.monotonic()
-
-    def _finish_timing(self, operation_id: str) -> float | None:
-        started_at = self._operation_started_at.pop(operation_id, None)
-        if started_at is None:
-            return None
-        return time.monotonic() - started_at
-
     def sync_config_to_migration(self) -> None:
         """将配置服务中的版本检测开关同步到运行时迁移参数。"""
         migration_config = self.config.migration
@@ -82,9 +139,10 @@ class MigrationController:
     def start(self) -> None:
         """校验配置并启动单次或批量迁移 worker。"""
         deps = self.dependencies
+        reserved = False
         try:
-            migration_config = self.config.migration
-            if not migration_config.src_path and not migration_config.batch_mode:
+            request = self._capture_request()
+            if not request.src_path and not request.batch:
                 deps.warn_dialog(
                     self._t("dialogs.warning", "提示"),
                     self._t(
@@ -93,7 +151,7 @@ class MigrationController:
                     ),
                 )
                 return
-            if not migration_config.dest_path.strip():
+            if not request.destination.strip():
                 deps.warn_dialog(
                     self._t("dialogs.warning", "提示"),
                     self._t(
@@ -103,31 +161,90 @@ class MigrationController:
                 )
                 return
 
+            generation = self._lifecycle.reserve_start()
+            reserved = True
             deps.set_start_enabled(False)
             self.try_update_page()
             self.save_config()
-            destination = migration_config.dest_path
-            run_batch = (
-                migration_config.batch_mode
-                and bool(self.migration.batch_worlds)
-            )
             operation_id = (
-                "migration_batch" if run_batch else "migration_single"
+                "migration_batch" if request.batch else "migration_single"
             )
-            self._start_timing(operation_id)
-            target = (
-                self.run_batch_thread if run_batch else self.run_single_thread
+            self._presenter.start_timing(operation_id)
+            worker: WorkerTarget = lambda token: self._run_request(
+                request,
+                generation,
+                token,
             )
-            self._active_operation = deps.start_worker(
+            legacy_target = (
+                self.run_batch_thread if request.batch else self.run_single_thread
+            )
+            self._lifecycle.remember_legacy_request(generation, request)
+            submission = MigrationWorkerAdapter.submit(
+                deps.start_worker,
                 operation_id,
-                target,
-                destination,
+                worker,
+                legacy_target,
+                request.destination,
             )
+            if submission.uses_legacy_target:
+                # The compatibility target owns its UI completion callback.
+                return
+            self._install_handle(generation, submission.handle)
+        except MigrationAlreadyRunning:
+            deps.warn_dialog(
+                self._t("dialogs.warning", "提示"),
+                self._t(
+                    "messages.migration_running",
+                    "已有迁移任务正在运行",
+                ),
+            )
+            return
         except Exception as exc:
-            # UI 入口边界：恢复按钮并使能。
+            if reserved:
+                self._rollback_start()
             deps.handle_exception(exc, title="启动转换失败")
             deps.set_start_enabled(True)
             self.try_update_page()
+
+    def _capture_request(self) -> MigrationRequest:
+        migration_config = self.config.migration
+        worlds = tuple(
+            Path(world).expanduser().absolute()
+            for world in self.migration.batch_worlds
+        )
+        return MigrationRequest(
+            destination=migration_config.dest_path,
+            src_path=migration_config.src_path,
+            world_name=migration_config.world_name,
+            mode=migration_config.mode,
+            offline=migration_config.offline_mode,
+            clean=migration_config.clean_mode,
+            pure_clean=migration_config.pure_clean_mode,
+            target_platform=migration_config.target_platform,
+            target_version=migration_config.target_version,
+            manual_names=migration_config.manual_names,
+            batch=bool(migration_config.batch_mode and worlds),
+            max_concurrent=self.config.max_concurrent,
+            batch_worlds=worlds,
+        )
+
+    def _install_handle(
+        self,
+        generation: int,
+        handle: Optional[OperationHandle[None]],
+    ) -> None:
+        outcome = self._lifecycle.install_handle(generation, handle)
+        if not outcome.accepted:
+            self._presenter.clear_timings()
+            if outcome.restore_ui:
+                self.dependencies.post_ui(self._finish_worker_ui)
+            return
+        assert handle is not None
+        handle.add_done_callback(self._schedule_finish)
+
+    def _rollback_start(self) -> None:
+        self._lifecycle.rollback_start()
+        self._presenter.clear_timings()
 
     def try_update_page(self) -> None:
         """尽力刷新页面；关闭中或未挂载时静默跳过。"""
@@ -146,169 +263,172 @@ class MigrationController:
             use_custom_mapping=self.config.use_custom_mapping,
         )
 
-    def run_single_thread(self, destination: str) -> None:
-        """后台线程：执行单存档迁移并反馈 UI。
-
-        Args:
-            destination: 目标输出目录。
-        """
-        deps = self.dependencies
-        migration_config = self.config.migration
+    def run_single_thread(
+        self,
+        destination: str,
+        token: Optional[CancellationToken] = None,
+    ) -> None:
+        """兼容旧 worker 入口；新运行时使用 token 目标闭包。"""
+        request, generation = self._legacy_request(destination, batch=False)
+        local_token = token or CancellationToken()
         try:
-            deps.log_header(
-                self._t("messages.migration_started", "开始迁移任务")
+            self._run_request(request, generation, local_token)
+        finally:
+            self._post_legacy_finish(generation)
+
+    def run_batch_thread(
+        self,
+        destination: str,
+        token: Optional[CancellationToken] = None,
+    ) -> None:
+        """兼容旧 worker 入口；新运行时使用 token 目标闭包。"""
+        request, generation = self._legacy_request(destination, batch=True)
+        local_token = token or CancellationToken()
+        try:
+            self._run_request(request, generation, local_token)
+        finally:
+            self._post_legacy_finish(generation)
+
+    def _legacy_request(
+        self,
+        destination: str,
+        *,
+        batch: bool,
+    ) -> tuple[MigrationRequest, int]:
+        request, generation = self._lifecycle.resolve_legacy_request(
+            lambda stored: stored.destination == destination
+        )
+        if request is not None:
+            return request, generation
+        request = self._capture_request()
+        if request.batch != batch:
+            request = replace(request, batch=batch)
+        return request, generation
+
+    def _run_request(
+        self,
+        request: MigrationRequest,
+        generation: int,
+        token: CancellationToken,
+    ) -> None:
+        if request.batch:
+            self._run_batch(request, generation, token)
+        else:
+            self._run_single(request, generation, token)
+
+    def _run_single(
+        self,
+        request: MigrationRequest,
+        generation: int,
+        token: CancellationToken,
+    ) -> None:
+        deps = self.dependencies
+        try:
+            self._ui.publish(
+                generation,
+                token,
+                deps.log_header,
+                self._t("messages.migration_started", "开始迁移任务"),
             )
             output_path = self.migration.run_single(
-                src=migration_config.src_path,
-                dest=destination,
-                world_name=migration_config.world_name,
-                mode=migration_config.mode,
-                offline=migration_config.offline_mode,
-                clean=migration_config.clean_mode,
-                pure_clean=migration_config.pure_clean_mode,
-                target_platform=migration_config.target_platform,
-                target_version=migration_config.target_version,
-                manual_names_str=migration_config.manual_names,
-                log_cb=deps.log,
-                progress_cb=deps.update_progress,
-            )
-            self._report_single_success(output_path)
-        except Exception as exc:
-            self._report_single_failure(exc)
-        finally:
-            self._finish_worker_ui()
-
-    def run_batch_thread(self, destination: str) -> None:
-        """后台线程：执行批量迁移并反馈 UI。
-
-        Args:
-            destination: 批量目标输出目录。
-        """
-        deps = self.dependencies
-        migration_config = self.config.migration
-        try:
-            deps.log_header(
-                self._t("messages.batch_migration_started", "开始批量处理")
-            )
-            self.save_config()
-            results = self.migration.run_batch(
-                dest_dir=destination,
-                mode=migration_config.mode,
-                offline=migration_config.offline_mode,
-                clean=migration_config.clean_mode,
-                pure_clean=migration_config.pure_clean_mode,
-                target_platform=migration_config.target_platform,
-                target_version=migration_config.target_version,
-                manual_names_str=migration_config.manual_names,
-                max_concurrent=self.config.max_concurrent,
-                log_cb=deps.log,
-                progress_cb=deps.update_progress,
-            )
-            self._report_batch_success(results)
-        except Exception as exc:
-            self._report_batch_failure(exc)
-        finally:
-            self._finish_worker_ui()
-
-    def _report_single_success(self, output_path: str) -> None:
-        deps = self.dependencies
-        elapsed = self._finish_timing("migration_single")
-        if elapsed is not None:
-            deps.log(f"迁移耗时: {elapsed:.2f}秒", "INFO")
-        deps.log_header(self._t("messages.migration_complete", "迁移完成"))
-        success_message = self._t(
-            "messages.migration_success",
-            "迁移完成！输出目录: {output_path}",
-            output_path=output_path,
-        )
-        deps.log(success_message, "SUCCESS")
-        deps.set_progress_label(self._t("top_bar.completed", "已完成"))
-        deps.show_success(
-            self._t("dialogs.success", "成功"),
-            success_message,
-        )
-
-    def _report_single_failure(self, exc: BaseException) -> None:
-        deps = self.dependencies
-        self._finish_timing("migration_single")
-        error_message = self._t(
-            "messages.migration_exception",
-            "迁移失败: {error}",
-            error=str(exc),
-        )
-        deps.handle_exception(
-            exc,
-            title=error_message,
-            log=True,
-            show_dialog=False,
-        )
-        deps.set_progress_label(self._t("top_bar.failed", "失败"))
-        deps.error_dialog(
-            self._t("dialogs.error", "错误"),
-            error_message,
-            exception=exc,
-            show_details=True,
-        )
-
-    def _report_batch_success(self, results: dict[str, Any]) -> None:
-        deps = self.dependencies
-        elapsed = self._finish_timing("migration_batch")
-        if elapsed is not None:
-            deps.log(f"批量迁移耗时: {elapsed:.2f}秒", "INFO")
-        success = sum(1 for result in results.values() if result["success"])
-        cancelled = sum(
-            1 for result in results.values() if result.get("cancelled")
-        )
-        failed = len(results) - success - cancelled
-        deps.log_header(
-            self._t(
-                "messages.batch_migration_complete_header",
-                "批量处理完成",
-            )
-        )
-        deps.log(
-            self._t(
-                "messages.batch_migration_complete",
-                "成功: {success}/{total}",
-                success=success,
-                total=len(results),
-            ),
-            "SUCCESS" if success == len(results) else "WARN",
-        )
-        if success == len(results):
-            label = self._t("top_bar.batch_completed", "批量处理完成")
-        else:
-            label = self._t(
-                "top_bar.batch_partial",
-                "批量处理部分完成",
-            )
-            deps.log(
-                self._t(
-                    "messages.batch_result_details",
-                    "失败: {failed}，取消: {cancelled}",
-                    failed=failed,
-                    cancelled=cancelled,
+                src=request.src_path,
+                dest=request.destination,
+                world_name=request.world_name,
+                mode=request.mode,
+                offline=request.offline,
+                clean=request.clean,
+                pure_clean=request.pure_clean,
+                target_platform=request.target_platform,
+                target_version=request.target_version,
+                manual_names_str=request.manual_names,
+                log_cb=self._ui.log_callback(
+                    generation,
+                    token,
+                    deps.log,
                 ),
-                "WARN",
+                progress_cb=self._ui.progress_callback(
+                    generation,
+                    token,
+                    deps.update_progress,
+                ),
+                cancel_check=lambda: token.is_cancelled,
             )
-        deps.set_progress_label(label)
+            token.raise_if_cancelled()
+            self._presenter.single_success(output_path, generation, token)
+        except (OperationCancelledError, BatchCancelledError):
+            return
+        except Exception as exc:
+            if token.is_cancelled:
+                return
+            self._presenter.single_failure(exc, generation, token)
 
-    def _report_batch_failure(self, exc: BaseException) -> None:
+    def _run_batch(
+        self,
+        request: MigrationRequest,
+        generation: int,
+        token: CancellationToken,
+    ) -> None:
         deps = self.dependencies
-        self._finish_timing("migration_batch")
-        deps.handle_exception(
-            exc,
-            title=self._t(
-                "messages.save_failed",
-                "批量处理失败: {error}",
-                error=str(exc),
-            ),
-            log=True,
-            show_dialog=False,
-        )
-        deps.set_progress_label(
-            self._t("top_bar.batch_failed", "批量处理失败")
-        )
+        try:
+            self._ui.publish(
+                generation,
+                token,
+                deps.log_header,
+                self._t("messages.batch_migration_started", "开始批量处理"),
+            )
+            results = self.migration.run_batch(
+                dest_dir=request.destination,
+                mode=request.mode,
+                offline=request.offline,
+                clean=request.clean,
+                pure_clean=request.pure_clean,
+                target_platform=request.target_platform,
+                target_version=request.target_version,
+                manual_names_str=request.manual_names,
+                max_concurrent=request.max_concurrent,
+                log_cb=self._ui.log_callback(
+                    generation,
+                    token,
+                    deps.log,
+                ),
+                progress_cb=self._ui.progress_callback(
+                    generation,
+                    token,
+                    deps.update_progress,
+                ),
+                cancel_check=lambda: token.is_cancelled,
+                worlds=request.batch_worlds,
+            )
+            token.raise_if_cancelled()
+            self._presenter.batch_success(results, generation, token)
+        except (OperationCancelledError, BatchCancelledError):
+            return
+        except Exception as exc:
+            if token.is_cancelled:
+                return
+            self._presenter.batch_failure(exc, generation, token)
+
+    def _schedule_finish(self, handle: OperationHandle[None]) -> None:
+        self.dependencies.post_ui(lambda: self._finish_handle(handle))
+
+    def _finish_handle(self, handle: OperationHandle[None]) -> None:
+        should_restore_ui = self._lifecycle.complete_handle(handle)
+        if should_restore_ui is None:
+            return
+        self._presenter.clear_timings()
+        if should_restore_ui:
+            self._finish_worker_ui()
+
+    def _post_legacy_finish(self, generation: int) -> None:
+        self.dependencies.post_ui(lambda: self._finish_legacy(generation))
+
+    def _finish_legacy(self, generation: int) -> None:
+        should_restore_ui = self._lifecycle.complete_legacy(generation)
+        if should_restore_ui is None:
+            return
+        self._presenter.clear_timings()
+        if should_restore_ui:
+            self._finish_worker_ui()
 
     def _finish_worker_ui(self) -> None:
         """恢复开始按钮与进度条，并刷新页面。"""
@@ -317,6 +437,43 @@ class MigrationController:
         deps.set_progress_value(0)
         self.try_update_page()
 
+    def cancel(self) -> bool:
+        """同时取消领域迁移与运行时句柄。"""
+        outcome = self._lifecycle.request_cancel()
+        if not outcome.accepted:
+            return False
+        self._cancel_domain()
+        if outcome.handle is not None:
+            outcome.handle.cancel()
+        return True
+
+    def close(self) -> None:
+        """关闭控制器，取消任务并丢弃迟到回调。"""
+        outcome = self._lifecycle.close()
+        if not outcome.changed:
+            return
+        self._presenter.clear_timings()
+        if outcome.should_cancel_domain:
+            self._cancel_domain()
+        if outcome.handle is not None:
+            outcome.handle.cancel()
+
     def open_folder(self, path: str) -> None:
         """在系统文件管理器中打开目录。"""
         self.migration.open_folder(path)
+
+    def _cancel_domain(self) -> None:
+        cancel_active = getattr(self.migration, "cancel_active", None)
+        if callable(cancel_active):
+            cancel_active()
+            return
+        cancel_batch = getattr(self.migration, "cancel_batch", None)
+        if callable(cancel_batch):
+            cancel_batch()
+
+
+__all__ = [
+    "MigrationController",
+    "MigrationControllerDependencies",
+    "MigrationRequest",
+]

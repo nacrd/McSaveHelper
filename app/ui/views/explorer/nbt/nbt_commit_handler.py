@@ -1,12 +1,26 @@
 """将类型化的 NBT 暂存变更提交到存档。"""
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 import flet as ft
 
-from app.models.nbt_edit import ChunkNbtTarget, NbtChange, NbtStageStore
+from app.models.nbt_edit import NbtChange, NbtStageStore
+from app.services.execution_runtime import (
+    OperationCancelledError,
+    OperationHandle,
+    OperationScope,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
+from app.services.nbt_commit_service import (
+    NbtCommitResult,
+    commit_nbt_changes,
+)
 from app.ui.theme import THEME
 from app.ui.views.explorer.explorer_helpers import format_change_summary
 from core.omni.world_session import WorldSession
@@ -17,6 +31,50 @@ DialogCallback = Callable[[str, str], None]
 ErrorCallback = Callable[[Exception, str], None]
 ReloadWorld = Callable[[Path], None]
 WorldIdentityCheck = Callable[[Path], bool]
+UiDispatch = Callable[[Callable[[], None]], None]
+
+
+@dataclass(frozen=True)
+class NbtCommitExecution:
+    """后台运行、视图身份与成功刷新端口。"""
+
+    scope: OperationScope
+    post_to_ui: UiDispatch
+    get_generation: Callable[[], int]
+    is_world_current: WorldIdentityCheck
+    reload_world: ReloadWorld
+
+
+@dataclass(frozen=True)
+class NbtCommitUi:
+    """提交协调器使用的最小 UI 端口。"""
+
+    get_page: Callable[[], Optional[ft.Page]]
+    refresh_stage: Callable[[], None]
+    warn: DialogCallback
+    info: DialogCallback
+    error: DialogCallback
+    handle_error: ErrorCallback
+    log: LogCallback
+
+
+@dataclass(frozen=True)
+class NbtCommitMessages:
+    """提交状态对应的本地化标题和正文。"""
+
+    world_changed: tuple[str, str]
+    busy: tuple[str, str]
+    cancelled: tuple[str, str]
+    queue_full: tuple[str, str]
+
+
+@dataclass(frozen=True)
+class _CommitRequest:
+    """后台提交输入及其所属视图 generation。"""
+
+    session: WorldSession
+    changes: Tuple[NbtChange, ...]
+    generation: int
 
 
 class NbtCommitHandler:
@@ -27,47 +85,39 @@ class NbtCommitHandler:
         *,
         store: NbtStageStore,
         get_world_session: Callable[[], Optional[WorldSession]],
-        get_page: Callable[[], Optional[ft.Page]],
-        refresh_stage: Callable[[], None],
-        reload_world: ReloadWorld,
-        is_world_current: WorldIdentityCheck,
-        world_changed_text: tuple[str, str],
-        warn: DialogCallback,
-        info: DialogCallback,
-        error: DialogCallback,
-        handle_error: ErrorCallback,
-        log: LogCallback,
+        execution: NbtCommitExecution,
+        ui: NbtCommitUi,
+        messages: NbtCommitMessages,
     ) -> None:
         """注入提交所需的会话与 UI 端口。"""
         self._store = store
         self._get_world_session = get_world_session
-        self._get_page = get_page
-        self._refresh_stage = refresh_stage
-        self._reload_world = reload_world
-        self._is_world_current = is_world_current
-        self._world_changed_text = world_changed_text
-        self._warn = warn
-        self._info = info
-        self._error = error
-        self._handle_error = handle_error
-        self._log = log
+        self._execution = execution
+        self._ui = ui
+        self._messages = messages
+        self._active_handle: Optional[OperationHandle[NbtCommitResult]] = None
+
+    @property
+    def is_committing(self) -> bool:
+        """返回是否仍有提交任务等待 UI 消费终态。"""
+        return self._active_handle is not None
 
     def commit_changes(self, e: object = None) -> None:
         """验证当前状态并打开提交预览。"""
         try:
             if not self._get_world_session():
-                self._warn("提示", "请先通过侧边栏设置当前存档。")
+                self._ui.warn("提示", "请先通过侧边栏设置当前存档。")
                 return
             if not self._store:
-                self._info("提示", "暂存区没有可提交的变更。")
+                self._ui.info("提示", "暂存区没有可提交的变更。")
                 return
             self.show_commit_preview_dialog()
         except Exception as ex:
-            self._handle_error(ex, "提交 NBT 变更失败")
+            self._ui.handle_error(ex, "提交 NBT 变更失败")
 
     def show_commit_preview_dialog(self) -> None:
         """显示提交预览；无页面环境时直接提交。"""
-        page = self._get_page()
+        page = self._ui.get_page()
         if not page:
             self.execute_commit()
             return
@@ -136,121 +186,99 @@ class NbtCommitHandler:
             spacing=10,
         )
 
-    def execute_commit(self) -> None:
-        """将暂存变更转换为 WorldSession 队列并原子提交。"""
+    def execute_commit(self) -> Optional[OperationHandle[NbtCommitResult]]:
+        """验证快照并把完整提交非阻塞地交给共享 I/O 通道。"""
         try:
+            if self._active_handle is not None:
+                self._ui.warn(*self._messages.busy)
+                return None
             session = self._get_world_session()
             if not session:
-                self._warn("提示", "请先通过侧边栏设置当前存档。")
-                return
+                self._ui.warn("提示", "请先通过侧边栏设置当前存档。")
+                return None
             if not self._store:
-                self._info("提示", "暂存区没有可提交的变更。")
-                return
-            if not self._is_world_current(session.world_path):
-                self._warn(*self._world_changed_text)
-                return
+                self._ui.info("提示", "暂存区没有可提交的变更。")
+                return None
+            if not self._execution.is_world_current(session.world_path):
+                self._ui.warn(*self._messages.world_changed)
+                return None
 
-            commit_session = session.new_action_session()
-            changes = self._store.changes
-            chunk_changes, normal_changes = self._partition_changes(changes)
-            self._queue_normal_changes(commit_session, normal_changes)
-            for target, target_changes in chunk_changes.values():
-                loaded = commit_session.load_chunk_nbt(
-                    target.region_path,
-                    target.chunk_x,
-                    target.chunk_z,
-                )
-                if loaded is None:
-                    raise ValueError(f"无法重新加载待提交区块: {target.key}")
-                chunk_data = loaded[0]
-                for change in target_changes:
-                    self._apply_change(chunk_data, change)
-                commit_session.queue_modify_chunk(
-                    target.region_path,
-                    target.chunk_x,
-                    target.chunk_z,
-                    chunk_data,
-                )
-
-            queued = commit_session.get_queue_size()
-            if not commit_session.commit(backup=True):
-                self._error(
-                    "提交失败",
-                    f"已排队 {queued} 个操作，但提交失败。请查看日志。",
-                )
-                return
-
-            committed = self._store.clear()
-            self._refresh_stage()
-            try:
-                self._reload_world(commit_session.world_path)
-            except Exception as exc:
-                # The transaction already succeeded; a UI reload fault must not
-                # be reported as a failed disk commit.
-                self._log(f"提交成功，但刷新世界会话失败: {exc}", "WARNING")
-            self._info(
-                "提交完成",
-                f"已提交 {committed} 个 NBT/JSON/区块变更。提交前已创建备份。",
+            request = _CommitRequest(
+                session=session,
+                changes=self._store.changes,
+                generation=self._execution.get_generation(),
             )
+            handle = self._execution.scope.submit(
+                "commit_nbt_changes",
+                lambda token: commit_nbt_changes(
+                    request.session,
+                    request.changes,
+                    token,
+                ),
+                priority=TaskPriority.INTERACTIVE,
+            )
+            self._active_handle = handle
+            handle.add_done_callback(
+                lambda completed: self._execution.post_to_ui(
+                    lambda: self._finish_commit(completed, request)
+                )
+            )
+            return handle
+        except (TaskQueueFullError, RuntimeClosedError):
+            self._ui.warn(*self._messages.queue_full)
+            return None
         except Exception as ex:
-            self._handle_error(ex, "提交 NBT 变更失败")
+            self._ui.handle_error(ex, "提交 NBT 变更失败")
+            return None
 
-    @staticmethod
-    def _partition_changes(
-        changes: Tuple[NbtChange, ...],
-    ) -> Tuple[Dict[str, Tuple[ChunkNbtTarget, List[NbtChange]]], List[NbtChange]]:
-        chunk_changes: Dict[str, Tuple[ChunkNbtTarget, List[NbtChange]]] = {}
-        normal_changes: List[NbtChange] = []
-        for change in changes:
-            if isinstance(change.target, ChunkNbtTarget):
-                entry = chunk_changes.setdefault(
-                    change.target.key,
-                    (change.target, []),
-                )
-                entry[1].append(change)
-            else:
-                normal_changes.append(change)
-        return chunk_changes, normal_changes
-
-    @staticmethod
-    def _apply_change(data: Any, change: NbtChange) -> None:
-        if not change.path:
-            raise ValueError("区块变更路径不能为空")
-        node = data
-        for part in change.path[:-1]:
-            node = node[part]
-        key = change.path[-1]
-        if change.operation == "delete":
-            del node[key]
-        elif change.operation == "add" and isinstance(key, int):
-            node.insert(key, change.new_value)
-        else:
-            node[key] = change.new_value
-
-    @staticmethod
-    def _queue_normal_changes(
-        session: WorldSession,
-        changes: List[NbtChange],
+    def _finish_commit(
+        self,
+        handle: OperationHandle[NbtCommitResult],
+        request: _CommitRequest,
     ) -> None:
-        for change in changes:
-            target = change.target
-            if isinstance(target, ChunkNbtTarget):
-                raise ValueError("区块变更不能进入普通 NBT/JSON 提交队列")
-            path = list(change.path)
-            if change.format == "json":
-                session.queue_modify_json(
-                    target,
-                    path,
-                    change.new_value,
-                    operation=change.operation,
-                )
-            else:
-                session.queue_modify_nbt(
-                    target,
-                    path,
-                    change.new_value,
-                    operation=change.operation,
-                )
+        """在 UI 线程消费提交结果，并丢弃过期视图回调。"""
+        if self._active_handle is handle:
+            self._active_handle = None
+        if not self._is_request_current(request):
+            self._ui.log(
+                f"丢弃过期 NBT 提交回调: {request.session.world_path}",
+                "INFO",
+            )
+            return
+        try:
+            result = handle.result()
+        except (CancelledError, OperationCancelledError):
+            self._ui.warn(*self._messages.cancelled)
+            return
+        except Exception as ex:
+            self._ui.handle_error(ex, "提交 NBT 变更失败")
+            return
+        if not result.committed:
+            self._ui.error(
+                "提交失败",
+                f"已排队 {result.queued_operations} 个操作，但提交失败。请查看日志。",
+            )
+            return
+
+        self._store.remove_snapshot(request.changes)
+        self._ui.refresh_stage()
+        try:
+            self._execution.reload_world(result.world_path)
+        except Exception as exc:
+            # 磁盘事务已经成功，UI 刷新失败不能改写提交语义。
+            self._ui.log(f"提交成功，但刷新世界会话失败: {exc}", "WARNING")
+        self._ui.info(
+            "提交完成",
+            f"已提交 {result.requested_changes} 个 NBT/JSON/区块变更。"
+            "提交前已创建备份。",
+        )
+
+    def _is_request_current(self, request: _CommitRequest) -> bool:
+        """确认完成结果仍属于提交时的世界和视图 generation。"""
+        return (
+            request.generation == self._execution.get_generation()
+            and self._execution.is_world_current(request.session.world_path)
+        )
 
     def get_commit_summary(self) -> str:
         """生成待提交变更的摘要文本。"""

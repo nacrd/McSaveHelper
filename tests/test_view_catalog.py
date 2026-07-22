@@ -72,3 +72,14 @@ def test_default_feature_registry_matches_default_view_catalog() -> None:
     assert tuple(
         feature.view_id for feature in DEFAULT_FEATURE_REGISTRY.features
     ) == create_default_view_catalog().view_ids
+
+
+def test_default_features_declare_capabilities_without_changing_defaults() -> None:
+    assert DEFAULT_FEATURE_REGISTRY.capabilities
+    assert all(
+        feature.required_capabilities
+        for feature in DEFAULT_FEATURE_REGISTRY.features
+    )
+    assert create_default_view_catalog().view_ids == tuple(
+        feature.view_id for feature in DEFAULT_FEATURE_REGISTRY.features
+    )

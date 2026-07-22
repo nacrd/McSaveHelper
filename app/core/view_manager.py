@@ -353,13 +353,27 @@ class ViewManager:
             self._deps.log(f"通知视图失败: {error}", "ERROR")
 
     def remove_view(self, view_id: str) -> Optional[ft.Control]:
-        """从缓存移除视图但不调用 dispose。
+        """从缓存移除视图并释放其拥有的资源。
 
         Args:
             view_id: 视图标识。
 
         Returns:
             被移除的控件；不存在时为 None。
+        """
+        view = self.detach_view(view_id)
+        if view is not None:
+            self._dispose_view(view_id, view)
+        return view
+
+    def detach_view(self, view_id: str) -> Optional[ft.Control]:
+        """从缓存分离视图，并将资源所有权转移给调用方。
+
+        Args:
+            view_id: 视图标识。
+
+        Returns:
+            被分离的控件；不存在时为 None。
         """
         return self.views.pop(view_id, None)
 
@@ -377,14 +391,17 @@ class ViewManager:
     def dispose(self) -> None:
         """对缓存中支持 dispose 的视图逐个幂等释放并清空缓存。"""
         for view_id, view in tuple(self.views.items()):
-            dispose = getattr(view, "dispose", None)
-            if not callable(dispose):
-                continue
-            try:
-                dispose()
-            except Exception as error:
-                self._deps.log(f"释放视图 '{view_id}' 失败: {error}", "ERROR")
+            self._dispose_view(view_id, view)
         self.views.clear()
+
+    def _dispose_view(self, view_id: str, view: ft.Control) -> None:
+        dispose = getattr(view, "dispose", None)
+        if not callable(dispose):
+            return
+        try:
+            dispose()
+        except Exception as error:
+            self._deps.log(f"释放视图 '{view_id}' 失败: {error}", "ERROR")
 
     def _require_host(self) -> ViewHost:
         if self._host is None:

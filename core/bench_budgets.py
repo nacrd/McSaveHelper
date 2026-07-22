@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, cast
 
 from core.bench_samples import SampleSize
 
@@ -19,6 +19,8 @@ class PathBudget:
     world_index_warm_ms: float
     topview_tile_ms: float
     session_open_ms: float
+    topview_cache_hit_ms: float = 30.0
+    backup_ms: float = 5000.0
 
 
 # 合成世界在 CI 共享机上的宽松预算；仅作回归闸门。
@@ -28,18 +30,24 @@ DEFAULT_BUDGETS: Mapping[SampleSize, PathBudget] = {
         world_index_warm_ms=50.0,
         topview_tile_ms=250.0,
         session_open_ms=500.0,
+        topview_cache_hit_ms=30.0,
+        backup_ms=5000.0,
     ),
     SampleSize.MEDIUM: PathBudget(
         world_index_cold_ms=1500.0,
         world_index_warm_ms=80.0,
         topview_tile_ms=800.0,
         session_open_ms=1500.0,
+        topview_cache_hit_ms=30.0,
+        backup_ms=5000.0,
     ),
     SampleSize.LARGE: PathBudget(
         world_index_cold_ms=5000.0,
         world_index_warm_ms=150.0,
         topview_tile_ms=2500.0,
         session_open_ms=5000.0,
+        topview_cache_hit_ms=30.0,
+        backup_ms=5000.0,
     ),
 }
 
@@ -53,30 +61,62 @@ def evaluate_sample_against_budget(
     index = sample.get("world_index")
     topview = sample.get("topview")
     session = sample.get("world_session")
-    if not isinstance(index, dict) or not isinstance(topview, dict):
-        return ["sample missing world_index/topview"]
+    backup = sample.get("backup")
+    missing: list[str] = []
+    if not isinstance(index, dict):
+        missing.append("world_index")
+    if not isinstance(topview, dict):
+        missing.append("topview")
     if not isinstance(session, dict):
-        return ["sample missing world_session"]
+        missing.append("world_session")
+    if not isinstance(backup, dict):
+        missing.append("backup")
+    if missing:
+        return [f"sample missing {','.join(missing)}"]
+    index_data = cast(dict[str, object], index)
+    topview_data = cast(dict[str, object], topview)
+    session_data = cast(dict[str, object], session)
+    backup_data = cast(dict[str, object], backup)
 
     checks = (
-        ("world_index.cold_ms", index.get("cold_ms"), budget.world_index_cold_ms),
+        (
+            "world_index.cold_ms",
+            index_data.get("cold_ms"),
+            budget.world_index_cold_ms,
+        ),
         (
             "world_index.warm_p95_ms",
-            index.get("warm_p95_ms", index.get("warm_median_ms")),
+            index_data.get("warm_p95_ms", index_data.get("warm_median_ms")),
             budget.world_index_warm_ms,
         ),
         (
             "topview.tile_p95_ms",
-            topview.get("tile_p95_ms", topview.get("tile_median_ms")),
+            topview_data.get(
+                "tile_p95_ms",
+                topview_data.get("tile_median_ms"),
+            ),
             budget.topview_tile_ms,
         ),
         (
+            "topview.cache_hit_p95_ms",
+            topview_data.get("cache_hit_p95_ms"),
+            budget.topview_cache_hit_ms,
+        ),
+        (
             "session.open_p95_ms",
-            session.get(
+            session_data.get(
                 "open_with_index_p95_ms",
-                session.get("open_with_index_median_ms"),
+                session_data.get("open_with_index_median_ms"),
             ),
             budget.session_open_ms,
+        ),
+        (
+            "backup.p95_ms",
+            backup_data.get(
+                "backup_p95_ms",
+                backup_data.get("backup_ms"),
+            ),
+            budget.backup_ms,
         ),
     )
     for name, value, limit in checks:

@@ -79,7 +79,7 @@ class ItemService:
             path: 目标 JSON 路径。
 
         Raises:
-            OSError: 写入失败时由底层 ``path.write_text`` 抛出。
+            OSError: 原子写入或发布目标文件失败。
         """
         _save_custom(
             path,

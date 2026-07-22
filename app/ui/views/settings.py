@@ -3,12 +3,27 @@
 每个设置分区支持点击标题栏展开/收起，减少纵向占用。
 """
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import flet as ft
 
+from app.controllers.settings_io_controller import (
+    CacheClearOutcome,
+    SettingsCacheSnapshot,
+    SettingsIOController,
+    SettingsIOControllerDependencies,
+)
 from app.models.config import ApplicationSettings
 from app.models.responsive_layout import ResponsiveLayout
+from app.presenters.runtime_observability import (
+    format_cache_registry_report,
+    format_runtime_snapshot,
+)
+from app.services.cache_registry import CacheRegistryStats
+from app.services.execution_runtime import (
+    ExecutionRuntime,
+    ExecutionRuntimeSnapshot,
+)
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
@@ -16,13 +31,13 @@ from app.ui.components.fields import text_field, checkbox, label, dropdown
 from app.ui.components.cards import card
 from app.ui.components.layout import page_header
 from app.ui.views.settings_sections import collapsible_section as _collapsible_section
-from app.ui.utils import safe_update
+from app.ui.utils import format_size, run_on_ui, safe_update
 
 
 Translate = Callable[..., str]
 DialogCallback = Callable[[str, str], None]
-CacheSnapshot = Callable[[], Any]
-CacheClear = Callable[[], dict[str, int]]
+CacheSnapshot = Callable[[], CacheRegistryStats]
+CacheClear = Callable[[], Mapping[str, int]]
 
 
 @dataclass(frozen=True)
@@ -31,7 +46,7 @@ class SettingsViewDependencies:
 
     load_settings: Callable[[], ApplicationSettings]
     save_settings: Callable[[ApplicationSettings], None]
-    reset_settings: Callable[[], None]
+    reset_settings: Callable[[], ApplicationSettings]
     translate: Translate
     apply_theme: Callable[[str], None]
     apply_language: Callable[[str], None]
@@ -45,7 +60,9 @@ class SettingsViewDependencies:
     cache_snapshot: CacheSnapshot
     clear_caches: CacheClear
     cache_path: Callable[[], str]
-    runtime_snapshot: Callable[[], Any] = lambda: None
+    execution_runtime: ExecutionRuntime
+    runtime_snapshot: Callable[[], Optional[ExecutionRuntimeSnapshot]]
+    save_debounce_seconds: float = 0.35
 
 
 class SettingsView(ft.Column):
@@ -60,6 +77,21 @@ class SettingsView(ft.Column):
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._deps = dependencies
+        self._disposed = False
+        self._operation_busy = False
+        self._io_controller = SettingsIOController(
+            SettingsIOControllerDependencies(
+                execution_runtime=dependencies.execution_runtime,
+                save_settings=dependencies.save_settings,
+                reset_settings=dependencies.reset_settings,
+                cache_snapshot=dependencies.cache_snapshot,
+                clear_caches=dependencies.clear_caches,
+                cache_path=dependencies.cache_path,
+                runtime_snapshot=dependencies.runtime_snapshot,
+                dispatch=self._dispatch_result,
+                save_debounce_seconds=dependencies.save_debounce_seconds,
+            )
+        )
         self._build()
 
     @property
@@ -409,21 +441,21 @@ class SettingsView(ft.Column):
 
     def _cache_summary_block(self) -> ft.Container:
         self._cache_summary = ft.Text(
-            self._cache_summary_text(),
+            self._t("settings.cache.loading", "正在读取缓存信息…"),
             size=12,
             color=THEME.text_primary,
             font_family="monospace",
             selectable=True,
         )
         self._runtime_summary = ft.Text(
-            self._runtime_summary_text(),
+            self._t("settings.cache.runtime_loading", "正在读取后台运行时…"),
             size=12,
             color=THEME.text_primary,
             font_family="monospace",
             selectable=True,
         )
         self._cache_path_label = ft.Text(
-            self._cache_path_text(),
+            self._t("settings.cache.path_loading", "地图瓦片路径: —"),
             size=11,
             color=THEME.text_muted,
             selectable=True,
@@ -438,93 +470,106 @@ class SettingsView(ft.Column):
         )
 
     def _cache_action_row(self) -> ft.Container:
+        self._cache_refresh_button = btn_ghost(
+            self._t("settings.cache.refresh", "刷新"),
+            width=100,
+            height=44,
+            on_click=lambda e: self._refresh_cache_stats(show_error=True),
+        )
+        self._cache_clear_button = btn_ghost(
+            self._t("settings.cache.clear", "清理缓存"),
+            width=120,
+            height=44,
+            on_click=lambda e: self._clear_map_cache(),
+        )
         return ft.Container(
             content=ft.Row(
                 [
-                    btn_ghost(
-                        self._t("settings.cache.refresh", "刷新"),
-                        width=100,
-                        height=44,
-                        on_click=lambda e: self._refresh_cache_stats(),
-                    ),
-                    btn_ghost(
-                        self._t("settings.cache.clear", "清理缓存"),
-                        width=120,
-                        height=44,
-                        on_click=lambda e: self._clear_map_cache(),
-                    ),
+                    self._cache_refresh_button,
+                    self._cache_clear_button,
                 ],
                 spacing=10,
             ),
             padding=ft.Padding(left=16, right=16, bottom=16),
         )
 
-    def _cache_summary_text(self) -> str:
-        try:
-            from app.presenters.runtime_observability import (
-                format_cache_registry_report,
-            )
-            from app.ui.utils import format_size
+    def _refresh_cache_stats(self, *, show_error: bool = False) -> None:
+        if self._disposed:
+            return
+        self._set_cache_busy(True)
+        self._io_controller.refresh_cache(
+            self._apply_cache_snapshot,
+            lambda error: self._apply_cache_error(error, show_error),
+        )
 
-            snapshot = self._deps.cache_snapshot()
-            return format_cache_registry_report(
-                snapshot,
-                format_size=format_size,
-            )
-        except Exception as ex:
-            return f"无法读取缓存信息: {ex}"
-
-    def _runtime_summary_text(self) -> str:
-        try:
-            from app.presenters.runtime_observability import (
-                format_runtime_snapshot,
-            )
-
-            snapshot = self._deps.runtime_snapshot()
-            if snapshot is None:
-                return "后台运行时: 不可用"
-            return format_runtime_snapshot(snapshot)
-        except Exception as ex:
-            return f"无法读取运行时信息: {ex}"
-
-    def _cache_path_text(self) -> str:
-        try:
-            return f"地图瓦片路径: {self._deps.cache_path()}"
-        except Exception:
-            return "路径: —"
-
-    def _refresh_cache_stats(self) -> None:
-        try:
-            self._cache_summary.value = self._cache_summary_text()
-            if hasattr(self, "_runtime_summary"):
-                self._runtime_summary.value = self._runtime_summary_text()
-            self._cache_path_label.value = self._cache_path_text()
-        except Exception:
-            # UI best-effort: control may already be unmounted.
-            pass
+    def _apply_cache_snapshot(self, snapshot: SettingsCacheSnapshot) -> None:
+        if self._disposed:
+            return
+        self._set_cache_busy(False)
+        self._cache_summary.value = format_cache_registry_report(
+            snapshot.cache,
+            format_size=format_size,
+        )
+        self._runtime_summary.value = (
+            format_runtime_snapshot(snapshot.runtime)
+            if snapshot.runtime is not None
+            else self._t("settings.cache.runtime_unavailable", "后台运行时: 不可用")
+        )
+        self._cache_path_label.value = self._t(
+            "settings.cache.path_value",
+            "地图瓦片路径: {path}",
+            path=snapshot.cache_path,
+        )
         safe_update(self._cache_summary)
-        if hasattr(self, "_runtime_summary"):
-            safe_update(self._runtime_summary)
+        safe_update(self._runtime_summary)
         safe_update(self._cache_path_label)
 
-    def _clear_map_cache(self) -> None:
-        try:
-            from app.ui.utils import format_size
-
-            result = self._deps.clear_caches()
-            deleted = int(result.get("deleted_files", 0) or 0)
-            freed = format_size(int(result.get("freed_bytes", 0) or 0))
-            mem = int(result.get("memory_chunks_cleared", 0) or 0)
-            self._refresh_cache_stats()
-            self._deps.info_dialog(
-                self._t("dialogs.success", "成功"),
-                f"已清理地图缓存：{deleted} 个文件（{freed}），内存 chunk {mem} 条",
-            )
-        except Exception as ex:
+    def _apply_cache_error(self, error: Exception, show_error: bool) -> None:
+        if self._disposed:
+            return
+        self._set_cache_busy(False)
+        self._cache_summary.value = self._t(
+            "settings.cache.read_failed",
+            "无法读取缓存信息: {error}",
+            error=str(error),
+        )
+        safe_update(self._cache_summary)
+        if show_error:
             self._deps.error_dialog(
                 self._t("dialogs.error", "错误"),
-                f"清理缓存失败: {ex}",
+                str(error),
             )
+
+    def _clear_map_cache(self) -> None:
+        if self._disposed:
+            return
+        self._set_cache_busy(True)
+        self._io_controller.clear_cache(
+            self._apply_cache_clear_success,
+            lambda error: self._apply_cache_error(error, True),
+        )
+
+    def _apply_cache_clear_success(self, outcome: CacheClearOutcome) -> None:
+        if self._disposed:
+            return
+        self._apply_cache_snapshot(outcome.snapshot)
+        metrics = outcome.metrics
+        self._deps.info_dialog(
+            self._t("dialogs.success", "成功"),
+            self._t(
+                "settings.cache.clear_success",
+                "已清理地图缓存：{deleted} 个文件（{freed}），内存 chunk {memory} 条",
+                deleted=metrics.deleted_files,
+                freed=format_size(metrics.freed_bytes),
+                memory=metrics.memory_chunks_cleared,
+            ),
+        )
+
+    def _set_cache_busy(self, busy: bool) -> None:
+        self._cache_refresh_button.disabled = busy
+        self._cache_clear_button.disabled = busy
+        safe_update(self._cache_refresh_button)
+        safe_update(self._cache_clear_button)
 
     # ─── 批量处理 ───────────────────────────────
 
@@ -682,25 +727,47 @@ class SettingsView(ft.Column):
             auto_import_mc_lang=bool(self._auto_import_mc_lang_var.value),
         )
 
-    def _persist(self) -> None:
-        """Persist settings and expose the result beside the page title."""
+    def _persist(self) -> bool:
+        """提交最新设置快照，并在防抖窗口内合并连续输入。"""
+        if self._disposed or self._operation_busy:
+            return False
         try:
-            self._deps.save_settings(self._collect_settings())
+            settings = self._collect_settings()
         except Exception as error:
-            self._set_save_status(
-                self._t("settings.save_status.failed", "保存失败"),
-                IconSet.ERROR,
-                THEME.error,
-            )
-            self._deps.error_dialog(
-                self._t("dialogs.error", "错误"),
-                str(error),
-            )
+            self._apply_save_error(error)
+            return False
+        self._set_save_status(
+            self._t("settings.save_status.pending", "等待保存"),
+            IconSet.INFO,
+            THEME.warning,
+        )
+        self._io_controller.schedule_save(
+            settings,
+            self._apply_save_success,
+            self._apply_save_error,
+        )
+        return True
+
+    def _apply_save_success(self) -> None:
+        if self._disposed:
             return
         self._set_save_status(
             self._t("settings.save_status.saved", "已保存"),
             IconSet.SUCCESS,
             THEME.success,
+        )
+
+    def _apply_save_error(self, error: Exception) -> None:
+        if self._disposed:
+            return
+        self._set_save_status(
+            self._t("settings.save_status.failed", "保存失败"),
+            IconSet.ERROR,
+            THEME.error,
+        )
+        self._deps.error_dialog(
+            self._t("dialogs.error", "错误"),
+            str(error),
         )
 
     def _set_save_status(
@@ -721,16 +788,16 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _on_theme_change(self, theme: str) -> None:
-        self._persist()
-        self._deps.apply_theme(theme)
+        if self._persist():
+            self._deps.apply_theme(theme)
 
     def _on_sidebar_mode_change(self, mode: str) -> None:
-        self._persist()
-        self._deps.set_sidebar_mode(mode)
+        if self._persist():
+            self._deps.set_sidebar_mode(mode)
 
     def _on_language_change(self, lang: str) -> None:
-        self._persist()
-        self._deps.apply_language(lang)
+        if self._persist():
+            self._deps.apply_language(lang)
 
     def _on_minecraft_dir_change(self) -> None:
         self._persist()
@@ -773,15 +840,15 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _on_show_log_panel_change(self, value: bool) -> None:
-        self._persist()
-        self._deps.set_log_panel_visible(value)
+        if self._persist():
+            self._deps.set_log_panel_visible(value)
 
     def _on_perf_monitor_change(self, value: bool) -> None:
-        self._persist()
-        self._deps.configure_performance_monitor(
-            value,
-            float(self._performance_interval()),
-        )
+        if self._persist():
+            self._deps.configure_performance_monitor(
+                value,
+                float(self._performance_interval()),
+            )
 
     def _on_perf_interval_change(self) -> None:
         try:
@@ -791,8 +858,8 @@ class SettingsView(ft.Column):
             )
         except ValueError:
             return
-        self._deps.set_performance_interval(interval)
-        self._persist()
+        if self._persist():
+            self._deps.set_performance_interval(interval)
 
     def _on_max_concurrent_change(self) -> None:
         try:
@@ -809,13 +876,83 @@ class SettingsView(ft.Column):
 
     def _restore_default_cleanup(self) -> None:
         self._cleanup_field.value = "\n".join(["*.log", "cache/", "logs/"])
-        self._cleanup_field.update()
+        safe_update(self._cleanup_field)
         self._persist()
 
     def _reset(self) -> None:
-        self._deps.reset_settings()
+        if self._disposed or self._operation_busy:
+            return
+        self._set_operation_busy(True)
+        self._set_save_status(
+            self._t("settings.save_status.resetting", "正在重置"),
+            IconSet.INFO,
+            THEME.warning,
+        )
+        self._io_controller.reset(
+            self._apply_reset_success,
+            self._apply_reset_error,
+        )
+
+    def _apply_reset_success(self, settings: ApplicationSettings) -> None:
+        if self._disposed:
+            return
+        self._operation_busy = False
+        self.disabled = False
+        self._apply_settings_effects(settings)
+        self._build()
+        self._set_save_status(
+            self._t("settings.save_status.saved", "已保存"),
+            IconSet.SUCCESS,
+            THEME.success,
+        )
+        safe_update(self)
+        self._refresh_cache_stats()
         self._deps.info_dialog(
             self._t("dialogs.success", "成功"),
             self._t("settings.messages.reset_success", "已恢复默认设置"),
         )
-        self._build()
+
+    def _apply_reset_error(self, error: Exception) -> None:
+        if self._disposed:
+            return
+        self._set_operation_busy(False)
+        self._apply_save_error(error)
+
+    def _apply_settings_effects(self, settings: ApplicationSettings) -> None:
+        self._deps.apply_theme(settings.theme)
+        self._deps.apply_language(settings.language)
+        self._deps.set_sidebar_mode(settings.sidebar_mode)
+        self._deps.set_log_panel_visible(settings.show_log_panel)
+        self._deps.configure_performance_monitor(
+            settings.enable_performance_monitor,
+            float(settings.performance_print_interval),
+        )
+
+    def _set_operation_busy(self, busy: bool) -> None:
+        self._operation_busy = busy
+        self.disabled = busy
+        safe_update(self)
+
+    def _dispatch_result(self, callback: Callable[[], None]) -> None:
+        if self._disposed:
+            return
+        try:
+            page = self.page
+        except RuntimeError:
+            page = None
+        if page is None:
+            callback()
+            return
+        run_on_ui(page, callback)
+
+    def did_mount(self) -> None:
+        """挂载后异步读取缓存统计，避免构建控件树时执行 I/O。"""
+        self._refresh_cache_stats()
+
+    def dispose(self) -> None:
+        """取消后台操作并使迟到结果失效；可重复调用。"""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._operation_busy = False
+        self._io_controller.close()

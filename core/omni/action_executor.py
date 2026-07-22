@@ -2,13 +2,18 @@
 ActionExecutor - 操作执行器
 负责执行队列中的所有操作并写入目标存档
 """
+from contextlib import AbstractContextManager
 import json
+from pathlib import Path
 import shutil
 import tempfile
-from pathlib import Path
-from typing import List, Union, Any, Optional, Callable
+from typing import Any, Callable, List, Optional, Union
+
 import core.nbt as nbtlib
-from .models import Action, ChunkTarget
+from core.cancellable_copy import copy_tree_with_checkpoints
+from core.uuid_utils import normalize_uuid
+
+from ..perf_timing import PerfTimer
 from ..utils import (
     find_advancements_dirs,
     find_player_data_dirs,
@@ -16,8 +21,10 @@ from ..utils import (
     get_write_player_data_dir,
     publish_directory_tree,
 )
-from ..perf_timing import PerfTimer
-from core.uuid_utils import normalize_uuid
+from .models import Action, ChunkTarget
+
+
+CancelCheck = Callable[[], bool]
 
 
 class ActionExecutor:
@@ -45,6 +52,8 @@ class ActionExecutor:
         actions: List[Action],
         dest_path: Optional[Path] = None,
         backup: bool = True,
+        cancel_check: Optional[CancelCheck] = None,
+        exchange_context: Optional[AbstractContextManager[None]] = None,
     ) -> bool:
         """执行所有队列中的操作，并将结果写入目标路径
 
@@ -52,6 +61,8 @@ class ActionExecutor:
             actions: 操作列表
             dest_path: 目标存档路径，若为 None 则原地修改（强烈不建议）
             backup: 是否在修改前备份原存档
+            cancel_check: 可选协作取消检查；发布开始后不再取消。
+            exchange_context: 仅包围目录换位/回滚的 session.lock handoff。
 
         Returns:
             成功返回 True，失败返回 False
@@ -61,9 +72,16 @@ class ActionExecutor:
             self._log("没有需要提交的操作", "INFO")
             return True
         try:
+            self._raise_if_cancelled(cancel_check)
             if backup and target_world.exists():
                 self._create_backup(target_world)
-            return self._execute_transaction(actions, target_world)
+            self._raise_if_cancelled(cancel_check)
+            return self._execute_transaction(
+                actions,
+                target_world,
+                cancel_check,
+                exchange_context,
+            )
         except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
             self._log(f"提交失败，原存档保持不变: {exc}", "ERROR")
             return False
@@ -76,15 +94,18 @@ class ActionExecutor:
         self,
         actions: List[Action],
         prepared_world: Path,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> None:
         """把队列操作应用到调用方拥有的暂存世界。
 
         Args:
             actions: 已验证的操作列表。
             prepared_world: 世界事务创建的完整暂存副本。
+            cancel_check: 可选协作取消检查。
         """
         with PerfTimer("action_executor.execute_queue"):
             for index, action in enumerate(actions):
+                self._raise_if_cancelled(cancel_check)
                 self._execute_action(action, prepared_world)
                 self._log(
                     f"操作 {index + 1}/{len(actions)} 执行成功",
@@ -104,6 +125,8 @@ class ActionExecutor:
         self,
         actions: List[Action],
         target_world: Path,
+        cancel_check: Optional[CancelCheck],
+        exchange_context: Optional[AbstractContextManager[None]],
     ) -> bool:
         target_world.parent.mkdir(parents=True, exist_ok=True)
         staging_root = Path(tempfile.mkdtemp(
@@ -113,19 +136,50 @@ class ActionExecutor:
         prepared = staging_root / target_world.name
         try:
             with PerfTimer("action_executor.clone"):
-                shutil.copytree(self.world_path, prepared)
+                copy_tree_with_checkpoints(
+                    self.world_path,
+                    prepared,
+                    lambda: self._raise_if_cancelled(cancel_check),
+                    ignore=self._ignore_runtime_entries,
+                )
+            self._raise_if_cancelled(cancel_check)
             with PerfTimer("action_executor.execute_queue"):
                 for index, action in enumerate(actions):
+                    self._raise_if_cancelled(cancel_check)
                     self._execute_action(action, prepared)
                     self._log(
                         f"操作 {index + 1}/{len(actions)} 执行成功",
                         "ACTION",
                     )
-            publish_directory_tree(prepared, target_world)
+            self._raise_if_cancelled(cancel_check)
+            publish_directory_tree(
+                prepared,
+                target_world,
+                exchange_context=exchange_context,
+            )
             self._log("所有操作已原子提交", "COMMIT")
             return True
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
+
+    def _ignore_runtime_entries(
+        self,
+        directory: str,
+        names: list[str],
+    ) -> set[str]:
+        """暂存复制排除根 session.lock 与应用内部备份目录。"""
+        ignored = {".mcsavehelper_backups"}.intersection(names)
+        if Path(directory).resolve() == self.world_path.resolve():
+            ignored.update({"session.lock"}.intersection(names))
+        return ignored
+
+    @staticmethod
+    def _raise_if_cancelled(
+        cancel_check: Optional[CancelCheck],
+    ) -> None:
+        """在原子发布前的安全检查点停止操作。"""
+        if cancel_check is not None and cancel_check():
+            raise RuntimeError("存档提交已取消，未发布任何修改")
 
     def _execute_action(self, action: Action, target_world: Path) -> None:
         """执行单个操作"""

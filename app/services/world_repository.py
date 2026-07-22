@@ -20,7 +20,11 @@ from core.world_index import WorldIndexBuilder, WorldIndexSnapshot, WorldShellMe
 
 
 WorldMutation = Callable[[Path], Any]
-TransactionCallback = Callable[[Path, WorldMutation], Any]
+CancelCheck = Callable[[], bool]
+TransactionCallback = Callable[
+    [Path, WorldMutation, Optional[CancelCheck]],
+    Any,
+]
 WriteLeaseFactory = Callable[[Path], AbstractContextManager[Any]]
 BackupCallback = Callable[[Path], Path]
 

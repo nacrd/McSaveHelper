@@ -35,6 +35,7 @@ from app.controllers.migration_controller import (
 from app.ui.theme import get_theme_manager
 from app.ui.view_catalog import create_default_view_catalog
 from app.ui.feature_context import FeatureContext
+from app.ui.utils import run_on_ui
 
 # 导入管理器
 from app.core.window_manager import (
@@ -49,6 +50,9 @@ from app.core.view_manager import (
 from app.core.progress_manager import ProgressManager
 from app.core.gui_optimizer import GUIOptimizer, GUIOptimizerDependencies
 from app.core.save_context_manager import SaveContextManager
+
+
+_RUNTIME_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
 class Application(
@@ -108,6 +112,7 @@ class Application(
                 set_progress_label=self.set_progress_label,
                 set_progress_value=self.set_progress_value,
                 start_worker=self._start_migration_worker,
+                post_ui=lambda callback: run_on_ui(self.page, callback),
             )
         )
 
@@ -157,10 +162,13 @@ class Application(
                 lambda: self.config.get_settings().sidebar_mode
             ),
             stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
-            dispose_views=lambda: self.view_manager.dispose(),
+            dispose_views=self._dispose_views_and_migration,
             dispose_file_dialogs=self._file_dialogs.close,
             close_texture_service=self.texture.close,
-            shutdown_execution_runtime=self.execution_runtime.shutdown,
+            shutdown_execution_runtime=lambda: self.execution_runtime.shutdown(
+                wait=True,
+                timeout=_RUNTIME_SHUTDOWN_TIMEOUT_SECONDS,
+            ),
             close_world_indexes=self.services.world_indexes.close,
             close_cache_registry=self.services.cache_registry.close,
         ))

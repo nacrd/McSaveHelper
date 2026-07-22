@@ -64,7 +64,7 @@ from app.ui.views.explorer.map.map_interaction_state import (
 from core.mca.map_coordinates import (
     format_region_coordinate_label,
 )
-from core.mca.map_models import MapLayerState, MapMarker
+from core.mca.map_models import MapLayerState, MapLayerStateSnapshot, MapMarker
 from core.mca.map_navigation import (
     McaMapNavigator,
     SelectionNotification,
@@ -89,6 +89,7 @@ from core.mca.viewport import (
 )
 
 if TYPE_CHECKING:
+    from app.services.cache_registry import CacheRegistry
     from app.services.execution_runtime import ExecutionRuntime
     from app.services.region_map import RegionMapService
 
@@ -123,6 +124,7 @@ class McaMapView(ft.Container):
         on_marker_selected: Optional[MapMarkerCallback] = None,
         width: int = 700,
         height: int = 450,
+        cache_registry: Optional[CacheRegistry] = None,
         **kwargs: Any,
     ) -> None:
         """构建地图控件并挂到共享的 RegionMapService。
@@ -134,6 +136,7 @@ class McaMapView(ft.Container):
             on_marker_selected: 标记被点中时的回调。
             width: 初始宽度像素。
             height: 初始高度像素。
+            cache_registry: 应用级缓存预算；视图释放时自动注销。
             **kwargs: 透传给 ``ft.Container``。
         """
         super().__init__(**kwargs)
@@ -143,13 +146,14 @@ class McaMapView(ft.Container):
         )
         self._on_selection_changed = on_selection_changed
         self._on_marker_selected = on_marker_selected
-        self._init_viewport_state()
+        self._init_viewport_state(cache_registry)
         self._init_interaction_state()
         self._init_layers_and_content(width, height)
-        # Progressive topview: service notifies when a tile finishes rendering.
-        self._service.set_tile_ready_callback(self._tile_ready_callback)
 
-    def _init_viewport_state(self) -> None:
+    def _init_viewport_state(
+        self,
+        cache_registry: Optional[CacheRegistry],
+    ) -> None:
         """Viewport, selection, and static map display flags."""
         self._viewport = McaViewport(
             cell_size=float(self.CELL_SIZE),
@@ -177,7 +181,7 @@ class McaMapView(ft.Container):
             Tuple[int, int], Tuple[float, float, float, float]
         ] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
-        self._tile_sources = TileSourceCache()
+        self._tile_sources = TileSourceCache(cache_registry)
         self._metadata_pending: set[Tuple[int, int]] = set()
         self._marker_layer = MapMarkerLayer()
         self._tile_ready_callback = self._on_tile_ready
@@ -191,6 +195,7 @@ class McaMapView(ft.Container):
         self._update_task: Optional[ScheduledTask] = None
         self._last_drawn_count = -1
         self._mounted = False
+        self._disposed = False
         self._visible_regions: set[Tuple[int, int]] = set()
         self._rebuild_state_lock = threading.Lock()
         self._rebuild_enqueued = False
@@ -362,13 +367,18 @@ class McaMapView(ft.Container):
         Canvas.shapes must only be mutated on the UI thread. Background timers,
         topview workers, and off-loop scan tasks all funnel through here.
         """
+        if self._disposed:
+            return
         if not self._mounted:
+            self._needs_initial_draw = True
             return
         try:
             page = self.page
         except RuntimeError:
+            self._needs_initial_draw = True
             return
         if page is None:
+            self._needs_initial_draw = True
             return
         with self._rebuild_state_lock:
             if self._rebuild_enqueued:
@@ -1215,6 +1225,8 @@ class McaMapView(ft.Container):
 
     def did_mount(self) -> None:
         """控件挂到页面后启用瓦片回调与扫描进度循环。"""
+        if self._disposed:
+            return
         super().did_mount()
         self._mounted = True
         self._service.set_tile_ready_callback(self._tile_ready_callback)
@@ -1223,14 +1235,35 @@ class McaMapView(ft.Container):
         if self._service.is_scanning:
             self._start_update_loop()
 
-    def did_unmount(self) -> None:
+    def will_unmount(self) -> None:
         """卸载时取消动画/循环，并摘掉可能指向本视图的服务回调。"""
+        self._mounted = False
+        self._needs_initial_draw = True
+        self._camera.cancel()
+        self._metadata_pending.clear()
+        self._rebuild_scheduler.cancel()
+        self._stop_update_loop()
+        self._surface_layer.suspend()
+        self._release_tile_ready_callback()
+        super().will_unmount()
+
+    def dispose(self) -> None:
+        """释放视图拥有的调度器与 Base64 瓦片缓存；可重复调用。"""
+        if self._disposed:
+            return
+        self._disposed = True
         self._mounted = False
         self._camera.cancel()
         self._metadata_pending.clear()
         self._rebuild_scheduler.cancel()
         self._stop_update_loop()
-        # Drop callback so worker threads do not touch a dead view.
+        self._tile_requests.reset()
+        self._surface_layer.close()
+        self._release_tile_ready_callback()
+        self._tile_sources.close()
+
+    def _release_tile_ready_callback(self) -> None:
+        """仅摘除当前视图仍拥有的服务回调。"""
         try:
             if (
                 getattr(self._service, "_tile_ready_callback", None)
@@ -1238,11 +1271,8 @@ class McaMapView(ft.Container):
             ):
                 self._service.set_tile_ready_callback(None)
         except Exception:
-            # UI best-effort: control may already be unmounted.
+            # UI teardown is best-effort; service may already be closed.
             pass
-        super_did_unmount = getattr(super(), "did_unmount", None)
-        if super_did_unmount:
-            super_did_unmount()
 
     def _schedule_task(
         self,
@@ -1378,7 +1408,10 @@ class McaMapView(ft.Container):
         self._request_rebuild()
         return visible
 
-    def apply_layer_state(self, layers: MapLayerState) -> None:
+    def apply_layer_state(
+        self,
+        layers: MapLayerState | MapLayerStateSnapshot,
+    ) -> None:
         """Apply persisted layer switches when a dimension is restored."""
         self._show_coordinates = bool(layers.show_coordinates)
         self._show_grid = bool(layers.show_grid)

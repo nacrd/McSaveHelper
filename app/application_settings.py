@@ -1,10 +1,11 @@
 """Settings coordination helpers for the application composition root."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import flet as ft
 
+from app.models.config import ApplicationSettings
 from app.ui.theme import THEME, get_theme_manager
 
 
@@ -50,6 +51,7 @@ class SettingsCoordinationMixin:
             cache_snapshot=self.services.cache_registry.stats,
             clear_caches=self._clear_application_caches,
             cache_path=self._map_cache_path,
+            execution_runtime=self.services.execution_runtime,
             runtime_snapshot=self.services.execution_runtime.snapshot,
         ))
 
@@ -104,18 +106,10 @@ class SettingsCoordinationMixin:
         self._log_fab.set_visible(visible)
         self.floating_log_panel.set_visible(False)
 
-    def _reset_settings(self) -> None:
-        """Reset settings and apply all immediate effects."""
+    def _reset_settings(self) -> ApplicationSettings:
+        """Reset persisted settings and return the resulting snapshot."""
         self.config.reset_config()
-        settings = self.config.get_settings()
-        self._apply_theme(settings.theme)
-        self._apply_language(settings.language)
-        self._set_sidebar_mode(settings.sidebar_mode)
-        self._set_log_panel_visible(settings.show_log_panel)
-        self.gui_optimizer.configure_performance_monitor(
-            settings.enable_performance_monitor,
-            float(settings.performance_print_interval),
-        )
+        return cast(ApplicationSettings, self.config.get_settings())
 
 
 __all__ = ["SettingsCoordinationMixin"]

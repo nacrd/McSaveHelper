@@ -6,14 +6,14 @@ import threading
 from concurrent.futures import (
     CancelledError,
     Future,
-    ThreadPoolExecutor,
     as_completed,
 )
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from core.parallel import clamp_workers
+from core.parallel import bounded_executor, clamp_workers
+from core.cancellable_copy import CopyCancelledError
 from core.types import BatchResult, LogCallback, ProgressCallback
 from core.utils import validate_world_name
 
@@ -191,7 +191,11 @@ class BatchProcessor:
 
         tracker = get_tracker()
         with tracker.track("批量处理", {"count": str(len(tasks)), "mode": mode}):
-            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            with bounded_executor(
+                max_workers=self.max_workers,
+                item_count=len(tasks),
+                absolute_max=self.MAX_WORKERS,
+            ) as executor:
                 future_tasks: dict[Future[Dict[str, Any]], _BatchTask] = {}
                 for task in tasks:
                     future = executor.submit(
@@ -281,7 +285,7 @@ class BatchProcessor:
                 )
                 result = {"success": True}
             return {**base, "version": version, **result}
-        except BatchCancelledError as exc:
+        except (BatchCancelledError, CopyCancelledError) as exc:
             return {**base, "success": False, "cancelled": True, "error": str(exc)}
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             return {**base, "success": False, "error": str(exc)}

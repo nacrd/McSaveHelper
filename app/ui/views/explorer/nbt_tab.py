@@ -14,9 +14,13 @@ from app.ui.views.explorer.nbt import (
     NbtDataLoader,
     NbtStageManager,
     ChunkOperations,
+    NbtCommitExecution,
     NbtCommitHandler,
+    NbtCommitMessages,
+    NbtCommitUi,
 )
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.nbt_tab_chrome import (
     NbtTabCallbacks,
@@ -200,33 +204,78 @@ class NbtTabMixin(ExplorerMixinHost):
                 ex, title=title
             ),
             save_file=self.app.save_file,
+            task_scope=self._task_scope,
+            page=self.app.page,
         )
 
     def _create_nbt_commit_handler(self) -> NbtCommitHandler:
         return NbtCommitHandler(
             store=self._nbt_stage_store,
             get_world_session=lambda: self.world_session,
-            get_page=lambda: self.app.page,
-            refresh_stage=self._stage_manager.update_stage_status,
-            reload_world=self._load_world,
-            is_world_current=self._is_nbt_world_current,
-            world_changed_text=(
-                self._translate_nbt_commit(
-                    "nbt_commit.world_changed_title",
-                    "存档已切换",
+            execution=NbtCommitExecution(
+                scope=self._task_scope,
+                post_to_ui=lambda callback: run_on_ui(
+                    self.app.page,
+                    callback,
                 ),
-                self._translate_nbt_commit(
-                    "nbt_commit.world_changed_message",
-                    "当前存档已改变，请重新打开提交预览。",
+                get_generation=lambda: self._world_load_generation,
+                is_world_current=self._is_nbt_world_current,
+                reload_world=self._load_world,
+            ),
+            ui=NbtCommitUi(
+                get_page=lambda: self.app.page,
+                refresh_stage=self._stage_manager.update_stage_status,
+                warn=self.app.warn_dialog,
+                info=self.app.info_dialog,
+                error=self.app.error_dialog,
+                handle_error=lambda ex, title: self.app.handle_exception(
+                    ex,
+                    title=title,
+                ),
+                log=self.app.log,
+            ),
+            messages=NbtCommitMessages(
+                world_changed=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.world_changed_title",
+                        "存档已切换",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.world_changed_message",
+                        "当前存档已改变，请重新打开提交预览。",
+                    ),
+                ),
+                busy=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.busy_title",
+                        "提交进行中",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.busy_message",
+                        "已有 NBT 提交正在执行，请等待当前操作完成。",
+                    ),
+                ),
+                cancelled=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.cancelled_title",
+                        "提交已取消",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.cancelled_message",
+                        "NBT 提交已在安全检查点取消，原存档保持不变。",
+                    ),
+                ),
+                queue_full=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.queue_full_title",
+                        "后台任务繁忙",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.queue_full_message",
+                        "后台 I/O 队列已满，请稍后重试。",
+                    ),
                 ),
             ),
-            warn=self.app.warn_dialog,
-            info=self.app.info_dialog,
-            error=self.app.error_dialog,
-            handle_error=lambda ex, title: self.app.handle_exception(
-                ex, title=title
-            ),
-            log=self.app.log,
         )
 
     def _translate_nbt_commit(self, key: str, fallback: str) -> str:

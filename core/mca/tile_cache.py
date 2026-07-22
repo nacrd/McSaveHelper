@@ -204,6 +204,12 @@ def clear_disk_cache() -> Dict[str, int]:
                     continue
         except OSError:
             pass
+        try:
+            from core.mca.tile_cache_index import clear_index
+
+            clear_index(root)
+        except (ImportError, OSError, ValueError, TypeError):
+            pass
     return {"deleted_files": deleted, "freed_bytes": freed}
 
 

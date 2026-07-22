@@ -187,7 +187,7 @@ class RegionMapMetaMixin(RegionMapHost):
                 current = self._region_meta_tasks.get(coord)
                 if current is not None and current is handle and current.done:
                     self._region_meta_tasks.pop(coord, None)
-        if handle.cancelled:
+        if handle.cancel_requested:
             raise asyncio.CancelledError
         return dict(meta or {})
 

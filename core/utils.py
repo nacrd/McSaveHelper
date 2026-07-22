@@ -4,11 +4,14 @@
 以及 Minecraft 26.1 存档路径兼容辅助函数。
 """
 
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 import re
 import shutil
-from typing import List, Optional
+from typing import Callable, List, Optional
 
+from .cancellable_copy import CopyCancelledError, copy_tree_with_checkpoints
+from .io_atomic import atomic_write_text
 from .types import LogCallback
 
 
@@ -198,7 +201,8 @@ def replace_directory_tree(
         src_path: Path,
         dst_path: Path,
         *,
-        ignore=None) -> None:
+        ignore=None,
+        cancel_check: Optional[Callable[[], bool]] = None) -> None:
     """Safely replace dst_path with a copy of src_path using atomic operations.
 
     使用原子操作确保数据完整性：先复制到临时目录，成功后再替换目标目录。
@@ -223,6 +227,10 @@ def replace_directory_tree(
 
     dst_resolved.parent.mkdir(parents=True, exist_ok=True)
 
+    def checkpoint() -> None:
+        if cancel_check is not None and cancel_check():
+            raise CopyCancelledError("目录复制已取消")
+
     # 使用原子操作：先复制到临时目录，再替换
     temp_dir = None
     try:
@@ -234,10 +242,12 @@ def replace_directory_tree(
         temp_path = Path(temp_dir)
 
         # 复制源目录到临时目录
-        shutil.copytree(
+        copy_tree_with_checkpoints(
             src_resolved,
             temp_path / dst_resolved.name,
-            ignore=ignore)
+            checkpoint,
+            ignore=ignore,
+        )
 
         final_temp_path = temp_path / dst_resolved.name
         publish_directory_tree(final_temp_path, dst_resolved)
@@ -249,8 +259,20 @@ def replace_directory_tree(
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def publish_directory_tree(prepared_path: Path, dst_path: Path) -> None:
-    """Publish a prepared world directory with rollback on exchange failure."""
+def publish_directory_tree(
+    prepared_path: Path,
+    dst_path: Path,
+    *,
+    exchange_context: Optional[AbstractContextManager[None]] = None,
+) -> None:
+    """Publish a prepared world directory with rollback on exchange failure.
+
+    Args:
+        prepared_path: 已完整验证、等待发布的世界目录。
+        dst_path: 原子替换的目标世界目录。
+        exchange_context: 仅包围目录换位与失败回滚的可选上下文，供
+            ``session.lock`` 在 Windows 上完成最短 handoff。
+    """
     import os
     import secrets
 
@@ -264,22 +286,34 @@ def publish_directory_tree(prepared_path: Path, dst_path: Path) -> None:
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     rollback: Optional[Path] = None
-    if destination.exists():
+    destination_exists = destination.exists()
+    if destination_exists:
         if not destination.is_dir():
             raise ValueError(f"目标路径不是目录: {destination}")
-        if any(destination.iterdir()) and not (destination / "level.dat").is_file():
+        meaningful_entries = [
+            path
+            for path in destination.iterdir()
+            if path.name != "session.lock"
+        ]
+        if meaningful_entries and not (destination / "level.dat").is_file():
             raise ValueError(f"目标目录不是 Minecraft 存档目录，拒绝替换: {destination}")
         rollback = destination.parent / (
             f".{destination.name}.rollback-{secrets.token_hex(4)}"
         )
-        os.replace(destination, rollback)
-
-    try:
-        os.replace(prepared, destination)
-    except OSError:
-        if rollback is not None and rollback.exists() and not destination.exists():
-            os.replace(rollback, destination)
-        raise
+    context = exchange_context or nullcontext()
+    with context:
+        if destination_exists and rollback is not None:
+            os.replace(destination, rollback)
+        try:
+            os.replace(prepared, destination)
+        except OSError:
+            if (
+                rollback is not None
+                and rollback.exists()
+                and not destination.exists()
+            ):
+                os.replace(rollback, destination)
+            raise
 
     if rollback is not None:
         shutil.rmtree(rollback, ignore_errors=True)
@@ -328,7 +362,7 @@ def update_server_properties(
         content = newline.join(new_lines)
         if had_trailing_newline:
             content += newline
-        props_file.write_text(content, encoding="utf-8")
+        atomic_write_text(props_file, content)
         log(f"已更新 server.properties: level-name={world_name}", "CONFIG")
     except OSError as exc:
         log(f"更新 server.properties 失败: {exc}", "ERROR")

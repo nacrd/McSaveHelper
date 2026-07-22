@@ -18,6 +18,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APP_ROOT = PROJECT_ROOT / "app"
 CORE_ROOT = PROJECT_ROOT / "core"
 
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -170,26 +173,41 @@ def check_no_private_execution_runtime_fallback() -> CheckResult:
 def check_region_delete_uses_transaction() -> CheckResult:
     """区域删除必须走统一世界事务端口。"""
     region_tab = APP_ROOT / "ui" / "views" / "explorer" / "region_tab.py"
+    controller = APP_ROOT / "controllers" / "region_delete_controller.py"
     editor = APP_ROOT / "services" / "region_editor_service.py"
-    if not region_tab.is_file() or not editor.is_file():
+    if (
+        not region_tab.is_file()
+        or not controller.is_file()
+        or not editor.is_file()
+    ):
         return CheckResult(
             "region_delete_transaction",
-            False,
-            "missing region delete modules",
+            False, "missing region delete modules",
         )
     tab_source = region_tab.read_text(encoding="utf-8-sig")
+    controller_source = controller.read_text(encoding="utf-8-sig")
     editor_source = editor.read_text(encoding="utf-8-sig")
-    if "delete_region_via_transaction" not in tab_source:
+    uses_controller = (
+        "RegionDeleteRequest" in tab_source
+        and "_region_delete_controller.start" in tab_source
+    )
+    if not uses_controller:
         return CheckResult(
             "region_delete_transaction",
-            False,
-            "region_tab does not call delete_region_via_transaction",
+            False, "region_tab does not route delete through controller",
+        )
+    if (
+        "scope.submit" not in controller_source
+        or "delete_region_via_transaction" not in controller_source
+    ):
+        return CheckResult(
+            "region_delete_transaction",
+            False, "delete controller does not use runtime transaction",
         )
     if "world_transactions.mutate" not in editor_source:
         return CheckResult(
             "region_delete_transaction",
-            False,
-            "delete helper does not call world_transactions.mutate",
+            False, "delete helper does not call world_transactions.mutate",
         )
     if "reset_region(region_path, backup=True)" in tab_source:
         return CheckResult(
@@ -459,6 +477,117 @@ def run_benchmark() -> CheckResult:
     return CheckResult("benchmark", ok, json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
+def _mca_sample_metrics(
+    payload: dict[str, object],
+) -> tuple[set[str], list[str]]:
+    """验证 MCA 基准样本覆盖与缓存命中字段。"""
+    samples = payload.get("samples")
+    if not isinstance(samples, list):
+        return set(), ["samples missing"]
+    sample_sizes = {
+        str(item.get("size"))
+        for item in samples
+        if isinstance(item, dict)
+    }
+    errors: list[str] = []
+    if sample_sizes != {"small", "medium", "large"}:
+        errors.append(f"sample sizes incomplete: {sorted(sample_sizes)}")
+    for item in samples:
+        if not isinstance(item, dict):
+            errors.append("sample is not an object")
+            continue
+        size = str(item.get("size", "?"))
+        topview = item.get("topview")
+        if not isinstance(topview, dict):
+            errors.append(f"{size}: topview missing")
+            continue
+        hit_p95 = topview.get("cache_hit_p95_ms")
+        hit_count = topview.get("cache_hit_count")
+        if not isinstance(hit_p95, (int, float)):
+            errors.append(f"{size}: cache hit p95 missing")
+        if not isinstance(hit_count, int) or hit_count < 1:
+            errors.append(f"{size}: cache hit sample missing")
+    return sample_sizes, errors
+
+
+def _mca_budget_is_ok(payload: dict[str, object]) -> bool:
+    """确认基准命令执行并返回了无违规预算结果。"""
+    budget_result = payload.get("budget_result")
+    violations = payload.get("budget_violations")
+    return (
+        payload.get("budgets_ok") is True
+        and isinstance(budget_result, dict)
+        and budget_result.get("ok") is True
+        and budget_result.get("checked_samples") == 3
+        and budget_result.get("violations") == []
+        and isinstance(violations, list)
+        and not violations
+    )
+
+
+def run_mca_benchmark() -> CheckResult:
+    """运行 MCA/世界路径基准并消费合成 p95 预算结果。"""
+    command = [
+        sys.executable,
+        "-m",
+        "scripts.bench_mca",
+        "--sizes",
+        "small",
+        "medium",
+        "large",
+        "--loops",
+        "3",
+        "--check-budgets",
+        "--json",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return CheckResult("mca_benchmark", False, "timeout>60s")
+    except OSError as exc:
+        return CheckResult("mca_benchmark", False, str(exc))
+
+    output = (completed.stdout or "").strip()
+    if not output:
+        detail = (completed.stderr or "").strip()
+        return CheckResult(
+            "mca_benchmark",
+            False,
+            detail or f"exit={completed.returncode}",
+        )
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError as exc:
+        return CheckResult("mca_benchmark", False, f"invalid json: {exc}")
+    if not isinstance(payload, dict):
+        return CheckResult("mca_benchmark", False, "benchmark payload is not an object")
+
+    sample_sizes, metric_errors = _mca_sample_metrics(payload)
+    budget_result = payload.get("budget_result")
+    violations = payload.get("budget_violations")
+    budget_ok = _mca_budget_is_ok(payload)
+    ok = completed.returncode == 0 and budget_ok and not metric_errors
+    detail_payload = {
+        "returncode": completed.returncode,
+        "budget_result": budget_result,
+        "budget_violations": violations,
+        "metric_errors": metric_errors,
+        "sample_sizes": sorted(sample_sizes),
+    }
+    return CheckResult(
+        "mca_benchmark",
+        ok,
+        json.dumps(detail_payload, ensure_ascii=False, sort_keys=True),
+    )
+
+
 def run_all() -> list[CheckResult]:
     static_checks = [
         check_dependency_direction(),
@@ -518,6 +647,7 @@ def run_all() -> list[CheckResult]:
         *static_checks,
         *quality_checks,
         run_benchmark(),
+        run_mca_benchmark(),
         run_pytest(),
     ]
 

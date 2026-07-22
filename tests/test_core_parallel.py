@@ -1,7 +1,14 @@
 """core.parallel bounds and map helpers."""
 from __future__ import annotations
 
-from core.parallel import ABSOLUTE_MAX_WORKERS, clamp_workers, map_unordered
+import threading
+
+from core.parallel import (
+    ABSOLUTE_MAX_WORKERS,
+    bounded_executor,
+    clamp_workers,
+    map_unordered,
+)
 
 
 def test_clamp_workers_hard_cap() -> None:
@@ -19,3 +26,15 @@ def test_map_unordered_preserves_results() -> None:
 def test_map_unordered_empty_and_single() -> None:
     assert map_unordered([], lambda n: n) == []
     assert map_unordered([7], lambda n: n + 1) == [8]
+
+
+def test_bounded_executor_applies_cap_and_thread_prefix() -> None:
+    with bounded_executor(max_workers=99, item_count=3) as executor:
+        futures = [
+            executor.submit(lambda: threading.current_thread().name)
+            for _ in range(3)
+        ]
+        names = [future.result(timeout=1) for future in futures]
+
+    assert len(set(names)) <= ABSOLUTE_MAX_WORKERS
+    assert all(name.startswith("MCSaveCore") for name in names)

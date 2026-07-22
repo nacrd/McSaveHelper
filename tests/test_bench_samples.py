@@ -25,6 +25,12 @@ def test_mca_benchmark_reports_core_metrics() -> None:
     assert sample["world_index"]["regions"] == 1
     assert sample["world_session"]["region_count"] == 1
     assert sample["backup"]["file_count"] >= 1
+    assert sample["backup"]["backup_p95_ms"] >= 0.0
+    assert sample["topview"]["cache_hit_count"] >= 1
+    assert sample["topview"]["cache_hit_p95_ms"] >= 0.0
+    assert report["budgets_ok"] is True
+    assert report["budget_result"]["ok"] is True
+    assert report["budget_result"]["checked_samples"] == 1
     runtime = cast(dict[str, Any], report["runtime"])
     assert runtime["stale_callbacks"] >= 1
     assert runtime["cache_bytes_used"] >= 0

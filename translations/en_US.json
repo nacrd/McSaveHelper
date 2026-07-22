@@ -6,7 +6,21 @@
   },
   "nbt_commit": {
     "world_changed_title": "Save changed",
-    "world_changed_message": "The current save changed. Reopen the commit preview."
+    "world_changed_message": "The current save changed. Reopen the commit preview.",
+    "busy_title": "Commit in progress",
+    "busy_message": "An NBT commit is already running. Wait for it to finish.",
+    "cancelled_title": "Commit cancelled",
+    "cancelled_message": "The NBT commit was cancelled at a safe checkpoint. The original save is unchanged.",
+    "queue_full_title": "Background tasks busy",
+    "queue_full_message": "The background I/O queue is full. Try again shortly."
+  },
+  "region_delete": {
+    "busy_title": "Deletion in progress",
+    "busy_message": "A region deletion is already running. Wait for it to finish.",
+    "cancelled_title": "Deletion cancelled",
+    "cancelled_message": "The region deletion was cancelled at a safe checkpoint. The original save is unchanged.",
+    "queue_full_title": "Background tasks busy",
+    "queue_full_message": "The background I/O queue is full. Try again shortly."
   },
   "top_bar": {
     "ready": "Ready",
@@ -27,6 +41,7 @@
     "detect_save": "Detect Save",
     "create_backup": "Create Backup",
     "cancel_batch": "Cancel Batch",
+    "cancel_migration": "Cancel Migration",
     "start_export": "Start Export",
     "start_compare": "Start Compare",
     "import_lang": "Import Lang File",
@@ -380,7 +395,15 @@
     "import_assets": "Import lang/textures",
     "assets_hint": "Multi-select language JSON and client/mod JARs; JARs import both lang and textures. UI language is preferred.",
     "import_assets_title": "Select language JSON / Minecraft or mod JARs (multi-select)",
-    "import_assets_empty": "No language or textures imported. Multi-select JSON/JAR, or cancel to try the local client."
+    "import_assets_empty": "No language or textures imported. Multi-select JSON/JAR, or cancel to try the local client.",
+    "error": {
+      "import_assets": "Failed to import language/textures",
+      "import_json": "Failed to import JSON mappings",
+      "export_json": "Failed to export mappings",
+      "uuid_import": "Failed to import UUID mappings",
+      "uuid_export": "Failed to export UUID mappings",
+      "uuid_save": "Failed to save UUID mappings"
+    }
   },
   "settings": {
     "general": {
@@ -411,7 +434,14 @@
       "title": "Application Cache",
       "description": "Manage world indexes, textures, and map rendering caches in one place. Memory is budgeted, while map tiles remain on disk for faster reopening.",
       "refresh": "Refresh",
-      "clear": "Clear Cache"
+      "clear": "Clear Cache",
+      "loading": "Reading cache information…",
+      "runtime_loading": "Reading background runtime…",
+      "runtime_unavailable": "Background runtime: unavailable",
+      "path_loading": "Map tile path: —",
+      "path_value": "Map tile path: {path}",
+      "read_failed": "Unable to read cache information: {error}",
+      "clear_success": "Cleared map cache: {deleted} files ({freed}), {memory} memory chunks"
     },
     "uuid": {
       "title": "Custom UUID Mapping",
@@ -430,7 +460,9 @@
     "save_status": {
       "auto": "Changes save automatically",
       "saved": "Saved",
-      "failed": "Save failed"
+      "failed": "Save failed",
+      "pending": "Waiting to save",
+      "resetting": "Resetting"
     },
     "auto_import_mc_lang_ok": "Auto-imported {count} Minecraft names ({locale})"
   },
@@ -497,6 +529,9 @@
     "batch_migration_started": "Batch processing started",
     "batch_cancel_requested": "Batch cancellation requested",
     "no_batch_running": "No batch operation is currently running",
+    "migration_cancel_requested": "Migration cancellation requested",
+    "no_migration_running": "No migration operation is currently running",
+    "migration_running": "A migration operation is already running",
     "batch_migration_complete": "Success: {success}/{total}",
     "batch_result_details": "Failed: {failed}, cancelled: {cancelled}",
     "cannot_open_folder": "Cannot open folder: {error}",

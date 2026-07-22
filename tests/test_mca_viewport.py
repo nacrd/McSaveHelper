@@ -8,9 +8,11 @@ from core.mca.viewport import (
     view_level_from_scale,
 )
 from core.mca.map_models import MapMarker
+from app.services.cache_registry import CacheRegistry
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.mca_map_view import McaMapView
+from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 
 
 def test_view_level_thresholds() -> None:
@@ -194,10 +196,59 @@ def test_map_view_unmount_releases_only_its_own_tile_callback() -> None:
     service = RegionMapService(ExecutionRuntime())
     first = McaMapView(map_service=service)
     second = McaMapView(map_service=service)
+    first.did_mount()
+    second.did_mount()
 
-    first.did_unmount()
+    first.will_unmount()
     assert service._tile_ready_callback is second._tile_ready_callback
 
-    second.did_unmount()
+    second.will_unmount()
     assert service._tile_ready_callback is None
     service.close()
+
+
+def test_map_view_dispose_unregisters_tile_source_cache() -> None:
+    runtime = ExecutionRuntime()
+    registry = CacheRegistry(budget_bytes=32 * 1024 * 1024)
+    service = RegionMapService(runtime)
+    view = McaMapView(map_service=service, cache_registry=registry)
+
+    assert any(
+        item.name.startswith(TileSourceCache.CACHE_NAME_PREFIX)
+        for item in registry.stats().regions
+    )
+
+    view.dispose()
+    view.dispose()
+
+    assert registry.stats().regions == ()
+    service.close()
+    runtime.shutdown()
+
+
+def test_map_view_remount_rebuilds_after_detached_resize() -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    view = McaMapView(map_service=service)
+    view._mounted = True
+    view._needs_initial_draw = False
+    view._surface_layer._dirty = False
+    surface_token = view._surface_layer._token
+
+    view.will_unmount()
+    view.resize_map(1200, 700)
+
+    assert view._mounted is False
+    assert view._needs_initial_draw is True
+    assert view._surface_layer._dirty is True
+    assert view._surface_layer._token == surface_token + 1
+
+    rebuilds = []
+    setattr(view, "_request_rebuild", lambda: rebuilds.append("rebuild"))
+    view.did_mount()
+
+    assert view._mounted is True
+    assert rebuilds == ["rebuild"]
+    view.dispose()
+    service.close()
+    runtime.shutdown()

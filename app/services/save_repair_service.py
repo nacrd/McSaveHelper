@@ -113,7 +113,6 @@ class SaveRepairService:
     def cancel(self) -> None:
         """请求取消正在进行的修复/检测操作。"""
         self._cancel_event.set()
-        self._backup_service.cancel()
 
     @property
     def is_cancelled(self) -> bool:
@@ -416,6 +415,7 @@ class SaveRepairService:
                     0.02 + value * 0.08,
                     message,
                 ),
+                cancel_check=lambda: self.is_cancelled,
             )
         except BackupCancelledError:
             raise

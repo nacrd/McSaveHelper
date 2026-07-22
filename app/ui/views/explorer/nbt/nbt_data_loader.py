@@ -1,19 +1,30 @@
-"""NBT、JSON 与区块数据源加载协调器。"""
+"""NBT、JSON 与区块数据源的 UI 加载协调器。"""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import flet as ft
-import core.nbt as nbtlib
 
 from app.models.nbt_edit import (
     ChunkNbtTarget,
     NbtEditFormat,
     NbtTarget,
 )
-from app.ui.views.explorer.explorer_helpers import world_coords_to_region_chunk
+from app.services.execution_runtime import OperationScope
+from app.ui.views.explorer.nbt.nbt_chunk_loader import (
+    NbtChunkLoader,
+    NbtChunkLoaderContext,
+    NbtChunkLoaderUi,
+    dimension_region_dir,
+)
+from app.ui.views.explorer.nbt.nbt_io_coordinator import NbtIoCoordinator
+from app.ui.views.explorer.nbt.nbt_io_operations import (
+    export_json_payload,
+    find_nbt_target_candidates,
+    load_world_json,
+    load_world_nbt,
+)
 from app.ui.views.explorer.nbt_tree import NBTTreeView
 from app.ui.views.explorer.utils import safe_update
 from core.omni.world_session import WorldSession
@@ -59,6 +70,8 @@ class NbtDataLoader:
         info: DialogCallback,
         handle_error: ErrorCallback,
         save_file: SaveFileCallback,
+        task_scope: Optional[OperationScope] = None,
+        page: Optional[ft.Page] = None,
     ) -> None:
         """注入会话/UI 依赖（仅绑定引用，不执行 I/O）。
 
@@ -89,59 +102,91 @@ class NbtDataLoader:
         self._get_current_uuid = get_current_uuid
         self._get_current_target = get_current_target
         self._get_current_label = get_current_label
-        self._get_dimension = get_dimension
         self._set_target_state = set_target_state
         self._load_player_data = load_player_data
-        self._render_chunk_objects = render_chunk_objects
-        self._query_current_block = query_current_block
         self._target_dropdown = target_dropdown
         self._target_label = target_label
-        self._region_file_field = region_file_field
-        self._chunk_x_field = chunk_x_field
-        self._chunk_z_field = chunk_z_field
-        self._world_x_field = world_x_field
-        self._world_z_field = world_z_field
         self._nbt_tree = nbt_tree
         self._warn = warn
         self._info = info
         self._handle_error = handle_error
         self._save_file = save_file
+        self._io = NbtIoCoordinator(
+            task_scope=task_scope,
+            page=page,
+            get_world_session=get_world_session,
+            handle_error=handle_error,
+        )
+        self._request_generation = 0
         self._target_options: Dict[str, Path] = {}
+        self._chunk_loader = NbtChunkLoader(
+            self._io,
+            NbtChunkLoaderContext(
+                get_world_session=get_world_session,
+                get_dimension=get_dimension,
+                next_generation=self._next_request_generation,
+                is_current=self._is_current_request,
+            ),
+            NbtChunkLoaderUi(
+                set_target_state=set_target_state,
+                render_chunk_objects=render_chunk_objects,
+                query_current_block=query_current_block,
+                target_label=target_label,
+                region_file_field=region_file_field,
+                chunk_x_field=chunk_x_field,
+                chunk_z_field=chunk_z_field,
+                world_x_field=world_x_field,
+                world_z_field=world_z_field,
+                nbt_tree=nbt_tree,
+                warn=warn,
+                handle_error=handle_error,
+            ),
+        )
 
     def update_nbt_target_options(self) -> None:
         """扫描当前存档中可直接编辑的 NBT 与 JSON 文件。"""
         try:
-            self._target_options.clear()
             session = self._get_world_session()
             if not session:
                 self._set_target_options([])
                 return
-            self._set_target_options(
-                self._find_nbt_target_candidates(session.world_path)
+            generation = self._next_request_generation()
+            self._io.submit(
+                "scan_nbt_targets",
+                lambda token: find_nbt_target_candidates(
+                    session.world_path,
+                    token,
+                ),
+                lambda candidates: self._apply_target_options(
+                    candidates,
+                    session,
+                    generation,
+                ),
+                "刷新 NBT 目标失败",
+                session=session,
+                request_guard=lambda: self._is_current_request(
+                    generation,
+                    session,
+                ),
             )
         except Exception as ex:
             self._handle_error(ex, "刷新 NBT 目标失败")
 
-    @staticmethod
-    def _find_nbt_target_candidates(world_path: Path) -> List[Tuple[str, Path]]:
-        candidates: List[Tuple[str, Path]] = []
-        if (world_path / "level.dat").exists():
-            candidates.append(("世界 / level.dat", Path("level.dat")))
-        candidates.extend(
-            (f"数据 / {path.name}", path.relative_to(world_path))
-            for path in sorted((world_path / "data").glob("*.dat"))
-        )
-        for folder_name, label in (("stats", "统计"), ("advancements", "进度")):
-            candidates.extend(
-                (f"{label} / {path.name}", path.relative_to(world_path))
-                for path in sorted((world_path / folder_name).glob("*.json"))
-            )
-        return candidates
+    def _apply_target_options(
+        self,
+        candidates: List[Tuple[str, Path]],
+        session: WorldSession,
+        generation: int,
+    ) -> None:
+        if not self._is_current_request(generation, session):
+            return
+        self._set_target_options(candidates)
 
     def _set_target_options(self, candidates: List[Tuple[str, Path]]) -> None:
-        self._target_options.update(
-            {relative_path.as_posix(): relative_path for _, relative_path in candidates}
-        )
+        self._target_options = {
+            relative_path.as_posix(): relative_path
+            for _, relative_path in candidates
+        }
         self._target_dropdown.options = [
             ft.dropdown.Option(path.as_posix(), label) for label, path in candidates
         ]
@@ -201,16 +246,31 @@ class NbtDataLoader:
         session = self._require_session()
         if session is None:
             return
-        path = session.world_path / relative_path
-        if not path.exists():
-            self._warn("提示", f"文件不存在: {relative_path}")
-            return
-        if path.suffix.lower() != ".dat":
+        if relative_path.suffix.lower() != ".dat":
             self.load_json_file(relative_path, label)
             return
-
-        self._set_loaded_target(relative_path, label, "nbt")
-        self._nbt_tree.load_nbt(nbtlib.load(path))
+        generation = self._next_request_generation()
+        self._io.submit(
+            "load_nbt_file",
+            lambda token: load_world_nbt(
+                session.world_path,
+                relative_path,
+                token,
+            ),
+            lambda data: self._apply_nbt_payload(
+                relative_path,
+                label,
+                data,
+                session,
+                generation,
+            ),
+            "加载 NBT 目标失败",
+            session=session,
+            request_guard=lambda: self._is_current_request(
+                generation,
+                session,
+            ),
+        )
 
     def load_json_file(self, relative_path: Path, label: str) -> None:
         """加载 stats/advancements 等 JSON 并以树形式展示。
@@ -222,15 +282,45 @@ class NbtDataLoader:
         session = self._require_session()
         if session is None:
             return
-        path = session.world_path / relative_path
-        if not path.exists():
-            self._warn("提示", f"文件不存在: {relative_path}")
-            return
-
         json_label = label.replace("NBT 文件", "JSON 文件")
-        self._set_loaded_target(relative_path, json_label, "json")
-        with path.open("r", encoding="utf-8") as file:
-            self._nbt_tree.load_nbt(json.load(file))
+        generation = self._next_request_generation()
+        self._io.submit(
+            "load_json_file",
+            lambda token: load_world_json(
+                session.world_path,
+                relative_path,
+                token,
+            ),
+            lambda data: self._apply_nbt_payload(
+                relative_path,
+                json_label,
+                data,
+                session,
+                generation,
+                edit_format="json",
+            ),
+            "加载 JSON 目标失败",
+            session=session,
+            request_guard=lambda: self._is_current_request(
+                generation,
+                session,
+            ),
+        )
+
+    def _apply_nbt_payload(
+        self,
+        relative_path: Path,
+        label: str,
+        data: Any,
+        session: WorldSession,
+        generation: int,
+        *,
+        edit_format: NbtEditFormat = "nbt",
+    ) -> None:
+        if not self._is_current_request(generation, session):
+            return
+        self._set_loaded_target(relative_path, label, edit_format)
+        self._nbt_tree.load_nbt(data, editable=True)
 
     def load_chunk_nbt(self, e: Any = None) -> None:
         """从区域路径与区块坐标加载区块 NBT（校验路径不越界世界根）。
@@ -238,60 +328,7 @@ class NbtDataLoader:
         Args:
             e: 可选 Flet 事件。
         """
-        try:
-            session = self._require_session()
-            if session is None:
-                return
-            relative_text = (
-                self._region_file_field.value or ""
-            ).strip().replace("\\", "/")
-            if not relative_text:
-                self._warn(
-                    "提示",
-                    "请输入区域文件路径，例如 region/r.0.0.mca。",
-                )
-                return
-
-            relative_path = Path(relative_text)
-            region_path = (session.world_path / relative_path).resolve()
-            world_root = session.world_path.resolve()
-            try:
-                region_path.relative_to(world_root)
-            except ValueError:
-                self._warn("提示", "区域文件必须位于当前存档目录内。")
-                return
-            if not region_path.exists() or region_path.suffix.lower() != ".mca":
-                self._warn(
-                    "提示",
-                    f"区域文件不存在或不是 .mca 文件: {relative_text}",
-                )
-                return
-
-            chunk_x = int((self._chunk_x_field.value or "0").strip())
-            chunk_z = int((self._chunk_z_field.value or "0").strip())
-            result = session.load_chunk_nbt(relative_path, chunk_x, chunk_z)
-            if result is None:
-                self._warn("提示", "该区块不存在或无法读取。")
-                return
-
-            chunk_data, _absolute_path = result
-            target = ChunkNbtTarget(
-                region_path=relative_path,
-                chunk_x=chunk_x,
-                chunk_z=chunk_z,
-                data=chunk_data,
-            )
-            label = f"区块 NBT: {relative_text} [{chunk_x}, {chunk_z}]"
-            self._set_target_state(target, label, "chunk", target)
-            self._target_label.value = label
-            safe_update(self._target_label)
-            self._nbt_tree.load_nbt(chunk_data, editable=True)
-            self._render_chunk_objects(chunk_data)
-            self._query_current_block()
-        except ValueError:
-            self._warn("提示", "区块坐标必须是整数。")
-        except Exception as ex:
-            self._handle_error(ex, "加载区块 NBT 失败")
+        self._chunk_loader.load_chunk_nbt(e)
 
     def fill_chunk_from_world_coords(self, e: Any = None) -> None:
         """根据世界坐标填入区域路径与区块坐标字段。
@@ -299,12 +336,7 @@ class NbtDataLoader:
         Args:
             e: 可选 Flet 事件。
         """
-        try:
-            self._set_chunk_fields_from_world_coords()
-        except ValueError:
-            self._warn("提示", "世界坐标必须是数字。")
-        except Exception as ex:
-            self._handle_error(ex, "填入区块坐标失败")
+        self._chunk_loader.fill_chunk_from_world_coords(e)
 
     def load_chunk_from_world_coords(self, e: Any = None) -> None:
         """填入区块坐标后立即加载该区块 NBT。
@@ -312,18 +344,11 @@ class NbtDataLoader:
         Args:
             e: 可选 Flet 事件。
         """
-        try:
-            self._set_chunk_fields_from_world_coords()
-        except ValueError:
-            self._warn("提示", "世界坐标必须是数字。")
-            return
-        except Exception as ex:
-            self._handle_error(ex, "填入区块坐标失败")
-            return
-        self.load_chunk_nbt(e)
+        self._chunk_loader.load_chunk_from_world_coords(e)
 
     def reload_current_nbt_target(self) -> None:
         """按当前目标类型重新从磁盘加载（Path/玩家/区块）。"""
+        self._next_request_generation()
         target = self._get_current_target()
         if isinstance(target, Path):
             self.load_nbt_file(target, self._get_current_label())
@@ -339,7 +364,8 @@ class NbtDataLoader:
             e: 可选 Flet 事件。
         """
         try:
-            if self._nbt_tree.get_modified_data() is None:
+            data = self._nbt_tree.get_modified_data()
+            if data is None:
                 self._warn("提示", "没有可导出的 NBT 数据")
                 return
             path = self._save_file(
@@ -349,15 +375,40 @@ class NbtDataLoader:
             )
             if not path:
                 return
-            if self._nbt_tree.export_json(path):
-                self._info("成功", f"已导出到: {path}")
-            else:
-                self._warn(
-                    "导出失败",
-                    "导出 JSON 文件失败，请检查文件路径和权限。",
-                )
+            generation = self._next_request_generation()
+            output_path = Path(path)
+            self._io.submit(
+                "export_nbt_json",
+                lambda token: export_json_payload(
+                    data,
+                    output_path,
+                    token,
+                ),
+                lambda _: self._apply_export_success(
+                    output_path,
+                    generation,
+                ),
+                "导出 JSON 失败",
+                on_error=lambda error: self._apply_export_error(
+                    error,
+                    generation,
+                ),
+                request_guard=lambda: (
+                    generation == self._request_generation
+                ),
+            )
         except Exception as ex:
             self._handle_error(ex, "导出 JSON 失败")
+
+    def _apply_export_success(self, output_path: Path, generation: int) -> None:
+        if generation != self._request_generation:
+            return
+        self._info("成功", f"已导出到: {output_path}")
+
+    def _apply_export_error(self, error: Exception, generation: int) -> None:
+        if generation != self._request_generation:
+            return
+        self._handle_error(error, "导出 JSON 失败")
 
     def _require_session(self) -> Optional[WorldSession]:
         session = self._get_world_session()
@@ -377,29 +428,26 @@ class NbtDataLoader:
         safe_update(self._target_label)
         safe_update(self._target_dropdown)
 
-    def _set_chunk_fields_from_world_coords(self) -> None:
-        world_x = int(float((self._world_x_field.value or "0").strip()))
-        world_z = int(float((self._world_z_field.value or "0").strip()))
-        region_x, region_z, chunk_x, chunk_z = world_coords_to_region_chunk(
-            world_x,
-            world_z,
-        )
-        region_dir = self._dimension_region_dir(self._get_dimension())
-        self._region_file_field.value = (
-            f"{region_dir}/r.{region_x}.{region_z}.mca"
-        )
-        self._chunk_x_field.value = str(chunk_x)
-        self._chunk_z_field.value = str(chunk_z)
-        safe_update(self._region_file_field)
-        safe_update(self._chunk_x_field)
-        safe_update(self._chunk_z_field)
-
     @staticmethod
     def _dimension_region_dir(dimension: str) -> str:
-        if dimension == "the_nether":
-            return "DIM-1/region"
-        if dimension == "the_end":
-            return "DIM1/region"
-        if dimension and dimension != "overworld":
-            return f"dimensions/{dimension}/region"
-        return "region"
+        return dimension_region_dir(dimension)
+
+    def _next_request_generation(self) -> int:
+        """递增数据请求代数，使旧回调在页面切换后失效。"""
+        self._request_generation += 1
+        return self._request_generation
+
+    def _is_current_request(
+        self,
+        generation: int,
+        session: Optional[WorldSession] = None,
+    ) -> bool:
+        """检查回调是否仍属于当前 loader 与存档会话。"""
+        if generation != self._request_generation:
+            return False
+        return session is None or self._get_world_session() is session
+
+    def dispose(self) -> None:
+        """使未完成回调失效；任务作用域由 ExplorerView 统一关闭。"""
+        self._next_request_generation()
+        self._io.close()

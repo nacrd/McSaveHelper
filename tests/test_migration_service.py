@@ -9,6 +9,7 @@ from app.services.config_service import ConfigService
 from app.services.migration_service import MigrationOptions, MigrationService
 from app.services.world_transaction import WorldTransactionService
 from app.services.world_write_coordinator import WorldWriteCoordinator
+from core.batch_processor import BatchCancelledError
 
 
 def test_migration_options_parses_manual_names() -> None:
@@ -343,3 +344,134 @@ def test_batch_cancel_before_publish_keeps_existing_target(
     assert returned[0]["task-1"]["cancelled"] is True
     assert (target / "level.dat").read_bytes() == b"old"
     assert service.cancel_batch() is False
+
+
+def test_single_cancel_before_publish_keeps_existing_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "level.dat").write_bytes(b"source")
+    destination = tmp_path / "server"
+    target = destination / "world"
+    target.mkdir(parents=True)
+    (target / "level.dat").write_bytes(b"old")
+    service, _ = _service(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    returned: list[BaseException] = []
+
+    def fake_run_fast(source_path, staging, world_name, *args):
+        del source_path, args
+        output = staging / world_name
+        output.mkdir()
+        (output / "level.dat").write_bytes(b"converted")
+        started.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr("core.fast_mode.run_fast", fake_run_fast)
+
+    def run() -> None:
+        try:
+            service.run_single(
+                str(source),
+                str(destination),
+                "world",
+                "fast",
+                True,
+                False,
+                False,
+                "java",
+                "",
+                "",
+                lambda message, level: None,
+                lambda value: None,
+            )
+        except BaseException as exc:
+            returned.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert started.wait(timeout=2)
+    assert service.cancel_active() is True
+    release.set()
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert returned
+    assert isinstance(returned[0], BatchCancelledError)
+    assert (target / "level.dat").read_bytes() == b"old"
+
+
+def test_migration_service_rejects_reentrant_operation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "level.dat").write_bytes(b"source")
+    destination = tmp_path / "server"
+    service, _ = _service(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_run_fast(source_path, staging, world_name, *args):
+        del source_path, args
+        output = staging / world_name
+        output.mkdir()
+        (output / "level.dat").write_bytes(b"converted")
+        started.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr("core.fast_mode.run_fast", fake_run_fast)
+
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            service.run_single(
+                str(source),
+                str(destination),
+                "world",
+                "fast",
+                True,
+                False,
+                False,
+                "java",
+                "",
+                "",
+                lambda message, level: None,
+                lambda value: None,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(
+        target=run,
+    )
+    thread.start()
+    assert started.wait(timeout=2)
+
+    with pytest.raises(RuntimeError, match="迁移任务"):
+        service.run_single(
+            str(source),
+            str(destination),
+            "world",
+            "fast",
+            True,
+            False,
+            False,
+            "java",
+            "",
+            "",
+            lambda message, level: None,
+            lambda value: None,
+        )
+
+    assert service.cancel_active() is True
+    release.set()
+    thread.join(timeout=3)
+    assert not thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], BatchCancelledError)

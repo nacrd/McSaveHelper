@@ -9,11 +9,14 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
-from app.services.world_transaction import WorldTransactionService
+from app.services.world_transaction import (
+    WorldTransactionCancelledError,
+    WorldTransactionService,
+)
 from core.batch_processor import (
     BatchCancelledError,
     BatchProcessor,
@@ -21,6 +24,10 @@ from core.batch_processor import (
 )
 from core.i18n import t
 from core.types import LogCallback, ProgressCallback
+
+
+CancelCheck = Callable[[], bool]
+CancelSource = CancelCheck | threading.Event
 
 
 @dataclass(frozen=True)
@@ -123,6 +130,9 @@ class MigrationService:
         self._batch_processor: Optional[BatchProcessor] = None
         self._batch_worlds: List[Path] = []
         self._scan_result: str = ""
+        self._operation_lock = threading.Lock()
+        self._active_kind: Optional[str] = None
+        self._active_cancel_event: Optional[threading.Event] = None
 
     @property
     def batch_worlds(self) -> List[Path]:
@@ -186,43 +196,55 @@ class MigrationService:
         manual_names_str: str,
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> str:
         """执行单存档迁移。
 
         See class docs and :class:`MigrationOptions` for parameter meaning.
         """
-        options = MigrationOptions.from_manual_names_str(
-            mode=mode,
-            offline=offline,
-            clean=clean,
-            pure_clean=pure_clean,
-            target_platform=target_platform,
-            target_version=target_version,
-            manual_names_str=manual_names_str,
+        operation_event = self._begin_operation("single")
+        operation_check = self._merge_cancel_checks(
+            operation_event.is_set,
+            cancel_check,
         )
-        src_path, dest_path, output_path = self._validate_single_inputs(
-            src,
-            dest,
-            world_name,
-            options.mode,
-        )
-
-        from core.performance import get_tracker
-        tracker = get_tracker()
-        with tracker.track(
-            "存档迁移",
-            {"name": world_name, "mode": options.mode},
-        ):
-            published = self._execute_single_transaction(
-                src_path=src_path,
-                dest_path=dest_path,
-                output_path=output_path,
-                world_name=world_name,
-                options=options,
-                log_cb=log_cb,
-                progress_cb=progress_cb,
+        try:
+            self._raise_if_batch_cancelled(operation_check)
+            options = MigrationOptions.from_manual_names_str(
+                mode=mode,
+                offline=offline,
+                clean=clean,
+                pure_clean=pure_clean,
+                target_platform=target_platform,
+                target_version=target_version,
+                manual_names_str=manual_names_str,
             )
-        return str(published)
+            src_path, dest_path, output_path = self._validate_single_inputs(
+                src,
+                dest,
+                world_name,
+                options.mode,
+            )
+
+            from core.performance import get_tracker
+
+            tracker = get_tracker()
+            with tracker.track(
+                "存档迁移",
+                {"name": world_name, "mode": options.mode},
+            ):
+                published = self._execute_single_transaction(
+                    src_path=src_path,
+                    dest_path=dest_path,
+                    output_path=output_path,
+                    world_name=world_name,
+                    options=options,
+                    log_cb=log_cb,
+                    progress_cb=progress_cb,
+                    cancel_check=operation_check,
+                )
+            return str(published)
+        finally:
+            self._end_operation("single", operation_event)
 
     def run_batch(
         self,
@@ -237,50 +259,74 @@ class MigrationService:
         max_concurrent: int,
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
+        cancel_check: Optional[CancelCheck] = None,
+        worlds: Optional[Sequence[Path]] = None,
     ) -> Dict[str, Any]:
         """执行批量迁移。
 
         内部将公共选项收束为 :class:`MigrationOptions`，再交给
         :class:`BatchProcessor`。
         """
-        if not dest_dir.strip():
-            raise ValueError("批量目标输出目录不能为空")
-        options = MigrationOptions.from_manual_names_str(
-            mode=mode,
-            offline=offline,
-            clean=clean,
-            pure_clean=pure_clean,
-            target_platform=target_platform,
-            target_version=target_version,
-            manual_names_str=manual_names_str,
+        operation_event = self._begin_operation("batch")
+        operation_check = self._merge_cancel_checks(
+            operation_event.is_set,
+            cancel_check,
         )
-        dest_path = Path(dest_dir).expanduser().resolve()
-        dest_path.mkdir(parents=True, exist_ok=True)
-        world_names = [
-            f"world_{i + 1}" for i in range(len(self._batch_worlds))
-        ]
-        self._batch_processor = self._create_batch_processor(
-            max_concurrent=max_concurrent,
-            options=options,
-        )
-        return self._batch_processor.process_batch(
-            self._batch_worlds,
-            dest_path,
-            world_names,
-            options.mode,
-            options.offline,
-            options.clean,
-            options.pure_clean,
-            list(options.manual_names),
-            log_cb,
-            progress_cb,
-        )
+        try:
+            self._raise_if_batch_cancelled(operation_check)
+            if not dest_dir.strip():
+                raise ValueError("批量目标输出目录不能为空")
+            options = MigrationOptions.from_manual_names_str(
+                mode=mode,
+                offline=offline,
+                clean=clean,
+                pure_clean=pure_clean,
+                target_platform=target_platform,
+                target_version=target_version,
+                manual_names_str=manual_names_str,
+            )
+            dest_path = Path(dest_dir).expanduser().resolve()
+            dest_path.mkdir(parents=True, exist_ok=True)
+            selected_worlds = tuple(
+                Path(world).expanduser().resolve()
+                for world in (
+                    self._batch_worlds if worlds is None else worlds
+                )
+            )
+            world_names = [
+                f"world_{i + 1}" for i in range(len(selected_worlds))
+            ]
+            processor = self._create_batch_processor(
+                max_concurrent=max_concurrent,
+                options=options,
+                cancel_check=operation_check,
+            )
+            with self._operation_lock:
+                self._batch_processor = processor
+                already_cancelled = operation_check()
+            if already_cancelled:
+                processor.stop()
+            return processor.process_batch(
+                list(selected_worlds),
+                dest_path,
+                world_names,
+                options.mode,
+                options.offline,
+                options.clean,
+                options.pure_clean,
+                list(options.manual_names),
+                log_cb,
+                progress_cb,
+            )
+        finally:
+            self._end_operation("batch", operation_event)
 
     def _create_batch_processor(
         self,
         *,
         max_concurrent: int,
         options: MigrationOptions,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> BatchProcessor:
         return BatchProcessor(
             max_concurrent,
@@ -290,17 +336,23 @@ class MigrationService:
                 if self._config.use_custom_mapping
                 else None
             ),
-            task_handler=self._make_batch_task_handler(options),
+            task_handler=self._make_batch_task_handler(
+                options,
+                cancel_check or (lambda: False),
+            ),
         )
 
     def _make_batch_task_handler(
         self,
         options: MigrationOptions,
+        shared_cancel_check: Optional[CancelCheck] = None,
     ) -> Callable[
         [Path, Path, str, LogCallback, threading.Event],
         Dict[str, Any],
     ]:
         """Build the per-world task callback used by :class:`BatchProcessor`."""
+
+        operation_cancel_check = shared_cancel_check or (lambda: False)
 
         def migrate_task(
             source: Path,
@@ -323,24 +375,74 @@ class MigrationService:
                 options=options,
                 log_cb=local_log,
                 progress_cb=lambda value: None,
-                cancel_event=cancel_event,
+                cancel_check=self._merge_cancel_checks(
+                    operation_cancel_check,
+                    cancel_event.is_set,
+                ),
                 region_workers=1,
             )
             return {"success": True, "output_path": str(published)}
 
         return migrate_task
 
-    def cancel_batch(self) -> bool:
-        """请求取消进行中的批量迁移。
+    def cancel_active(self) -> bool:
+        """请求取消当前迁移，并同步停止批量处理器。
 
         Returns:
-            bool: 若存在运行中的批量任务并已发出取消请求则为 True。
+            bool: 若存在运行中的迁移任务并已发出取消请求则为 True。
         """
-        processor = self._batch_processor
-        if processor is None or not processor.is_running:
+        with self._operation_lock:
+            active_kind = self._active_kind
+            cancel_event = self._active_cancel_event
+            processor = self._batch_processor
+        if active_kind is None or cancel_event is None:
             return False
-        processor.stop()
+        cancel_event.set()
+        if active_kind == "batch" and processor is not None:
+            processor.stop()
         return True
+
+    def cancel_batch(self) -> bool:
+        """兼容旧调用方，请求取消当前批量迁移。"""
+        with self._operation_lock:
+            is_batch = self._active_kind == "batch"
+            processor = self._batch_processor
+        if is_batch:
+            return self.cancel_active()
+        if processor is not None and processor.is_running:
+            processor.stop()
+            return True
+        return False
+
+    def _begin_operation(self, kind: str) -> threading.Event:
+        with self._operation_lock:
+            if self._active_kind is not None:
+                raise RuntimeError("已有迁移任务正在运行")
+            event = threading.Event()
+            self._active_kind = kind
+            self._active_cancel_event = event
+            return event
+
+    def _end_operation(self, kind: str, event: threading.Event) -> None:
+        with self._operation_lock:
+            if (
+                self._active_kind == kind
+                and self._active_cancel_event is event
+            ):
+                self._active_kind = None
+                self._active_cancel_event = None
+                self._batch_processor = None
+
+    @staticmethod
+    def _merge_cancel_checks(
+        *checks: Optional[CancelCheck],
+    ) -> CancelCheck:
+        active_checks = tuple(check for check in checks if check is not None)
+
+        def is_cancelled() -> bool:
+            return any(check() for check in active_checks)
+
+        return is_cancelled
 
     def _validate_single_inputs(
         self,
@@ -378,31 +480,40 @@ class MigrationService:
         options: MigrationOptions,
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
+        cancel_check: Optional[CancelCheck] = None,
         cancel_event: Optional[threading.Event] = None,
         region_workers: Optional[int] = None,
     ) -> Path:
         """在暂存目录完成迁移并原子发布到目标世界。"""
+        operation_check = self._merge_cancel_checks(
+            cancel_check,
+            cancel_event.is_set if cancel_event is not None else None,
+        )
         manual = list(options.manual_names)
         with self._backup_service.exclusive_operation(output_path):
-            self._raise_if_batch_cancelled(cancel_event)
+            self._raise_if_batch_cancelled(operation_check)
             staging_root = Path(tempfile.mkdtemp(
                 prefix=f".mcsavehelper_migrate_{world_name}_",
                 dir=dest_path,
             ))
             try:
-                return self._migrate_in_staging(
-                    src_path=src_path,
-                    dest_path=dest_path,
-                    output_path=output_path,
-                    world_name=world_name,
-                    options=options,
-                    manual=manual,
-                    staging_root=staging_root,
-                    log_cb=log_cb,
-                    progress_cb=progress_cb,
-                    cancel_event=cancel_event,
-                    region_workers=region_workers,
-                )
+                try:
+                    return self._migrate_in_staging(
+                        src_path=src_path,
+                        dest_path=dest_path,
+                        output_path=output_path,
+                        world_name=world_name,
+                        options=options,
+                        manual=manual,
+                        staging_root=staging_root,
+                        log_cb=log_cb,
+                        progress_cb=progress_cb,
+                        cancel_check=operation_check,
+                        region_workers=region_workers,
+                    )
+                except WorldTransactionCancelledError:
+                    self._raise_if_batch_cancelled(operation_check)
+                    raise
             finally:
                 shutil.rmtree(staging_root, ignore_errors=True)
 
@@ -418,10 +529,10 @@ class MigrationService:
         staging_root: Path,
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
-        cancel_event: Optional[threading.Event],
+        cancel_check: Optional[CancelCheck],
         region_workers: Optional[int],
     ) -> Path:
-        self._raise_if_batch_cancelled(cancel_event)
+        self._raise_if_batch_cancelled(cancel_check)
         self._run_migration_modes(
             src_path=src_path,
             staging_root=staging_root,
@@ -431,6 +542,7 @@ class MigrationService:
             log_cb=log_cb,
             progress_cb=progress_cb,
             region_workers=region_workers,
+            cancel_check=cancel_check,
         )
         prepared_world = staging_root / world_name
         self._publish_prepared_world(
@@ -440,7 +552,7 @@ class MigrationService:
             world_name=world_name,
             options=options,
             log_cb=log_cb,
-            cancel_event=cancel_event,
+            cancel_check=cancel_check,
         )
         return output_path
 
@@ -453,7 +565,7 @@ class MigrationService:
         world_name: str,
         options: MigrationOptions,
         log_cb: LogCallback,
-        cancel_event: Optional[threading.Event],
+        cancel_check: Optional[CancelCheck],
     ) -> None:
         from core.utils import update_server_properties
 
@@ -468,14 +580,12 @@ class MigrationService:
             raise RuntimeError(
                 "版本/平台转换失败，请查看日志获取详细信息"
             )
-        self._raise_if_batch_cancelled(cancel_event)
+        self._raise_if_batch_cancelled(cancel_check)
         backup_record = self._world_transactions.publish_prepared(
             prepared_world,
             output_path,
             backup_label="迁移覆盖前自动备份",
-            cancel_check=(
-                cancel_event.is_set if cancel_event is not None else None
-            ),
+            cancel_check=cancel_check,
         )
         if backup_record is not None:
             log_cb(
@@ -495,6 +605,7 @@ class MigrationService:
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
         region_workers: Optional[int],
+        cancel_check: Optional[CancelCheck],
     ) -> None:
         from core.fast_mode import run_fast
         from core.full_mode import run_full
@@ -510,6 +621,7 @@ class MigrationService:
                 manual,
                 log_cb,
                 region_workers,
+                cancel_check,
             )
             return
         custom_mappings = (
@@ -529,13 +641,21 @@ class MigrationService:
             progress_cb,
             custom_mappings,
             region_workers,
+            cancel_check,
         )
 
     @staticmethod
     def _raise_if_batch_cancelled(
-        cancel_event: Optional[threading.Event],
+        cancel_check: Optional[CancelSource],
     ) -> None:
-        if cancel_event is not None and cancel_event.is_set():
+        if cancel_check is None:
+            return
+        cancelled = (
+            cancel_check.is_set()
+            if isinstance(cancel_check, threading.Event)
+            else cancel_check()
+        )
+        if cancelled:
             raise BatchCancelledError("批量迁移已取消，产物未发布")
 
     def _apply_version_conversion(

@@ -32,6 +32,7 @@ class ApplicationShellDependencies:
     show_log_panel: bool
     progress_control: ft.Container
     title_bar: ft.Control
+    available_capabilities: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -52,16 +53,20 @@ class ApplicationShell:
 def build_tab_definitions(
     translate: Translate,
     registry: FeatureRegistry = DEFAULT_FEATURE_REGISTRY,
+    available_capabilities: frozenset[str] | None = None,
 ) -> List[Dict[str, Any]]:
     """Build the translated sidebar catalog in one deterministic place."""
-    return registry.sidebar_definitions(translate)
+    return registry.sidebar_definitions(translate, available_capabilities)
 
 
 def build_application_shell(
     dependencies: ApplicationShellDependencies,
 ) -> ApplicationShell:
     """Assemble the visual shell without coordinating application services."""
-    tab_defs = build_tab_definitions(dependencies.translate)
+    tab_defs = build_tab_definitions(
+        dependencies.translate,
+        available_capabilities=dependencies.available_capabilities,
+    )
     content = ft.Container(
         padding=24,
         bgcolor=THEME.bg_primary,

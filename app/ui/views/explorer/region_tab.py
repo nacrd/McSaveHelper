@@ -3,12 +3,20 @@
 Hosts the simplified map display (McaMapView) for browsing MCA regions.
 """
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import flet as ft
 
+from app.controllers.region_delete_controller import (
+    RegionDeleteBusyError,
+    RegionDeleteOutcome,
+    RegionDeleteRequest,
+    RegionDeleteStatus,
+)
+from app.services.execution_runtime import RuntimeClosedError, TaskQueueFullError
 from app.ui.theme import THEME
 from app.controllers.map_controller import MapController
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.map import McaMapView
 from app.ui.views.explorer.map.export_dialog import MapExportDialog, MapExportSession
@@ -21,7 +29,11 @@ from app.ui.views.explorer.region_tab_chrome import (
     build_region_tab_chrome,
 )
 from core.mca.region_selection import format_region_selection
-from core.mca.map_models import MapMarker, MapViewState
+from core.mca.map_models import (
+    MapMarker,
+    MapViewState,
+    MapViewStateSnapshot,
+)
 from core.mca.map_search import MapSearchError
 from core.region_utils import DimensionInfo
 
@@ -51,6 +63,7 @@ class RegionTabMixin(ExplorerMixinHost):
             else None
         )
         self._selected_marker_id: Optional[str] = None
+        self._marker_busy = False
         self._refresh_map_markers()
 
     def _create_region_map_view(self) -> ft.Control:
@@ -62,6 +75,7 @@ class RegionTabMixin(ExplorerMixinHost):
                 on_marker_selected=self._on_map_marker_selected,
                 width=900,
                 height=560,
+                cache_registry=self.app.services.cache_registry,
             )
             return self._map_view
         except Exception:
@@ -140,6 +154,10 @@ class RegionTabMixin(ExplorerMixinHost):
         export_dialog = getattr(self, "_map_export_dialog", None)
         if export_dialog is not None:
             export_dialog.dispose()
+        map_view = getattr(self, "_map_view", None)
+        dispose_map = getattr(map_view, "dispose", None)
+        if callable(dispose_map):
+            dispose_map()
 
     def _open_map_export_dialog(self) -> None:
         """Open export dialog prefilled from the active map context."""
@@ -352,29 +370,71 @@ class RegionTabMixin(ExplorerMixinHost):
         )
         self._region_status_text.color = marker.color
         if hasattr(self, "_map_delete_marker_btn"):
-            self._map_delete_marker_btn.disabled = False
+            self._map_delete_marker_btn.disabled = self._marker_busy
             safe_update(self._map_delete_marker_btn)
         self._refresh_marker_list()
         safe_update(self._region_status_text)
 
     def _refresh_map_markers(self) -> None:
         controller = getattr(self, "_map_controller", None)
-        markers: list[MapMarker] = []
-        if controller is not None and controller.world_path is not None:
-            try:
-                markers = controller.markers()
-            except Exception:
-                # Marker store failures should not break the map UI.
-                markers = []
+        markers = controller.markers() if controller is not None else []
         marker_ids = {marker.id for marker in markers}
-        if self._selected_marker_id not in marker_ids:
+        selected_marker_id = getattr(self, "_selected_marker_id", None)
+        if selected_marker_id not in marker_ids:
             self._selected_marker_id = None
             if hasattr(self, "_map_delete_marker_btn"):
                 self._map_delete_marker_btn.disabled = True
                 safe_update(self._map_delete_marker_btn)
+        elif hasattr(self, "_map_delete_marker_btn"):
+            self._map_delete_marker_btn.disabled = self._marker_busy
+            safe_update(self._map_delete_marker_btn)
         if self._map_view is not None and hasattr(self._map_view, "set_markers"):
             self._map_view.set_markers(markers)
         self._refresh_marker_list(markers)
+
+    def _request_map_marker_load(self) -> None:
+        """提交当前世界/维度标记加载，不在 UI 回调读取 JSON。"""
+        controller = getattr(self, "_map_controller", None)
+        if controller is None or controller.world_path is None:
+            return
+        self._set_map_marker_busy(True)
+        try:
+            controller.submit_load_markers(
+                self._finish_map_marker_load,
+                self._handle_map_marker_error,
+            )
+        except (RuntimeClosedError, TaskQueueFullError, RuntimeError) as error:
+            self._handle_map_marker_error(error)
+
+    def _finish_map_marker_load(self) -> None:
+        self._set_map_marker_busy(False)
+        if hasattr(self, "_map_marker_list"):
+            self._refresh_map_markers()
+
+    def _handle_map_marker_error(self, error: Exception) -> None:
+        self._set_map_marker_busy(False)
+        self.app.handle_exception(
+            error,
+            title=self.app.translate(
+                "map.marker_operation_failed",
+                "地图标记操作失败",
+            ),
+        )
+
+    def _set_map_marker_busy(self, busy: bool) -> None:
+        self._marker_busy = busy
+        add_button = getattr(self, "_map_add_marker_btn", None)
+        if add_button is not None:
+            add_button.disabled = busy
+            safe_update(add_button)
+        delete_button = getattr(self, "_map_delete_marker_btn", None)
+        if delete_button is not None:
+            delete_button.disabled = busy or not getattr(
+                self,
+                "_selected_marker_id",
+                None,
+            )
+            safe_update(delete_button)
 
     def _refresh_marker_list(
         self,
@@ -518,20 +578,31 @@ class RegionTabMixin(ExplorerMixinHost):
             self.app.page.update()
 
         def save(_click: Any = None) -> None:
+            if getattr(self, "_marker_busy", False):
+                return
             try:
-                marker = controller.upsert_marker(
+                self._set_map_marker_busy(True)
+                controller.submit_upsert_marker(
                     fields["name_field"].value or "",
                     int((fields["x_field"].value or "0").strip()),
                     int((fields["z_field"].value or "0").strip()),
                     y=int((fields["y_field"].value or "64").strip()),
                     color=fields["color_field"].value or "#FFD54F",
+                    on_complete=lambda marker: self._finish_add_map_marker(
+                        marker,
+                        close,
+                    ),
+                    on_error=lambda error: self._show_add_marker_error(
+                        error,
+                        error_text,
+                    ),
                 )
-                close()
-                self._refresh_map_markers()
-                self._focus_map_marker(marker)
             except (TypeError, ValueError) as exc:
+                self._set_map_marker_busy(False)
                 error_text.value = str(exc)
                 safe_update(error_text)
+            except (RuntimeClosedError, TaskQueueFullError, RuntimeError) as exc:
+                self._show_add_marker_error(exc, error_text)
 
         return [
             ft.TextButton(
@@ -544,6 +615,25 @@ class RegionTabMixin(ExplorerMixinHost):
                 on_click=close,
             ),
         ]
+
+    def _finish_add_map_marker(
+        self,
+        marker: MapMarker,
+        close_dialog: Callable[[], None],
+    ) -> None:
+        self._set_map_marker_busy(False)
+        close_dialog()
+        self._refresh_map_markers()
+        self._focus_map_marker(marker)
+
+    def _show_add_marker_error(
+        self,
+        error: Exception,
+        error_text: ft.Text,
+    ) -> None:
+        self._set_map_marker_busy(False)
+        error_text.value = str(error)
+        safe_update(error_text)
 
     def _build_add_marker_fields(self) -> dict[str, Any]:
         block_x, block_z = self._default_marker_coordinates()
@@ -599,28 +689,51 @@ class RegionTabMixin(ExplorerMixinHost):
     def _delete_selected_marker(self, _event: Any = None) -> None:
         marker_id = getattr(self, "_selected_marker_id", None)
         controller = getattr(self, "_map_controller", None)
-        if not marker_id or controller is None:
+        if (
+            not marker_id
+            or controller is None
+            or getattr(self, "_marker_busy", False)
+        ):
             return
         try:
-            if controller.delete_marker(marker_id):
-                self._selected_marker_id = None
-                self._map_delete_marker_btn.disabled = True
-                self._refresh_map_markers()
-                self._region_status_text.value = self.app.translate(
-                    "map.marker_deleted",
-                    "地图标记已删除",
-                )
-                self._region_status_text.color = THEME.text_secondary
-                safe_update(self._region_status_text)
-                safe_update(self._map_delete_marker_btn)
-        except Exception as exc:
-            self.app.handle_exception(
-                exc,
-                title=self.app.translate(
-                    "map.delete_marker_failed",
-                    "删除地图标记失败",
-                ),
+            self._set_map_marker_busy(True)
+            controller.submit_delete_marker(
+                marker_id,
+                on_complete=self._finish_delete_map_marker,
+                on_error=self._handle_delete_map_marker_error,
             )
+        except (
+            KeyError,
+            RuntimeClosedError,
+            TaskQueueFullError,
+            RuntimeError,
+        ) as error:
+            self._handle_delete_map_marker_error(error)
+
+    def _finish_delete_map_marker(self, deleted: bool) -> None:
+        self._set_map_marker_busy(False)
+        self._refresh_map_markers()
+        if not deleted:
+            return
+        self._selected_marker_id = None
+        self._map_delete_marker_btn.disabled = True
+        self._region_status_text.value = self.app.translate(
+            "map.marker_deleted",
+            "地图标记已删除",
+        )
+        self._region_status_text.color = THEME.text_secondary
+        safe_update(self._region_status_text)
+        safe_update(self._map_delete_marker_btn)
+
+    def _handle_delete_map_marker_error(self, error: Exception) -> None:
+        self._set_map_marker_busy(False)
+        self.app.handle_exception(
+            error,
+            title=self.app.translate(
+                "map.delete_marker_failed",
+                "删除地图标记失败",
+            ),
+        )
 
     def _on_region_selected(self,
                             coord: Optional[Tuple[int, int]],
@@ -644,6 +757,7 @@ class RegionTabMixin(ExplorerMixinHost):
         safe_update(self._region_status_text)
 
     def _delete_selected_region(self, e: Any) -> None:
+        """校验内存选择，并把区域删除提交到共享 I/O 通道。"""
         try:
             if self.world_session is None or self._selected_region_coord is None:
                 self.app.warn_dialog("提示", "请先在区域地图中选择一个区域。")
@@ -654,45 +768,82 @@ class RegionTabMixin(ExplorerMixinHost):
                 return
             coord = self._selected_region_coord
             region_path = region_dir / f"r.{coord[0]}.{coord[1]}.mca"
-            if not region_path.exists():
-                self.app.warn_dialog("提示", f"区域文件不存在: {region_path.name}")
-                return
-            from app.services.region_editor_service import (
-                delete_region_via_transaction,
-            )
-            from app.services.world_transaction import (
-                WorldTransactionCancelledError,
-                WorldTransactionError,
-            )
-
             world_path = self.world_session.world_path
-            try:
-                result = delete_region_via_transaction(
-                    self.app.services.world_transactions,
-                    world_path,
-                    region_path,
-                    backup_label="删除区域前自动备份",
-                    log=self.app.log,
-                )
-            except WorldTransactionCancelledError:
-                self.app.warn_dialog("提示", "区域删除已取消，原存档保持不变。")
-                return
-            except WorldTransactionError as exc:
-                self.app.warn_dialog("失败", f"区域删除失败: {exc}")
-                return
-            if result.value:
-                self.app.info_dialog(
-                    "成功",
-                    f"已删除区域 {coord}，游戏下次进入会重新生成。"
-                    f"安全备份: {result.backup.backup_path.name}",
-                )
-                self._selected_region_coord = None
-                # 事务已使共享索引失效；异步重载会话，避免继续使用旧维度快照。
-                self._load_world(world_path)
-            else:
-                self.app.warn_dialog("失败", "区域删除失败，请查看日志。")
+            request = RegionDeleteRequest(
+                world_path=world_path,
+                region_path=region_path,
+                coord=coord,
+                generation=self._world_load_generation,
+            )
+            self._region_delete_controller.start(
+                request,
+                lambda outcome: run_on_ui(
+                    self.app.page,
+                    self._apply_region_delete_outcome,
+                    outcome,
+                ),
+            )
+        except RegionDeleteBusyError:
+            self.app.warn_dialog(
+                self._t("region_delete.busy_title", "删除进行中"),
+                self._t(
+                    "region_delete.busy_message",
+                    "已有区域删除正在执行，请等待当前操作完成。",
+                ),
+            )
+        except (TaskQueueFullError, RuntimeClosedError):
+            self.app.warn_dialog(
+                self._t("region_delete.queue_full_title", "后台任务繁忙"),
+                self._t(
+                    "region_delete.queue_full_message",
+                    "后台 I/O 队列已满，请稍后重试。",
+                ),
+            )
         except Exception as ex:
             self.app.handle_exception(ex, title="删除区域失败")
+
+    def _apply_region_delete_outcome(
+        self,
+        outcome: RegionDeleteOutcome,
+    ) -> None:
+        """在 UI 线程投影区域删除终态，并拒绝过期结果。"""
+        request = outcome.request
+        session = self.world_session
+        if (
+            request.generation != self._world_load_generation
+            or session is None
+            or session.world_path.resolve() != request.world_path.resolve()
+        ):
+            self.app.log(
+                f"丢弃过期区域删除回调: {request.region_path}",
+                "INFO",
+            )
+            return
+        if outcome.status is RegionDeleteStatus.CANCELLED:
+            self.app.warn_dialog(
+                self._t("region_delete.cancelled_title", "删除已取消"),
+                self._t(
+                    "region_delete.cancelled_message",
+                    "区域删除已在安全检查点取消，原存档保持不变。",
+                ),
+            )
+            return
+        if outcome.status is RegionDeleteStatus.FAILED:
+            error = outcome.error or RuntimeError("区域删除失败")
+            self.app.handle_exception(error, title="区域删除失败")
+            return
+        result = outcome.result
+        if result is None or not result.value:
+            self.app.warn_dialog("失败", "区域删除失败，请查看日志。")
+            return
+        self.app.info_dialog(
+            "成功",
+            f"已删除区域 {request.coord}，游戏下次进入会重新生成。"
+            f"安全备份: {result.backup.backup_path.name}",
+        )
+        self._selected_region_coord = None
+        # 事务已使共享索引失效；异步重载会话，避免继续使用旧维度快照。
+        self._load_world(request.world_path)
 
     def _fill_selected_region_for_nbt(self, e: Any = None) -> None:
         try:
@@ -806,6 +957,7 @@ class RegionTabMixin(ExplorerMixinHost):
             controller = getattr(self, "_map_controller", None)
             if controller is not None and controller.world_path is None:
                 controller.bind_world(self.world_session.world_path, dimensions)
+                self._request_map_marker_load()
             options = self._build_dimension_options(dimensions)
             self._select_current_dimension(options, controller)
             self._update_dimension_dropdown(options)
@@ -830,7 +982,9 @@ class RegionTabMixin(ExplorerMixinHost):
         if not options:
             self._current_dimension = ""
             return
-        controller_dimension = controller.state.dimension_id if controller is not None else None
+        controller_dimension = (
+            controller.snapshot.dimension_id if controller is not None else None
+        )
         if controller_dimension in self._dimension_region_dirs:
             self._current_dimension = controller_dimension
         elif self._current_dimension not in self._dimension_region_dirs:
@@ -845,10 +999,10 @@ class RegionTabMixin(ExplorerMixinHost):
     def _restore_controller_map_state(self, controller: Optional[MapController]) -> None:
         if (
             controller is not None
-            and self._current_dimension == controller.state.dimension_id
+            and self._current_dimension == controller.snapshot.dimension_id
             and hasattr(self, "_map_coord_btn")
         ):
-            self._apply_map_state(controller.state)
+            self._apply_map_state(controller.snapshot)
 
     def _on_dimension_changed(self, e: Any) -> None:
         try:
@@ -863,7 +1017,8 @@ class RegionTabMixin(ExplorerMixinHost):
                     center_z,
                     self._map_view.get_camera_scale(),
                 )
-                state = controller.switch_dimension(new_dim)
+                controller.switch_dimension(new_dim)
+                state = controller.snapshot
             else:
                 state = None
             self._current_dimension = new_dim
@@ -871,6 +1026,7 @@ class RegionTabMixin(ExplorerMixinHost):
             self._map_delete_marker_btn.disabled = True
             safe_update(self._map_delete_marker_btn)
             self._refresh_map()
+            self._request_map_marker_load()
             if state is not None and self._map_view is not None:
                 self._apply_map_state(state)
                 self._map_view.focus_block(
@@ -882,7 +1038,10 @@ class RegionTabMixin(ExplorerMixinHost):
         except Exception as ex:
             self.app.handle_exception(ex, title="切换维度失败")
 
-    def _apply_map_state(self, state: MapViewState) -> None:
+    def _apply_map_state(
+        self,
+        state: MapViewState | MapViewStateSnapshot,
+    ) -> None:
         """Synchronize view controls with the controller's dimension snapshot."""
         from app.presenters.map_viewport_state import decide_map_rebuild
 

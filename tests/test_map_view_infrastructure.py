@@ -1,5 +1,7 @@
 import base64
+import threading
 
+from app.services.cache_registry import CacheRegistry
 from app.ui.views.explorer.map.rebuild_scheduler import RebuildScheduler
 from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 
@@ -73,3 +75,53 @@ def test_tile_source_cache_refreshes_one_coord_when_revision_changes() -> None:
     assert detail == base64.b64encode(b"detail").decode("ascii")
     assert detail is not None
     assert cache._bytes == len(detail)
+
+
+def test_tile_source_cache_unregisters_application_budget_on_close() -> None:
+    registry = CacheRegistry(budget_bytes=TileSourceCache.MAX_BYTES)
+    cache = TileSourceCache(registry)
+
+    assert [item.name for item in registry.stats().regions] == [cache._name]
+
+    cache.close()
+    cache.close()
+
+    assert registry.stats().regions == ()
+
+
+def test_tile_source_cache_clear_does_not_resurrect_inflight_value() -> None:
+    cache = TileSourceCache()
+    started = threading.Event()
+    release = threading.Event()
+
+    def load(_coord: tuple[int, int]) -> bytes:
+        started.set()
+        release.wait(timeout=1.0)
+        return b"tile"
+
+    worker = threading.Thread(
+        target=lambda: cache.get((0, 0), generation=1, load_tile=load),
+    )
+    worker.start()
+    assert started.wait(timeout=1.0)
+
+    cache.clear()
+    release.set()
+    worker.join(timeout=1.0)
+
+    assert not worker.is_alive()
+    assert cache.stats().entries == 0
+
+
+def test_tile_source_cache_does_not_reload_after_close() -> None:
+    cache = TileSourceCache()
+    cache.close()
+
+    loaded = cache.get(
+        (0, 0),
+        generation=1,
+        load_tile=lambda _coord: b"unexpected",
+    )
+
+    assert loaded is None
+    assert cache.stats().entries == 0

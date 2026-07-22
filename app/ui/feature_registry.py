@@ -57,22 +57,47 @@ class FeatureRegistry:
         """返回注册顺序稳定的功能描述。"""
         return self._features
 
+    @property
+    def capabilities(self) -> frozenset[str]:
+        """返回注册功能声明的完整能力集合。"""
+        return frozenset(
+            capability
+            for feature in self._features
+            for capability in feature.required_capabilities
+        )
+
+    def available_features(
+        self,
+        available_capabilities: Optional[frozenset[str]] = None,
+    ) -> tuple[FeatureDescriptor, ...]:
+        """按能力筛选功能；未提供能力集时保持全部功能可用。"""
+        if available_capabilities is None:
+            return self._features
+        return tuple(
+            feature
+            for feature in self._features
+            if feature.has_capabilities(available_capabilities)
+        )
+
     def sidebar_definitions(
         self,
         translate: Translate,
+        available_capabilities: Optional[frozenset[str]] = None,
     ) -> list[dict[str, object]]:
         """构造稳定顺序的侧边栏定义。"""
         return [
-            feature.sidebar_definition(translate) for feature in self._features
+            feature.sidebar_definition(translate)
+            for feature in self.available_features(available_capabilities)
         ]
 
     def create_view_catalog(
         self,
         settings_factory: Optional[ViewFactory] = None,
+        available_capabilities: Optional[frozenset[str]] = None,
     ) -> ViewCatalog:
         """注册全部惰性视图，并可替换设置页组合根工厂。"""
         catalog = ViewCatalog()
-        for feature in self._features:
+        for feature in self.available_features(available_capabilities):
             if feature.view_id == "settings" and settings_factory is not None:
                 catalog.register(feature.view_id, settings_factory)
             else:
@@ -89,6 +114,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.MAP,
             "app.ui.views.explorer",
             "ExplorerView",
+            frozenset({"map.tiles", "world.read", "world.write"}),
         ),
         FeatureDescriptor(
             "migrator",
@@ -97,6 +123,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.PACKAGE,
             "app.ui.views.migrator",
             "MigratorView",
+            frozenset({"world.migrate", "world.read", "world.write"}),
         ),
         FeatureDescriptor(
             "save_repair",
@@ -105,6 +132,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.BUILD,
             "app.ui.views.save_repair",
             "SaveRepairView",
+            frozenset({"world.read", "world.repair", "world.write"}),
         ),
         FeatureDescriptor(
             "backup_center",
@@ -113,6 +141,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.HISTORY,
             "app.ui.views.backup_center",
             "BackupCenterView",
+            frozenset({"world.backup", "world.read", "world.write"}),
         ),
         FeatureDescriptor(
             "compare",
@@ -121,6 +150,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.BALANCE,
             "app.ui.views.compare",
             "CompareView",
+            frozenset({"world.compare", "world.read"}),
         ),
         FeatureDescriptor(
             "mappings",
@@ -129,6 +159,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.LINK,
             "app.ui.views.mappings",
             "MappingsView",
+            frozenset({"mappings.manage"}),
         ),
         FeatureDescriptor(
             "server_properties",
@@ -137,6 +168,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.CLIPBOARD,
             "app.ui.views.server_properties",
             "ServerPropertiesView",
+            frozenset({"server.properties"}),
         ),
         FeatureDescriptor(
             "settings",
@@ -145,6 +177,7 @@ DEFAULT_FEATURE_REGISTRY = FeatureRegistry(
             IconSet.SETTINGS,
             "app.ui.views.settings",
             "SettingsView",
+            frozenset({"app.settings"}),
         ),
     )
 )

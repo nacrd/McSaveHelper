@@ -1,14 +1,23 @@
 """Migrator View —— 存档转换主界面"""
 from __future__ import annotations
 
+from concurrent.futures import CancelledError
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import flet as ft
 
+from app.services.execution_runtime import (
+    ExecutionLane,
+    OperationCancelledError,
+    OperationHandle,
+    TaskPriority,
+)
 from app.ui.components.layout import page_header
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
-from app.ui.utils import safe_update
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 from app.ui.views.migrator_cards import (
     build_batch_card,
@@ -29,6 +38,23 @@ if TYPE_CHECKING:
     from app.ui.feature_context import FeatureContext
 
 
+@dataclass(frozen=True)
+class _BatchScanResult:
+    """后台批量扫描结果，避免 UI 回调读取服务的可变中间状态。"""
+
+    worlds: tuple[Path, ...]
+    message: str
+
+
+@dataclass(frozen=True)
+class _UuidQueryResult:
+    """后台 UUID 查询结果。"""
+
+    offline_uuid: str
+    online_uuid: str | None
+    official_name: str | None
+
+
 class MigratorView(ft.Column):
     """存档转换视图 — 左右两栏布局（优化版）"""
 
@@ -41,6 +67,10 @@ class MigratorView(ft.Column):
         super().__init__(spacing=24, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app: "FeatureContext" = app
+        self._task_scope = app.execution_runtime.create_scope("migrator_view")
+        self._scan_generation = 0
+        self._query_generation = 0
+        self._query_handle: OperationHandle[_UuidQueryResult] | None = None
         self._build()
 
     @property
@@ -56,26 +86,32 @@ class MigratorView(ft.Column):
         return [
             ViewAction(
                 self._t("top_bar.start_conversion", "开始转换"),
-                lambda event: self.app.host.start(),
+                lambda event: self.app.migration_commands.start(),
             ),
             ViewAction(
-                self._t("top_bar.cancel_batch", "取消批量处理"),
-                self._cancel_batch,
+                self._t("top_bar.cancel_migration", "取消迁移"),
+                self._cancel_migration,
                 "danger",
             ),
         ]
 
-    def _cancel_batch(self, event: ft.ControlEvent) -> None:
+    def _cancel_migration(self, event: ft.ControlEvent) -> None:
         del event
-        if self.app.migration.cancel_batch():
+        if self.app.migration_commands.cancel():
             self.app.log(
-                self._t("messages.batch_cancel_requested", "已请求取消批量处理"),
+                self._t(
+                    "messages.migration_cancel_requested",
+                    "已请求取消迁移",
+                ),
                 "WARNING",
             )
         else:
             self.app.warn_dialog(
                 self._t("dialogs.warning", "提示"),
-                self._t("messages.no_batch_running", "当前没有运行中的批量任务"),
+                self._t(
+                    "messages.no_migration_running",
+                    "当前没有运行中的迁移任务",
+                ),
             )
 
     def set_path_value(self, target: str, value: str) -> None:
@@ -152,7 +188,7 @@ class MigratorView(ft.Column):
             dest_path=mc.dest_path or "",
             world_name=mc.world_name or "world",
             on_field_change=self._sync_field_to_config,
-            on_browse_dest=self.app.host.set_dest,
+            on_browse_dest=self.app.migration_commands.choose_destination,
         )
         self._src_field = directory.src_field
         self._dest_field = directory.dest_field
@@ -226,7 +262,9 @@ class MigratorView(ft.Column):
             batch_dir_path=mc.batch_dir_path or "",
             on_toggle_batch=self._toggle_batch,
             on_field_change=self._sync_field_to_config,
-            on_browse_batch=self.app.host.set_batch_dir,
+            on_browse_batch=(
+                self.app.migration_commands.choose_batch_directory
+            ),
             on_scan_batch=self._scan_batch,
         )
         self._batch_mode_cb = batch.batch_mode_cb
@@ -288,14 +326,85 @@ class MigratorView(ft.Column):
 
     def _scan_batch(self) -> None:
         mc = self.app.config.migration
-        result = self.app.migration.scan_batch_dir(mc.batch_dir_path)
-        if result:
-            self._batch_result.value = self.app.migration.scan_result
+        directory = mc.batch_dir_path
+        self._scan_generation += 1
+        generation = self._scan_generation
+        try:
+            handle = self._task_scope.submit(
+                "scan_batch_dir",
+                lambda token: self._scan_batch_worker(directory, token),
+                lane=ExecutionLane.IO,
+                priority=TaskPriority.INTERACTIVE,
+            )
+            handle.add_done_callback(
+                lambda completed: self._finish_batch_scan(
+                    completed,
+                    directory,
+                    generation,
+                )
+            )
+        except Exception as error:
+            self._post_to_ui(
+                self._apply_batch_scan_error,
+                error,
+                directory,
+                generation,
+            )
+
+    def _scan_batch_worker(self, directory: str, token: object) -> _BatchScanResult:
+        """在 I/O 通道扫描批量存档目录。"""
+        raise_if_cancelled = getattr(token, "raise_if_cancelled", None)
+        if callable(raise_if_cancelled):
+            raise_if_cancelled()
+        worlds = tuple(self.app.migration.scan_batch_dir(directory))
+        if callable(raise_if_cancelled):
+            raise_if_cancelled()
+        return _BatchScanResult(worlds, self.app.migration.scan_result)
+
+    def _finish_batch_scan(
+        self,
+        handle: OperationHandle[_BatchScanResult],
+        directory: str,
+        generation: int,
+    ) -> None:
+        if handle.cancelled:
+            return
+        try:
+            result = handle.result()
+        except (CancelledError, OperationCancelledError):
+            return
+        except Exception as error:
+            self._post_to_ui(
+                self._apply_batch_scan_error,
+                error,
+                directory,
+                generation,
+            )
+            return
+        self._post_to_ui(
+            self._apply_batch_scan_success,
+            result,
+            directory,
+            generation,
+        )
+
+    def _apply_batch_scan_success(
+        self,
+        result: _BatchScanResult,
+        directory: str,
+        generation: int,
+    ) -> None:
+        if generation != self._scan_generation:
+            return
+        if (self._batch_dir_field.value or "") != directory:
+            return
+        if result.worlds:
+            self._batch_result.value = result.message
             self.app.log(
                 self._t(
                     "messages.batch_scan_complete",
                     "批量扫描完成: 找到 {count} 个世界存档",
-                    count=len(result),
+                    count=len(result.worlds),
                 ),
                 "SUCCESS",
             )
@@ -313,21 +422,152 @@ class MigratorView(ft.Column):
             )
         safe_update(self._batch_result)
 
+    def _apply_batch_scan_error(
+        self,
+        error: Exception,
+        directory: str,
+        generation: int,
+    ) -> None:
+        if generation != self._scan_generation:
+            return
+        if (self._batch_dir_field.value or "") != directory:
+            return
+        self.app.handle_exception(error, title="批量扫描失败")
+
+    def _post_to_ui(self, callback: object, *args: object) -> None:
+        """投递后台结果；无页面时供隔离测试直接执行。"""
+        if not callable(callback):
+            return
+        page = getattr(self.app, "page", None)
+        if page is None:
+            callback(*args)
+            return
+        run_on_ui(page, callback, *args)
+
     def _query_uuid(self) -> None:
         name = (self._query_field.value or "").strip()
+        self._query_generation += 1
+        generation = self._query_generation
+        previous_handle = self._query_handle
+        self._query_handle = None
+        if previous_handle is not None:
+            previous_handle.cancel()
         if not name:
+            self._query_result.value = "在此显示查询结果"
+            safe_update(self._query_result)
             return
+
+        self._query_result.value = "正在查询 UUID..."
+        safe_update(self._query_result)
+        try:
+            handle = self._task_scope.submit(
+                "query_uuid",
+                lambda token: self._query_uuid_worker(name, token),
+                lane=ExecutionLane.IO,
+                priority=TaskPriority.INTERACTIVE,
+            )
+            self._query_handle = handle
+            handle.add_done_callback(
+                lambda completed: self._finish_uuid_query(
+                    completed,
+                    name,
+                    generation,
+                )
+            )
+        except Exception as error:
+            self._post_to_ui(
+                self._apply_uuid_query_error,
+                error,
+                name,
+                generation,
+            )
+
+    def _query_uuid_worker(
+        self,
+        name: str,
+        token: object,
+    ) -> _UuidQueryResult:
+        """在 I/O 通道生成离线 UUID 并查询 Mojang 服务。"""
+        raise_if_cancelled = getattr(token, "raise_if_cancelled", None)
+        if callable(raise_if_cancelled):
+            raise_if_cancelled()
         offline_uuid = self.app.uuid.generate_offline_uuid(name)
+        if callable(raise_if_cancelled):
+            raise_if_cancelled()
         online_uuid, official_name = self.app.uuid.query_online_uuid(
-            name, self.app.log
+            name,
+            self.app.log,
         )
+        if callable(raise_if_cancelled):
+            raise_if_cancelled()
+        return _UuidQueryResult(
+            offline_uuid=offline_uuid,
+            online_uuid=online_uuid,
+            official_name=official_name,
+        )
+
+    def _finish_uuid_query(
+        self,
+        handle: OperationHandle[_UuidQueryResult],
+        name: str,
+        generation: int,
+    ) -> None:
+        if handle.cancelled:
+            return
+        try:
+            result = handle.result()
+        except (CancelledError, OperationCancelledError):
+            return
+        except Exception as error:
+            self._post_to_ui(
+                self._apply_uuid_query_error,
+                error,
+                name,
+                generation,
+            )
+            return
+        self._post_to_ui(
+            self._apply_uuid_query_success,
+            result,
+            name,
+            generation,
+        )
+
+    def _apply_uuid_query_success(
+        self,
+        result: _UuidQueryResult,
+        name: str,
+        generation: int,
+    ) -> None:
+        if not self._is_current_uuid_query(name, generation):
+            return
+        self._query_handle = None
         self._query_result.value = format_uuid_query_result(
             name,
-            offline_uuid,
-            online_uuid,
-            official_name,
+            result.offline_uuid,
+            result.online_uuid,
+            result.official_name,
         )
         safe_update(self._query_result)
+
+    def _apply_uuid_query_error(
+        self,
+        error: Exception,
+        name: str,
+        generation: int,
+    ) -> None:
+        if not self._is_current_uuid_query(name, generation):
+            return
+        self._query_handle = None
+        self._query_result.value = "UUID 查询失败，请稍后重试。"
+        safe_update(self._query_result)
+        self.app.handle_exception(error, title="UUID 查询失败")
+
+    def _is_current_uuid_query(self, name: str, generation: int) -> bool:
+        return (
+            generation == self._query_generation
+            and (self._query_field.value or "").strip() == name
+        )
 
     def on_save_selected(self, path: str) -> None:
         """响应侧边栏「当前存档」变更，同步源路径字段。
@@ -342,3 +582,10 @@ class MigratorView(ft.Column):
             # UI best-effort: field/config sync may fail during teardown.
             pass
         safe_update(self._src_field)
+
+    def dispose(self) -> None:
+        """释放视图自有任务；应用级迁移控制器由组合根关闭。"""
+        self._scan_generation += 1
+        self._query_generation += 1
+        self._query_handle = None
+        self._task_scope.close()

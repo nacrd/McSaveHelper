@@ -48,6 +48,21 @@ class ManyActionView(ActionView):
         ]
 
 
+class DisposableActionView(ActionView):
+    def __init__(self, *, fail_top_actions: bool = False) -> None:
+        super().__init__()
+        self.dispose_calls = 0
+        self.fail_top_actions = fail_top_actions
+
+    def get_top_actions(self) -> list[ViewAction]:
+        if self.fail_top_actions:
+            raise RuntimeError("top action projection failed")
+        return super().get_top_actions()
+
+    def dispose(self) -> None:
+        self.dispose_calls += 1
+
+
 def _manager(create_view, selected=lambda: "test"):
     updates = []
     logs = []
@@ -162,10 +177,41 @@ def test_view_manager_renders_factory_errors_without_application_access() -> Non
 
 
 def test_view_manager_cache_has_explicit_accessors() -> None:
-    view = ActionView()
+    view = DisposableActionView()
     manager, _, _, _ = _manager(lambda view_id: view)
     manager.switch_view("test")
 
     assert manager.get_view("test") is view
     assert manager.remove_view("test") is view
     assert manager.get_view("test") is None
+    assert view.dispose_calls == 1
+    assert manager.remove_view("test") is None
+    assert view.dispose_calls == 1
+
+
+def test_detach_view_transfers_resource_ownership_without_dispose() -> None:
+    view = DisposableActionView()
+    manager, _, _, _ = _manager(lambda view_id: view)
+    manager.switch_view("test")
+
+    assert manager.detach_view("test") is view
+    assert view.dispose_calls == 0
+
+
+def test_retry_after_loaded_view_error_disposes_previous_instance() -> None:
+    failed = DisposableActionView(fail_top_actions=True)
+    replacement = DisposableActionView()
+    pending = [failed, replacement]
+    manager, content, _, logs = _manager(lambda view_id: pending.pop(0))
+
+    manager.switch_view("test")
+    assert manager.get_view("test") is failed
+    assert isinstance(content.content, ft.Text)
+
+    assert manager.remove_view("test") is failed
+    manager.switch_view("test")
+
+    assert failed.dispose_calls == 1
+    assert manager.get_view("test") is replacement
+    assert content.content is replacement
+    assert logs[0][1] == "ERROR"

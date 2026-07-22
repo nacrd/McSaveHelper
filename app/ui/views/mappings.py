@@ -1,31 +1,49 @@
-"""Mappings View —— 映射管理（UUID映射 + 物品映射）"""
+"""Mappings View —— 映射管理（UUID 映射 + 物品映射）。"""
+from __future__ import annotations
+
+from collections.abc import Callable
 from pathlib import Path
+from threading import Lock
+from typing import TYPE_CHECKING, Dict, Optional, TypeVar
+
 import flet as ft
-from typing import TYPE_CHECKING, Dict, Optional
 
 from app.services.asset_import import (
+    AssetImportCounts,
     configured_minecraft_dir,
     current_save_start_path,
     import_assets_from_sources,
     pick_asset_sources,
     preferred_mc_locale,
 )
-from app.ui.theme import THEME
-from app.ui.icons import IconSet
+from app.services.execution_runtime import (
+    CancellationToken,
+)
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
 from app.ui.components.layout import page_header
 from app.ui.components.uuid_table import UUIDMappingTable
+from app.ui.icons import IconSet
+from app.ui.theme import THEME
+from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
-from app.ui.utils import safe_update
+from app.ui.views.mappings_operations import (
+    _DebouncedLatestSave,
+    _LatestOperationGroup,
+)
 
 if TYPE_CHECKING:
     from app.ui.feature_context import FeatureContext
 
 
+ResultT = TypeVar("ResultT")
+
+
 class MappingsView(ft.Column):
     """映射管理视图 — UUID映射 + 物品映射"""
+
+    _UUID_SAVE_DEBOUNCE_SECONDS = 0.15
 
     def __init__(self, app: "FeatureContext") -> None:
         """初始化映射管理视图。
@@ -37,6 +55,21 @@ class MappingsView(ft.Column):
         self.expand = True
         self.app: "FeatureContext" = app
         self._item_service = app.item
+        self._operations = _LatestOperationGroup(
+            app.execution_runtime,
+            "mappings_view",
+            lambda callback: run_on_ui(
+                getattr(self.app, "page", None),
+                callback,
+            ),
+        )
+        self._item_mutation_lock = Lock()
+        self._item_busy = False
+        self._uuid_saver = _DebouncedLatestSave(
+            self._operations,
+            lambda: self.app.config.save(),
+        )
+        self._disposed = False
         self._build()
 
     @property
@@ -89,7 +122,7 @@ class MappingsView(ft.Column):
 
         self._table: UUIDMappingTable = UUIDMappingTable(
             mappings=self.app.config.custom_uuid_mappings,
-            on_mappings_change=self.app.update_uuid_mappings,
+            on_mappings_change=self._queue_uuid_mappings,
             on_import_click=self._on_uuid_import,
             on_export_click=self._on_uuid_export,
         )
@@ -138,15 +171,27 @@ class MappingsView(ft.Column):
         )
 
     def _item_import_controls(self) -> list[ft.Control]:
-        import_row = ft.Row([
-            btn_primary("导入 JSON", width=110, on_click=self._import_json),
-            btn_ghost("导出 JSON", width=110, on_click=self._export_json),
-            btn_ghost(
-                self._t("mappings.import_assets", "导入语言/贴图"),
-                width=150,
-                on_click=self._import_assets,
-            ),
-        ], spacing=8, scroll=ft.ScrollMode.AUTO)
+        import_row = ft.Row(
+            [
+                btn_primary(
+                    "导入 JSON",
+                    width=110,
+                    on_click=self._import_json,
+                ),
+                btn_ghost(
+                    "导出 JSON",
+                    width=110,
+                    on_click=self._export_json,
+                ),
+                btn_ghost(
+                    self._t("mappings.import_assets", "导入语言/贴图"),
+                    width=150,
+                    on_click=self._import_assets,
+                ),
+            ],
+            spacing=8,
+            scroll=ft.ScrollMode.AUTO,
+        )
         return [
             ft.Container(
                 content=import_row,
@@ -331,10 +376,15 @@ class MappingsView(ft.Column):
         )
 
     def _on_item_search(self) -> None:
+        if self._item_busy or self._disposed:
+            return
         self._render_item_table(self._item_search_field.value or "")
         safe_update(self._item_table_container)
 
     def _add_item_mapping(self, e: ft.ControlEvent) -> None:
+        del e
+        if self._item_busy or self._disposed:
+            return
         item_id = (self._item_id_field.value or "").strip()
         display_name = (self._item_name_field.value or "").strip()
         if not item_id or not display_name:
@@ -351,48 +401,76 @@ class MappingsView(ft.Column):
         self.update()
 
     def _delete_item_mapping(self, item_id: str) -> None:
+        if self._item_busy or self._disposed:
+            return
         removed = self._item_service.delete_item_mapping(item_id)
-        self._item_mapping_status.value = f"已删除: {item_id}" if removed else f"未找到自定义映射: {item_id}"
+        self._item_mapping_status.value = (
+            f"已删除: {item_id}"
+            if removed
+            else f"未找到自定义映射: {item_id}"
+        )
         self._item_mapping_status.color = THEME.mc_grass if removed else THEME.warning
         self._render_item_table(self._item_search_field.value or "")
-        try:
-            self._item_table_container.update()
-            self._item_mapping_status.update()
-        except RuntimeError:
-            pass
+        safe_update(self._item_table_container)
+        safe_update(self._item_mapping_status)
 
     def _import_lang(self, e: ft.ControlEvent) -> None:
         """Top-bar entry — same unified assets importer."""
         self._import_assets(e)
 
     def _import_assets(self, e: Optional[ft.ControlEvent] = None) -> None:
-        """Unified multi-select language + jar texture importer."""
+        """选择资源来源并在共享 I/O 通道导入语言与贴图。"""
+        del e
+        if self._item_busy or self._disposed:
+            return
+        failure_title = self._t("mappings.error.import_assets", "导入语言/贴图失败")
         try:
             title = self._t(
                 "mappings.import_assets_title",
                 "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
             )
-            paths = pick_asset_sources(self.app, title)
+            paths = tuple(pick_asset_sources(self.app, title))
             locale = preferred_mc_locale(self.app)
-            counts = import_assets_from_sources(
-                item_service=self._item_service,
-                texture_service=self.app.texture,
-                paths=paths,
-                locale=locale,
-                configured_dir=configured_minecraft_dir(self.app),
-                start_path=current_save_start_path(self.app),
-                empty_paths_fallback=True,
-            )
-            self._set_asset_import_status(
-                counts.lang_count,
-                counts.texture_count,
-                counts.jar_count,
-                locale,
-            )
-            self._render_item_table(self._item_search_field.value or "")
-            self.update()
-        except Exception as ex:
-            self.app.handle_exception(ex, title="导入语言/贴图失败")
+            configured_dir = configured_minecraft_dir(self.app)
+            start_path = current_save_start_path(self.app)
+        except Exception as error:
+            self.app.handle_exception(error, title=failure_title)
+            return
+
+        self._set_item_busy(True)
+        self._operations.submit(
+            "item_import",
+            lambda token: self._run_item_operation(
+                token,
+                lambda: import_assets_from_sources(
+                    item_service=self._item_service,
+                    texture_service=self.app.texture,
+                    paths=paths,
+                    locale=locale,
+                    configured_dir=configured_dir,
+                    start_path=start_path,
+                    empty_paths_fallback=True,
+                ),
+            ),
+            lambda counts: self._apply_asset_import_success(counts, locale),
+            lambda error: self._apply_item_io_error(error, failure_title),
+        )
+
+    def _apply_asset_import_success(
+        self,
+        counts: AssetImportCounts,
+        locale: str,
+    ) -> None:
+        """在 UI 线程投影资源导入结果。"""
+        self._set_item_busy(False)
+        self._set_asset_import_status(
+            counts.lang_count,
+            counts.texture_count,
+            counts.jar_count,
+            locale,
+        )
+        self._render_item_table(self._item_search_field.value or "")
+        safe_update(self)
 
     def _set_asset_import_status(
         self,
@@ -418,54 +496,120 @@ class MappingsView(ft.Column):
         )
         self._item_mapping_status.color = THEME.mc_grass
 
-    def _import_from_local_minecraft(
-        self,
-        e: Optional[ft.ControlEvent] = None,
-    ) -> None:
+    def _import_from_local_minecraft(self, e: Optional[ft.ControlEvent] = None) -> None:
         """Back-compat: unified importer with empty selection falls back to local."""
         self._import_assets(e)
 
-    def _import_from_jar_file(
-        self,
-        e: Optional[ft.ControlEvent] = None,
-    ) -> None:
+    def _import_from_jar_file(self, e: Optional[ft.ControlEvent] = None) -> None:
         """Back-compat alias for the unified assets importer."""
         self._import_assets(e)
 
     def _import_json(self, e: ft.ControlEvent) -> None:
+        del e
+        if self._item_busy or self._disposed:
+            return
+        failure_title = self._t("mappings.error.import_json", "导入 JSON 映射失败")
         try:
             path = self.app.pick_file(
                 title="选择 JSON 映射文件",
                 file_types=[("JSON 文件 (*.json)", "*.json")],
             )
-            if path:
-                count = self._item_service.load_custom_mapping_file(Path(path))
-                self._item_mapping_status.value = f"已导入 {count} 个映射。"
-                self._item_mapping_status.color = THEME.mc_grass
-                self._render_item_table(self._item_search_field.value or "")
-                self.update()
-        except Exception as ex:
-            self.app.handle_exception(ex, title="导入 JSON 映射失败")
+        except Exception as error:
+            self.app.handle_exception(error, title=failure_title)
+            return
+        if not path:
+            return
+
+        source_path = Path(path)
+        self._set_item_busy(True)
+        self._operations.submit(
+            "item_import",
+            lambda token: self._run_item_operation(
+                token,
+                lambda: self._item_service.load_custom_mapping_file(
+                    source_path
+                ),
+            ),
+            self._apply_item_json_import_success,
+            lambda error: self._apply_item_io_error(error, failure_title),
+        )
+
+    def _apply_item_json_import_success(self, count: int) -> None:
+        """在 UI 线程刷新 JSON 导入结果。"""
+        self._set_item_busy(False)
+        self._item_mapping_status.value = f"已导入 {count} 个映射。"
+        self._item_mapping_status.color = THEME.mc_grass
+        self._render_item_table(self._item_search_field.value or "")
+        safe_update(self)
 
     def _export_json(self, e: ft.ControlEvent) -> None:
+        del e
+        if self._item_busy or self._disposed:
+            return
+        failure_title = self._t("mappings.error.export_json", "导出映射失败")
         try:
             path = self.app.save_file(
                 title="导出物品映射",
                 default_ext=".json",
                 file_types=[("JSON 文件 (*.json)", "*.json")],
             )
-            if path:
-                self._item_service.save_custom_mapping_file(Path(path))
-                self.app.info_dialog("成功", f"映射已导出到 {path}")
-        except Exception as ex:
-            self.app.handle_exception(ex, title="导出映射失败")
+        except Exception as error:
+            self.app.handle_exception(error, title=failure_title)
+            return
+        if not path:
+            return
+
+        output_path = Path(path)
+        self._set_item_busy(True)
+        self._operations.submit(
+            "item_export",
+            lambda token: self._run_item_operation(
+                token,
+                lambda: self._item_service.save_custom_mapping_file(
+                    output_path
+                ),
+            ),
+            lambda _: self._apply_item_json_export_success(output_path),
+            lambda error: self._apply_item_io_error(error, failure_title),
+        )
+
+    def _apply_item_json_export_success(self, output_path: Path) -> None:
+        """在 UI 线程完成 JSON 导出反馈。"""
+        self._set_item_busy(False)
+        self.app.info_dialog("成功", f"映射已导出到 {output_path}")
+
+    def _apply_item_io_error(self, error: Exception, title: str) -> None:
+        """恢复物品控件并显示后台 I/O 错误。"""
+        self._set_item_busy(False)
+        self.app.handle_exception(error, title=title)
+
+    def _run_item_operation(
+        self,
+        token: CancellationToken,
+        operation: Callable[[], ResultT],
+    ) -> ResultT:
+        """串行访问共享可变物品服务，并在边界协作取消。"""
+        token.raise_if_cancelled()
+        with self._item_mutation_lock:
+            token.raise_if_cancelled()
+            result = operation()
+            token.raise_if_cancelled()
+            return result
+
+    def _set_item_busy(self, busy: bool) -> None:
+        """切换物品映射控件的后台操作状态。"""
+        self._item_busy = busy
 
     def refresh_mappings(self) -> None:
         """从应用配置重新加载 UUID 映射表并刷新表格。"""
+        if self._disposed:
+            return
         self._table.set_mappings(self.app.config.custom_uuid_mappings)
 
     def _on_uuid_import(self) -> Optional[str]:
-        return self.app.pick_file(
+        if self._disposed:
+            return None
+        path = self.app.pick_file(
             title="导入映射文件",
             file_types=[
                 ("文本文件 (*.txt)", "*.txt"),
@@ -473,11 +617,25 @@ class MappingsView(ft.Column):
                 ("所有文件 (*.*)", "*.*"),
             ],
         )
+        if not path:
+            return None
+        source_path = Path(path)
+        failure_title = self._t("mappings.error.uuid_import", "导入 UUID 映射失败")
+        self._operations.submit(
+            "uuid_import",
+            lambda token: self._run_io(
+                token,
+                lambda: UUIDMappingTable.read_mappings_file(source_path),
+            ),
+            self._table.merge_mappings,
+            lambda error: self.app.handle_exception(error, title=failure_title),
+        )
+        return None
 
     def _on_uuid_export(self, mappings: Dict[str, str]) -> Optional[str]:
-        if not mappings:
+        if not mappings or self._disposed:
             return None
-        return self.app.save_file(
+        path = self.app.save_file(
             title="导出映射文件",
             default_ext=".txt",
             file_types=[
@@ -485,3 +643,48 @@ class MappingsView(ft.Column):
                 ("所有文件 (*.*)", "*.*"),
             ],
         )
+        if not path:
+            return None
+        output_path = Path(path)
+        snapshot = dict(mappings)
+        failure_title = self._t("mappings.error.uuid_export", "导出 UUID 映射失败")
+        self._operations.submit(
+            "uuid_export",
+            lambda token: self._run_io(
+                token,
+                lambda: UUIDMappingTable.write_mappings_file(
+                    output_path,
+                    snapshot,
+                ),
+            ),
+            None,
+            lambda error: self.app.handle_exception(error, title=failure_title),
+        )
+        return None
+
+    @staticmethod
+    def _run_io(token: CancellationToken, operation: Callable[[], ResultT]) -> ResultT:
+        """在磁盘操作前后执行协作取消检查。"""
+        token.raise_if_cancelled()
+        result = operation()
+        token.raise_if_cancelled()
+        return result
+
+    def _queue_uuid_mappings(self, mappings: Dict[str, str]) -> None:
+        """立即更新内存，并合并连续输入为一次后台配置保存。"""
+        if self._disposed:
+            return
+        self.app.config.custom_uuid_mappings = dict(mappings)
+        failure_title = self._t("mappings.error.uuid_save", "保存 UUID 映射失败")
+        self._uuid_saver.schedule(
+            self._UUID_SAVE_DEBOUNCE_SECONDS,
+            lambda error: self.app.handle_exception(error, title=failure_title),
+        )
+
+    def dispose(self) -> None:
+        """取消后台操作并使已经排队的 UI 回调失效；可重复调用。"""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._operations.close()
+        self._uuid_saver.flush()

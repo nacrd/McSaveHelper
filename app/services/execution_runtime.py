@@ -7,13 +7,16 @@ import queue
 import threading
 import time
 from collections import Counter
-from concurrent.futures import Future
+from concurrent.futures import CancelledError, Future
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 from typing import Callable, Generic, Optional, TypeVar, cast
 
+from core.observability import OperationOutcome, OperationRecord
+
 
 ResultT = TypeVar("ResultT")
+OperationRecordSink = Callable[[OperationRecord], None]
 
 
 class ExecutionLane(str, Enum):
@@ -140,8 +143,21 @@ class OperationHandle(Generic[ResultT]):
 
     @property
     def cancelled(self) -> bool:
-        """返回任务是否收到取消请求或在执行前被取消。"""
-        return self._token.is_cancelled or self._future.cancelled()
+        """返回任务是否以取消作为最终状态结束。"""
+        if self._future.cancelled():
+            return True
+        if not self._future.done():
+            return False
+        try:
+            error = self._future.exception()
+        except CancelledError:
+            return True
+        return isinstance(error, OperationCancelledError)
+
+    @property
+    def cancel_requested(self) -> bool:
+        """返回任务是否曾收到协作取消请求。"""
+        return self._token.is_cancelled
 
     def cancel(self) -> bool:
         """请求协作取消，并尝试移除尚未开始的任务。
@@ -272,6 +288,7 @@ class _WorkItem:
 
     future: Future[object]
     func: Callable[[], object]
+    on_dequeued: Callable[[Future[object]], None]
 
 
 class _PriorityExecutor:
@@ -297,10 +314,19 @@ class _PriorityExecutor:
         with self._lock:
             return sum(worker.is_alive() for worker in self._workers)
 
+    @property
+    def is_terminated(self) -> bool:
+        """返回执行器是否已关闭且全部工作线程已经退出。"""
+        with self._lock:
+            closed = self._closed
+            workers = tuple(self._workers)
+        return closed and self._workers_terminated(workers)
+
     def submit(
         self,
         priority: TaskPriority,
         func: Callable[[], ResultT],
+        on_dequeued: Callable[[Future[object]], None],
     ) -> Future[ResultT]:
         """将可执行函数按优先级投入队列。"""
         with self._lock:
@@ -311,6 +337,7 @@ class _PriorityExecutor:
             item = _WorkItem(
                 future=cast(Future[object], future),
                 func=cast(Callable[[], object], func),
+                on_dequeued=on_dequeued,
             )
             self._queue.put((int(priority), next(self._sequence), item))
             return future
@@ -335,6 +362,7 @@ class _PriorityExecutor:
             try:
                 if item is None:
                     return
+                item.on_dequeued(item.future)
                 if not item.future.set_running_or_notify_cancel():
                     continue
                 try:
@@ -344,21 +372,53 @@ class _PriorityExecutor:
             finally:
                 self._queue.task_done()
 
-    def shutdown(self, *, wait: bool, cancel_futures: bool) -> None:
-        """停止接收任务，并按需取消尚未开始的 Future。"""
+    def shutdown(
+        self,
+        *,
+        wait: bool,
+        cancel_futures: bool,
+        timeout: Optional[float] = None,
+    ) -> bool:
+        """停止接收任务，并按需有界等待工作线程退出。"""
+        if timeout is not None and timeout < 0:
+            raise ValueError("关闭等待时间不能为负数")
         with self._lock:
-            if self._closed:
-                return
-            self._closed = True
+            should_close = not self._closed
+            if should_close:
+                self._closed = True
             workers = tuple(self._workers)
 
-        if cancel_futures:
-            self._cancel_pending_items()
-        for _ in workers:
-            self._queue.put((self._SENTINEL_PRIORITY, next(self._sequence), None))
+        if should_close:
+            if cancel_futures:
+                self._cancel_pending_items()
+            for _ in workers:
+                self._queue.put(
+                    (self._SENTINEL_PRIORITY, next(self._sequence), None)
+                )
         if wait:
-            for worker in workers:
-                worker.join()
+            self._wait_for_workers(workers, timeout)
+        return self._workers_terminated(workers)
+
+    @staticmethod
+    def _wait_for_workers(
+        workers: tuple[threading.Thread, ...],
+        timeout: Optional[float],
+    ) -> None:
+        """使用共享截止时间等待工作线程，且不等待调用线程自身。"""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        current_worker = threading.current_thread()
+        for worker in workers:
+            if worker is current_worker:
+                continue
+            remaining = None
+            if deadline is not None:
+                remaining = max(0.0, deadline - time.monotonic())
+            worker.join(remaining)
+
+    @staticmethod
+    def _workers_terminated(workers: tuple[threading.Thread, ...]) -> bool:
+        """返回给定工作线程快照是否已经全部退出。"""
+        return all(not worker.is_alive() for worker in workers)
 
     def _cancel_pending_items(self) -> None:
         """取消队列中尚未启动的任务，同时保留关闭哨兵协议。"""
@@ -372,6 +432,7 @@ class _PriorityExecutor:
         for _, _, item in pending:
             try:
                 if item is not None:
+                    item.on_dequeued(item.future)
                     item.future.cancel()
             finally:
                 self._queue.task_done()
@@ -393,6 +454,76 @@ class _TrackedTask:
     lane: ExecutionLane
 
 
+class _TaskAdmission:
+    """协调 Future 终态与队列出队，确保容量只释放一次。"""
+
+    def __init__(self) -> None:
+        """创建尚未出队且尚未结束的容量占用。"""
+        self._lock = threading.Lock()
+        self._dequeued = False
+        self._future_done = False
+        self._released = False
+
+    def mark_dequeued(self) -> bool:
+        """记录工作项已经离开底层队列，并返回是否应释放容量。"""
+        with self._lock:
+            self._dequeued = True
+            return self._claim_release_locked()
+
+    def mark_future_done(self) -> bool:
+        """记录 Future 已进入终态，并返回是否应释放容量。"""
+        with self._lock:
+            self._future_done = True
+            return self._claim_release_locked()
+
+    def _claim_release_locked(self) -> bool:
+        """在持锁时认领唯一一次容量释放。"""
+        if self._released or not self._dequeued or not self._future_done:
+            return False
+        self._released = True
+        return True
+
+
+class _TaskTiming:
+    """线程安全地保存一个任务的排队与执行耗时。"""
+
+    def __init__(self) -> None:
+        """以构造时刻作为进入运行时队列的时间。"""
+        self._enqueued_at = time.perf_counter()
+        self._lock = threading.Lock()
+        self._started_at: Optional[float] = None
+        self._queue_wait_ms = 0.0
+        self._run_ms = 0.0
+
+    def mark_started(self) -> float:
+        """记录开始执行时刻并返回队列等待毫秒。"""
+        started_at = time.perf_counter()
+        queue_wait_ms = (started_at - self._enqueued_at) * 1000.0
+        with self._lock:
+            self._started_at = started_at
+            self._queue_wait_ms = max(0.0, queue_wait_ms)
+        return self._queue_wait_ms
+
+    def mark_finished(self) -> None:
+        """记录工作函数实际运行耗时。"""
+        finished_at = time.perf_counter()
+        with self._lock:
+            if self._started_at is not None:
+                self._run_ms = max(
+                    0.0,
+                    (finished_at - self._started_at) * 1000.0,
+                )
+
+    def snapshot(self) -> tuple[float, float]:
+        """返回排队与执行毫秒；执行前取消时运行耗时为零。"""
+        observed_at = time.perf_counter()
+        with self._lock:
+            if self._started_at is None:
+                queue_wait_ms = (observed_at - self._enqueued_at) * 1000.0
+                return max(0.0, queue_wait_ms), 0.0
+            return self._queue_wait_ms, self._run_ms
+
+
 class ExecutionRuntime:
     """统一持有应用后台工作线程、优先级、容量和取消生命周期。"""
 
@@ -400,12 +531,15 @@ class ExecutionRuntime:
         self,
         io_limits: Optional[LaneLimits] = None,
         cpu_limits: Optional[LaneLimits] = None,
+        *,
+        operation_sink: Optional[OperationRecordSink] = None,
     ) -> None:
         """创建 I/O 与计算执行通道。
 
         Args:
             io_limits: I/O 通道限制；默认最多四个工作线程、三十二个排队任务。
             cpu_limits: 计算通道限制；默认最多两个工作线程、八个排队任务。
+            operation_sink: 可选的统一操作指标接收器；应快速且非阻塞。
         """
         cpu_count = os.cpu_count() or 2
         selected_io = io_limits or LaneLimits(
@@ -424,6 +558,7 @@ class ExecutionRuntime:
         self._queue_wait_last_ms = 0.0
         self._queue_wait_max_ms = 0.0
         self._queue_wait_samples = 0
+        self._operation_sink = operation_sink
         self._lanes = {
             ExecutionLane.IO: self._create_lane("mcsavehelper-io", selected_io),
             ExecutionLane.CPU: self._create_lane(
@@ -447,6 +582,18 @@ class ExecutionRuntime:
         """返回运行时是否已进入关闭状态。"""
         with self._lock:
             return self._closed
+
+    @property
+    def is_terminated(self) -> bool:
+        """返回运行时是否已关闭且全部工作线程已经退出。"""
+        with self._lock:
+            closed = self._closed
+            executors = tuple(
+                state.executor for state in self._lanes.values()
+            )
+        return closed and all(
+            executor.is_terminated for executor in executors
+        )
 
     @property
     def active_task_count(self) -> int:
@@ -536,12 +683,16 @@ class ExecutionRuntime:
             )
 
         token = CancellationToken()
-        enqueued_at = time.perf_counter()
+        admission = _TaskAdmission()
+        timing = _TaskTiming()
 
         def timed_work(cancel_token: CancellationToken) -> ResultT:
-            wait_ms = (time.perf_counter() - enqueued_at) * 1000.0
+            wait_ms = timing.mark_started()
             self._record_queue_wait_ms(wait_ms)
-            return work(cancel_token)
+            try:
+                return work(cancel_token)
+            finally:
+                timing.mark_finished()
 
         try:
             future = self._submit_locked(
@@ -550,6 +701,7 @@ class ExecutionRuntime:
                 priority,
                 token,
                 timed_work,
+                admission,
             )
         except Exception:
             state.capacity.release()
@@ -558,8 +710,15 @@ class ExecutionRuntime:
         tracked_future = cast(Future[object], future)
 
         def release_task(completed: Future[ResultT]) -> None:
-            del completed
-            self._release_task(state, tracked_future)
+            if admission.mark_future_done():
+                self._release_task(state, tracked_future)
+            self._publish_operation_record(
+                normalized_operation,
+                lane,
+                priority,
+                timing,
+                cast(Future[object], completed),
+            )
 
         future.add_done_callback(release_task)
         return OperationHandle(
@@ -590,6 +749,7 @@ class ExecutionRuntime:
         priority: TaskPriority,
         token: CancellationToken,
         work: Callable[[CancellationToken], ResultT],
+        admission: _TaskAdmission,
     ) -> Future[ResultT]:
         """在关闭锁内提交任务并登记生命周期。"""
         with self._lock:
@@ -599,12 +759,27 @@ class ExecutionRuntime:
                 future = state.executor.submit(
                     priority,
                     lambda: self._invoke(token, work),
+                    lambda dequeued: self._on_task_dequeued(
+                        state,
+                        admission,
+                        dequeued,
+                    ),
                 )
             except RuntimeError as exc:
                 raise RuntimeClosedError("后台任务运行时已经关闭") from exc
             self._tasks[cast(Future[object], future)] = _TrackedTask(token, lane)
             self._submitted[lane] += 1
             return future
+
+    def _on_task_dequeued(
+        self,
+        state: _LaneState,
+        admission: _TaskAdmission,
+        future: Future[object],
+    ) -> None:
+        """工作项出队后，在 Future 已结束时释放对应容量。"""
+        if admission.mark_dequeued():
+            self._release_task(state, future)
 
     @staticmethod
     def _invoke(
@@ -620,23 +795,86 @@ class ExecutionRuntime:
         state: _LaneState,
         future: Future[object],
     ) -> None:
-        """任务结束后释放一个通道容量名额。"""
+        """任务结束且离开底层队列后释放一个通道容量名额。"""
         with self._lock:
             tracked = self._tasks.pop(future, None)
         if tracked is not None:
             state.capacity.release()
 
-    def shutdown(self, *, wait: bool = False) -> None:
+    def _publish_operation_record(
+        self,
+        operation: str,
+        lane: ExecutionLane,
+        priority: TaskPriority,
+        timing: _TaskTiming,
+        future: Future[object],
+    ) -> None:
+        """向可选接收器发布一次任务终态，不影响任务主要语义。"""
+        sink = self._operation_sink
+        if sink is None:
+            return
+        queue_wait_ms, run_ms = timing.snapshot()
+        record = OperationRecord(
+            operation_id=operation,
+            feature="runtime",
+            queue_wait_ms=queue_wait_ms,
+            run_ms=run_ms,
+            outcome=self._operation_outcome(future),
+            metadata={
+                "lane": lane.value,
+                "priority": priority.name.lower(),
+            },
+        )
+        try:
+            sink(record)
+        except Exception:
+            # Observability is best-effort and must not change task results.
+            pass
+
+    @staticmethod
+    def _operation_outcome(future: Future[object]) -> OperationOutcome:
+        """根据 Future 的真实终态归类成功、错误或协作取消。"""
+        if future.cancelled():
+            return OperationOutcome.CANCELLED
+        try:
+            error = future.exception()
+        except CancelledError:
+            return OperationOutcome.CANCELLED
+        if isinstance(error, OperationCancelledError):
+            return OperationOutcome.CANCELLED
+        if error is not None:
+            return OperationOutcome.ERROR
+        return OperationOutcome.OK
+
+    def shutdown(
+        self,
+        *,
+        wait: bool = False,
+        timeout: Optional[float] = None,
+    ) -> bool:
         """停止接收任务，取消现有任务并关闭所有执行器。
 
         Args:
             wait: 是否等待已经开始的工作函数自行结束。
+            timeout: 全部执行通道共享的最长等待秒数。
+
+        Returns:
+            全部工作线程均已退出时返回 True。
+
+        Raises:
+            ValueError: 关闭等待时间为负数。
         """
+        if timeout is not None and timeout < 0:
+            raise ValueError("关闭等待时间不能为负数")
+        deadline = None
+        if wait and timeout is not None:
+            deadline = time.monotonic() + timeout
+
         with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            tasks = tuple(self._tasks.items())
+            should_close = not self._closed
+            if should_close:
+                self._closed = True
+            tasks = tuple(self._tasks.items()) if should_close else ()
             executors = tuple(
                 state.executor for state in self._lanes.values()
             )
@@ -644,8 +882,18 @@ class ExecutionRuntime:
         for future, tracked in tasks:
             tracked.token.cancel()
             future.cancel()
+        terminated = True
         for executor in executors:
-            executor.shutdown(wait=wait, cancel_futures=True)
+            remaining = None
+            if deadline is not None:
+                remaining = max(0.0, deadline - time.monotonic())
+            executor_terminated = executor.shutdown(
+                wait=wait,
+                cancel_futures=True,
+                timeout=remaining,
+            )
+            terminated = executor_terminated and terminated
+        return terminated
 
 
 __all__ = [
@@ -656,6 +904,7 @@ __all__ = [
     "LaneLimits",
     "OperationCancelledError",
     "OperationHandle",
+    "OperationRecordSink",
     "OperationScope",
     "RuntimeClosedError",
     "TaskPriority",

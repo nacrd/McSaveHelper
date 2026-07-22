@@ -149,8 +149,10 @@ def _bench_topview(world: Path, loops: int) -> dict[str, Any]:
     target = region_files[0]
     samples: list[float] = []
     tile_bytes = 0
-    for _ in range(max(1, loops)):
-        render_ms, png = _timed(
+    effective_loops = max(1, loops)
+    png: Optional[bytes] = None
+    for _ in range(effective_loops):
+        render_ms, current_png = _timed(
             lambda: render_region_topview(
                 target,
                 tile_size=32,
@@ -159,25 +161,85 @@ def _bench_topview(world: Path, loops: int) -> dict[str, Any]:
             )
         )
         samples.append(render_ms)
-        if png is not None:
-            tile_bytes = len(png)
+        if current_png is not None:
+            png = current_png
+            tile_bytes = len(current_png)
+    if tile_bytes <= 0:
+        raise RuntimeError(f"俯视图渲染没有生成有效瓦片: {target}")
+    cache_hit = _bench_topview_cache_hit(
+        target,
+        32,
+        png,
+        effective_loops,
+    )
     return {
         "region_file": target.name,
         "tile_median_ms": round(_median(samples), 3),
         "tile_p95_ms": round(p95(samples), 3),
         "tile_bytes": tile_bytes,
         "rendered": tile_bytes > 0,
+        **cache_hit,
     }
 
 
-def _bench_backup(world: Path) -> dict[str, Any]:
+def _bench_topview_cache_hit(
+    region_path: Path,
+    tile_size: int,
+    png: Optional[bytes],
+    loops: int,
+) -> dict[str, Any]:
+    """在隔离磁盘缓存中测量已预热瓦片的读取命中延迟。"""
+    if not png:
+        raise RuntimeError(f"缓存预热缺少瓦片内容: {region_path}")
+    from core.mca import tile_cache
+
+    previous_cache_dir = tile_cache._CACHE_DIR
+    with tempfile.TemporaryDirectory(prefix="mcsavehelper-tile-bench-") as raw:
+        cache_root = Path(raw)
+        tile_cache._CACHE_DIR = cache_root
+        try:
+            tile_cache.store_tile(region_path, tile_size, png)
+            if tile_cache.load_tile(region_path, tile_size) is None:
+                raise RuntimeError("俯视图磁盘缓存预热失败")
+            samples: list[float] = []
+
+            def load_cached() -> Optional[bytes]:
+                return tile_cache.load_tile(region_path, tile_size)
+
+            for _ in range(max(1, loops)):
+                hit_ms, cached = _timed(load_cached)
+                if cached is None:
+                    raise RuntimeError("俯视图磁盘缓存命中丢失")
+                samples.append(hit_ms)
+            return {
+                "cache_hit_median_ms": round(_median(samples), 3),
+                "cache_hit_p95_ms": round(p95(samples), 3),
+                "cache_hit_samples": len(samples),
+                "cache_hit_count": len(samples),
+            }
+        finally:
+            tile_cache._CACHE_DIR = previous_cache_dir
+
+
+def _bench_backup(world: Path, loops: int) -> dict[str, Any]:
     coordinator = WorldWriteCoordinator()
     service = BackupService(coordinator)
-    backup_ms, record = _timed(
-        lambda: service.create_backup(world, label="bench")
-    )
+    samples: list[float] = []
+    record = None
+
+    def create_backup(label_index: int) -> Any:
+        return service.create_backup(world, label=f"bench-{label_index}")
+
+    for index in range(max(1, loops)):
+        backup_ms, record = _timed(lambda: create_backup(index))
+        samples.append(backup_ms)
+    if record is None:
+        raise RuntimeError("备份基准没有生成结果")
     return {
-        "backup_ms": round(backup_ms, 3),
+        "backup_ms": round(_median(samples), 3),
+        "backup_median_ms": round(_median(samples), 3),
+        "backup_p95_ms": round(p95(samples), 3),
+        "backup_samples": len(samples),
         "file_count": record.file_count,
         "size_bytes": record.size_bytes,
         "valid": record.valid,
@@ -227,9 +289,7 @@ def _bench_runtime_and_stale() -> dict[str, Any]:
                 lane.value: count
                 for lane, count in snapshot.worker_count_by_lane.items()
             },
-            "active_tasks": snapshot.active_task_count
-            if hasattr(snapshot, "active_task_count")
-            else runtime.active_task_count,
+            "active_tasks": runtime.active_task_count,
             "stale_callbacks": stale,
             "accepted_callbacks": accepted,
             "cache_bytes_used": cache_stats.bytes_used,
@@ -253,7 +313,7 @@ def _bench_size(size: SampleSize, root: Path, loops: int) -> dict[str, Any]:
         "world_index": _bench_world_index(world, loops),
         "world_session": _bench_world_session(world, loops),
         "topview": _bench_topview(world, loops),
-        "backup": _bench_backup(world),
+        "backup": _bench_backup(world, loops),
     }
 
 
@@ -263,18 +323,29 @@ def run_benchmark(
 ) -> dict[str, Any]:
     """Run fixed-sample MCA/index/session/tile/backup benchmarks."""
     selected = sizes or [SampleSize.SMALL, SampleSize.MEDIUM, SampleSize.LARGE]
+    effective_loops = max(1, int(loops))
     with tempfile.TemporaryDirectory(prefix="mcsavehelper-mca-bench-") as raw:
         root = Path(raw)
         samples = [
-            _bench_size(size, root / size.value, loops) for size in selected
+            _bench_size(size, root / size.value, effective_loops)
+            for size in selected
         ]
         runtime = _bench_runtime_and_stale()
-    return {
+    report = {
         "reference_machine": REFERENCE_MACHINE,
-        "loops": loops,
+        "loops": effective_loops,
         "samples": samples,
         "runtime": runtime,
     }
+    budget_violations = evaluate_report_budgets(report)
+    report["budget_violations"] = budget_violations
+    report["budgets_ok"] = not budget_violations
+    report["budget_result"] = {
+        "ok": not budget_violations,
+        "violations": budget_violations,
+        "checked_samples": len(samples),
+    }
+    return report
 
 
 def _print_human(report: dict[str, Any]) -> None:
@@ -300,17 +371,22 @@ def _print_human(report: dict[str, Any]) -> None:
         )
         print(
             f"  topview={topview['tile_median_ms']}ms "
-            f"bytes={topview['tile_bytes']} rendered={topview['rendered']}"
+            f"bytes={topview['tile_bytes']} rendered={topview['rendered']} "
+            f"cache-hit-p95={topview['cache_hit_p95_ms']}ms"
         )
         print(
             f"  backup={backup['backup_ms']}ms files={backup['file_count']} "
-            f"bytes={backup['size_bytes']}"
+            f"bytes={backup['size_bytes']} p95={backup['backup_p95_ms']}ms"
         )
     runtime = report["runtime"]
     print(
         f"runtime workers={runtime['worker_count_by_lane']} "
         f"stale={runtime['stale_callbacks']} "
         f"cache_bytes={runtime['cache_bytes_used']}"
+    )
+    print(
+        f"budgets ok={report['budgets_ok']} "
+        f"violations={len(report['budget_violations'])}"
     )
 
 
@@ -352,9 +428,7 @@ def main() -> int:
     args = parser.parse_args()
     sizes = [SampleSize(item) for item in args.sizes]
     report = run_benchmark(sizes=sizes, loops=max(1, args.loops))
-    budget_violations = evaluate_report_budgets(report)
-    report["budget_violations"] = budget_violations
-    report["budgets_ok"] = not budget_violations
+    budget_violations = report["budget_violations"]
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:

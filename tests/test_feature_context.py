@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-from app.ui.feature_context import FeatureContext
+from app.ui.feature_context import FeatureContext, MigrationCommands
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -31,10 +31,18 @@ def test_views_do_not_type_application_union() -> None:
 
 def test_feature_context_delegates_host_ports() -> None:
     calls: list[str] = []
+    commands = MigrationCommands(
+        start=lambda: calls.append("start"),
+        cancel=lambda: True,
+        choose_destination=lambda: calls.append("dest"),
+        choose_batch_directory=lambda: calls.append("batch"),
+        close=lambda: calls.append("close"),
+    )
 
     host = SimpleNamespace(
         page=object(),
         services=SimpleNamespace(),
+        migration_commands=commands,
         config=object(),
         migration=object(),
         uuid=object(),
@@ -66,6 +74,7 @@ def test_feature_context_delegates_host_ports() -> None:
     assert ctx.pick_directory() == "dir"
     assert ctx.create_region_map_service() == "map"
     assert ctx.current_save_path == "C:/tmp/world"
+    assert ctx.migration_commands is commands
     ctx.show_progress("task")
     assert "show" in calls
     assert not hasattr(ctx, "start")

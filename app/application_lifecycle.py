@@ -150,12 +150,20 @@ class MigrationRuntimeSupport:
     """Mixin: migration worker scheduling through ExecutionRuntime."""
 
     execution_runtime: Any
+    migration_controller: Any
+    view_manager: Any
+
+    def _dispose_views_and_migration(self) -> None:
+        """释放视图后关闭由应用拥有的迁移控制器。"""
+        try:
+            self.view_manager.dispose()
+        finally:
+            self.migration_controller.close()
 
     def _start_migration_worker(
         self,
         operation: str,
-        target: Callable[[str], None],
-        destination: str,
+        target: Callable[[CancellationToken], None],
     ) -> OperationHandle[None]:
         from app.services.execution_runtime import ExecutionLane, TaskPriority
 
@@ -165,22 +173,20 @@ class MigrationRuntimeSupport:
                 operation,
                 lambda cancellation: self._run_migration_target(
                     target,
-                    destination,
                     cancellation,
                 ),
-                lane=ExecutionLane.CPU,
+                lane=ExecutionLane.IO,
                 priority=TaskPriority.INTERACTIVE,
             ),
         )
 
     @staticmethod
     def _run_migration_target(
-        target: Callable[[str], None],
-        destination: str,
+        target: Callable[[CancellationToken], None],
         cancellation: CancellationToken,
     ) -> None:
         cancellation.raise_if_cancelled()
-        target(destination)
+        target(cancellation)
         cancellation.raise_if_cancelled()
 
 

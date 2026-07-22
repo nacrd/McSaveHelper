@@ -81,9 +81,10 @@ def test_delete_region_cancel_preserves_original(tmp_path: Path) -> None:
     service = WorldTransactionService(coordinator, backup)
 
     with pytest.raises(WorldTransactionCancelledError):
-        service.mutate(
+        delete_region_via_transaction(
+            service,
             world,
-            lambda prepared: prepared,
+            region,
             backup_label="cancel",
             cancel_check=lambda: True,
         )

@@ -61,7 +61,7 @@ class WindowManagerDependencies:
         dispose_views: 关闭时释放视图资源。
         dispose_file_dialogs: 关闭时销毁 Tk 文件对话框工作线程。
         close_texture_service: 关闭应用级纹理任务与内存缓存。
-        shutdown_execution_runtime: 关闭应用级后台任务运行时。
+        shutdown_execution_runtime: 关闭应用级后台任务运行时；False 表示有任务未退出。
         close_world_indexes: 关闭共享世界只读索引缓存。
         close_cache_registry: 关闭应用缓存注册表。
     """
@@ -74,7 +74,7 @@ class WindowManagerDependencies:
     dispose_views: Callable[[], None]
     dispose_file_dialogs: Callable[[], None] = lambda: None
     close_texture_service: Callable[[], None] = lambda: None
-    shutdown_execution_runtime: Callable[[], None] = lambda: None
+    shutdown_execution_runtime: Callable[[], Optional[bool]] = lambda: None
     close_world_indexes: Callable[[], None] = lambda: None
     close_cache_registry: Callable[[], None] = lambda: None
 
@@ -494,11 +494,14 @@ class WindowManager:
         self._stop_gui_optimizer()
         self._dispose_views()
         self._dispose_file_dialogs()
-        self._close_texture_service()
-        self._close_world_indexes()
-        self._close_cache_registry()
-        self._shutdown_execution_runtime()
-        self._shutdown_logger()
+        runtime_terminated = self._shutdown_execution_runtime()
+        if runtime_terminated:
+            self._close_texture_service()
+            self._close_world_indexes()
+            self._close_cache_registry()
+            self._shutdown_logger()
+        else:
+            self._log_runtime_shutdown_timeout()
         self._destroy_window_async()
 
     def _set_closing_flag(self) -> None:
@@ -535,12 +538,24 @@ class WindowManager:
         except Exception:
             pass
 
-    def _shutdown_execution_runtime(self) -> None:
-        """取消并关闭应用持有的后台执行器。"""
+    def _shutdown_execution_runtime(self) -> bool:
+        """取消并关闭应用后台执行器，报告依赖资源是否可安全释放。"""
         try:
-            self._deps.shutdown_execution_runtime()
+            result = self._deps.shutdown_execution_runtime()
+            return result is not False
         except Exception:
             # 关闭流程必须继续执行，运行时清理失败只影响后台资源。
+            return False
+
+    @staticmethod
+    def _log_runtime_shutdown_timeout() -> None:
+        """记录有界 drain 超时，不让日志异常阻止窗口关闭。"""
+        try:
+            logger.warning(
+                "后台任务未在关闭期限内退出，保留其依赖资源直到进程结束",
+                module="WindowManager",
+            )
+        except Exception:
             pass
 
     def _close_world_indexes(self) -> None:

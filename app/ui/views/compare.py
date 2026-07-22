@@ -1,11 +1,24 @@
 """存档对比视图。"""
+from __future__ import annotations
+
+from concurrent.futures import CancelledError
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import flet as ft
 
-from app.services.world_compare_service import CompareItem, get_world_compare_service
-from app.services.execution_runtime import TaskPriority
+from app.services.world_compare_service import (
+    CompareItem,
+    WorldCompareResult,
+    get_world_compare_service,
+)
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    OperationCancelledError,
+    OperationHandle,
+    TaskPriority,
+)
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
@@ -37,6 +50,7 @@ class CompareView(ft.Column):
             index_provider=app.services.world_repository.get_index,
         )
         self._comparing = False
+        self._compare_generation = 0
         self._build()
 
     def get_top_actions(self) -> list[ViewAction]:
@@ -113,43 +127,99 @@ class CompareView(ft.Column):
             self._summary.value = "正在对比，请稍候..."
             self._result.controls.clear()
             self._comparing = True
+            self._compare_generation += 1
+            generation = self._compare_generation
             self.update()
-            self._task_scope.submit(
+            handle = self._task_scope.submit(
                 "compare_worlds",
-                lambda token: self._run_compare(*paths),
+                lambda token: self._run_compare(*paths, token),
+                lane=ExecutionLane.IO,
                 priority=TaskPriority.INTERACTIVE,
             )
+            handle.add_done_callback(
+                lambda completed: self._finish_compare_task(
+                    completed,
+                    generation,
+                )
+            )
         except Exception as ex:
-            self._handle_compare_error(ex)
+            self._handle_compare_error(ex, self._compare_generation)
 
     def _validated_compare_paths(self) -> Optional[Tuple[Path, Path]]:
-        left = Path(self._left_field.value or "")
-        right = Path(self._right_field.value or "")
-        if not (left / "level.dat").exists():
+        left_text = str(self._left_field.value or "").strip()
+        right_text = str(self._right_field.value or "").strip()
+        if not left_text:
             self.app.warn_dialog("提示", "请先通过侧边栏设置有效基准存档目录。")
             return None
-        if not (right / "level.dat").exists():
+        if not right_text:
             self.app.warn_dialog("提示", "请指定包含 level.dat 的有效目标存档目录。")
             return None
-        return left, right
+        return Path(left_text), Path(right_text)
 
-    def _run_compare(self, left: Path, right: Path) -> None:
+    def _run_compare(
+        self,
+        left: Path,
+        right: Path,
+        token: CancellationToken,
+    ) -> WorldCompareResult:
+        """在 I/O 通道校验路径并生成纯对比结果。"""
+        token.raise_if_cancelled()
+        self._validate_world_path(left, "基准")
+        self._validate_world_path(right, "目标")
+        result = self._service.compare_worlds(left, right)
+        token.raise_if_cancelled()
+        return result
+
+    @staticmethod
+    def _validate_world_path(path: Path, label: str) -> None:
+        if not (path / "level.dat").is_file():
+            raise ValueError(f"{label}存档目录缺少 level.dat: {path}")
+
+    def _finish_compare_task(
+        self,
+        handle: OperationHandle[WorldCompareResult],
+        generation: int,
+    ) -> None:
+        if handle.cancelled:
+            return
         try:
-            result = self._service.compare_worlds(left, right)
-            total = sum(
-                value
-                for key, value in result.summary.items()
-                if key != "changed"
+            result = handle.result()
+        except (CancelledError, OperationCancelledError):
+            return
+        except Exception as error:
+            run_on_ui(
+                self.app.page,
+                self._handle_compare_error,
+                error,
+                generation,
             )
-            summary = f"变更项: {result.summary['changed']} / {total}"
-            groups = [
-                self._group("WorldInfo 差异", result.world_info),
-                self._group("玩家数据差异", result.players),
-                self._group("区域文件差异", result.regions),
-            ]
-            run_on_ui(self.app.page, self._finish_compare, summary, groups)
-        except Exception as ex:
-            run_on_ui(self.app.page, self._handle_compare_error, ex)
+            return
+        run_on_ui(
+            self.app.page,
+            self._apply_compare_result,
+            result,
+            generation,
+        )
+
+    def _apply_compare_result(
+        self,
+        result: WorldCompareResult,
+        generation: int,
+    ) -> None:
+        if generation != self._compare_generation:
+            return
+        total = sum(
+            value
+            for key, value in result.summary.items()
+            if key != "changed"
+        )
+        summary = f"变更项: {result.summary['changed']} / {total}"
+        groups = [
+            self._group("WorldInfo 差异", result.world_info),
+            self._group("玩家数据差异", result.players),
+            self._group("区域文件差异", result.regions),
+        ]
+        self._finish_compare(summary, groups)
 
     def _finish_compare(
         self,
@@ -161,7 +231,13 @@ class CompareView(ft.Column):
         self._comparing = False
         self.update()
 
-    def _handle_compare_error(self, error: Exception) -> None:
+    def _handle_compare_error(
+        self,
+        error: Exception,
+        generation: int,
+    ) -> None:
+        if generation != self._compare_generation:
+            return
         self._comparing = False
         self.app.handle_exception(error, title="存档对比失败")
 
@@ -205,4 +281,6 @@ class CompareView(ft.Column):
 
     def dispose(self) -> None:
         """取消页面拥有的对比任务；可重复调用。"""
+        self._compare_generation += 1
+        self._comparing = False
         self._task_scope.close()

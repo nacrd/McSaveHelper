@@ -79,7 +79,8 @@ def test_session_uses_injected_world_transaction_for_commit(
     world = _world(tmp_path)
     calls: list[Path] = []
 
-    def transact(target: Path, mutation) -> None:
+    def transact(target: Path, mutation, cancel_check) -> None:
+        del cancel_check
         calls.append(target)
         mutation(target)
 
@@ -106,7 +107,7 @@ def test_publish_failure_keeps_original_world(
     session.queue_custom(lambda target: (target / "marker.txt").write_text("new"))
     monkeypatch.setattr(
         "core.omni.action_executor.publish_directory_tree",
-        lambda prepared, destination: (_ for _ in ()).throw(
+        lambda prepared, destination, **_kwargs: (_ for _ in ()).throw(
             OSError("publish failed")
         ),
     )
@@ -163,6 +164,29 @@ def test_world_write_lease_rejects_concurrent_commit(tmp_path: Path) -> None:
     assert results == [False]
     assert not (world / "marker.txt").exists()
     assert session.get_queue_size() == 1
+
+
+def test_fallback_commit_handoffs_session_lock_for_directory_exchange(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    coordinator = WorldWriteCoordinator()
+    session = WorldSession(world, write_lease_factory=coordinator.reserve)
+    (world / "session.lock").write_bytes(b"runtime-lock")
+
+    def write_marker(target: Path) -> None:
+        assert not (target / "session.lock").exists()
+        (target / "marker.txt").write_text(
+            "committed",
+            encoding="utf-8",
+        )
+
+    session.queue_custom(write_marker)
+
+    assert session.commit(backup=False) is True
+    assert (world / "marker.txt").read_text(encoding="utf-8") == "committed"
+    assert (world / "session.lock").is_file()
+    assert not list(tmp_path.glob(".world.rollback-*"))
 
 
 def test_region_delete_targets_only_selected_dimension(tmp_path: Path) -> None:

@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Callable, Generic, Optional, TypeVar
 
 from app.services.backup_service import BackupRecord, BackupService
-from app.services.world_write_coordinator import WorldWriteCoordinator
+from app.services.world_write_coordinator import (
+    WorldWriteCoordinator,
+    WorldWriteLease,
+)
+from core.cancellable_copy import copy_file_with_checkpoints
+from core.logger import logger
 from core.utils import publish_directory_tree
 
 
@@ -32,12 +37,23 @@ class WorldTransactionMutationError(WorldTransactionError):
 
 
 @dataclass(frozen=True)
+class WorldTransactionWarning:
+    """发布已提交，但后置观察者执行失败的结构化警告。"""
+
+    code: str
+    message: str
+    world_path: Path
+    error_type: str
+
+
+@dataclass(frozen=True)
 class WorldTransactionResult(Generic[ResultT]):
     """成功发布后的业务结果和安全备份信息。"""
 
     value: ResultT
     world_path: Path
     backup: BackupRecord
+    warnings: tuple[WorldTransactionWarning, ...] = ()
 
 
 class WorldTransactionService:
@@ -80,15 +96,17 @@ class WorldTransactionService:
             WorldTransactionError: 路径、复制、验证或发布失败。
         """
         world = self._validate_world(world_path)
-        with self._coordinator.reserve(world):
+        with self._coordinator.reserve(world) as lease:
             self._raise_if_cancelled(cancel_check)
             self._reject_linked_tree(world)
             try:
                 backup = self._backup_service.create_backup(
                     world,
                     label=backup_label,
+                    cancel_check=cancel_check,
                 )
             except Exception as exc:
+                self._raise_if_cancelled(cancel_check)
                 raise WorldTransactionError(
                     f"安全备份失败，已中止写入: {world}: {exc}"
                 ) from exc
@@ -99,6 +117,7 @@ class WorldTransactionService:
                 backup,
                 cancel_check,
                 validator,
+                lease,
             )
 
     def publish_prepared(
@@ -124,42 +143,61 @@ class WorldTransactionService:
         """
         prepared = Path(prepared_world).expanduser().resolve()
         target = Path(destination).expanduser().absolute()
-        self._validate_prepared_world(prepared)
-        if validator is not None:
-            validator(prepared)
-        with self._coordinator.reserve(target):
+        self._validate_prepared_for_publish(prepared, validator)
+        with self._coordinator.reserve(target) as lease:
             self._raise_if_cancelled(cancel_check)
             backup = self._backup_destination_if_present(
                 target,
                 backup_label,
+                cancel_check,
             )
             self._raise_if_cancelled(cancel_check)
+            self._validate_prepared_for_publish(prepared, validator)
+            self._raise_if_cancelled(cancel_check)
             try:
-                publish_directory_tree(prepared, target)
+                publish_directory_tree(
+                    prepared,
+                    target,
+                    exchange_context=lease.publication_window(),
+                )
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
                 raise WorldTransactionError(
                     f"发布世界失败，原目标保持不变: {target}: {exc}"
                 ) from exc
-            self._invalidate_world(target.resolve())
+            self._warn_lock_rebind(
+                target.resolve(),
+                lease.consume_publication_error(),
+            )
+            self._notify_world_published(target.resolve())
             return backup
 
     def _backup_destination_if_present(
         self,
         destination: Path,
         label: str,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> Optional[BackupRecord]:
         """目标是既有世界时创建强制备份，否则校验为空目录。"""
         if not destination.exists():
             return None
         if not destination.is_dir():
             raise WorldTransactionError(f"目标路径不是目录: {destination}")
-        if not any(destination.iterdir()):
+        destination_entries = [
+            path
+            for path in destination.iterdir()
+            if path.name != "session.lock"
+        ]
+        if not destination_entries:
             return None
         if not (destination / "level.dat").is_file():
             raise WorldTransactionError(
                 f"目标目录不是 Minecraft 存档，拒绝覆盖: {destination}"
             )
-        return self._backup_service.create_backup(destination, label=label)
+        return self._backup_service.create_backup(
+            destination,
+            label=label,
+            cancel_check=cancel_check,
+        )
 
     def _mutate_staged(
         self,
@@ -168,6 +206,7 @@ class WorldTransactionService:
         backup: BackupRecord,
         cancel_check: Optional[CancelCheck],
         validator: Optional[WorldValidator],
+        lease: WorldWriteLease,
     ) -> WorldTransactionResult[ResultT]:
         """管理暂存目录生命周期并在成功后失效读模型。"""
         staging_root = Path(tempfile.mkdtemp(
@@ -176,7 +215,7 @@ class WorldTransactionService:
         ))
         prepared = staging_root / world.name
         try:
-            self._copy_world(world, prepared)
+            self._copy_world(world, prepared, cancel_check)
             self._raise_if_cancelled(cancel_check)
             value = mutation(prepared)
             self._raise_if_cancelled(cancel_check)
@@ -184,9 +223,17 @@ class WorldTransactionService:
             if validator is not None:
                 validator(prepared)
             self._raise_if_cancelled(cancel_check)
-            publish_directory_tree(prepared, world)
-            self._invalidate_world(world)
-            return WorldTransactionResult(value, world, backup)
+            publish_directory_tree(
+                prepared,
+                world,
+                exchange_context=lease.publication_window(),
+            )
+            warnings = self._warn_lock_rebind(
+                world,
+                lease.consume_publication_error(),
+            )
+            warnings += self._notify_world_published(world)
+            return WorldTransactionResult(value, world, backup, warnings)
         except (
             WorldTransactionCancelledError,
             WorldTransactionMutationError,
@@ -199,16 +246,35 @@ class WorldTransactionService:
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
 
-    @staticmethod
-    def _copy_world(world: Path, prepared: Path) -> None:
-        """复制世界但排除运行锁和应用自己的备份仓库。"""
+    @classmethod
+    def _copy_world(
+        cls,
+        world: Path,
+        prepared: Path,
+        cancel_check: Optional[CancelCheck],
+    ) -> None:
+        """分块复制世界，并排除运行锁和应用自己的备份仓库。"""
         ignored = {"session.lock", ".mcsavehelper_backups"}
-
-        def ignore(directory: str, names: list[str]) -> set[str]:
-            del directory
-            return ignored.intersection(names)
-
-        shutil.copytree(world, prepared, ignore=ignore)
+        prepared.mkdir()
+        for directory, directory_names, file_names in os.walk(world):
+            cls._raise_if_cancelled(cancel_check)
+            directory_names[:] = sorted(
+                name for name in directory_names if name not in ignored
+            )
+            source_dir = Path(directory)
+            relative_dir = source_dir.relative_to(world)
+            target_dir = prepared / relative_dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for name in sorted(file_names):
+                if name in ignored:
+                    continue
+                source_file = source_dir / name
+                target_file = target_dir / name
+                copy_file_with_checkpoints(
+                    source_file,
+                    target_file,
+                    lambda: cls._raise_if_cancelled(cancel_check),
+                )
 
     @staticmethod
     def _validate_prepared_world(prepared: Path) -> None:
@@ -218,6 +284,69 @@ class WorldTransactionService:
                 f"暂存世界无效或缺少 level.dat: {prepared}"
             )
         WorldTransactionService._reject_linked_tree(prepared)
+
+    @classmethod
+    def _validate_prepared_for_publish(
+        cls,
+        prepared: Path,
+        validator: Optional[WorldValidator],
+    ) -> None:
+        """在准备阶段及发布紧前执行一致的基础与业务验证。"""
+        cls._validate_prepared_world(prepared)
+        if validator is not None:
+            validator(prepared)
+
+    def _notify_world_published(
+        self,
+        world: Path,
+    ) -> tuple[WorldTransactionWarning, ...]:
+        """Best-effort 通知缓存/观察者，不改写已经提交的成功语义。"""
+        try:
+            self._invalidate_world(world)
+        except Exception as exc:
+            warning = WorldTransactionWarning(
+                code="post_publish_observer_failed",
+                message=f"世界已发布，但缓存失效通知失败: {exc}",
+                world_path=world,
+                error_type=type(exc).__name__,
+            )
+            self._log_warning_best_effort(warning)
+            return (warning,)
+        return ()
+
+    @staticmethod
+    def _warn_lock_rebind(
+        world: Path,
+        error: Optional[Exception],
+    ) -> tuple[WorldTransactionWarning, ...]:
+        """把发布后 session.lock 重绑失败降级为结构化警告。"""
+        if error is None:
+            return ()
+        warning = WorldTransactionWarning(
+            code="post_publish_lock_rebind_failed",
+            message=f"世界已发布，但 session.lock 重绑失败: {error}",
+            world_path=world,
+            error_type=type(error).__name__,
+        )
+        WorldTransactionService._log_warning_best_effort(warning)
+        return (warning,)
+
+    @staticmethod
+    def _log_warning_best_effort(warning: WorldTransactionWarning) -> None:
+        """记录结构化警告，日志后端失败也不改变已提交结果。"""
+        try:
+            logger.warning(
+                warning.message,
+                module="WorldTransaction",
+                extra={
+                    "code": warning.code,
+                    "world_path": str(warning.world_path),
+                    "error_type": warning.error_type,
+                },
+            )
+        except Exception:
+            # 发布已经提交；日志属于 best-effort 观察边界。
+            pass
 
     @staticmethod
     def _validate_world(world_path: Path | str) -> Path:
@@ -253,4 +382,5 @@ __all__ = [
     "WorldTransactionMutationError",
     "WorldTransactionResult",
     "WorldTransactionService",
+    "WorldTransactionWarning",
 ]

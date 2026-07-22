@@ -14,6 +14,7 @@ from app.models.nbt_edit import (
 from app.services.execution_runtime import OperationScope
 from app.services.region_map import RegionMapService
 from app.controllers.map_controller import MapController
+from app.controllers.region_delete_controller import RegionDeleteController
 from core.omni.world_session import WorldSession
 
 if TYPE_CHECKING:
@@ -42,10 +43,13 @@ class ExplorerMixinHost:
     _selected_region_coord: Optional[Tuple[int, int]]
     _tabs_built: list[bool]
     _task_scope: OperationScope
+    _world_load_generation: int
+    _marker_busy: bool
 
     _nbt_stage_store: NbtStageStore
     _map_service: RegionMapService
     _map_controller: MapController
+    _region_delete_controller: RegionDeleteController
 
     _tab_world_info: ft.Container
     _tab_player: ft.Container

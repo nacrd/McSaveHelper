@@ -4,24 +4,30 @@
 实现非破坏性、延迟加载机制，支持任务队列与统一提交。
 采用模块化设计，各功能拆分到独立模块。
 """
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from contextlib import nullcontext
-from contextlib import AbstractContextManager
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
-from .models import WorldInfo
-from .world_scanner import WorldScanner
-from .nbt_loader import NbtLoader
-from .player_manager import PlayerManager
-from .action_queue import ActionQueue
-from .action_executor import ActionExecutor
-from ..region_utils import DimensionInfo
-from ..types import LogCallback
 from core.nbt import Compound
 from core.world_index import WorldIndexSnapshot
 
+from ..region_utils import DimensionInfo
+from ..types import LogCallback
+from .action_executor import ActionExecutor
+from .action_queue import ActionQueue
+from .models import WorldInfo
+from .nbt_loader import NbtLoader
+from .player_manager import PlayerManager
+from .world_scanner import WorldScanner
+
 
 IndexProvider = Callable[[Path, bool], WorldIndexSnapshot]
+CancelCheck = Callable[[], bool]
+WorldMutation = Callable[[Path], None]
+TransactionCallback = Callable[
+    [Path, WorldMutation, Optional[CancelCheck]],
+    Any,
+]
 
 
 class WorldSession:
@@ -36,9 +42,7 @@ class WorldSession:
         ] = None,
         backup_callback: Optional[Callable[[Path], Path]] = None,
         index_snapshot: Optional[WorldIndexSnapshot] = None,
-        transaction_callback: Optional[
-            Callable[[Path, Callable[[Path], None]], Any]
-        ] = None,
+        transaction_callback: Optional[TransactionCallback] = None,
         index_provider: Optional[IndexProvider] = None,
     ) -> None:
         """初始化会话：扫描目录、加载 level.dat 并装配队列。
@@ -338,12 +342,18 @@ class WorldSession:
     #  提交和执行
     # ════════════════════════════════════════════
 
-    def commit(self, dest_path: Optional[Path] = None, backup: bool = True) -> bool:
+    def commit(
+        self,
+        dest_path: Optional[Path] = None,
+        backup: bool = True,
+        cancel_check: Optional[CancelCheck] = None,
+    ) -> bool:
         """执行所有队列中的操作，并将结果写入目标路径
 
         Args:
             dest_path: 目标存档路径，若为 None 则原地修改（强烈不建议）
             backup: 是否在修改前备份原存档
+            cancel_check: 可选协作取消检查；原子发布开始后不再取消。
 
         Returns:
             成功返回 True，失败返回 False
@@ -361,7 +371,9 @@ class WorldSession:
                     lambda staged: self._executor.apply_actions(
                         actions,
                         staged,
+                        cancel_check,
                     ),
+                    cancel_check,
                 )
                 self._action_queue.clear_queue()
                 return True
@@ -374,8 +386,39 @@ class WorldSession:
             else nullcontext()
         )
         try:
-            with lease:
-                success = self._executor.execute_all(actions, dest_path, backup)
+            with lease as acquired_lease:
+                publication_window = getattr(
+                    acquired_lease,
+                    "publication_window",
+                    None,
+                )
+                exchange_context = cast(
+                    Optional[AbstractContextManager[None]],
+                    publication_window()
+                    if callable(publication_window)
+                    else None,
+                )
+                success = self._executor.execute_all(
+                    actions,
+                    dest_path,
+                    backup,
+                    cancel_check,
+                    exchange_context,
+                )
+                consume_error = getattr(
+                    acquired_lease,
+                    "consume_publication_error",
+                    None,
+                )
+                rebind_error = (
+                    consume_error() if callable(consume_error) else None
+                )
+                if rebind_error is not None:
+                    self.log(
+                        "存档已提交，但 session.lock 重绑失败: "
+                        f"{rebind_error}",
+                        "WARN",
+                    )
         except Exception as exc:
             self.log(f"存档写操作冲突: {exc}", "ERROR")
             return False

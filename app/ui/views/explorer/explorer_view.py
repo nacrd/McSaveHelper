@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from core.omni.world_session import WorldSession
 from app.ui.views.explorer.utils import safe_update
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
 from app.ui.views.explorer.player_tab import PlayerTabMixin
 from app.ui.views.explorer.region_tab import RegionTabMixin
@@ -32,7 +33,12 @@ from app.ui.views.explorer.explorer_helpers import (
     world_coords_to_region_chunk,
 )
 from app.controllers.map_controller import MapController
-from app.services.execution_runtime import TaskPriority
+from app.controllers.region_delete_controller import RegionDeleteController
+from app.services.execution_runtime import (
+    CancellationToken,
+    OperationCancelledError,
+    TaskPriority,
+)
 from app.services.map_marker_service import MapMarkerService
 
 
@@ -67,13 +73,23 @@ class ExplorerView(
         self._task_scope = self.app.execution_runtime.create_scope(
             "explorer_view"
         )
-        self._map_controller = MapController(MapMarkerService())
+        self._world_load_generation = 0
+        self._disposed = False
+        self._region_delete_controller = RegionDeleteController(
+            self._task_scope,
+            self.app.services.world_transactions,
+        )
+        self._map_controller = MapController(
+            MapMarkerService(),
+            task_scope=self._task_scope,
+            post_to_ui=lambda callback: run_on_ui(self.app.page, callback),
+            get_generation=lambda: self._world_load_generation,
+        )
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
         self._map_view: Optional[Any] = None
         self._compact_mode = False
-        self._world_load_generation = 0
         self._build()
 
     @property
@@ -343,6 +359,8 @@ class ExplorerView(
             safe_update(self._world_label)
             self._world_load_generation += 1
             generation = self._world_load_generation
+            self._set_map_marker_busy(False)
+            self.app.hide_progress()
 
             self._task_scope.cancel_all()
             self._task_scope.submit(
@@ -350,20 +368,28 @@ class ExplorerView(
                 lambda token: self._load_world_worker(
                     str(path),
                     generation,
+                    token,
                 ),
                 priority=TaskPriority.VISIBLE,
             )
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
 
-    def _load_world_worker(self, path: str, generation: int) -> None:
+    def _load_world_worker(
+        self,
+        path: str,
+        generation: int,
+        token: CancellationToken,
+    ) -> None:
         """Load shell metadata first, then full session (progressive publish)."""
         try:
+            token.raise_if_cancelled()
             world = Path(path)
             try:
                 shell = self.app.services.world_repository.get_shell_metadata(
                     world,
                 )
+                token.raise_if_cancelled()
                 self.app.page.run_task(
                     self._apply_shell_metadata,
                     shell,
@@ -372,9 +398,15 @@ class ExplorerView(
             except (OSError, ValueError, FileNotFoundError, TypeError):
                 # Shell metadata is best-effort; full load still proceeds.
                 pass
+            token.raise_if_cancelled()
             session = self._create_world_session(world, self.app.log)
+            token.raise_if_cancelled()
             self.app.page.run_task(self._apply_loaded_world, session, generation)
+        except OperationCancelledError:
+            return
         except Exception as exc:
+            if token.is_cancelled:
+                return
             self.app.page.run_task(self._show_world_load_error, exc, generation)
 
     async def _apply_shell_metadata(
@@ -383,7 +415,7 @@ class ExplorerView(
         generation: int,
     ) -> None:
         """首屏：在完整会话前显示世界名与区域规模提示。"""
-        if generation != self._world_load_generation:
+        if not self._is_world_load_current(generation):
             return
         name = getattr(shell, "display_name", None) or "..."
         regions = int(getattr(shell, "overworld_region_count", 0) or 0)
@@ -417,7 +449,7 @@ class ExplorerView(
         session: WorldSession,
         generation: int,
     ) -> None:
-        if generation != self._world_load_generation:
+        if not self._is_world_load_current(generation):
             return
         try:
             self._populate_world(session)
@@ -429,7 +461,7 @@ class ExplorerView(
         error: Exception,
         generation: int,
     ) -> None:
-        if generation != self._world_load_generation:
+        if not self._is_world_load_current(generation):
             return
         if isinstance(error, FileNotFoundError):
             self._world_label.value = "存档无效"
@@ -458,18 +490,27 @@ class ExplorerView(
 
     def dispose(self) -> None:
         """Release session-scoped background resources."""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._world_load_generation += 1
+        self._map_controller.close()
+        data_loader = getattr(self, "_data_loader", None)
+        if data_loader is not None:
+            data_loader.dispose()
         self._task_scope.close()
         if hasattr(self, "_entity_block_search_view"):
             self._entity_block_search_view.dispose()
-        avatar_service = getattr(
-            self,
-            "_player_avatar_service_instance",
-            None,
-        )
-        if avatar_service is not None:
-            avatar_service.close()
+        self._dispose_player_tab()
         self._dispose_region_tab()
         self._map_service.close()
+
+    def _is_world_load_current(self, generation: int) -> bool:
+        """Return whether a delayed world-load callback still owns the view."""
+        return (
+            not self._disposed
+            and generation == self._world_load_generation
+        )
 
     def _populate_world(self, session: WorldSession) -> None:
         """在 WorldSession 加载完成后填充 UI（可在后台线程调用）"""
@@ -488,6 +529,7 @@ class ExplorerView(
         world_info = session.get_world_info()
         dimensions = session.get_dimensions()
         self._map_controller.bind_world(session.world_path, dimensions)
+        self._request_map_marker_load()
         stats = {
             "world_path": str(session.world_path),
             "player_count": len(session.get_player_uuids()),

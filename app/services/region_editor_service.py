@@ -7,7 +7,7 @@ invalidation stay on the shared write path.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from app.services.world_transaction import (
     WorldTransactionError,
@@ -34,6 +34,7 @@ def delete_region_via_transaction(
     *,
     backup_label: str = "删除区域前自动备份",
     log: Optional[LogCallback] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> WorldTransactionResult[bool]:
     """Delete one region file inside a full world transaction.
 
@@ -47,6 +48,7 @@ def delete_region_via_transaction(
         region_path: Absolute or relative region file under the world.
         backup_label: Label for the forced pre-publish backup.
         log: Optional editor log callback.
+        cancel_check: Optional cooperative cancellation check.
 
     Returns:
         Transaction result whose value is whether the staged delete ran.
@@ -84,6 +86,7 @@ def delete_region_via_transaction(
         world,
         mutation,
         backup_label=backup_label,
+        cancel_check=cancel_check,
     )
 
 

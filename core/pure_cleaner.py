@@ -2,12 +2,12 @@
 
 移除存档中所有模组相关的方块和实体，让模组存档能够“无损”降级回原版服务端运行。
 """
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Optional, Tuple
 
 import core.nbt as nbtlib
-from .parallel import clamp_workers
+from .parallel import bounded_executor, clamp_workers
 from .scanner import scan_all_entity_regions, scan_all_regions
 from .types import LogCallback
 
@@ -83,7 +83,10 @@ def purge_mod_blocks_and_entities(
     # region 级并发（各处理独立文件，写回安全）；上限由 core.parallel 统一钳制。
     workers = clamp_workers(max_workers, item_count=total_regions)
     done = 0
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with bounded_executor(
+        max_workers=workers,
+        item_count=total_regions,
+    ) as executor:
         futures = [
             executor.submit(_process_one_region, rf) for rf in region_files
         ]

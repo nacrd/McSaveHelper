@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .cleaner import clean_world
 from .pure_cleaner import purge_mod_blocks_and_entities
@@ -113,6 +113,7 @@ def run_fast(
     manual_names: Optional[List[str]],
     log: LogCallback,
     region_workers: Optional[int] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> None:
     """执行快速模式迁移。
 
@@ -137,7 +138,13 @@ def run_fast(
     if dest_world.exists():
         log("目标文件夹已存在，正在安全替换...", "WARN")
     log(f"正在复制存档到 {dest_world}", "FILE")
-    replace_directory_tree(src_world, dest_world)
+    replace_directory_tree(
+        src_world,
+        dest_world,
+        cancel_check=cancel_check,
+    )
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("快速迁移已取消")
 
     cache = load_usercache(src_world)
     log(f"从 usercache 加载了 {len(cache)} 条记录", "CACHE")
@@ -162,6 +169,8 @@ def run_fast(
         log,
         region_workers,
     )
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("快速迁移已取消")
     update_server_properties(dest_dir, world_name, log)
 
 

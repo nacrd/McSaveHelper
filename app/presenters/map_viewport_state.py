@@ -4,7 +4,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from core.mca.map_models import MapViewState
+from core.mca.map_models import MapViewState, MapViewStateSnapshot
+
+
+MapStateLike = MapViewState | MapViewStateSnapshot
 
 
 @dataclass(frozen=True)
@@ -31,7 +34,7 @@ class MapRebuildDecision:
     snapshot: MapViewportSnapshot
 
 
-def snapshot_map_view_state(state: MapViewState) -> MapViewportSnapshot:
+def snapshot_map_view_state(state: MapStateLike) -> MapViewportSnapshot:
     """提取 MapViewState 的不可变投影字段。"""
     layers = state.layers
     return MapViewportSnapshot(
@@ -49,7 +52,7 @@ def snapshot_map_view_state(state: MapViewState) -> MapViewportSnapshot:
 
 def decide_map_rebuild(
     previous: Optional[MapViewportSnapshot],
-    current: MapViewState,
+    current: MapStateLike,
 ) -> MapRebuildDecision:
     """比较前后视口快照，决定是否需要重建。
 

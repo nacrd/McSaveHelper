@@ -1,14 +1,18 @@
-"""UUID 映射表组件 —— 可视化编辑玩家名-UUID 映射"""
+"""UUID 映射表组件 —— 可视化编辑玩家名-UUID 映射。"""
+from __future__ import annotations
+
 import csv
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional
 
 import flet as ft
 
-from app.ui.theme import THEME, TEXT_LABEL_SIZE
-from app.ui.components.buttons import btn_primary, btn_ghost, btn_danger
+from app.ui.components.buttons import btn_danger, btn_ghost, btn_primary
 from app.ui.icons import IconSet
+from app.ui.theme import TEXT_LABEL_SIZE, THEME
 from app.ui.utils import safe_update as _safe_update
+from core.io_atomic import atomic_write_text
 
 
 class UUIDMappingTable(ft.Column):
@@ -56,69 +60,122 @@ class UUIDMappingTable(ft.Column):
         """返回当前映射副本。"""
         return dict(self._mappings)
 
+    @classmethod
+    def read_mappings_file(cls, path: Path) -> Dict[str, str]:
+        """从文本或 CSV 文件读取映射，不修改控件状态。
+
+        Args:
+            path: 待读取的映射文件。
+
+        Returns:
+            Dict[str, str]: 文件中的有效 ``玩家名 -> UUID`` 映射。
+
+        Raises:
+            OSError: 文件无法读取。
+            UnicodeError: 文件不是有效的 UTF-8 文本。
+        """
+        if path.suffix.lower() == ".csv":
+            return cls._read_csv_mappings(path)
+        return cls._read_text_mappings(path)
+
+    @staticmethod
+    def write_mappings_file(
+        path: Path,
+        mappings: Mapping[str, str],
+    ) -> int:
+        """按稳定顺序原子写入文本映射。
+
+        Args:
+            path: 输出文件路径。
+            mappings: 待写入的 ``玩家名 -> UUID`` 映射。
+
+        Returns:
+            int: 写入的有效映射数量。
+
+        Raises:
+            OSError: 文件无法写入或原子替换失败。
+        """
+        entries = sorted(
+            (name.strip(), uuid.strip())
+            for name, uuid in mappings.items()
+            if name.strip() and uuid.strip()
+        )
+        if not entries:
+            return 0
+        content = "".join(f"{name} {uuid}\n" for name, uuid in entries)
+        atomic_write_text(path, content, newline="\n")
+        return len(entries)
+
+    def merge_mappings(self, mappings: Mapping[str, str]) -> int:
+        """在 UI 线程合并已解析映射并同步变更回调。
+
+        Args:
+            mappings: 已完成磁盘解析的映射。
+
+        Returns:
+            int: 合并的映射数量。
+        """
+        loaded = dict(mappings)
+        if not loaded:
+            return 0
+        self._mappings.update(loaded)
+        self._rebuild()
+        self._sync()
+        return len(loaded)
+
     def load_from_file(self, file_path: str) -> int:
-        """从文件加载映射（支持 .txt 和 .csv）
+        """从文件加载映射（支持 ``.txt`` 和 ``.csv``）。
 
-        .txt 格式: player_name uuid
-        .csv 格式: player_name,uuid
+        Args:
+            file_path: 待读取的文件路径。
 
-        Returns: 加载的条目数量
+        Returns:
+            int: 加载并合并的条目数量；路径不存在时返回 0。
+
+        Raises:
+            OSError: 文件存在但无法读取。
+            UnicodeError: 文件不是有效的 UTF-8 文本。
         """
         path = Path(file_path)
         if not path.exists():
             return 0
-
-        loaded = (
-            self._read_csv_mappings(path)
-            if path.suffix.lower() == ".csv"
-            else self._read_text_mappings(path)
-        )
-
-        if loaded:
-            self._mappings.update(loaded)
-            self._rebuild()
-            self._sync()
-        return len(loaded)
+        return self.merge_mappings(self.read_mappings_file(path))
 
     @staticmethod
     def _read_csv_mappings(path: Path) -> Dict[str, str]:
         loaded: Dict[str, str] = {}
-        try:
-            with path.open("r", encoding="utf-8", newline="") as file:
-                for row in csv.reader(file):
-                    if len(row) < 2:
-                        continue
-                    name, uuid = row[0].strip(), row[1].strip()
-                    if name and uuid:
-                        loaded[name] = uuid
-        except Exception:
-            pass
+        with path.open("r", encoding="utf-8-sig", newline="") as file:
+            for row in csv.reader(file):
+                if len(row) < 2:
+                    continue
+                name, uuid = row[0].strip(), row[1].strip()
+                if name and uuid and not name.startswith("#"):
+                    loaded[name] = uuid
         return loaded
 
     @staticmethod
     def _read_text_mappings(path: Path) -> Dict[str, str]:
         loaded: Dict[str, str] = {}
-        try:
-            with path.open("r", encoding="utf-8") as file:
-                for line in file:
-                    parts = line.strip().split()
-                    if len(parts) >= 2 and not line.lstrip().startswith("#"):
-                        loaded[parts[0]] = parts[1]
-        except Exception:
-            pass
+        with path.open("r", encoding="utf-8-sig") as file:
+            for line in file:
+                parts = line.strip().split()
+                if len(parts) >= 2 and not line.lstrip().startswith("#"):
+                    loaded[parts[0]] = parts[1]
         return loaded
 
     def save_to_file(self, file_path: str) -> int:
-        """保存映射到文本文件 (player_name uuid)
+        """将映射原子保存为 ``player_name uuid`` 文本。
 
-        Returns: 保存的条目数量
+        Args:
+            file_path: 输出文件路径。
+
+        Returns:
+            int: 写入的有效条目数量。
+
+        Raises:
+            OSError: 文件无法写入或原子替换失败。
         """
-        if not self._mappings:
-            return 0
-        with open(file_path, "w", encoding="utf-8") as f:
-            for name, uuid in self._mappings.items():
-                f.write(f"{name} {uuid}\n")
-        return len(self._mappings)
+        return self.write_mappings_file(Path(file_path), self._mappings)
 
     # ─── UI 构建 ───────────────────────────────────
 
@@ -144,7 +201,7 @@ class UUIDMappingTable(ft.Column):
         self.controls.append(header)
 
         # 数据行
-        for name, uuid in self._mappings.items():
+        for name, uuid in sorted(self._mappings.items()):
             self._add_row_with_values(name, uuid)
 
         # 操作按钮

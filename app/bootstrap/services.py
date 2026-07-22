@@ -86,11 +86,13 @@ def _default_world_repository(
     def transaction_callback(
         world: Path,
         mutation: Callable[[Path], Any],
+        cancel_check: Optional[Callable[[], bool]],
     ) -> Any:
         return world_transactions.mutate(
             world,
             mutation,
             backup_label="NBT 提交前自动备份",
+            cancel_check=cancel_check,
         )
 
     return WorldRepository(

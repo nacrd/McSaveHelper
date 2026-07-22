@@ -102,7 +102,8 @@ def test_repository_ports_are_injected(tmp_path: Path) -> None:
         seen["backup"] = path
         return path / "backup"
 
-    def transaction(path: Path, mutation):
+    def transaction(path: Path, mutation, cancel_check):
+        del cancel_check
         seen["transaction"] = path
         mutation(path)
         return "ok"

@@ -1,12 +1,12 @@
 """Concurrent MCA UUID patching helpers for full-mode migration."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .nbt_utils import patch_nbt
-from .parallel import clamp_workers
+from .parallel import bounded_executor, clamp_workers
 from .types import LogCallback, UUIDMapping
 
 
@@ -84,7 +84,10 @@ def process_regions_parallel(
 
     errors: List[str] = []
     workers = clamp_workers(max_workers, item_count=total)
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    with bounded_executor(
+        max_workers=workers,
+        item_count=total,
+    ) as executor:
         futures = [
             executor.submit(process_region_file, region_path, mappings)
             for region_path in files

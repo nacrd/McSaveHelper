@@ -1,5 +1,6 @@
 import asyncio
-from typing import Any, Coroutine, Optional, cast
+from concurrent.futures import Future
+from typing import Any, Callable, Coroutine, Optional, cast
 
 from app.controllers.topview_tile_requests import TopviewTileRequestCoordinator
 from app.services.execution_runtime import ExecutionRuntime
@@ -23,6 +24,34 @@ class _ImageSink:
     ) -> None:
         assert premultiplied is True
         self.frames.append((width, height, pixels))
+
+
+class _RendererProbe:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class _HandleProbe:
+    def __init__(self) -> None:
+        self.cancelled = False
+        self._callbacks: list[Callable[["_HandleProbe"], None]] = []
+
+    def cancel(self) -> bool:
+        self.cancelled = True
+        return True
+
+    def add_done_callback(
+        self,
+        callback: Callable[["_HandleProbe"], None],
+    ) -> None:
+        self._callbacks.append(callback)
+
+    def finish(self) -> None:
+        for callback in self._callbacks:
+            callback(self)
 
 
 def test_surface_leaf_lod_only_activates_at_high_zoom() -> None:
@@ -192,6 +221,62 @@ def test_surface_layer_ignores_tile_callbacks_outside_buffer() -> None:
     assert layer.mark_tile_ready((100, 100)) is False
     assert layer.mark_tile_ready((0, 0)) is True
     service.close()
+
+
+def test_surface_layer_close_cancels_owned_tasks_and_releases_renderer() -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    layer = MapSurfaceLayer(
+        service,
+        execution_runtime=service._execution_runtime,
+        schedule_task=lambda _coro: None,
+        request_rebuild=lambda: None,
+        is_active=lambda: True,
+        background_color="#162016",
+    )
+    scheduled_task: Future[None] = Future()
+    compose_handle = _HandleProbe()
+    renderer = _RendererProbe()
+    layer._task = scheduled_task
+    layer._compose_handle = cast(Any, compose_handle)
+    layer._renderer = cast(Any, renderer)
+
+    layer.close()
+    layer.close()
+
+    assert scheduled_task.cancelled() is True
+    assert compose_handle.cancelled is True
+    assert layer._task is None
+    assert layer._compose_handle is None
+    assert renderer.close_calls == 0
+
+    compose_handle.finish()
+
+    assert renderer.close_calls == 1
+    service.close()
+    runtime.shutdown(wait=False)
+
+
+def test_surface_layer_suspend_invalidates_pending_frame_without_closing() -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    layer = MapSurfaceLayer(
+        service,
+        execution_runtime=service._execution_runtime,
+        schedule_task=lambda _coro: None,
+        request_rebuild=lambda: None,
+        is_active=lambda: False,
+        background_color="#162016",
+    )
+    token = layer._token
+    layer._dirty = False
+
+    layer.suspend()
+
+    assert layer._token == token + 1
+    assert layer._dirty is True
+    service.close()
+    runtime.shutdown(wait=False)
 
 
 def test_visible_request_ledger_retries_tiles_rejected_by_full_queue() -> None:

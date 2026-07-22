@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from app.services.region_map import RegionMapService
     from app.services.texture_service import TextureService
     from app.services.uuid_service import UUIDService
+    from app.ui.feature_context import MigrationCommands
 
 
 class ApplicationFacadeMixin:
@@ -161,6 +162,23 @@ class ApplicationFacadeMixin:
 
     def start(self) -> None:
         self.migration_controller.start()
+
+    def cancel_migration(self) -> bool:
+        """请求取消当前迁移任务。"""
+        return bool(self.migration_controller.cancel())
+
+    @property
+    def migration_commands(self) -> "MigrationCommands":
+        """Return the narrow command port consumed by the migrator view."""
+        from app.ui.feature_context import MigrationCommands
+
+        return MigrationCommands(
+            start=self.start,
+            cancel=self.cancel_migration,
+            choose_destination=self.set_dest,
+            choose_batch_directory=self.set_batch_dir,
+            close=self.migration_controller.close,
+        )
 
     def _try_update_page(self) -> None:
         try:

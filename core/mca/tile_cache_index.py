@@ -87,8 +87,8 @@ def remove_file(cache_root: Path, file_name: str) -> None:
                 pass
 
 
-def rebuild_index(cache_root: Path) -> dict[str, dict[str, Any]]:
-    """从磁盘 PNG 重建索引。"""
+def _scan_cache_files(cache_root: Path) -> dict[str, dict[str, Any]]:
+    """扫描磁盘 PNG；调用方负责持有索引锁。"""
     entries: dict[str, dict[str, Any]] = {}
     try:
         for path in cache_root.glob("*.png"):
@@ -102,11 +102,36 @@ def rebuild_index(cache_root: Path) -> dict[str, dict[str, Any]]:
                 }
             except OSError:
                 continue
-        with _LOCK:
-            save_index(cache_root, entries)
     except OSError:
         return {}
     return entries
+
+
+def _rebuild_index_locked(cache_root: Path) -> dict[str, dict[str, Any]]:
+    """在已持有索引锁时扫描并保存索引。"""
+    entries = _scan_cache_files(cache_root)
+    try:
+        save_index(cache_root, entries)
+    except OSError:
+        return {}
+    return entries
+
+
+def rebuild_index(cache_root: Path) -> dict[str, dict[str, Any]]:
+    """从磁盘 PNG 重建索引。"""
+    with _LOCK:
+        return _rebuild_index_locked(cache_root)
+
+
+def clear_index(cache_root: Path) -> None:
+    """删除磁盘索引及未完成的临时索引。"""
+    path = index_path(cache_root)
+    with _LOCK:
+        for target in (path, path.with_suffix(".tmp")):
+            try:
+                target.unlink()
+            except FileNotFoundError:
+                continue
 
 
 def prune_to_limit(
@@ -119,7 +144,7 @@ def prune_to_limit(
     with _LOCK:
         entries = load_index(cache_root)
         if not entries:
-            entries = rebuild_index(cache_root)
+            entries = _rebuild_index_locked(cache_root)
         if len(entries) <= max_files:
             return 0, 0
         ordered = sorted(
@@ -166,6 +191,7 @@ def index_stats(cache_root: Path) -> dict[str, Any]:
 
 
 __all__ = [
+    "clear_index",
     "index_path",
     "index_stats",
     "load_index",

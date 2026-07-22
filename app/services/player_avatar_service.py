@@ -10,7 +10,12 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from app.services.execution_runtime import ExecutionRuntime, TaskPriority
+from app.services.execution_runtime import (
+    ExecutionRuntime,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
 from core.io_atomic import atomic_write_bytes
 from core.uuid_utils import normalize_uuid
 
@@ -183,11 +188,9 @@ class PlayerAvatarService:
         norm = normalize_uuid(uuid)
         if not norm:
             return None
-        with self._lock:
-            cached = self._memory.get(norm)
-            if cached is not None and cached.is_file():
-                self._memory.move_to_end(norm)
-                return cached
+        cached = self._get_memory_cached_path(norm)
+        if cached is not None and cached.is_file():
+            return cached
         path = self._cache_dir / f"{norm}.png"
         if path.is_file():
             with self._lock:
@@ -196,6 +199,15 @@ class PlayerAvatarService:
                 while len(self._memory) > _MAX_MEMORY:
                     self._memory.popitem(last=False)
             return path
+        return None
+
+    def _get_memory_cached_path(self, norm: str) -> Optional[Path]:
+        """读取内存索引，不触发文件系统查询。"""
+        with self._lock:
+            cached = self._memory.get(norm)
+            if cached is not None:
+                self._memory.move_to_end(norm)
+                return cached
         return None
 
     def load_avatar_async(
@@ -219,7 +231,9 @@ class PlayerAvatarService:
             on_loaded(None)
             return
 
-        cached = self.get_cached_path(norm)
+        # Only an in-memory hit may complete on the caller thread. Disk stat
+        # and potential network I/O are both performed by ``_fetch_worker``.
+        cached = self._get_memory_cached_path(norm)
         if cached is not None:
             on_loaded(str(cached))
             return
@@ -233,11 +247,22 @@ class PlayerAvatarService:
                 return
             self._inflight[norm] = [on_loaded]
 
-        self._execution_runtime.submit(
-            "fetch_player_avatar",
-            lambda token: self._fetch_worker(norm),
-            priority=TaskPriority.VISIBLE,
-        )
+        try:
+            self._execution_runtime.submit(
+                "fetch_player_avatar",
+                lambda token: self._fetch_worker(norm),
+                priority=TaskPriority.VISIBLE,
+            )
+        except (RuntimeClosedError, TaskQueueFullError) as exc:
+            logger.debug("avatar task rejected for %s: %s", norm[:8], exc)
+            with self._lock:
+                callbacks = self._inflight.pop(norm, [])
+            for callback in callbacks:
+                try:
+                    callback(None)
+                except Exception:
+                    # UI callbacks are best-effort during queue pressure/teardown.
+                    pass
 
     def _avatar_cache_stats(self) -> Any:
         """向 CacheRegistry 报告内存路径索引规模。"""
@@ -280,7 +305,9 @@ class PlayerAvatarService:
         """Background worker: fetch/cache avatar and invoke waiters."""
         path: Optional[Path] = None
         try:
-            path = self._fetch_and_cache(norm)
+            path = self.get_cached_path(norm)
+            if path is None:
+                path = self._fetch_and_cache(norm)
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             logger.debug(
                 "avatar fetch failed for %s: %s",

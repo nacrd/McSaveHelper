@@ -102,8 +102,9 @@ class PerformanceMonitor:
         run_ms = float(getattr(record, "run_ms", 0.0) or 0.0)
         feature = str(getattr(record, "feature", "business") or "business")
         outcome = getattr(record, "outcome", None)
-        outcome_value = (
-            outcome.value if hasattr(outcome, "value") else str(outcome or "ok")
+        outcome_attr = getattr(outcome, "value", None)
+        outcome_value = str(
+            outcome_attr if outcome_attr is not None else outcome or "ok"
         )
         metadata = dict(getattr(record, "metadata", {}) or {})
         metadata.update(

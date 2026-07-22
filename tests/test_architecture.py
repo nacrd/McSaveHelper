@@ -272,16 +272,22 @@ def test_app_services_forbid_private_threadpool_and_write_fallbacks() -> None:
 
 
 def test_region_destructive_delete_uses_world_transaction() -> None:
-    """Stage 3: UI region delete routes through the transaction helper."""
+    """Stage 3: UI region delete routes through runtime and transaction."""
     region_tab = (
         PROJECT_ROOT / "app/ui/views/explorer/region_tab.py"
+    ).read_text(encoding="utf-8")
+    controller = (
+        PROJECT_ROOT / "app/controllers/region_delete_controller.py"
     ).read_text(encoding="utf-8")
     editor = (
         PROJECT_ROOT / "app/services/region_editor_service.py"
     ).read_text(encoding="utf-8")
-    assert "delete_region_via_transaction" in region_tab
+    assert "RegionDeleteRequest" in region_tab
+    assert "_region_delete_controller.start" in region_tab
     assert "world_writes.reserve" not in region_tab
     assert "reset_region(region_path, backup=True)" not in region_tab
+    assert "scope.submit" in controller
+    assert "delete_region_via_transaction" in controller
     assert "def delete_region_via_transaction" in editor
     assert "world_transactions.mutate" in editor
 
@@ -303,19 +309,19 @@ def test_read_paths_use_world_repository_index() -> None:
 
 
 def test_feature_context_omits_migration_only_shortcuts() -> None:
-    """FeatureContext stays thin: migration UI goes through host, not ctx."""
+    """FeatureContext exposes a narrow migration command port."""
     source = (
         PROJECT_ROOT / "app/ui/feature_context.py"
     ).read_text(encoding="utf-8")
-    # Proxies removed from FeatureContext body (host may still implement them).
+    # Migration methods are represented by one explicit command port.
     assert "\n    def start(self)" not in source
     assert "\n    def set_dest(self)" not in source
     assert "\n    def set_batch_dir(self)" not in source
     migrator = (
         PROJECT_ROOT / "app/ui/views/migrator.py"
     ).read_text(encoding="utf-8")
-    assert "self.app.host.start" in migrator
-    assert "self.app.host.set_dest" in migrator
+    assert "self.app.migration_commands.start" in migrator
+    assert "choose_destination" in migrator
 
 
 def test_feature_registry_drives_catalog_and_application_budget() -> None:

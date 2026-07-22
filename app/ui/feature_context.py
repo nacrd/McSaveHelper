@@ -27,6 +27,11 @@ class FeatureHost(Protocol):
         """Write application log."""
         ...
 
+    @property
+    def migration_commands(self) -> "MigrationCommands":
+        """Return the narrow command port for migration UI actions."""
+        ...
+
     def info_dialog(self, title: str, message: str) -> None:
         """Show info dialog."""
         ...
@@ -200,6 +205,11 @@ class FeatureContext:
     def view_manager(self) -> Any:
         return self.host.view_manager
 
+    @property
+    def migration_commands(self) -> "MigrationCommands":
+        """Return migration commands without exposing the full host facade."""
+        return self.host.migration_commands
+
     def translate(self, key: str, default: str = "", **kwargs: Any) -> str:
         return self.host.translate(key, default, **kwargs)
 
@@ -283,4 +293,15 @@ class FeatureContext:
         )
 
 
-__all__ = ["FeatureContext", "FeatureHost"]
+@dataclass(frozen=True)
+class MigrationCommands:
+    """UI command port owned by the application composition root."""
+
+    start: Callable[[], None]
+    cancel: Callable[[], bool]
+    choose_destination: Callable[[], None]
+    choose_batch_directory: Callable[[], None]
+    close: Callable[[], None]
+
+
+__all__ = ["FeatureContext", "FeatureHost", "MigrationCommands"]

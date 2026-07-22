@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import core.nbt as nbtlib
 
@@ -28,6 +28,7 @@ def run_full(
     progress: ProgressCallback,
     custom_mappings: Optional[Dict[str, str]] = None,
     region_workers: Optional[int] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> None:
     """执行完整模式迁移。
 
@@ -53,7 +54,13 @@ def run_full(
     dest_world = safe_destination_world(src_world, dest_dir, world_name)
 
     # 1. 克隆
-    replace_directory_tree(src_world, dest_world)
+    replace_directory_tree(
+        src_world,
+        dest_world,
+        cancel_check=cancel_check,
+    )
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("完整迁移已取消")
     log(f"存档已克隆到 {dest_world}", "FILE")
 
     # 2. 加载缓存与构建映射
@@ -80,6 +87,9 @@ def run_full(
         clean_world(dest_world, log)
 
     _run_pure_clean(dest_world, pure_clean, log, region_workers)
+
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("完整迁移已取消")
 
     # 8. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
