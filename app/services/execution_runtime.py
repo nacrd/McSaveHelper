@@ -31,6 +31,15 @@ class TaskPriority(IntEnum):
     BACKGROUND = 2
 
 
+@dataclass(frozen=True)
+class TaskSpec:
+    """后台任务描述（文档形态对齐；可选包装 submit 参数）。"""
+
+    operation: str
+    lane: ExecutionLane = ExecutionLane.IO
+    priority: TaskPriority = TaskPriority.BACKGROUND
+
+
 class TaskQueueFullError(RuntimeError):
     """任务通道达到有界容量时抛出。"""
 
@@ -561,6 +570,19 @@ class ExecutionRuntime:
             _token=token,
         )
 
+    def submit_spec(
+        self,
+        spec: TaskSpec,
+        work: Callable[[CancellationToken], ResultT],
+    ) -> OperationHandle[ResultT]:
+        """按 ``TaskSpec`` 提交任务（文档形态便捷入口）。"""
+        return self.submit(
+            spec.operation,
+            work,
+            lane=spec.lane,
+            priority=spec.priority,
+        )
+
     def _submit_locked(
         self,
         state: _LaneState,
@@ -638,4 +660,5 @@ __all__ = [
     "RuntimeClosedError",
     "TaskPriority",
     "TaskQueueFullError",
+    "TaskSpec",
 ]

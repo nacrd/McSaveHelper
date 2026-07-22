@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Generic, Hashable, Optional, TypeVar
 
 
@@ -11,6 +12,7 @@ KeyT = TypeVar("KeyT", bound=Hashable)
 ValueT = TypeVar("ValueT")
 
 DEFAULT_CACHE_BUDGET_BYTES = 256 * 1024 * 1024
+WorldInvalidator = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -202,6 +204,7 @@ class CacheRegistry:
             str,
             tuple[CachePolicy, ExternalStats, ExternalClear],
         ] = {}
+        self._world_invalidators: dict[str, WorldInvalidator] = {}
         self._closed = False
 
     def create_region(
@@ -252,6 +255,49 @@ class CacheRegistry:
             return
         with self._lock:
             self._external.pop(normalized, None)
+            self._world_invalidators.pop(normalized, None)
+
+    def register_world_invalidator(
+        self,
+        name: str,
+        invalidate: WorldInvalidator,
+    ) -> None:
+        """注册按世界路径失效的回调（与已有分区名关联）。
+
+        Args:
+            name: 缓存分区名（应已 create/register）。
+            invalidate: ``(normalized_world_key) -> None``。
+        """
+        normalized = name.strip()
+        if not normalized:
+            raise ValueError("世界失效器名称不能为空")
+        with self._lock:
+            self._ensure_open_locked()
+            self._world_invalidators[normalized] = invalidate
+
+    def invalidate_world(self, world_path: Path | str) -> int:
+        """按世界路径通知所有已注册失效器。
+
+        Args:
+            world_path: 世界根路径。
+
+        Returns:
+            实际调用的失效器数量。
+        """
+        import os
+
+        world = Path(world_path).expanduser().resolve()
+        key = os.path.normcase(str(world))
+        with self._lock:
+            invalidators = tuple(self._world_invalidators.items())
+        called = 0
+        for _name, invalidate in invalidators:
+            try:
+                invalidate(key)
+                called += 1
+            except (OSError, RuntimeError, ValueError, TypeError):
+                continue
+        return called
 
     def stats(self) -> CacheRegistryStats:
         """返回所有分区的聚合可观测快照。"""

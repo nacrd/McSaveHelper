@@ -127,6 +127,7 @@ class PlayerAvatarService:
         cache_dir: Optional[Path] = None,
         *,
         enabled: bool = True,
+        cache_registry: Optional[Any] = None,
     ) -> None:
         """初始化头像缓存目录与内存索引。
 
@@ -134,6 +135,7 @@ class PlayerAvatarService:
             execution_runtime: 应用组合根持有的共享后台运行时（必填）。
             cache_dir: 本地 PNG 缓存目录；缺省 ``~/.mc_save_helper/avatars``。
             enabled: 是否启用远程拉取；为 False 时仅读本地缓存。
+            cache_registry: 可选应用缓存注册表，用于登记 ``player.avatar`` 预算。
         """
         self._enabled = enabled
         self._cache_dir = (
@@ -148,6 +150,16 @@ class PlayerAvatarService:
         self._failed: set[str] = set()
         self._execution_runtime = execution_runtime
         self._closed = False
+        self._cache_registration: Optional[Any] = None
+        if cache_registry is not None:
+            from app.services.cache_registry import CachePolicy
+
+            self._cache_registration = cache_registry.register_external(
+                "player.avatar",
+                CachePolicy(128, 8 * 1024 * 1024),
+                self._avatar_cache_stats,
+                self._clear_memory_paths,
+            )
 
     @property
     def enabled(self) -> bool:
@@ -227,6 +239,29 @@ class PlayerAvatarService:
             priority=TaskPriority.VISIBLE,
         )
 
+    def _avatar_cache_stats(self) -> Any:
+        """向 CacheRegistry 报告内存路径索引规模。"""
+        from app.services.cache_registry import CacheStats
+
+        with self._lock:
+            entries = len(self._memory)
+        # 路径索引近似占用：每条 256 字节元数据。
+        return CacheStats(
+            name="player.avatar",
+            entries=entries,
+            bytes_used=entries * 256,
+            max_entries=128,
+            max_bytes=8 * 1024 * 1024,
+            hits=0,
+            misses=0,
+            evictions=0,
+        )
+
+    def _clear_memory_paths(self) -> None:
+        """仅清理可重建的内存路径索引。"""
+        with self._lock:
+            self._memory.clear()
+
     def close(self) -> None:
         """丢弃内存状态；不关闭共享运行时（由组合根释放）。"""
         if self._closed:
@@ -236,6 +271,10 @@ class PlayerAvatarService:
             self._memory.clear()
             self._inflight.clear()
             self._failed.clear()
+        registration = self._cache_registration
+        self._cache_registration = None
+        if registration is not None:
+            registration.close()
 
     def _fetch_worker(self, norm: str) -> None:
         """Background worker: fetch/cache avatar and invoke waiters."""

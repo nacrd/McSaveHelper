@@ -353,6 +353,11 @@ def test_explorer_surfaces_consume_view_state_presenters() -> None:
     for relative, symbol in checks:
         source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
         assert symbol in source, relative
+    player_source = (
+        PROJECT_ROOT / "app/ui/views/explorer/player_tab.py"
+    ).read_text(encoding="utf-8")
+    assert "page_size = 40" in player_source
+    assert "max(40, len(refs)" not in player_source
 
 
 def test_business_metrics_adapt_to_operation_record_protocol() -> None:

@@ -65,6 +65,11 @@ def test_player_list_state_filters_and_pages() -> None:
     )
     assert by_hyphen.total_count == 1
     assert by_hyphen.items[0].uuid == "bbb"
+    page0 = build_player_list_state(refs, page_index=0, page_size=1)
+    page1 = build_player_list_state(refs, page_index=1, page_size=1)
+    assert page0.page_size == 1
+    assert page0.page_size < page0.total_count
+    assert page0.items[0].uuid != page1.items[0].uuid
 
 
 def test_stats_view_state_from_empty_statistics() -> None:

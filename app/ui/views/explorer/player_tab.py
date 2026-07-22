@@ -134,9 +134,15 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _player_avatar_service(self) -> PlayerAvatarService:
         service = getattr(self, "_player_avatar_service_instance", None)
         if service is None:
+            cache_registry = getattr(
+                self.app.services,
+                "cache_registry",
+                None,
+            )
             service = PlayerAvatarService(
                 self.app.execution_runtime,
                 enabled=True,
+                cache_registry=cache_registry,
             )
             self._player_avatar_service_instance = service
         return service
@@ -797,15 +803,17 @@ class PlayerTabMixin(ExplorerMixinHost):
         if hasattr(self, "_player_filter") and self._player_filter.value:
             query = str(self._player_filter.value).strip()
         refs = list(getattr(self, "_player_refs_cache", []))
-        # 大页上限保留完整列表交互；ViewState 仍提供分页契约供后续虚拟化。
+        page_size = 40
+        page_index = int(getattr(self, "_player_list_page", 0) or 0)
         list_state = build_player_list_state(
             refs,
             query=query,
-            page_index=0,
-            page_size=max(40, len(refs) or 40),
+            page_index=page_index,
+            page_size=page_size,
         )
+        self._player_list_page = list_state.page_index
         self._last_player_list_state = list_state
-        allowed = {item.uuid for item in list_state.items}
+        by_uuid = {ref.uuid_norm: ref for ref in refs}
 
         tiles: List[ft.Control] = []
         self._player_list_tiles = {}
@@ -813,15 +821,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._player_list_avatar_gen = (
             getattr(self, "_player_list_avatar_gen", 0) + 1
         )
-        for ref in refs:
-            if ref.uuid_norm not in allowed:
-                continue
-            tile = self._build_player_list_tile(ref)
-            self._player_list_tiles[ref.uuid_norm] = tile
-            tiles.append(tile)
-            self._load_list_avatar(ref)
-
-        if not tiles:
+        if list_state.total_count == 0:
             tiles.append(
                 ft.Text(
                     self._t("player.list_empty", "没有匹配的玩家"),
@@ -829,8 +829,59 @@ class PlayerTabMixin(ExplorerMixinHost):
                     color=THEME.text_muted,
                 )
             )
+        else:
+            for item in list_state.items:
+                ref = by_uuid.get(item.uuid)
+                if ref is None:
+                    continue
+                tile = self._build_player_list_tile(ref)
+                self._player_list_tiles[ref.uuid_norm] = tile
+                tiles.append(tile)
+                self._load_list_avatar(ref)
+            if list_state.page_count > 1:
+                tiles.append(
+                    ft.Row(
+                        [
+                            ft.TextButton(
+                                self._t("player.page_prev", "上一页"),
+                                on_click=self._player_list_prev_page,
+                                disabled=list_state.page_index <= 0,
+                            ),
+                            ft.Text(
+                                self._t(
+                                    "player.page_status",
+                                    "第 {page}/{pages} 页（{total}）",
+                                    page=list_state.page_index + 1,
+                                    pages=list_state.page_count,
+                                    total=list_state.total_count,
+                                ),
+                                size=12,
+                                color=THEME.text_muted,
+                            ),
+                            ft.TextButton(
+                                self._t("player.page_next", "下一页"),
+                                on_click=self._player_list_next_page,
+                                disabled=(
+                                    list_state.page_index
+                                    >= list_state.page_count - 1
+                                ),
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    )
+                )
         self._player_list_column.controls = tiles
         safe_update(self._player_list_column)
+
+    def _player_list_prev_page(self, _e: Any = None) -> None:
+        page = int(getattr(self, "_player_list_page", 0) or 0)
+        self._player_list_page = max(0, page - 1)
+        self._apply_player_list()
+
+    def _player_list_next_page(self, _e: Any = None) -> None:
+        page = int(getattr(self, "_player_list_page", 0) or 0)
+        self._player_list_page = page + 1
+        self._apply_player_list()
 
     def _build_player_list_tile(self, ref: Any) -> ft.Container:
         selected = False

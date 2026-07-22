@@ -77,6 +77,10 @@ class WorldIndexRegistry:
                 self._cache_stats,
                 self.clear,
             )
+            cache_registry.register_world_invalidator(
+                self.CACHE_NAME,
+                self._invalidate_normalized_key,
+            )
 
     def get(
         self,
@@ -225,6 +229,10 @@ class WorldIndexRegistry:
         key = os.path.normcase(
             str(Path(world_path).expanduser().resolve())
         )
+        self._invalidate_normalized_key(key)
+
+    def _invalidate_normalized_key(self, key: str) -> None:
+        """按已规范化世界键丢弃缓存（供 CacheRegistry.invalidate_world）。"""
         with self._lock:
             self._entries.pop(key, None)
 
