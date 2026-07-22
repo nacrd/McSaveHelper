@@ -35,6 +35,10 @@ from app.services.execution_runtime import (  # noqa: E402
 )
 from app.services.world_index_service import WorldIndexRegistry  # noqa: E402
 from app.services.world_write_coordinator import WorldWriteCoordinator  # noqa: E402
+from core.bench_budgets import (  # noqa: E402
+    DEFAULT_BUDGETS,
+    evaluate_sample_against_budget,
+)
 from core.bench_samples import (  # noqa: E402
     REFERENCE_MACHINE,
     SAMPLE_SPECS,
@@ -43,6 +47,7 @@ from core.bench_samples import (  # noqa: E402
 )
 from core.mca import RegionFile  # noqa: E402
 from core.mca.topview_renderer import render_region_topview  # noqa: E402
+from core.observability import p95  # noqa: E402
 from core.omni.world_session import WorldSession  # noqa: E402
 from core.world_index import WorldIndexBuilder  # noqa: E402
 
@@ -108,6 +113,7 @@ def _bench_world_index(world: Path, loops: int) -> dict[str, Any]:
         return {
             "cold_ms": round(cold_ms, 3),
             "warm_median_ms": round(_median(warm_samples), 3),
+            "warm_p95_ms": round(p95(warm_samples), 3),
             "regions": len(snapshot.region_files),
             "players": len(snapshot.player_files),
             "hits": stats.hits,
@@ -130,6 +136,7 @@ def _bench_world_session(world: Path, loops: int) -> dict[str, Any]:
             del session
         return {
             "open_with_index_median_ms": round(_median(samples), 3),
+            "open_with_index_p95_ms": round(p95(samples), 3),
             "player_count": len(snapshot.player_files),
             "region_count": len(snapshot.region_files),
         }
@@ -157,6 +164,7 @@ def _bench_topview(world: Path, loops: int) -> dict[str, Any]:
     return {
         "region_file": target.name,
         "tile_median_ms": round(_median(samples), 3),
+        "tile_p95_ms": round(p95(samples), 3),
         "tile_bytes": tile_bytes,
         "rendered": tile_bytes > 0,
     }
@@ -306,6 +314,26 @@ def _print_human(report: dict[str, Any]) -> None:
     )
 
 
+def evaluate_report_budgets(report: dict[str, Any]) -> list[str]:
+    """对照 DEFAULT_BUDGETS 检查报告；返回全部违规描述。"""
+    violations: list[str] = []
+    for sample in report.get("samples", []):
+        if not isinstance(sample, dict):
+            continue
+        size_name = str(sample.get("size", ""))
+        try:
+            size = SampleSize(size_name)
+        except ValueError:
+            violations.append(f"unknown size {size_name}")
+            continue
+        budget = DEFAULT_BUDGETS.get(size)
+        if budget is None:
+            continue
+        for item in evaluate_sample_against_budget(sample, budget):
+            violations.append(f"{size_name}: {item}")
+    return violations
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Bench MCA and world paths")
     parser.add_argument(
@@ -316,13 +344,29 @@ def main() -> int:
     )
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--check-budgets",
+        action="store_true",
+        help="Fail with exit 2 when synthetic p95 budgets are exceeded",
+    )
     args = parser.parse_args()
     sizes = [SampleSize(item) for item in args.sizes]
     report = run_benchmark(sizes=sizes, loops=max(1, args.loops))
+    budget_violations = evaluate_report_budgets(report)
+    report["budget_violations"] = budget_violations
+    report["budgets_ok"] = not budget_violations
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     else:
         _print_human(report)
+        if budget_violations:
+            print("budget violations:")
+            for item in budget_violations:
+                print(f"  - {item}")
+        elif args.check_budgets:
+            print("budgets: ok")
+    if args.check_budgets and budget_violations:
+        return 2
     return 0
 
 

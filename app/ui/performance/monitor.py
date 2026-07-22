@@ -90,6 +90,47 @@ class PerformanceMonitor:
                 self.metrics[metric_name] = deque(maxlen=self.max_samples)
             self.metrics[metric_name].append(metric)
 
+    def record_operation(self, record: Any) -> None:
+        """记录统一 ``OperationRecord``（core 业务与 UI 共用协议）。
+
+        Args:
+            record: ``core.observability.OperationRecord`` 或兼容对象。
+        """
+        if not self.enabled:
+            return
+        operation_id = str(getattr(record, "operation_id", "unknown"))
+        run_ms = float(getattr(record, "run_ms", 0.0) or 0.0)
+        feature = str(getattr(record, "feature", "business") or "business")
+        outcome = getattr(record, "outcome", None)
+        outcome_value = (
+            outcome.value if hasattr(outcome, "value") else str(outcome or "ok")
+        )
+        metadata = dict(getattr(record, "metadata", {}) or {})
+        metadata.update(
+            {
+                "feature": feature,
+                "world_id": str(getattr(record, "world_id", "") or ""),
+                "queue_wait_ms": float(
+                    getattr(record, "queue_wait_ms", 0.0) or 0.0
+                ),
+                "files_processed": int(
+                    getattr(record, "files_processed", 0) or 0
+                ),
+                "bytes_processed": int(
+                    getattr(record, "bytes_processed", 0) or 0
+                ),
+                "cache_hits": int(getattr(record, "cache_hits", 0) or 0),
+                "cache_misses": int(getattr(record, "cache_misses", 0) or 0),
+                "outcome": outcome_value,
+            }
+        )
+        self.record(
+            f"operation.{operation_id}",
+            run_ms,
+            unit="ms",
+            **metadata,
+        )
+
     def get_metrics(self, metric_name: str) -> List[PerformanceMetric]:
         """获取指定指标的所有记录
 

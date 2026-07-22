@@ -334,6 +334,56 @@ def test_scoped_views_dispose_task_scopes() -> None:
         assert "_task_scope.close()" in source, relative
 
 
+def test_explorer_surfaces_consume_view_state_presenters() -> None:
+    """Residual checklist: map/player/stats UI paths call real presenters."""
+    checks = (
+        (
+            "app/ui/views/explorer/region_tab.py",
+            "decide_map_rebuild",
+        ),
+        (
+            "app/ui/views/explorer/player_tab.py",
+            "build_player_list_state",
+        ),
+        (
+            "app/ui/views/explorer/stats_tab.py",
+            "build_stats_view_state",
+        ),
+    )
+    for relative, symbol in checks:
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        assert symbol in source, relative
+
+
+def test_business_metrics_adapt_to_operation_record_protocol() -> None:
+    """Observability residual: GUI sink adapts core metrics via OperationRecord."""
+    optimizer = (
+        PROJECT_ROOT / "app/core/gui_optimizer.py"
+    ).read_text(encoding="utf-8")
+    monitor = (
+        PROJECT_ROOT / "app/ui/performance/monitor.py"
+    ).read_text(encoding="utf-8")
+    performance = (
+        PROJECT_ROOT / "core/performance.py"
+    ).read_text(encoding="utf-8")
+    assert "to_operation_record" in optimizer
+    assert "record_operation" in monitor
+    assert "metrics_to_operation_record" in performance
+
+
+def test_core_algorithm_pools_use_bounded_parallel_clamp() -> None:
+    """Core residual: algorithm pools go through clamp_workers hard caps."""
+    for relative in (
+        "core/worker.py",
+        "core/pure_cleaner.py",
+        "core/batch_processor.py",
+        "core/converter.py",
+        "core/mca/surface.py",
+    ):
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        assert "clamp_workers" in source, relative
+
+
 def test_map_and_world_index_register_with_cache_budget() -> None:
     """Stage 4: map topview and world index participate in CacheRegistry."""
     from app.bootstrap.services import create_app_services

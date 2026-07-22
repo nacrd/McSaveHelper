@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from core.parallel import clamp_workers
 from core.types import BatchResult, LogCallback, ProgressCallback
 from core.utils import validate_world_name
 
@@ -61,9 +62,10 @@ class BatchProcessor:
             task_handler: 自定义单世界处理回调；None 时用内置
                 fast/full 路径。
         """
-        self.max_workers = min(
-            self.MAX_WORKERS,
-            max(1, max_workers or 2),
+        self.max_workers = clamp_workers(
+            max_workers or 2,
+            item_count=self.MAX_WORKERS,
+            absolute_max=self.MAX_WORKERS,
         )
         self.version_detector = version_detector
         self.custom_mappings = custom_mappings

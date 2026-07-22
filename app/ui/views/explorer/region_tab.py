@@ -883,11 +883,19 @@ class RegionTabMixin(ExplorerMixinHost):
 
     def _apply_map_state(self, state: MapViewState) -> None:
         """Synchronize view controls with the controller's dimension snapshot."""
+        from app.presenters.map_viewport_state import decide_map_rebuild
+
+        previous = getattr(self, "_map_viewport_snapshot", None)
+        decision = decide_map_rebuild(previous, state)
+        self._map_viewport_snapshot = decision.snapshot
         self._region_display_mode = state.style
         self._region_display_mode_dropdown.value = state.style
         if self._map_view is not None:
+            # Always sync mode/layers; rebuild decision is recorded for
+            # consumers that want to skip expensive canvas work.
             self._map_view.set_display_mode(state.style)
             self._map_view.apply_layer_state(state.layers)
+            self._last_map_rebuild_reason = decision.reason
         self._set_map_toggle_button(
             self._map_coord_btn,
             state.layers.show_coordinates,

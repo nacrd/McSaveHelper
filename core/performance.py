@@ -1,9 +1,15 @@
-"""UI-independent performance tracking for business operations."""
+"""UI-independent performance tracking for business operations.
+
+业务指标通过 ``set_metrics_sink`` 投递；UI 适配器应使用
+``core.observability.metrics_to_operation_record`` 转为统一协议。
+"""
 import time
 import threading
 from typing import Optional, Dict, Any, Callable, Iterator
 from dataclasses import dataclass, field
 from contextlib import contextmanager
+
+from core.observability import OperationRecord, metrics_to_operation_record
 
 
 @dataclass
@@ -18,6 +24,19 @@ class PerformanceMetrics:
     bytes_processed: int = 0
     errors: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_operation_record(
+        self,
+        *,
+        feature: str = "business",
+        world_id: str = "",
+    ) -> OperationRecord:
+        """转换为统一 ``OperationRecord`` 供 UI/日志适配。"""
+        return metrics_to_operation_record(
+            self,
+            feature=feature,
+            world_id=world_id,
+        )
 
     @property
     def throughput_files_per_sec(self) -> float:

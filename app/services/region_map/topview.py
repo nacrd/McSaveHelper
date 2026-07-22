@@ -53,6 +53,9 @@ class RegionMapTopviewMixin(RegionMapHost):
         ] = {}
         # 瓦片变更回调（由 UI 注册，在 UI 线程调度）
         self._tile_ready_callback: Optional[Any] = None
+        self._topview_cache_hits = 0
+        self._topview_cache_misses = 0
+        self._stale_callback_discards = 0
 
     def _init_topview_workers(self) -> None:
         # 渲染统一使用应用计算通道，局部并发上限仅用于请求泵的可见预算。
@@ -81,10 +84,15 @@ class RegionMapTopviewMixin(RegionMapHost):
                 bytes_used=self._topview_memory_bytes,
                 max_entries=self.TOPVIEW_QUEUE_LIMIT,
                 max_bytes=self.TOPVIEW_MEMORY_LIMIT,
-                hits=0,
-                misses=0,
+                hits=self._topview_cache_hits,
+                misses=self._topview_cache_misses,
                 evictions=0,
             )
+
+    def get_stale_callback_discards(self) -> int:
+        """返回因 generation 过期而丢弃的瓦片回调/任务次数。"""
+        with self._data_lock:
+            return int(self._stale_callback_discards)
 
     def _clear_topview_memory_cache(self) -> None:
         """在注册表清理请求中仅释放可重建的瓦片内存。"""
@@ -119,7 +127,10 @@ class RegionMapTopviewMixin(RegionMapHost):
             tile = self._topview_tiles.get(coord)
             if tile is not None:
                 self._topview_tiles.move_to_end(coord)
-            return tile
+                self._topview_cache_hits += 1
+                return tile
+            self._topview_cache_misses += 1
+            return None
 
     def has_topview_tile(self, coord: Tuple[int, int], min_size: int = 0) -> bool:
         """判断是否已有满足最小尺寸的完整瓦片。
@@ -463,6 +474,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                 job = self._topview_queue.popleft()
                 # Drop stale jobs from a previous generation.
                 if job[3] != self._topview_generation:
+                    self._stale_callback_discards += 1
                     if self._topview_pending.get(job[0]) == job[3]:
                         self._topview_pending.pop(job[0], None)
                         self._topview_pending_sizes.pop(job[0], None)
@@ -611,6 +623,8 @@ class RegionMapTopviewMixin(RegionMapHost):
         source_file_size = 0
         try:
             if self._topview_generation_stale(generation, cancel_event):
+                with self._data_lock:
+                    self._stale_callback_discards += 1
                 return
             source_mtime_ns, source_file_size = self._read_topview_source_stat(
                 path,

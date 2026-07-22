@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .nbt_utils import patch_nbt
+from .parallel import clamp_workers
 from .types import LogCallback, UUIDMapping
 
 
@@ -82,8 +83,7 @@ def process_regions_parallel(
         return 0
 
     errors: List[str] = []
-    requested_workers = 8 if max_workers is None else max(1, int(max_workers))
-    workers = min(requested_workers, 8, total)
+    workers = clamp_workers(max_workers, item_count=total)
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [
             executor.submit(process_region_file, region_path, mappings)

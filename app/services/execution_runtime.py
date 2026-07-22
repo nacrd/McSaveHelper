@@ -5,6 +5,7 @@ import itertools
 import os
 import queue
 import threading
+import time
 from collections import Counter
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -71,6 +72,9 @@ class ExecutionRuntimeSnapshot:
     submitted_by_lane: dict[ExecutionLane, int]
     rejected_by_lane: dict[ExecutionLane, int]
     worker_count_by_lane: dict[ExecutionLane, int]
+    queue_wait_last_ms: float = 0.0
+    queue_wait_max_ms: float = 0.0
+    queue_wait_samples: int = 0
 
 
 class CancellationToken:
@@ -408,6 +412,9 @@ class ExecutionRuntime:
         self._tasks: dict[Future[object], _TrackedTask] = {}
         self._submitted: Counter[ExecutionLane] = Counter()
         self._rejected: Counter[ExecutionLane] = Counter()
+        self._queue_wait_last_ms = 0.0
+        self._queue_wait_max_ms = 0.0
+        self._queue_wait_samples = 0
         self._lanes = {
             ExecutionLane.IO: self._create_lane("mcsavehelper-io", selected_io),
             ExecutionLane.CPU: self._create_lane(
@@ -439,13 +446,16 @@ class ExecutionRuntime:
             return len(self._tasks)
 
     def snapshot(self) -> ExecutionRuntimeSnapshot:
-        """返回任务、拒绝次数与工作线程数的一致快照。"""
+        """返回任务、拒绝次数、队列等待与工作线程数的一致快照。"""
         with self._lock:
             active_by_lane = Counter(
                 tracked.lane for tracked in self._tasks.values()
             )
             submitted = dict(self._submitted)
             rejected = dict(self._rejected)
+            queue_wait_last_ms = self._queue_wait_last_ms
+            queue_wait_max_ms = self._queue_wait_max_ms
+            queue_wait_samples = self._queue_wait_samples
         return ExecutionRuntimeSnapshot(
             active_tasks=sum(active_by_lane.values()),
             active_by_lane={
@@ -461,7 +471,18 @@ class ExecutionRuntime:
                 lane: state.executor.worker_count
                 for lane, state in self._lanes.items()
             },
+            queue_wait_last_ms=queue_wait_last_ms,
+            queue_wait_max_ms=queue_wait_max_ms,
+            queue_wait_samples=queue_wait_samples,
         )
+
+    def _record_queue_wait_ms(self, wait_ms: float) -> None:
+        """记录一次从入队到开始执行的等待时间。"""
+        sample = max(0.0, float(wait_ms))
+        with self._lock:
+            self._queue_wait_last_ms = sample
+            self._queue_wait_max_ms = max(self._queue_wait_max_ms, sample)
+            self._queue_wait_samples += 1
 
     def create_scope(self, name: str) -> OperationScope:
         """创建由调用方显式关闭的任务所有权作用域。"""
@@ -506,8 +527,21 @@ class ExecutionRuntime:
             )
 
         token = CancellationToken()
+        enqueued_at = time.perf_counter()
+
+        def timed_work(cancel_token: CancellationToken) -> ResultT:
+            wait_ms = (time.perf_counter() - enqueued_at) * 1000.0
+            self._record_queue_wait_ms(wait_ms)
+            return work(cancel_token)
+
         try:
-            future = self._submit_locked(state, lane, priority, token, work)
+            future = self._submit_locked(
+                state,
+                lane,
+                priority,
+                token,
+                timed_work,
+            )
         except Exception:
             state.capacity.release()
             raise

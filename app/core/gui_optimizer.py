@@ -253,9 +253,19 @@ class GUIOptimizer:
             self.notification_manager = None
 
     def _record_business_metric(self, metrics: PerformanceMetrics) -> None:
-        """Adapt core business metrics to the optional GUI monitor."""
+        """Adapt core business metrics via the unified OperationRecord protocol."""
         if not self._performance_monitor.enabled:
             return
+        record = metrics.to_operation_record(feature="business")
+        record_operation = getattr(
+            self._performance_monitor,
+            "record_operation",
+            None,
+        )
+        if callable(record_operation):
+            record_operation(record)
+            return
+        # Backward-compatible fallback for stripped test doubles.
         self._performance_monitor.record(
             f"biz_{metrics.operation}",
             metrics.duration_seconds * 1000,

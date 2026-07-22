@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
+from core.parallel import clamp_workers
 from core.mca.block_palette import (
     get_world_surface_chunk_blocks,
     is_air_name,
@@ -649,7 +650,7 @@ def _decode_misses_parallel(
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
 ) -> None:
     external_signatures = external_signatures or {}
-    workers = min(workers, len(misses))
+    workers = clamp_workers(workers, item_count=len(misses))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         future_coords = {
             pool.submit(_decode_one, region, chunk_x, chunk_z, samples):

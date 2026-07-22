@@ -31,7 +31,38 @@ def test_submit_returns_result_and_releases_capacity() -> None:
         second = runtime.submit("second", lambda token: 9)
         assert second.result(timeout=1) == 9
         assert runtime.active_task_count == 0
+        snapshot = runtime.snapshot()
+        assert snapshot.queue_wait_samples >= 2
+        assert snapshot.queue_wait_last_ms >= 0.0
+        assert snapshot.queue_wait_max_ms >= 0.0
     finally:
+        runtime.shutdown(wait=True)
+
+
+def test_queue_wait_increases_when_task_waits_behind_running_work() -> None:
+    runtime = _single_lane_runtime(queue_capacity=2)
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocker(token):
+        del token
+        started.set()
+        release.wait(1)
+
+    first = runtime.submit("blocker", blocker)
+    assert started.wait(1)
+    second = runtime.submit("queued", lambda token: "done")
+    try:
+        release.set()
+        assert first.result(timeout=1) is None
+        assert second.result(timeout=1) == "done"
+        snapshot = runtime.snapshot()
+        assert snapshot.queue_wait_samples >= 2
+        # Second task waited in the single-worker queue.
+        assert snapshot.queue_wait_max_ms >= snapshot.queue_wait_last_ms
+        assert snapshot.queue_wait_max_ms >= 0.0
+    finally:
+        release.set()
         runtime.shutdown(wait=True)
 
 

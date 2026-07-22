@@ -1,4 +1,5 @@
 import asyncio
+import threading
 
 import pytest
 
@@ -182,6 +183,29 @@ def test_failure_signature_includes_mca_size() -> None:
     )
 
     assert first != second
+
+
+def test_topview_cache_hit_miss_and_stale_discard_are_measurable() -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    try:
+        assert service.get_topview_tile((0, 0)) is None
+        service._topview_tiles[(0, 0)] = b"\x89PNG"
+        service._topview_memory_bytes = 4
+        assert service.get_topview_tile((0, 0)) == b"\x89PNG"
+        stats = service._topview_cache_stats()
+        assert stats.hits >= 1
+        assert stats.misses >= 1
+        # Drop a queued job from a previous generation.
+        service._topview_generation = 1
+        service._topview_queue.append(
+            ((1, 1), "r.1.1.mca", 32, 0, threading.Event(), 0)
+        )
+        service._pump_topview_queue()
+        assert service.get_stale_callback_discards() >= 1
+    finally:
+        service.close()
+        runtime.shutdown(wait=False)
 
 
 def test_close_releases_executor_and_rejects_new_scan(tmp_path) -> None:

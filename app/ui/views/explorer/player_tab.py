@@ -791,9 +791,21 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _apply_player_list(self) -> None:
         if not hasattr(self, "_player_list_column"):
             return
+        from app.presenters.player_list_state import build_player_list_state
+
         query = ""
         if hasattr(self, "_player_filter") and self._player_filter.value:
-            query = str(self._player_filter.value).strip().lower()
+            query = str(self._player_filter.value).strip()
+        refs = list(getattr(self, "_player_refs_cache", []))
+        # 大页上限保留完整列表交互；ViewState 仍提供分页契约供后续虚拟化。
+        list_state = build_player_list_state(
+            refs,
+            query=query,
+            page_index=0,
+            page_size=max(40, len(refs) or 40),
+        )
+        self._last_player_list_state = list_state
+        allowed = {item.uuid for item in list_state.items}
 
         tiles: List[ft.Control] = []
         self._player_list_tiles = {}
@@ -801,11 +813,8 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._player_list_avatar_gen = (
             getattr(self, "_player_list_avatar_gen", 0) + 1
         )
-        for ref in getattr(self, "_player_refs_cache", []):
-            haystack = (
-                f"{ref.display_name} {ref.uuid_norm} {ref.uuid_hyphen}".lower()
-            )
-            if query and query not in haystack:
+        for ref in refs:
+            if ref.uuid_norm not in allowed:
                 continue
             tile = self._build_player_list_tile(ref)
             self._player_list_tiles[ref.uuid_norm] = tile

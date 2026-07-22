@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import core.nbt as nbtlib
+from .parallel import clamp_workers
 from .scanner import scan_all_entity_regions, scan_all_regions
 from .types import LogCallback
 
@@ -79,10 +80,8 @@ def purge_mod_blocks_and_entities(
     total_entities_removed = 0
     errors = 0
 
-    # region 级并发（各处理独立文件，写回安全）
-    # 参照 core/worker.py process_regions_parallel 的 ThreadPoolExecutor 模式
-    requested_workers = 8 if max_workers is None else max(1, int(max_workers))
-    workers = min(requested_workers, 8, total_regions)
+    # region 级并发（各处理独立文件，写回安全）；上限由 core.parallel 统一钳制。
+    workers = clamp_workers(max_workers, item_count=total_regions)
     done = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [

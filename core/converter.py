@@ -448,10 +448,12 @@ def _convert_region_files(
     log_warning: Any,
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from .parallel import clamp_workers
     from .scanner import scan_all_regions
 
     mca_files = scan_all_regions(work_path)
-    workers = min(8, max(1, len(mca_files)))
+    workers = clamp_workers(None, item_count=max(1, len(mca_files)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [
             executor.submit(
