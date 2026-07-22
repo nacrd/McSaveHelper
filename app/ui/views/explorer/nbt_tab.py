@@ -151,6 +151,8 @@ class NbtTabMixin(ExplorerMixinHost):
         )
 
     def _create_nbt_chunk_ops(self) -> ChunkOperations:
+        from core.mca.block_data_service import BlockDataService
+
         return ChunkOperations(
             objects_list=self._chunk_objects_list,
             nbt_tree=self._nbt_tree,
@@ -168,6 +170,7 @@ class NbtTabMixin(ExplorerMixinHost):
             handle_error=lambda ex, title: self.app.handle_exception(
                 ex, title=title
             ),
+            block_service=BlockDataService(),
         )
 
     def _create_nbt_data_loader(self) -> NbtDataLoader:

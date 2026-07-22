@@ -3,6 +3,7 @@ import threading
 from typing import Any
 
 from app.services.backup_service import BackupError, BackupRecord, BackupService
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.save_repair.models import IssueLevel
 from app.services.save_repair.models import RepairReport
 from app.services.save_repair_service import SaveRepairService
@@ -22,7 +23,7 @@ def _service(
     coordinator = WorldWriteCoordinator()
     selected_backup = backup or BackupService(coordinator)
     transaction = WorldTransactionService(coordinator, selected_backup)
-    return SaveRepairService(selected_backup, transaction)
+    return SaveRepairService(selected_backup, transaction, ExecutionRuntime())
 
 
 def test_repair_aborts_before_mutation_when_backup_fails(
@@ -93,7 +94,7 @@ def test_repair_fails_cleanly_while_another_backup_operation_is_reserved(
         coordinator,
         backup_service,
     )
-    service = SaveRepairService(backup_service, transaction)
+    service = SaveRepairService(backup_service, transaction, ExecutionRuntime())
     result = []
 
     with backup_service.exclusive_operation(world):

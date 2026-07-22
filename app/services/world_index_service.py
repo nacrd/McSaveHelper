@@ -93,6 +93,38 @@ class WorldIndexRegistry:
                 return cached
         return self._get_or_build(key, world)
 
+    def refresh(
+        self,
+        world_path: Path | str,
+    ) -> WorldIndexSnapshot:
+        """增量入口：探针未变复用缓存，否则合并并发全量重建。"""
+        world = Path(world_path).expanduser().resolve()
+        key = os.path.normcase(str(world))
+        with self._lock:
+            self._ensure_open_locked()
+            previous = self._entries.get(key)
+        if previous is not None:
+            try:
+                refreshed = self._builder.refresh(previous)
+            except (OSError, ValueError, RuntimeError, FileNotFoundError):
+                return self._get_or_build(key, world)
+            if refreshed is previous:
+                with self._lock:
+                    self._ensure_open_locked()
+                    current = self._entries.get(key)
+                    if current is previous:
+                        self._entries.move_to_end(key)
+                        self._hits += 1
+                        return previous
+            with self._lock:
+                self._ensure_open_locked()
+                if self._entries.get(key) is previous:
+                    self._entries[key] = refreshed
+                    self._entries.move_to_end(key)
+                    self._builds += 1
+                    return refreshed
+        return self._get_or_build(key, world)
+
     def _cached_if_current(
         self,
         key: str,

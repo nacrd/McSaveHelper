@@ -8,7 +8,8 @@ from core.mca.viewport import (
     view_level_from_scale,
 )
 from core.mca.map_models import MapMarker
-from app.services.region_map_service import RegionMapService
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.mca_map_view import McaMapView
 
 
@@ -144,7 +145,7 @@ def test_nearest_block_follows_the_contiguous_region_projection() -> None:
 
 
 def test_map_view_center_uses_contiguous_block_projection() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service, width=640, height=360)
     view._viewport.offset_x = 320.0 - 33.75
     view._viewport.offset_y = 180.0 - 4.0
@@ -154,7 +155,7 @@ def test_map_view_center_uses_contiguous_block_projection() -> None:
 
 
 def test_map_view_selects_marker_from_external_list_action() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service)
     view.set_markers(
         [
@@ -176,7 +177,7 @@ def test_map_view_selects_marker_from_external_list_action() -> None:
 
 
 def test_map_view_rebuild_consumes_core_viewport() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._mca_data.update({(-1, 0): 1024, (0, 0): 2048})
     view = McaMapView(map_service=service, width=640, height=360)
     view._use_topview = False
@@ -190,7 +191,7 @@ def test_map_view_rebuild_consumes_core_viewport() -> None:
 
 
 def test_map_view_unmount_releases_only_its_own_tile_callback() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     first = McaMapView(map_service=service)
     second = McaMapView(map_service=service)
 

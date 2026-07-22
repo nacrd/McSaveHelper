@@ -20,7 +20,6 @@ from app.services.entity_block_search.constants import get_preset_options
 from app.services.entity_block_search.models import SearchCondition
 
 if TYPE_CHECKING:
-    from app.application import Application
     from app.ui.feature_context import FeatureContext
 
 
@@ -56,7 +55,7 @@ class EntityBlockSearchView(ft.Column):
         "end": "末地",
     }
 
-    def __init__(self, app: "Application | FeatureContext", compact: bool = False) -> None:
+    def __init__(self, app: "FeatureContext", compact: bool = False) -> None:
         """初始化实体/方块/容器搜索视图。
 
         Args:

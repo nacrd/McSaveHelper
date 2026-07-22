@@ -58,15 +58,19 @@ class RegionMapService(
 
     def __init__(
         self,
-        execution_runtime: Optional[ExecutionRuntime] = None,
+        execution_runtime: ExecutionRuntime,
         cache_registry: Optional[CacheRegistry] = None,
     ) -> None:
-        """初始化内部状态"""
+        """初始化内部状态。
+
+        Args:
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
+            cache_registry: 可选应用缓存注册表，用于登记俯视瓦片预算。
+        """
         self._init_scan_state()
         self._init_topview_state()
         self._init_topview_workers()
-        self._execution_runtime = execution_runtime or ExecutionRuntime()
-        self._owns_execution_runtime = execution_runtime is None
+        self._execution_runtime = execution_runtime
         self._topview_handles: set[OperationHandle[None]] = set()
         self._cache_registration: Optional[CacheRegistration] = None
         if cache_registry is not None:
@@ -186,8 +190,6 @@ class RegionMapService(
         self._cache_registration = None
         if registration is not None:
             registration.close()
-        if self._owns_execution_runtime:
-            self._execution_runtime.shutdown(wait=False)
 
 
 __all__ = ["RegionMapService", "ScanProgress"]

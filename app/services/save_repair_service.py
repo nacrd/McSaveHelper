@@ -96,20 +96,19 @@ class SaveRepairService:
         self,
         backup_service: BackupService,
         world_transactions: WorldTransactionService,
-        execution_runtime: Optional[ExecutionRuntime] = None,
+        execution_runtime: ExecutionRuntime,
     ) -> None:
         """初始化服务。
 
         Args:
             backup_service: 应用共享备份服务。
             world_transactions: 强制备份、暂存与原子发布事务。
-            execution_runtime: 可选共享后台运行时。
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
         """
         self._cancel_event = threading.Event()
         self._backup_service = backup_service
         self._world_transactions = world_transactions
-        self._execution_runtime = execution_runtime or ExecutionRuntime()
-        self._owns_execution_runtime = execution_runtime is None
+        self._execution_runtime = execution_runtime
 
     def cancel(self) -> None:
         """请求取消正在进行的修复/检测操作。"""
@@ -122,10 +121,8 @@ class SaveRepairService:
         return self._cancel_event.is_set()
 
     def close(self) -> None:
-        """释放本地拥有的运行时；可重复调用。"""
-        if self._owns_execution_runtime:
-            self._execution_runtime.shutdown(wait=False)
-            self._owns_execution_runtime = False
+        """幂等关闭钩子；共享运行时由组合根释放。"""
+        return
 
     # ── 存档检测（只读）────────────────────────────────────
 

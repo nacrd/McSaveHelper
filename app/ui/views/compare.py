@@ -16,14 +16,13 @@ from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
-    from app.application import Application
     from app.ui.feature_context import FeatureContext
 
 
 class CompareView(ft.Column):
     """双世界差异对比页：level.dat、玩家与区域文件。"""
 
-    def __init__(self, app: "Application | FeatureContext") -> None:
+    def __init__(self, app: "FeatureContext") -> None:
         """绑定应用与对比服务。
 
         Args:

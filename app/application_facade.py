@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from app.services.i18n_service import I18nService
     from app.services.item_service import ItemService
     from app.services.migration_service import MigrationService
-    from app.services.region_map_service import RegionMapService
+    from app.services.region_map import RegionMapService
     from app.services.texture_service import TextureService
     from app.services.uuid_service import UUIDService
 
@@ -239,7 +239,7 @@ class ApplicationFacadeMixin:
         return cast("ExecutionRuntime", self.services.execution_runtime)
 
     def create_region_map_service(self) -> "RegionMapService":
-        from app.services.region_map_service import RegionMapService
+        from app.services.region_map import RegionMapService
 
         return RegionMapService(
             self.execution_runtime,

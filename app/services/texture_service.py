@@ -76,10 +76,15 @@ class TextureService:
 
     def __init__(
         self,
-        execution_runtime: Optional[ExecutionRuntime] = None,
+        execution_runtime: ExecutionRuntime,
         cache_registry: Optional[CacheRegistry] = None,
     ) -> None:
-        """初始化缓存目录与内存表。"""
+        """初始化缓存目录与内存表。
+
+        Args:
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
+            cache_registry: 可选应用缓存注册表；缺省时仅为本服务创建临时预算。
+        """
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._jar_cache_dir = Path.home() / ".mc_save_helper" / "jars"
@@ -109,8 +114,7 @@ class TextureService:
         self._lock = threading.Lock()
         self._jar_lock = threading.Lock()
         self._tried_paths: Dict[str, str] = {}
-        self._execution_runtime = execution_runtime or ExecutionRuntime()
-        self._owns_execution_runtime = execution_runtime is None
+        self._execution_runtime = execution_runtime
         self._task_scope = self._execution_runtime.create_scope(
             "texture_service"
         )
@@ -224,15 +228,13 @@ class TextureService:
             logger.debug("texture task rejected: %s", exc)
 
     def close(self) -> None:
-        """关闭自有后台运行时并释放内存索引；可重复调用。"""
+        """关闭任务作用域并释放内存索引；不关闭共享运行时。"""
         if self._closed:
             return
         self._closed = True
         self._task_scope.close()
         self._memory_cache.close()
         self._base64_cache.close()
-        if self._owns_execution_runtime:
-            self._execution_runtime.shutdown(wait=False)
         if self._owns_cache_registry:
             self._cache_registry.close()
 

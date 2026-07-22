@@ -3,12 +3,13 @@ import asyncio
 import pytest
 
 from app.services.region_map import topview as region_map_topview
-from app.services.region_map_service import RegionMapService
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 
 
 def test_region_map_services_do_not_share_mutable_state() -> None:
-    first = RegionMapService()
-    second = RegionMapService()
+    first = RegionMapService(ExecutionRuntime())
+    second = RegionMapService(ExecutionRuntime())
     first._mca_data[(1, 2)] = 123
 
     assert first is not second
@@ -20,8 +21,8 @@ def test_region_map_services_do_not_share_mutable_state() -> None:
 
 
 def test_region_map_service_instances_are_fresh() -> None:
-    first = RegionMapService()
-    second = RegionMapService()
+    first = RegionMapService(ExecutionRuntime())
+    second = RegionMapService(ExecutionRuntime())
 
     assert first is not second
 
@@ -30,7 +31,7 @@ def test_region_map_service_instances_are_fresh() -> None:
 
 
 def test_topview_outer_pool_is_bounded_for_nested_decode_work() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
 
     assert 1 <= service._topview_max_workers <= 2
 
@@ -38,7 +39,7 @@ def test_topview_outer_pool_is_bounded_for_nested_decode_work() -> None:
 
 
 def test_topview_queue_is_bounded_for_large_worlds() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers
     service._region_paths = {
         (index, 0): f"r.{index}.0.mca" for index in range(256)
@@ -67,7 +68,7 @@ def test_topview_queue_is_bounded_for_large_worlds() -> None:
 
 
 def test_full_topview_queue_reports_only_retained_requests() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers
     coords = [(index, 0) for index in range(service.TOPVIEW_QUEUE_LIMIT + 8)]
     service._region_paths = {
@@ -86,7 +87,7 @@ def test_full_topview_queue_reports_only_retained_requests() -> None:
 
 
 def test_priority_eviction_removes_dropped_request_from_pending_state() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers
     queued_count = service.TOPVIEW_QUEUE_LIMIT - service._topview_active
     normal_coords = [(index, 0) for index in range(queued_count)]
@@ -111,7 +112,7 @@ def test_priority_eviction_removes_dropped_request_from_pending_state() -> None:
 
 
 def test_detail_request_upgrades_a_queued_preview() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers
     coord = (0, 0)
     service._region_paths[coord] = "r.0.0.mca"
@@ -126,7 +127,7 @@ def test_detail_request_upgrades_a_queued_preview() -> None:
 
 
 def test_topview_request_clamps_renderer_size() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers
     coord = (0, 0)
     service._region_paths[coord] = "r.0.0.mca"
@@ -139,7 +140,7 @@ def test_topview_request_clamps_renderer_size() -> None:
 
 
 def test_cancelled_topview_worker_does_not_scan_failure_signature(monkeypatch) -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     coord = (0, 0)
     generation = service.get_topview_generation()
     cancelled = service._topview_cancel_event
@@ -184,21 +185,25 @@ def test_failure_signature_includes_mca_size() -> None:
 
 
 def test_close_releases_executor_and_rejects_new_scan(tmp_path) -> None:
-    service = RegionMapService()
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
     executor = service._ensure_topview_executor()
+    assert executor is runtime
 
     service.close()
     service.close()
 
     assert service._closed is True
     assert service._topview_executor is None
-    assert executor.is_closed is True
+    # Shared runtime stays open; composition root owns shutdown.
+    assert runtime.is_closed is False
     with pytest.raises(RuntimeError, match="已关闭"):
         asyncio.run(service.start_silent_scan(str(tmp_path)))
+    runtime.shutdown(wait=False)
 
 
 def test_old_worker_does_not_remove_new_generation_pending_marker() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     coord = (3, 4)
     old_generation = service.get_topview_generation()
     service._topview_pending[coord] = old_generation + 1
@@ -226,7 +231,7 @@ def test_failed_tile_retries_once_then_stops_rebuild_loop(
 ) -> None:
     region_path = tmp_path / "r.0.0.mca"
     region_path.write_bytes(b"placeholder")
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     coord = (0, 0)
     generation = service.get_topview_generation()
     callbacks = []

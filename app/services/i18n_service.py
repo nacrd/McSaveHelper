@@ -1,5 +1,5 @@
 """国际化服务 —— 封装翻译逻辑，简化 UI 层调用"""
-from typing import List, Optional
+from typing import List
 
 from core.i18n import TranslationManager, init_translations, t as _t
 from app.services.config_service import ConfigService
@@ -14,13 +14,13 @@ class I18nService:
       - 管理可用语言列表
     """
 
-    def __init__(self, config: Optional[ConfigService] = None) -> None:
+    def __init__(self, config: ConfigService) -> None:
         """绑定配置中的语言读写并初始化翻译管理器。
 
         Args:
-            config: 配置服务；缺省新建（仅用于独立脚本场景）。
+            config: 配置服务（必填，由组合根注入）。
         """
-        self._config = config or ConfigService()
+        self._config = config
         self._manager: TranslationManager = init_translations(
             language_loader=lambda: self._config.language,
             language_saver=self._save_language,

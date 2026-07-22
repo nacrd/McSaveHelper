@@ -132,6 +132,17 @@ def test_managed_backup_callback_replaces_legacy_backup(tmp_path: Path) -> None:
     assert (world / "marker.txt").read_text() == "ok"
 
 
+def test_commit_backup_requires_injected_callback(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    session = WorldSession(world)
+    session.queue_custom(lambda target: (target / "marker.txt").write_text("ok"))
+
+    assert session.commit(backup=True) is False
+    assert not (world / "marker.txt").exists()
+    assert not (tmp_path / "world.backup").exists()
+    assert session.get_queue_size() == 1
+
+
 def test_world_write_lease_rejects_concurrent_commit(tmp_path: Path) -> None:
     world = _world(tmp_path)
     coordinator = WorldWriteCoordinator()

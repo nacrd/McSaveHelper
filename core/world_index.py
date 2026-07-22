@@ -132,6 +132,31 @@ class WorldIndexBuilder:
     def probe(self, world_path: Path | str) -> WorldIndexProbe:
         """重新枚举相关文件并返回当前失效签名。"""
         world = self._validate_world(world_path)
+        return self._probe_from_paths(world, self._enumerate_stamped_paths(world))
+
+    def refresh(
+        self,
+        previous: WorldIndexSnapshot,
+    ) -> WorldIndexSnapshot:
+        """探针未变则复用快照，否则全量重建（增量一致性入口）。
+
+        Args:
+            previous: 此前构建的不可变快照。
+
+        Returns:
+            仍有效时返回同一 ``previous`` 实例，否则返回新快照。
+        """
+        world = self._validate_world(previous.world_path)
+        current_probe = self._probe_from_paths(
+            world,
+            self._enumerate_stamped_paths(world),
+        )
+        if current_probe == previous.probe:
+            return previous
+        return self.build(world)
+
+    def _enumerate_stamped_paths(self, world: Path) -> tuple[Path, ...]:
+        """枚举会影响读模型的全部文件路径。"""
         player_files = self._glob_files(find_player_data_dirs(world), "*.dat")
         dimensions = discover_dimension_region_dirs(world)
         region_files = tuple(
@@ -150,7 +175,7 @@ class WorldIndexBuilder:
             find_advancements_dirs(world),
             "*.json",
         )
-        paths = self._stamped_paths(
+        return self._stamped_paths(
             world,
             player_files=player_files,
             region_files=region_files,
@@ -158,7 +183,6 @@ class WorldIndexBuilder:
             stats_files=stats_files,
             advancement_files=advancement_files,
         )
-        return self._probe_from_paths(world, paths)
 
     def _build_dimensions(
         self,

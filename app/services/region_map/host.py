@@ -19,7 +19,6 @@ class RegionMapHost:
     _data_lock: threading.Lock
     _closed: bool
     _execution_runtime: ExecutionRuntime
-    _owns_execution_runtime: bool
     _cache_registration: Optional[CacheRegistration]
     _topview_handles: set[OperationHandle[None]]
 

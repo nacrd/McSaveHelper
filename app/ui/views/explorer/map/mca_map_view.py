@@ -85,7 +85,7 @@ from core.mca.viewport import (
 
 if TYPE_CHECKING:
     from app.services.execution_runtime import ExecutionRuntime
-    from app.services.region_map_service import RegionMapService
+    from app.services.region_map import RegionMapService
 
 
 MapSelectionCallback = Callable[

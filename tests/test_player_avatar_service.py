@@ -10,6 +10,7 @@ from typing import cast
 
 from PIL import Image
 
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.player_avatar_service import (
     PlayerAvatarService,
     crop_face_png,
@@ -77,7 +78,7 @@ def test_crop_face_png_from_synthetic_skin() -> None:
 
 
 def test_get_cached_path_reads_disk(tmp_path: Path) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=True)
+    service = PlayerAvatarService(ExecutionRuntime(), cache_dir=tmp_path, enabled=True)
     uuid = "11111111222233334444555555555555"
     path = tmp_path / f"{uuid}.png"
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
@@ -88,7 +89,7 @@ def test_get_cached_path_reads_disk(tmp_path: Path) -> None:
 
 
 def test_disabled_service_skips_fetch(tmp_path: Path) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=False)
+    service = PlayerAvatarService(ExecutionRuntime(), cache_dir=tmp_path, enabled=False)
     results: list[object] = []
     service.load_avatar_async(
         "11111111222233334444555555555555",
@@ -98,17 +99,18 @@ def test_disabled_service_skips_fetch(tmp_path: Path) -> None:
 
 
 def test_invalid_uuid_callback_none(tmp_path: Path) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=True)
+    service = PlayerAvatarService(ExecutionRuntime(), cache_dir=tmp_path, enabled=True)
     results: list[object] = []
     service.load_avatar_async("not-a-uuid", lambda path: results.append(path))
     assert results == [None]
 
 
-def test_avatar_fetch_uses_owned_fallback_runtime(
+def test_avatar_fetch_uses_injected_runtime(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=True)
+    runtime = ExecutionRuntime()
+    service = PlayerAvatarService(runtime, cache_dir=tmp_path, enabled=True)
     fetched = threading.Event()
     worker_names: list[str] = []
     monkeypatch.setattr(
@@ -125,7 +127,9 @@ def test_avatar_fetch_uses_owned_fallback_runtime(
 
         assert fetched.wait(1)
         assert worker_names[0].startswith("mcsavehelper-io-")
+        assert service._execution_runtime is runtime
     finally:
         service.close()
-
-    assert service._execution_runtime.is_closed is True
+        # Service must not shut down the injected shared runtime.
+        assert runtime.is_closed is False
+        runtime.shutdown(wait=False)

@@ -113,22 +113,118 @@ def check_dependency_direction() -> CheckResult:
 
 
 def check_app_threadpools() -> CheckResult:
-    """应用服务层禁止再直接创建 ThreadPoolExecutor。"""
+    """应用服务层禁止再直接创建 ThreadPoolExecutor 或裸 threading.Thread。"""
     offenders: list[str] = []
     allowed = {
         "app/services/execution_runtime.py",
-        "app/services/runtime_map.py",
-        "app/services/world_index_service.py",
-        "app/services/region_map/meta.py",
     }
     for path in _iter_py_files(APP_ROOT / "services"):
         rel = path.relative_to(PROJECT_ROOT).as_posix()
+        if rel in allowed:
+            continue
         source = path.read_text(encoding="utf-8-sig")
-        if "ThreadPoolExecutor" in source and rel not in allowed:
+        if "ThreadPoolExecutor" in source or "threading.Thread(" in source:
             offenders.append(rel)
     if offenders:
         return CheckResult("app_threadpools", False, ", ".join(offenders))
-    return CheckResult("app_threadpools", True, "no direct ThreadPoolExecutor in services")
+    return CheckResult(
+        "app_threadpools",
+        True,
+        "services use ExecutionRuntime only",
+    )
+
+
+def check_no_private_execution_runtime_fallback() -> CheckResult:
+    """禁止应用服务在未注入时静默自建 ExecutionRuntime。"""
+    offenders: list[str] = []
+    patterns = (
+        "or ExecutionRuntime()",
+        "execution_runtime or ExecutionRuntime",
+        "ExecutionRuntime() if execution_runtime is None",
+        "or BackupService(",
+    )
+    for path in _iter_py_files(APP_ROOT / "services"):
+        rel = path.relative_to(PROJECT_ROOT).as_posix()
+        if rel == "app/services/execution_runtime.py":
+            continue
+        source = path.read_text(encoding="utf-8-sig")
+        if any(pattern in source for pattern in patterns):
+            offenders.append(rel)
+        if rel != "app/services/execution_runtime.py" and (
+            "ThreadPoolExecutor" in source or "threading.Thread(" in source
+        ):
+            offenders.append(f"{rel}:pool")
+    if offenders:
+        return CheckResult(
+            "no_private_execution_runtime",
+            False,
+            ", ".join(offenders),
+        )
+    return CheckResult(
+        "no_private_execution_runtime",
+        True,
+        "map/texture/repair/avatar require injected runtime",
+    )
+
+
+def check_region_delete_uses_transaction() -> CheckResult:
+    """区域删除必须走统一世界事务端口。"""
+    region_tab = APP_ROOT / "ui" / "views" / "explorer" / "region_tab.py"
+    editor = APP_ROOT / "services" / "region_editor_service.py"
+    if not region_tab.is_file() or not editor.is_file():
+        return CheckResult(
+            "region_delete_transaction",
+            False,
+            "missing region delete modules",
+        )
+    tab_source = region_tab.read_text(encoding="utf-8-sig")
+    editor_source = editor.read_text(encoding="utf-8-sig")
+    if "delete_region_via_transaction" not in tab_source:
+        return CheckResult(
+            "region_delete_transaction",
+            False,
+            "region_tab does not call delete_region_via_transaction",
+        )
+    if "world_transactions.mutate" not in editor_source:
+        return CheckResult(
+            "region_delete_transaction",
+            False,
+            "delete helper does not call world_transactions.mutate",
+        )
+    if "reset_region(region_path, backup=True)" in tab_source:
+        return CheckResult(
+            "region_delete_transaction",
+            False,
+            "region_tab still uses direct reset_region backup path",
+        )
+    return CheckResult(
+        "region_delete_transaction",
+        True,
+        "region delete uses WorldTransaction",
+    )
+
+
+def check_views_use_feature_context() -> CheckResult:
+    """顶层视图构造参数只接受 FeatureContext，不再联合 Application。"""
+    offenders: list[str] = []
+    views_root = APP_ROOT / "ui" / "views"
+    for path in _iter_py_files(views_root):
+        source = path.read_text(encoding="utf-8-sig")
+        if "Application | FeatureContext" in source:
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+        if 'from app.application import Application' in source:
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+    if offenders:
+        return CheckResult(
+            "views_feature_context",
+            False,
+            ", ".join(sorted(set(offenders))),
+        )
+    return CheckResult(
+        "views_feature_context",
+        True,
+        "views depend on FeatureContext only",
+    )
 
 
 def check_core_threadpool_bounds() -> CheckResult:
@@ -199,10 +295,13 @@ def check_region_map_package() -> CheckResult:
     if missing:
         return CheckResult("region_map_package", False, f"missing: {', '.join(missing)}")
     try:
+        from app.services.execution_runtime import ExecutionRuntime
         from app.services.region_map import RegionMapService
 
-        service = RegionMapService()
+        runtime = ExecutionRuntime()
+        service = RegionMapService(runtime)
         service.close()
+        runtime.shutdown(wait=False)
     except (ImportError, RuntimeError, ValueError, OSError) as exc:
         return CheckResult("region_map_package", False, f"import/lifecycle: {exc}")
     return CheckResult("region_map_package", True, "scan/meta/topview package present")
@@ -361,6 +460,9 @@ def run_all() -> list[CheckResult]:
     static_checks = [
         check_dependency_direction(),
         check_app_threadpools(),
+        check_no_private_execution_runtime_fallback(),
+        check_region_delete_uses_transaction(),
+        check_views_use_feature_context(),
         check_core_threadpool_bounds(),
         check_forbidden_runtime_dependencies(),
         check_region_map_package(),

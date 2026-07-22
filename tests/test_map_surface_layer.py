@@ -2,7 +2,8 @@ import asyncio
 from typing import Any, Coroutine, Optional, cast
 
 from app.controllers.topview_tile_requests import TopviewTileRequestCoordinator
-from app.services.region_map_service import RegionMapService
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 from app.ui.utils import ScheduledTask
 from app.ui.views.explorer.map.map_surface_layer import MapSurfaceLayer
 from core.mca.viewport import McaViewport
@@ -25,7 +26,7 @@ class _ImageSink:
 
 
 def test_surface_leaf_lod_only_activates_at_high_zoom() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     layer = MapSurfaceLayer(
         service,
         execution_runtime=service._execution_runtime,
@@ -43,7 +44,7 @@ def test_surface_leaf_lod_only_activates_at_high_zoom() -> None:
 
 
 def test_leaf_surface_accepts_256_parent_until_focus_tile_is_ready() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     coord = (0, 0)
     service._topview_tiles[coord] = b"parent"
     service._topview_tile_sizes[coord] = 256
@@ -64,7 +65,7 @@ def test_leaf_surface_accepts_256_parent_until_focus_tile_is_ready() -> None:
 
 
 def test_wide_view_reduces_surface_lod_without_cropping() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     layer = MapSurfaceLayer(
         service,
         execution_runtime=service._execution_runtime,
@@ -108,7 +109,7 @@ def test_wide_view_reduces_surface_lod_without_cropping() -> None:
 
 def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
     async def scenario() -> None:
-        service = RegionMapService()
+        service = RegionMapService(ExecutionRuntime())
         service._mca_data[(0, 0)] = 1
         service._mark_data_dirty()
         active = True
@@ -166,7 +167,7 @@ def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
 
 
 def test_surface_layer_ignores_tile_callbacks_outside_buffer() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     layer = MapSurfaceLayer(
         service,
         execution_runtime=service._execution_runtime,
@@ -194,7 +195,7 @@ def test_surface_layer_ignores_tile_callbacks_outside_buffer() -> None:
 
 
 def test_visible_request_ledger_retries_tiles_rejected_by_full_queue() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers
     queued_count = service.TOPVIEW_QUEUE_LIMIT - service._topview_active
     queued_coords = [(index, 0) for index in range(queued_count)]

@@ -6,9 +6,9 @@ from typing import Any, cast
 
 import flet as ft
 
-from app.application import Application
 from app.controllers.map_controller import MapController
 from app.services.map_marker_service import MapMarkerService
+from app.ui.feature_context import FeatureContext
 from app.ui.views.explorer.region_tab import RegionTabMixin
 from core.mca.map_models import MapLayerState, MapViewState
 
@@ -38,7 +38,7 @@ class _MapView:
 
 def _host() -> RegionTabMixin:
     host = RegionTabMixin()
-    host.app = cast(Application, _App())
+    host.app = cast(FeatureContext, _App())
     host._map_view = cast(Any, _MapView())
     host._region_display_mode_dropdown = ft.Dropdown()
     host._map_coord_btn = ft.IconButton()

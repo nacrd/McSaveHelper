@@ -28,7 +28,7 @@ from core.mca.topview_renderer import ULTRA_TILE_SIZE
 from core.mca.viewport import McaViewport
 
 if TYPE_CHECKING:
-    from app.services.region_map_service import RegionMapService
+    from app.services.region_map import RegionMapService
 
 
 RegionCoord = Tuple[int, int]

@@ -17,6 +17,18 @@ def test_application_module_stays_under_250_lines() -> None:
     assert len(lines) < 250
 
 
+def test_views_do_not_type_application_union() -> None:
+    views_root = PROJECT_ROOT / "app" / "ui" / "views"
+    offenders: list[str] = []
+    for path in views_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        if "Application | FeatureContext" in source:
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+        if "from app.application import Application" in source:
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+    assert offenders == []
+
+
 def test_feature_context_delegates_host_ports() -> None:
     calls: list[str] = []
 

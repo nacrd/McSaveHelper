@@ -486,7 +486,7 @@ class StatsTabMixin(ExplorerMixinHost):
         self._player_sort_key = str(value)
         if not self._player_stats_cache:
             return
-        service = self._stats_service_cache or WorldStatsService()
+        service = self._ensure_world_stats_service()
         sorted_players = WorldStatsService.sort_player_stats(
             self._player_stats_cache,
             self._player_sort_key,
@@ -648,10 +648,16 @@ class StatsTabMixin(ExplorerMixinHost):
                 title=self._t("stats.error_title", "统计存档失败"),
             )
 
-    def _start_stats_analysis(self, world_path: Path) -> None:
-        from app.services.world_stats_service import get_world_stats_service
+    def _ensure_world_stats_service(self) -> WorldStatsService:
+        """返回本视图会话持有的统计服务；不在 UI 分支静默新建第二份。"""
+        service = getattr(self, "_stats_service_cache", None)
+        if service is None:
+            service = WorldStatsService(log=self.app.log)
+            self._stats_service_cache = service
+        return service
 
-        service = get_world_stats_service(log=self.app.log)
+    def _start_stats_analysis(self, world_path: Path) -> None:
+        service = self._ensure_world_stats_service()
         self._stats_generation = getattr(self, "_stats_generation", 0) + 1
         generation = self._stats_generation
         self._stats_busy = True

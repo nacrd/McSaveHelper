@@ -10,7 +10,7 @@ import flet as ft
 from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices
 from app.services.execution_runtime import ExecutionRuntime
-from app.services.region_map_service import RegionMapService
+from app.services.region_map import RegionMapService
 
 
 class FeatureHost(Protocol):

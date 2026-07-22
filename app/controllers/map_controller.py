@@ -33,16 +33,16 @@ class MapController:
 
     def __init__(
         self,
-        marker_service: Optional[MapMarkerService] = None,
+        marker_service: MapMarkerService,
         on_state_changed: Optional[StateCallback] = None,
     ) -> None:
         """创建空会话。
 
         Args:
-            marker_service: 标记持久化服务；缺省新建实例。
+            marker_service: 标记持久化服务（必填；由视图或组合根显式注入）。
             on_state_changed: 状态变更时同步回调（通常在 UI 线程）。
         """
-        self._marker_service = marker_service or MapMarkerService()
+        self._marker_service = marker_service
         self._on_state_changed = on_state_changed
         self._world_path: Optional[Path] = None
         self._dimensions: dict[str, MapDimension] = {}

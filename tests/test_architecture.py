@@ -177,6 +177,198 @@ def test_item_and_texture_services_are_application_scoped() -> None:
     assert "get_texture_service" not in view_sources
 
 
+def test_app_services_require_injected_execution_runtime() -> None:
+    """Map/texture/repair/avatar must not silently create private runtimes."""
+    services_root = PROJECT_ROOT / "app" / "services"
+    forbidden = (
+        "or ExecutionRuntime()",
+        "execution_runtime or ExecutionRuntime",
+        "ExecutionRuntime() if execution_runtime is None",
+    )
+    offenders: list[str] = []
+    for path in services_root.rglob("*.py"):
+        if path.name == "execution_runtime.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        if any(token in source for token in forbidden):
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+    assert offenders == []
+
+
+def test_map_controller_requires_marker_service_injection() -> None:
+    """MapController must not self-construct MapMarkerService."""
+    from inspect import Parameter, signature
+
+    from app.controllers.map_controller import MapController
+    from app.services.map_marker_service import MapMarkerService
+
+    source = (
+        PROJECT_ROOT / "app/controllers/map_controller.py"
+    ).read_text(encoding="utf-8")
+    assert "or MapMarkerService()" not in source
+    param = signature(MapController.__init__).parameters["marker_service"]
+    assert param.default is Parameter.empty
+
+    markers = MapMarkerService()
+    controller = MapController(markers)
+    assert controller._marker_service is markers
+
+
+def test_stats_tab_does_not_silently_construct_world_stats_service() -> None:
+    """Explorer stats path reuses a cached service, not ad-hoc fallbacks."""
+    source = (
+        PROJECT_ROOT / "app/ui/views/explorer/stats_tab.py"
+    ).read_text(encoding="utf-8")
+    assert "or WorldStatsService()" not in source
+    assert "get_world_stats_service" not in source
+    assert "_ensure_world_stats_service" in source
+
+
+def test_composition_root_injects_shared_runtime_into_services() -> None:
+    """App bootstrap and map factory wire the same runtime instance."""
+    from app.bootstrap.services import create_app_services
+    from app.services.region_map import RegionMapService
+
+    services = create_app_services()
+    try:
+        assert services.texture._execution_runtime is services.execution_runtime
+        assert (
+            services.save_repair._execution_runtime
+            is services.execution_runtime
+        )
+        map_service = RegionMapService(
+            services.execution_runtime,
+            cache_registry=services.cache_registry,
+        )
+        try:
+            assert map_service.execution_runtime is services.execution_runtime
+            # Background work must stay on the shared runtime, not a private pool.
+            handle = map_service.execution_runtime.submit(
+                "architecture_runtime_probe",
+                lambda token: token.is_cancelled,
+            )
+            assert handle.result(timeout=2) is False
+        finally:
+            map_service.close()
+    finally:
+        services.execution_runtime.shutdown(wait=False)
+        services.cache_registry.close()
+
+
+def test_app_services_forbid_private_threadpool_and_write_fallbacks() -> None:
+    """Stage 1/3: no private pools or BackupService self-construction in services."""
+    services_root = PROJECT_ROOT / "app" / "services"
+    offenders: list[str] = []
+    for path in services_root.rglob("*.py"):
+        if path.name == "execution_runtime.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        rel = path.relative_to(PROJECT_ROOT).as_posix()
+        if "ThreadPoolExecutor" in source or "threading.Thread(" in source:
+            offenders.append(f"{rel}:pool")
+        if "or BackupService(" in source or "or ExecutionRuntime()" in source:
+            offenders.append(f"{rel}:fallback")
+    assert offenders == []
+
+
+def test_region_destructive_delete_uses_world_transaction() -> None:
+    """Stage 3: UI region delete routes through the transaction helper."""
+    region_tab = (
+        PROJECT_ROOT / "app/ui/views/explorer/region_tab.py"
+    ).read_text(encoding="utf-8")
+    editor = (
+        PROJECT_ROOT / "app/services/region_editor_service.py"
+    ).read_text(encoding="utf-8")
+    assert "delete_region_via_transaction" in region_tab
+    assert "world_writes.reserve" not in region_tab
+    assert "reset_region(region_path, backup=True)" not in region_tab
+    assert "def delete_region_via_transaction" in editor
+    assert "world_transactions.mutate" in editor
+
+
+def test_read_paths_use_world_repository_index() -> None:
+    """Stage 2: compare/stats/explorer share world_repository for inventory."""
+    compare = (
+        PROJECT_ROOT / "app/ui/views/compare.py"
+    ).read_text(encoding="utf-8")
+    stats = (
+        PROJECT_ROOT / "app/ui/views/explorer/stats_tab.py"
+    ).read_text(encoding="utf-8")
+    explorer = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    assert "world_repository.get_index" in compare or "index_provider" in compare
+    assert "world_repository.get_index" in stats
+    assert "world_repository" in explorer
+
+
+def test_feature_registry_drives_catalog_and_application_budget() -> None:
+    """Stage 5: registry catalog + FeatureContext views + thin application."""
+    view_catalog = (
+        PROJECT_ROOT / "app/ui/view_catalog.py"
+    ).read_text(encoding="utf-8")
+    assert "DEFAULT_FEATURE_REGISTRY" in view_catalog
+    app_lines = (PROJECT_ROOT / "app/application.py").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(app_lines) < 250
+    views_root = PROJECT_ROOT / "app/ui/views"
+    for path in views_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert "Application | FeatureContext" not in source
+        assert "from app.application import Application" not in source
+
+
+def test_scoped_views_dispose_task_scopes() -> None:
+    """Stage 5: views owning runtime scopes cancel them on dispose."""
+    for relative in (
+        "app/ui/views/explorer/explorer_view.py",
+        "app/ui/views/compare.py",
+        "app/ui/views/save_repair.py",
+        "app/ui/views/backup_center.py",
+        "app/ui/views/entity_block_search.py",
+    ):
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        assert "create_scope" in source, relative
+        assert "def dispose" in source, relative
+        assert "_task_scope.close()" in source, relative
+
+
+def test_map_and_world_index_register_with_cache_budget() -> None:
+    """Stage 4: map topview and world index participate in CacheRegistry."""
+    from app.bootstrap.services import create_app_services
+    from app.services.region_map import RegionMapService
+
+    services = create_app_services()
+    try:
+        names = {item.name for item in services.cache_registry.stats().regions}
+        assert "world.index" in names
+        map_service = RegionMapService(
+            services.execution_runtime,
+            cache_registry=services.cache_registry,
+        )
+        try:
+            names_with_map = {
+                item.name for item in services.cache_registry.stats().regions
+            }
+            assert any(name.startswith("map.topview.") for name in names_with_map)
+            generation_before = map_service.get_topview_generation()
+            map_service.clear_data()
+            assert map_service.get_topview_generation() > generation_before
+        finally:
+            map_service.close()
+            names_after = {
+                item.name for item in services.cache_registry.stats().regions
+            }
+            assert not any(
+                name.startswith("map.topview.") for name in names_after
+            )
+    finally:
+        services.world_indexes.close()
+        services.execution_runtime.shutdown(wait=False)
+        services.cache_registry.close()
+
+
 def test_application_does_not_mutate_migrator_private_controls() -> None:
     app_root = PROJECT_ROOT / "app"
     application_source = "".join(

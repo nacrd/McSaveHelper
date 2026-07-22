@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-from app.application import Application
 from app.services.execution_runtime import ExecutionRuntime
+from app.ui.feature_context import FeatureContext
 from app.ui.views.explorer.map.export_dialog import (
     MapExportDialog,
     MapExportSession,
@@ -69,7 +69,7 @@ def test_default_output_path_uses_dimension_suffix() -> None:
 
 def test_open_prefills_selected_region(tmp_path: Path) -> None:
     app = _App()
-    dialog = MapExportDialog(cast(Application, app))
+    dialog = MapExportDialog(cast(FeatureContext, app))
     session = MapExportSession(
         world_path=tmp_path / "world",
         dimension_id="overworld",
@@ -89,7 +89,7 @@ def test_open_prefills_selected_region(tmp_path: Path) -> None:
 
 def test_open_without_selection_defaults_to_full_dimension(tmp_path: Path) -> None:
     app = _App()
-    dialog = MapExportDialog(cast(Application, app))
+    dialog = MapExportDialog(cast(FeatureContext, app))
     (tmp_path / "world").mkdir()
 
     dialog.open(
@@ -106,7 +106,7 @@ def test_open_without_selection_defaults_to_full_dimension(tmp_path: Path) -> No
 
 def test_dispose_cancels_export_and_closes_dialog(tmp_path: Path) -> None:
     app = _App()
-    dialog = MapExportDialog(cast(Application, app))
+    dialog = MapExportDialog(cast(FeatureContext, app))
     (tmp_path / "world").mkdir()
     dialog.open(
         MapExportSession(

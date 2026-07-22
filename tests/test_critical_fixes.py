@@ -361,7 +361,19 @@ class TestOmniNbtEditing:
             [Compound({"Count": Int(1), "id": String("minecraft:stone")})]), }))
         player.save(playerdata / f"{player_uuid}.dat")
 
-        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        backups: list[Path] = []
+
+        def backup_cb(target: Path) -> Path:
+            backups.append(target)
+            dest = tmp_path / "managed-backup"
+            dest.mkdir(exist_ok=True)
+            return dest
+
+        session = WorldSession(
+            world,
+            log=lambda msg, level="INFO": None,
+            backup_callback=backup_cb,
+        )
         session.queue_modify_nbt(
             player_uuid, [
                 "Inventory", 0, "Count"], Int(64))
@@ -369,7 +381,8 @@ class TestOmniNbtEditing:
         assert session.get_queue_size() == 1
         assert session.commit(backup=True)
         assert session.get_queue_size() == 0
-        assert (tmp_path / "world.backup").exists()
+        assert backups == [world.resolve()]
+        assert not (tmp_path / "world.backup").exists()
 
         updated = nbtlib.load(playerdata / f"{player_uuid}.dat")
         assert updated["Inventory"][0]["Count"] == Int(64)
@@ -386,7 +399,11 @@ class TestOmniNbtEditing:
             {"LevelName": String("old"), "Version": Compound({"Id": Int(1)})})}))
         level.save(world / "level.dat")
 
-        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session = WorldSession(
+            world,
+            log=lambda msg, level="INFO": None,
+            backup_callback=lambda target: target,
+        )
         session.queue_modify_nbt(
             Path("level.dat"), [
                 "Data", "LevelName"], String("new"))
@@ -411,7 +428,11 @@ class TestOmniNbtEditing:
         raids = File(Compound({"Data": Compound({"Name": String("old")})}))
         raids.save(data_dir / "raids.dat")
 
-        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session = WorldSession(
+            world,
+            log=lambda msg, level="INFO": None,
+            backup_callback=lambda target: target,
+        )
         session.queue_modify_nbt(
             "data/raids.dat", ["Data", "Name"], String("new"))
 
@@ -456,7 +477,11 @@ class TestOmniNbtEditing:
         stats_path.write_text(json.dumps(
             {"stats": {"minecraft:mined": {"minecraft:stone": 1}}}), encoding="utf-8")
 
-        session = WorldSession(world, log=lambda msg, level="INFO": None)
+        session = WorldSession(
+            world,
+            log=lambda msg, level="INFO": None,
+            backup_callback=lambda target: target,
+        )
         session.queue_modify_json(
             "stats/player.json", ["stats", "minecraft:mined", "minecraft:stone"], 8)
 

@@ -21,14 +21,13 @@ from app.ui.view_actions import ViewAction
 from app.ui.utils import safe_update
 
 if TYPE_CHECKING:
-    from app.application import Application
     from app.ui.feature_context import FeatureContext
 
 
 class MappingsView(ft.Column):
     """映射管理视图 — UUID映射 + 物品映射"""
 
-    def __init__(self, app: "Application | FeatureContext") -> None:
+    def __init__(self, app: "FeatureContext") -> None:
         """初始化映射管理视图。
 
         Args:
@@ -36,7 +35,7 @@ class MappingsView(ft.Column):
         """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
-        self.app: "Application | FeatureContext" = app
+        self.app: "FeatureContext" = app
         self._item_service = app.item
         self._build()
 

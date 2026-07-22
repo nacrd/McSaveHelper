@@ -128,17 +128,16 @@ class WorldDetector:
     def __init__(
         self,
         cancel_event: threading.Event,
-        execution_runtime: Optional[ExecutionRuntime] = None,
+        execution_runtime: ExecutionRuntime,
     ) -> None:
         """初始化检测器。
 
         Args:
             cancel_event: 协作式取消事件。
-            execution_runtime: 可选共享运行时；缺省创建本地有界运行时。
+            execution_runtime: 应用共享后台运行时（必填）。
         """
         self._cancel_event = cancel_event
-        self._execution_runtime = execution_runtime or ExecutionRuntime()
-        self._owns_execution_runtime = execution_runtime is None
+        self._execution_runtime = execution_runtime
 
     @property
     def is_cancelled(self) -> bool:
@@ -146,10 +145,8 @@ class WorldDetector:
         return self._cancel_event.is_set()
 
     def close(self) -> None:
-        """释放本地拥有的运行时；可重复调用。"""
-        if self._owns_execution_runtime:
-            self._execution_runtime.shutdown(wait=False)
-            self._owns_execution_runtime = False
+        """幂等关闭钩子；不关闭共享运行时。"""
+        return
 
     def detect_world(
         self,

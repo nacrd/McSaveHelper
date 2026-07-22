@@ -657,15 +657,35 @@ class RegionTabMixin(ExplorerMixinHost):
             if not region_path.exists():
                 self.app.warn_dialog("提示", f"区域文件不存在: {region_path.name}")
                 return
-            from app.services.region_editor_service import get_region_editor_service
-            service = get_region_editor_service(log=self.app.log)
-            with self.app.services.world_writes.reserve(
-                self.world_session.world_path
-            ):
-                deleted = service.reset_region(region_path, backup=True)
-            if deleted:
+            from app.services.region_editor_service import (
+                delete_region_via_transaction,
+            )
+            from app.services.world_transaction import (
+                WorldTransactionCancelledError,
+                WorldTransactionError,
+            )
+
+            world_path = self.world_session.world_path
+            try:
+                result = delete_region_via_transaction(
+                    self.app.services.world_transactions,
+                    world_path,
+                    region_path,
+                    backup_label="删除区域前自动备份",
+                    log=self.app.log,
+                )
+            except WorldTransactionCancelledError:
+                self.app.warn_dialog("提示", "区域删除已取消，原存档保持不变。")
+                return
+            except WorldTransactionError as exc:
+                self.app.warn_dialog("失败", f"区域删除失败: {exc}")
+                return
+            if result.value:
                 self.app.info_dialog(
-                    "成功", f"已删除区域 {coord}，游戏下次进入会重新生成。备份文件保留为 .bak。")
+                    "成功",
+                    f"已删除区域 {coord}，游戏下次进入会重新生成。"
+                    f"安全备份: {result.backup.backup_path.name}",
+                )
                 self._selected_region_coord = None
                 self._refresh_map()
             else:

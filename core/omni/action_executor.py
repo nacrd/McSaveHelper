@@ -92,16 +92,13 @@ class ActionExecutor:
                 )
 
     def _create_backup(self, target_world: Path) -> None:
-        if self._backup_callback:
-            backup_path = self._backup_callback(target_world)
-            self._log(f"已备份原存档到 {backup_path}", "BACKUP")
-            return
-        backup_dir = target_world.parent / f"{target_world.name}.backup"
-        if backup_dir.exists():
-            shutil.rmtree(backup_dir)
-        with PerfTimer("action_executor.backup"):
-            shutil.copytree(target_world, backup_dir)
-        self._log(f"已备份原存档到 {backup_dir}", "BACKUP")
+        if self._backup_callback is None:
+            raise RuntimeError(
+                "commit(backup=True) 需要注入 backup_callback 或使用 "
+                "WorldTransaction；禁止隐式 .backup 目录复制"
+            )
+        backup_path = self._backup_callback(target_world)
+        self._log(f"已备份原存档到 {backup_path}", "BACKUP")
 
     def _execute_transaction(
         self,

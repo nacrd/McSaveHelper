@@ -4,13 +4,14 @@ from typing import cast
 
 import flet as ft
 
-from app.services.region_map_service import RegionMapService
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 from app.ui.views.explorer.map.mca_map_view import McaMapView
 
 
 def _controller(side_visible=True):
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     map_view = McaMapView(map_service=service, width=900, height=560)
     host = ft.Container(content=map_view)
     side = ft.Container(visible=side_visible)
@@ -50,7 +51,7 @@ def test_tab_only_fullscreen_restores_map_and_visibility() -> None:
 
 
 def test_fullscreen_restore_is_idempotent_for_wrapped_inline_content() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     map_view = McaMapView(map_service=service)
     original = ft.Stack([map_view])
     host = ft.Container(content=original)

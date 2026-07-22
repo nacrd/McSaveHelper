@@ -13,6 +13,7 @@ from core.texture.block_guess import (
     resolve_texture_resource_key,
 )
 from core.texture.client_jar import ClientJarInfo
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.texture_service import TextureService
 
 
@@ -97,7 +98,7 @@ def test_import_textures_from_jars_bulk_extracts_pngs(
         archive.writestr("assets/examplemod/textures/item/widget.png", png)
         archive.writestr("assets/minecraft/lang/zh_cn.json", "{}")
 
-    service = TextureService()
+    service = TextureService(ExecutionRuntime())
     monkeypatch.setattr(service, "_cache_dir", cache_dir)
     # Avoid network / local MC discovery side effects.
     monkeypatch.setattr(service, "find_minecraft_jar", lambda: None)
@@ -195,7 +196,7 @@ def test_find_local_jar_uses_release_time_not_version_string(
 
 
 def test_texture_cache_rejects_item_id_path_traversal(tmp_path: Path) -> None:
-    service = TextureService()
+    service = TextureService(ExecutionRuntime())
     service._cache_dir = tmp_path / "cache"
     service._cache_dir.mkdir()
     outside = tmp_path / "review_probe.png"
@@ -208,7 +209,7 @@ def test_client_jar_download_is_single_flight(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
-    service = TextureService()
+    service = TextureService(ExecutionRuntime())
     service._jar_cache_dir = tmp_path
     target = tmp_path / "client.jar"
     entered = threading.Event()
@@ -251,10 +252,11 @@ def test_block_guess_and_resource_resolution_are_pure() -> None:
     ) == "textures/item/diamond_sword.png"
 
 
-def test_async_texture_load_uses_owned_fallback_runtime(
+def test_async_texture_load_uses_injected_runtime(
     monkeypatch: Any,
 ) -> None:
-    service = TextureService()
+    runtime = ExecutionRuntime()
+    service = TextureService(runtime)
     loaded = threading.Event()
     worker_names: list[str] = []
     monkeypatch.setattr(
@@ -271,7 +273,9 @@ def test_async_texture_load_uses_owned_fallback_runtime(
 
         assert loaded.wait(1)
         assert worker_names[0].startswith("mcsavehelper-io-")
+        assert service._execution_runtime is runtime
     finally:
         service.close()
-
-    assert service._execution_runtime.is_closed is True
+        # Injected shared runtime is owned by the composition root.
+        assert runtime.is_closed is False
+        runtime.shutdown(wait=False)

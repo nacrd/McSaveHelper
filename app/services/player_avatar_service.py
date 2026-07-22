@@ -123,14 +123,15 @@ class PlayerAvatarService:
 
     def __init__(
         self,
+        execution_runtime: ExecutionRuntime,
         cache_dir: Optional[Path] = None,
         *,
         enabled: bool = True,
-        execution_runtime: Optional[ExecutionRuntime] = None,
     ) -> None:
         """初始化头像缓存目录与内存索引。
 
         Args:
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
             cache_dir: 本地 PNG 缓存目录；缺省 ``~/.mc_save_helper/avatars``。
             enabled: 是否启用远程拉取；为 False 时仅读本地缓存。
         """
@@ -145,8 +146,7 @@ class PlayerAvatarService:
         self._lock = threading.Lock()
         self._inflight: Dict[str, list[Callable[[Optional[str]], None]]] = {}
         self._failed: set[str] = set()
-        self._execution_runtime = execution_runtime or ExecutionRuntime()
-        self._owns_execution_runtime = execution_runtime is None
+        self._execution_runtime = execution_runtime
         self._closed = False
 
     @property
@@ -228,7 +228,7 @@ class PlayerAvatarService:
         )
 
     def close(self) -> None:
-        """停止自有后台任务并丢弃不再需要的内存状态；可重复调用。"""
+        """丢弃内存状态；不关闭共享运行时（由组合根释放）。"""
         if self._closed:
             return
         self._closed = True
@@ -236,8 +236,6 @@ class PlayerAvatarService:
             self._memory.clear()
             self._inflight.clear()
             self._failed.clear()
-        if self._owns_execution_runtime:
-            self._execution_runtime.shutdown(wait=False)
 
     def _fetch_worker(self, norm: str) -> None:
         """Background worker: fetch/cache avatar and invoke waiters."""

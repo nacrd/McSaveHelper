@@ -158,6 +158,38 @@ def test_builder_rejects_non_world(tmp_path: Path) -> None:
         WorldIndexBuilder().build(tmp_path)
 
 
+def test_builder_refresh_reuses_snapshot_when_probe_stable(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    builder = WorldIndexBuilder()
+    first = builder.build(world)
+    second = builder.refresh(first)
+    (world / "stats" / "extra.json").write_text("{}", encoding="utf-8")
+    third = builder.refresh(first)
+
+    assert second is first
+    assert third is not first
+    assert len(third.stats_files) == 2
+    assert third.probe != first.probe
+
+
+def test_registry_refresh_matches_get_consistency(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    registry = WorldIndexRegistry()
+    first = registry.get(world)
+    warm = registry.refresh(world)
+    (world / "region" / "r.1.0.mca").write_bytes(b"region")
+    rebuilt = registry.refresh(world)
+    via_get = registry.get(world)
+
+    assert warm is first
+    assert rebuilt is not first
+    assert via_get is rebuilt
+    assert len(rebuilt.region_files) == 2
+    assert registry.stats().builds >= 2
+
+
 def test_registry_registers_with_cache_registry(tmp_path: Path) -> None:
     world = _world(tmp_path)
     registry = CacheRegistry(budget_bytes=8 * 256 * 1024)

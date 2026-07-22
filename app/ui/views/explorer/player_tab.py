@@ -135,8 +135,8 @@ class PlayerTabMixin(ExplorerMixinHost):
         service = getattr(self, "_player_avatar_service_instance", None)
         if service is None:
             service = PlayerAvatarService(
+                self.app.execution_runtime,
                 enabled=True,
-                execution_runtime=self.app.execution_runtime,
             )
             self._player_avatar_service_instance = service
         return service

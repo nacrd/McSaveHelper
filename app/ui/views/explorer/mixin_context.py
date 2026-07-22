@@ -12,12 +12,12 @@ from app.models.nbt_edit import (
     NbtTarget,
 )
 from app.services.execution_runtime import OperationScope
-from app.services.region_map_service import RegionMapService
+from app.services.region_map import RegionMapService
 from app.controllers.map_controller import MapController
 from core.omni.world_session import WorldSession
 
 if TYPE_CHECKING:
-    from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 class ExplorerMixinHost:
@@ -28,7 +28,7 @@ class ExplorerMixinHost:
     inheritance composition.
     """
 
-    app: "Application"
+    app: "FeatureContext"
     world_session: Optional[WorldSession]
     current_uuid: Optional[str]
 

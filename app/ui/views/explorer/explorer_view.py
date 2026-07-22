@@ -16,7 +16,6 @@ from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_
 from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
-    from app.application import Application
     from app.ui.feature_context import FeatureContext
 
 from core.omni.world_session import WorldSession
@@ -34,6 +33,7 @@ from app.ui.views.explorer.explorer_helpers import (
 )
 from app.controllers.map_controller import MapController
 from app.services.execution_runtime import TaskPriority
+from app.services.map_marker_service import MapMarkerService
 
 
 class ExplorerView(
@@ -45,7 +45,7 @@ class ExplorerView(
         ft.Column):
     """存档浏览器视图"""
 
-    def __init__(self, app: "Application | FeatureContext") -> None:
+    def __init__(self, app: "FeatureContext") -> None:
         """初始化存档浏览器主视图及其子 Tab 状态。
 
         Args:
@@ -53,7 +53,7 @@ class ExplorerView(
         """
         super().__init__(spacing=0)
         self.expand = True
-        self.app: "Application | FeatureContext" = app
+        self.app: "FeatureContext" = app
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
@@ -67,7 +67,7 @@ class ExplorerView(
         self._task_scope = self.app.execution_runtime.create_scope(
             "explorer_view"
         )
-        self._map_controller = MapController()
+        self._map_controller = MapController(MapMarkerService())
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
