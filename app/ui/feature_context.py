@@ -104,18 +104,6 @@ class FeatureHost(Protocol):
         """Persist UUID mappings."""
         ...
 
-    def start(self) -> None:
-        """Start migration."""
-        ...
-
-    def set_dest(self) -> None:
-        """Pick migration destination."""
-        ...
-
-    def set_batch_dir(self) -> None:
-        """Pick batch directory."""
-        ...
-
     @property
     def current_save_path(self) -> Optional[str]:
         """Selected save path."""
@@ -281,15 +269,6 @@ class FeatureContext:
 
     def update_uuid_mappings(self, mappings: dict[str, str]) -> None:
         self.host.update_uuid_mappings(mappings)
-
-    def start(self) -> None:
-        self.host.start()
-
-    def set_dest(self) -> None:
-        self.host.set_dest()
-
-    def set_batch_dir(self) -> None:
-        self.host.set_batch_dir()
 
     def open_world_session(
         self,

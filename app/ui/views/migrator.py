@@ -56,7 +56,7 @@ class MigratorView(ft.Column):
         return [
             ViewAction(
                 self._t("top_bar.start_conversion", "开始转换"),
-                lambda event: self.app.start(),
+                lambda event: self.app.host.start(),
             ),
             ViewAction(
                 self._t("top_bar.cancel_batch", "取消批量处理"),
@@ -152,7 +152,7 @@ class MigratorView(ft.Column):
             dest_path=mc.dest_path or "",
             world_name=mc.world_name or "world",
             on_field_change=self._sync_field_to_config,
-            on_browse_dest=self.app.set_dest,
+            on_browse_dest=self.app.host.set_dest,
         )
         self._src_field = directory.src_field
         self._dest_field = directory.dest_field
@@ -226,7 +226,7 @@ class MigratorView(ft.Column):
             batch_dir_path=mc.batch_dir_path or "",
             on_toggle_batch=self._toggle_batch,
             on_field_change=self._sync_field_to_config,
-            on_browse_batch=self.app.set_batch_dir,
+            on_browse_batch=self.app.host.set_batch_dir,
             on_scan_batch=self._scan_batch,
         )
         self._batch_mode_cb = batch.batch_mode_cb

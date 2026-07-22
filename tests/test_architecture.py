@@ -302,6 +302,22 @@ def test_read_paths_use_world_repository_index() -> None:
     assert "world_repository" in explorer
 
 
+def test_feature_context_omits_migration_only_shortcuts() -> None:
+    """FeatureContext stays thin: migration UI goes through host, not ctx."""
+    source = (
+        PROJECT_ROOT / "app/ui/feature_context.py"
+    ).read_text(encoding="utf-8")
+    # Proxies removed from FeatureContext body (host may still implement them).
+    assert "\n    def start(self)" not in source
+    assert "\n    def set_dest(self)" not in source
+    assert "\n    def set_batch_dir(self)" not in source
+    migrator = (
+        PROJECT_ROOT / "app/ui/views/migrator.py"
+    ).read_text(encoding="utf-8")
+    assert "self.app.host.start" in migrator
+    assert "self.app.host.set_dest" in migrator
+
+
 def test_feature_registry_drives_catalog_and_application_budget() -> None:
     """Stage 5: registry catalog + FeatureContext views + thin application."""
     view_catalog = (

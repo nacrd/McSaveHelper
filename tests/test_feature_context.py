@@ -59,9 +59,6 @@ def test_feature_context_delegates_host_ports() -> None:
         update_progress_with_task=lambda task, value: calls.append("progress"),
         create_region_map_service=lambda: "map",
         update_uuid_mappings=lambda mappings: calls.append("uuid"),
-        start=lambda: calls.append("start"),
-        set_dest=lambda: calls.append("dest"),
-        set_batch_dir=lambda: calls.append("batch"),
     )
 
     ctx = FeatureContext(host)  # type: ignore[arg-type]
@@ -70,6 +67,7 @@ def test_feature_context_delegates_host_ports() -> None:
     assert ctx.create_region_map_service() == "map"
     assert ctx.current_save_path == "C:/tmp/world"
     ctx.show_progress("task")
-    ctx.start()
     assert "show" in calls
-    assert "start" in calls
+    assert not hasattr(ctx, "start")
+    assert not hasattr(ctx, "set_dest")
+    assert not hasattr(ctx, "set_batch_dir")
