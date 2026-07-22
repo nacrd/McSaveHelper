@@ -357,12 +357,42 @@ class ExplorerView(
             self.app.handle_exception(ex, title="设置当前存档失败")
 
     def _load_world_worker(self, path: str, generation: int) -> None:
-        """Load a world off the UI thread and schedule one result callback."""
+        """Load shell metadata first, then full session (progressive publish)."""
         try:
-            session = self._create_world_session(Path(path), self.app.log)
+            world = Path(path)
+            try:
+                shell = self.app.services.world_repository.get_shell_metadata(
+                    world,
+                )
+                self.app.page.run_task(
+                    self._apply_shell_metadata,
+                    shell,
+                    generation,
+                )
+            except (OSError, ValueError, FileNotFoundError, TypeError):
+                # Shell metadata is best-effort; full load still proceeds.
+                pass
+            session = self._create_world_session(world, self.app.log)
             self.app.page.run_task(self._apply_loaded_world, session, generation)
         except Exception as exc:
             self.app.page.run_task(self._show_world_load_error, exc, generation)
+
+    async def _apply_shell_metadata(
+        self,
+        shell: Any,
+        generation: int,
+    ) -> None:
+        """首屏：在完整会话前显示世界名与区域规模提示。"""
+        if generation != self._world_load_generation:
+            return
+        name = getattr(shell, "display_name", None) or "..."
+        regions = int(getattr(shell, "overworld_region_count", 0) or 0)
+        dims = int(getattr(shell, "dimension_hint_count", 0) or 0)
+        self._world_label.value = (
+            f"⏳ {name} · 区域 {regions} · 维度提示 {dims} · 加载中..."
+        )
+        self._world_label.color = THEME.mc_gold
+        safe_update(self._world_label)
 
     def _create_world_session(
         self,

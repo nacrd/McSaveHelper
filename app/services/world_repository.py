@@ -16,7 +16,7 @@ from app.services.world_index_service import (
 )
 from core.omni.world_session import WorldSession
 from core.types import LogCallback
-from core.world_index import WorldIndexSnapshot
+from core.world_index import WorldIndexBuilder, WorldIndexSnapshot, WorldShellMetadata
 
 
 WorldMutation = Callable[[Path], Any]
@@ -60,6 +60,13 @@ class WorldRepository:
     ) -> WorldIndexSnapshot:
         """返回世界只读索引快照。"""
         return self._indexes.get(world_path, force_refresh=force_refresh)
+
+    def get_shell_metadata(
+        self,
+        world_path: Path | str,
+    ) -> WorldShellMetadata:
+        """返回首屏轻量元数据（完整索引之前可用）。"""
+        return WorldIndexBuilder().shell_metadata(world_path)
 
     def open_session(
         self,
@@ -112,4 +119,5 @@ class WorldRepository:
 __all__ = [
     "WorldRepository",
     "WorldSessionPorts",
+    "WorldShellMetadata",
 ]

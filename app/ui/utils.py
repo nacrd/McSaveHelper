@@ -97,6 +97,19 @@ def run_on_ui(
             return
 
 
+def deliver_to_ui(
+    page: Optional[ft.Page],
+    func: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> None:
+    """UI 投递通道（文档 ``ui`` lane）：只把结果调度到 Flet 线程。
+
+    与 ``run_on_ui`` 等价；命名强调不得在此回调内执行文件 I/O / NBT 解析。
+    """
+    run_on_ui(page, func, *args, **kwargs)
+
+
 def schedule_coroutine(
     coroutine: Coroutine[Any, Any, Any],
     *,

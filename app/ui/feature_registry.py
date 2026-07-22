@@ -23,6 +23,7 @@ class FeatureDescriptor:
     icon: ft.IconData
     module: str
     class_name: str
+    required_capabilities: frozenset[str] = frozenset()
 
     def sidebar_definition(self, translate: Translate) -> dict[str, object]:
         """构造已翻译的侧边栏条目。"""
@@ -31,6 +32,10 @@ class FeatureDescriptor:
             "label": translate(self.translation_key, self.default_label),
             "icon": self.icon,
         }
+
+    def has_capabilities(self, available: frozenset[str]) -> bool:
+        """当前能力集合是否满足本功能声明的依赖。"""
+        return self.required_capabilities.issubset(available)
 
     def register(self, catalog: ViewCatalog) -> None:
         """在目录中注册功能的惰性视图工厂。"""

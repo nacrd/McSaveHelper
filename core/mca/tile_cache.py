@@ -93,6 +93,12 @@ def store_tile(region_path: PathLike, tile_size: int, png: bytes) -> None:
         with _LOCK:
             tmp.write_bytes(png)
             os.replace(tmp, path)
+            try:
+                from core.mca.tile_cache_index import record_file
+
+                record_file(cache_dir(), path)
+            except (ImportError, OSError, ValueError, TypeError):
+                pass
             _maybe_prune()
     except OSError:
         try:
@@ -135,17 +141,25 @@ def get_cache_stats() -> Dict[str, Any]:
     root = cache_dir()
     file_count = 0
     total_bytes = 0
+    index_meta: Dict[str, Any] = {}
     try:
-        for path in root.glob("*.png"):
-            if not path.is_file():
-                continue
-            try:
-                total_bytes += path.stat().st_size
-                file_count += 1
-            except OSError:
-                continue
-    except OSError:
-        pass
+        from core.mca.tile_cache_index import index_stats
+
+        index_meta = index_stats(root)
+        file_count = int(index_meta.get("indexed_files", 0) or 0)
+        total_bytes = int(index_meta.get("indexed_bytes", 0) or 0)
+    except (ImportError, OSError, ValueError, TypeError):
+        try:
+            for path in root.glob("*.png"):
+                if not path.is_file():
+                    continue
+                try:
+                    total_bytes += path.stat().st_size
+                    file_count += 1
+                except OSError:
+                    continue
+        except OSError:
+            pass
 
     mem_entries = 0
     mem_bytes = 0
@@ -169,6 +183,7 @@ def get_cache_stats() -> Dict[str, Any]:
         "algo_version": ALGO_VERSION,
         "memory_chunks": mem_entries,
         "memory_bytes": mem_bytes,
+        "index_path": str(index_meta.get("index_path", "")),
     }
 
 
@@ -210,14 +225,24 @@ def clear_all_caches() -> Dict[str, Any]:
 def _maybe_prune() -> None:
     try:
         root = cache_dir()
-        files = [p for p in root.glob("*.png") if p.is_file()]
-        if len(files) <= _MAX_FILES:
+        from core.mca.tile_cache_index import load_index, prune_to_limit
+
+        entries = load_index(root)
+        if entries and len(entries) <= _MAX_FILES:
             return
-        files.sort(key=lambda p: p.stat().st_mtime)
-        for p in files[: len(files) // 2]:
-            try:
-                p.unlink()
-            except OSError:
-                pass
-    except OSError:
-        pass
+        prune_to_limit(root, _MAX_FILES)
+    except (ImportError, OSError, ValueError, TypeError):
+        # Fallback: legacy full-directory prune.
+        try:
+            root = cache_dir()
+            files = [p for p in root.glob("*.png") if p.is_file()]
+            if len(files) <= _MAX_FILES:
+                return
+            files.sort(key=lambda p: p.stat().st_mtime)
+            for p in files[: len(files) // 2]:
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
+        except OSError:
+            pass

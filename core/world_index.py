@@ -48,6 +48,17 @@ class WorldIndexProbe:
 
 
 @dataclass(frozen=True)
+class WorldShellMetadata:
+    """世界首屏轻量元数据（不做完整玩家/区域索引扫描）。"""
+
+    world_path: Path
+    display_name: str
+    has_level_dat: bool
+    overworld_region_count: int
+    dimension_hint_count: int
+
+
+@dataclass(frozen=True)
 class WorldIndexSnapshot:
     """世界目录扫描结果的不可变快照。"""
 
@@ -79,6 +90,40 @@ class WorldIndexSnapshot:
 
 class WorldIndexBuilder:
     """扫描一个世界目录并构造可复用读模型。"""
+
+    def shell_metadata(self, world_path: Path | str) -> WorldShellMetadata:
+        """快速构造首屏元数据：目录名、level.dat 存在性与区域计数。
+
+        不做完整 NBT/玩家扫描，供 UI 在完整索引前显示占位信息。
+        """
+        world = self._validate_world(world_path)
+        display_name = world.name
+        try:
+            level_path = world / "level.dat"
+            if level_path.is_file() and level_path.stat().st_size > 0:
+                # Prefer folder name for speed; optional LevelName is expensive.
+                display_name = world.name
+        except OSError:
+            pass
+        overworld = 0
+        region_dir = world / "region"
+        if region_dir.is_dir():
+            try:
+                overworld = sum(1 for _ in region_dir.glob("r.*.*.mca"))
+            except OSError:
+                overworld = 0
+        dim_hints = 0
+        for relative in ("DIM-1/region", "DIM1/region", "dimensions"):
+            candidate = world / relative
+            if candidate.exists():
+                dim_hints += 1
+        return WorldShellMetadata(
+            world_path=world,
+            display_name=display_name,
+            has_level_dat=(world / "level.dat").is_file(),
+            overworld_region_count=overworld,
+            dimension_hint_count=dim_hints,
+        )
 
     def build(self, world_path: Path | str) -> WorldIndexSnapshot:
         """扫描有效世界并返回不可变快照。
@@ -323,4 +368,5 @@ __all__ = [
     "WorldIndexBuilder",
     "WorldIndexProbe",
     "WorldIndexSnapshot",
+    "WorldShellMetadata",
 ]

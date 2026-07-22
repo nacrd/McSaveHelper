@@ -334,6 +334,21 @@ def test_scoped_views_dispose_task_scopes() -> None:
         assert "_task_scope.close()" in source, relative
 
 
+def test_explorer_progressive_shell_metadata_and_tile_adapter() -> None:
+    """Remaining residual: progressive shell load + tile request adapter."""
+    explorer = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    assert "get_shell_metadata" in explorer
+    assert "_apply_shell_metadata" in explorer
+    adapter = (
+        PROJECT_ROOT
+        / "app/ui/views/explorer/map/map_tile_request_adapter.py"
+    )
+    assert adapter.is_file()
+    assert "adapt_viewport_tile_requests" in adapter.read_text(encoding="utf-8")
+
+
 def test_explorer_surfaces_consume_view_state_presenters() -> None:
     """Residual checklist: map/player/stats UI paths call real presenters."""
     checks = (
