@@ -20,6 +20,7 @@ from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
 from app.services.world_write_coordinator import WorldWriteCoordinator
 from app.services.world_index_service import WorldIndexRegistry
+from app.services.world_repository import WorldRepository
 from app.services.world_transaction import WorldTransactionService
 
 
@@ -156,6 +157,7 @@ def test_service_container_builds_in_dependency_order() -> None:
     assert services.execution_runtime is execution_runtime
     assert services.cache_registry is cache_registry
     assert services.world_indexes is world_indexes
+    assert isinstance(services.world_repository, WorldRepository)
     assert services.world_transactions is world_transactions
     assert events == [
         "config",

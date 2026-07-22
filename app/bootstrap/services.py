@@ -17,6 +17,7 @@ from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
 from app.services.world_write_coordinator import WorldWriteCoordinator
 from app.services.world_index_service import WorldIndexRegistry
+from app.services.world_repository import WorldRepository
 from app.services.world_transaction import WorldTransactionService
 
 
@@ -50,6 +51,7 @@ class AppServices:
     world_writes: WorldWriteCoordinator
     execution_runtime: ExecutionRuntime
     world_indexes: WorldIndexRegistry
+    world_repository: WorldRepository
     world_transactions: WorldTransactionService
     cache_registry: CacheRegistry
 
@@ -124,6 +126,11 @@ def create_app_services(
         backup,
         world_indexes.invalidate,
     )
+    world_repository = _create(
+        "world_repository",
+        WorldRepository,
+        world_indexes,
+    )
     migration = _create(
         "migration",
         selected.migration,
@@ -158,6 +165,7 @@ def create_app_services(
         world_writes=world_writes,
         execution_runtime=execution_runtime,
         world_indexes=world_indexes,
+        world_repository=world_repository,
         world_transactions=world_transactions,
         cache_registry=cache_registry,
     )

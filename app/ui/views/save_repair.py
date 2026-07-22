@@ -24,6 +24,7 @@ from app.services.execution_runtime import ExecutionLane, TaskPriority
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 class SaveRepairView(ft.Column):
@@ -31,7 +32,7 @@ class SaveRepairView(ft.Column):
 
     def __init__(
         self,
-        app: "Application",
+        app: "Application | FeatureContext",
         service: SaveRepairService | None = None,
     ) -> None:
         """初始化存档修复视图。

@@ -85,7 +85,7 @@ class BackupService:
 
     def __init__(
         self,
-        coordinator: Optional[WorldWriteCoordinator] = None,
+        coordinator: WorldWriteCoordinator,
     ) -> None:
         """构造备份服务。
 
@@ -93,7 +93,7 @@ class BackupService:
             coordinator: 世界写租约协调器；缺省使用进程内共享默认实例。
         """
         self._cancel_event = threading.Event()
-        self._coordinator = coordinator or WorldWriteCoordinator()
+        self._coordinator = coordinator
 
     def cancel(self) -> None:
         """Request cancellation at the next copy checkpoint."""

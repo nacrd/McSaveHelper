@@ -17,6 +17,7 @@ from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 from core.omni.world_session import WorldSession
 from app.ui.views.explorer.utils import safe_update
@@ -44,7 +45,7 @@ class ExplorerView(
         ft.Column):
     """存档浏览器视图"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "Application | FeatureContext") -> None:
         """初始化存档浏览器主视图及其子 Tab 状态。
 
         Args:
@@ -52,7 +53,7 @@ class ExplorerView(
         """
         super().__init__(spacing=0)
         self.expand = True
-        self.app: "Application" = app
+        self.app: "Application | FeatureContext" = app
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
@@ -369,23 +370,33 @@ class ExplorerView(
         log: Any = None,
     ) -> WorldSession:
         """Compose a session with application-scoped write safety ports."""
-        return WorldSession(
+        open_session = getattr(self.app, "open_world_session", None)
+        if callable(open_session):
+            session = open_session(path, log=log or self.app.log)
+            if not isinstance(session, WorldSession):
+                raise TypeError("open_world_session must return WorldSession")
+            return session
+        repository = self.app.services.world_repository
+        from app.services.world_repository import WorldSessionPorts
+
+        return repository.open_session(
             path,
             log=log or self.app.log,
-            index_snapshot=self.app.services.world_indexes.get(path),
-            transaction_callback=lambda world, mutation: (
-                self.app.services.world_transactions.mutate(
-                    world,
-                    mutation,
-                    backup_label="NBT 提交前自动备份",
-                )
-            ),
-            write_lease_factory=self.app.services.world_writes.reserve,
-            backup_callback=lambda world: (
-                self.app.services.backup.create_backup(
-                    world,
-                    label="NBT 提交前自动备份",
-                ).backup_path
+            ports=WorldSessionPorts(
+                write_lease_factory=self.app.services.world_writes.reserve,
+                backup_callback=lambda world: (
+                    self.app.services.backup.create_backup(
+                        world,
+                        label="NBT 提交前自动备份",
+                    ).backup_path
+                ),
+                transaction_callback=lambda world, mutation: (
+                    self.app.services.world_transactions.mutate(
+                        world,
+                        mutation,
+                        backup_label="NBT 提交前自动备份",
+                    )
+                ),
             ),
         )
 

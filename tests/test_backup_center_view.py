@@ -5,6 +5,7 @@ from typing import Any, cast
 from app.services.backup_service import BackupService
 from app.services.execution_runtime import ExecutionRuntime
 from app.ui.views.backup_center import BackupCenterView
+from app.services.world_write_coordinator import WorldWriteCoordinator
 
 
 def _app(service: BackupService) -> Any:
@@ -20,7 +21,7 @@ def test_backup_center_tracks_selected_world_and_renders_records(tmp_path: Path)
     world = tmp_path / "world"
     world.mkdir()
     (world / "level.dat").write_bytes(b"level")
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     service.create_backup(world, "测试恢复点")
     view = BackupCenterView(cast(Any, _app(service)))
 
@@ -32,7 +33,7 @@ def test_backup_center_tracks_selected_world_and_renders_records(tmp_path: Path)
 
 
 def test_backup_center_keeps_creation_next_to_form() -> None:
-    view = BackupCenterView(cast(Any, _app(BackupService())))
+    view = BackupCenterView(cast(Any, _app(BackupService(WorldWriteCoordinator()))))
 
     actions = view.get_top_actions()
 

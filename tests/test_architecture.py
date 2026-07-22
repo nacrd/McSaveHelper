@@ -178,9 +178,15 @@ def test_item_and_texture_services_are_application_scoped() -> None:
 
 
 def test_application_does_not_mutate_migrator_private_controls() -> None:
-    application_source = (
-        PROJECT_ROOT / "app" / "application.py"
-    ).read_text(encoding="utf-8")
+    app_root = PROJECT_ROOT / "app"
+    application_source = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            app_root / "application.py",
+            app_root / "application_facade.py",
+        )
+        if path.exists()
+    )
 
     assert "_update_migrator_field" not in application_source
     assert '"_src_field"' not in application_source
@@ -297,9 +303,14 @@ def test_region_map_service_is_not_a_global_singleton() -> None:
     explorer_source = (
         PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
     ).read_text(encoding="utf-8")
-    application_source = (
-        PROJECT_ROOT / "app/application.py"
-    ).read_text(encoding="utf-8")
+    application_source = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            PROJECT_ROOT / "app/application.py",
+            PROJECT_ROOT / "app/application_facade.py",
+        )
+        if path.exists()
+    )
     assert "get_region_map_service" not in map_view_source
     assert "get_region_map_service" not in explorer_source
     assert "create_region_map_service" in application_source

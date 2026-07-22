@@ -10,6 +10,7 @@ from app.services.backup_service import (
     BackupError,
     BackupService,
 )
+from app.services.world_write_coordinator import WorldWriteCoordinator
 
 
 def _world(tmp_path: Path) -> Path:
@@ -23,7 +24,7 @@ def _world(tmp_path: Path) -> Path:
 def test_create_and_list_backup_with_metadata(tmp_path: Path) -> None:
     world = _world(tmp_path)
     progress = []
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
 
     created = service.create_backup(
         world,
@@ -46,7 +47,7 @@ def test_create_and_list_backup_with_metadata(tmp_path: Path) -> None:
 
 
 def test_create_rejects_invalid_world_and_label(tmp_path: Path) -> None:
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
 
     with pytest.raises(BackupError, match="有效存档"):
         service.create_backup(tmp_path / "missing")
@@ -59,7 +60,7 @@ def test_create_rejects_invalid_world_and_label(tmp_path: Path) -> None:
 
 def test_cancelled_create_removes_partial_directory(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
 
     def cancel_after_first_file(value: float, message: str) -> None:
         del value
@@ -78,7 +79,7 @@ def test_create_rejects_world_changed_during_copy(
     monkeypatch,
 ) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     real_copy2 = shutil.copy2
 
     def mutate_after_copy(source, destination):
@@ -98,7 +99,7 @@ def test_create_rejects_world_changed_during_copy(
 
 def test_restore_replaces_world_and_preserves_backup(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world, "原始")
     (world / "level.dat").write_bytes(b"level-v2")
     (world / "new.dat").write_bytes(b"new")
@@ -115,7 +116,7 @@ def test_restore_replaces_world_and_preserves_backup(tmp_path: Path) -> None:
 
 def test_restore_rolls_back_when_publish_fails(tmp_path: Path, monkeypatch) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     (world / "level.dat").write_bytes(b"current")
     real_replace = os.replace
@@ -139,7 +140,7 @@ def test_restore_rolls_back_when_publish_fails(tmp_path: Path, monkeypatch) -> N
 
 def test_damaged_backup_is_listed_but_cannot_be_restored(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     (backup.backup_path / "world" / "level.dat").unlink()
 
@@ -160,7 +161,7 @@ def test_restore_remains_successful_when_rollback_cleanup_fails(
     monkeypatch,
 ) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     (world / "level.dat").write_bytes(b"changed")
     real_rmtree = shutil.rmtree
@@ -180,7 +181,7 @@ def test_restore_remains_successful_when_rollback_cleanup_fails(
 
 def test_backup_metadata_cannot_be_rebound_to_another_world(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     metadata_path = backup.backup_path / "backup.json"
     data = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -195,7 +196,7 @@ def test_backup_metadata_cannot_be_rebound_to_another_world(tmp_path: Path) -> N
 
 def test_delete_accepts_only_managed_backup_ids(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -212,7 +213,7 @@ def test_verify_detects_same_size_tampering_and_restore_refuses_it(
     tmp_path: Path,
 ) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     snapshot_file = backup.backup_path / "world" / "region" / "r.0.0.mca"
     snapshot_file.write_bytes(b"region-v2")
@@ -229,7 +230,7 @@ def test_verify_detects_same_size_tampering_and_restore_refuses_it(
 
 def test_verify_detects_manifest_tampering_and_extra_files(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     first = service.create_backup(world)
     (first.backup_path / "manifest.json").write_text("{}", encoding="utf-8")
 
@@ -249,7 +250,7 @@ def test_verify_detects_manifest_tampering_and_extra_files(tmp_path: Path) -> No
 
 def test_legacy_backup_without_manifest_remains_compatible(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     backup = service.create_backup(world)
     metadata_path = backup.backup_path / "backup.json"
     data = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -267,7 +268,7 @@ def test_legacy_backup_without_manifest_remains_compatible(tmp_path: Path) -> No
 
 def test_prune_backups_keeps_latest_records(tmp_path: Path) -> None:
     world = _world(tmp_path)
-    service = BackupService()
+    service = BackupService(WorldWriteCoordinator())
     created = []
     for index in range(4):
         (world / "level.dat").write_bytes(f"level-{index}".encode())

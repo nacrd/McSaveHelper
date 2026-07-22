@@ -17,12 +17,13 @@ from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 class CompareView(ft.Column):
     """双世界差异对比页：level.dat、玩家与区域文件。"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "Application | FeatureContext") -> None:
         """绑定应用与对比服务。
 
         Args:
@@ -34,7 +35,7 @@ class CompareView(ft.Column):
         self._task_scope = app.execution_runtime.create_scope("compare_view")
         self._service = get_world_compare_service(
             log=app.log,
-            index_provider=app.services.world_indexes.get,
+            index_provider=app.services.world_repository.get_index,
         )
         self._comparing = False
         self._build()

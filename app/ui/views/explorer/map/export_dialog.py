@@ -23,6 +23,7 @@ from core.mca.map_models import MapUnit
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ class MapExportSession:
 class MapExportDialog:
     """Modal export UI that reuses the map's current world/dimension/selection."""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "Application | FeatureContext") -> None:
         """绑定应用壳并尝试初始化导出服务。
 
         Args:

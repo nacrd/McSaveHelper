@@ -709,7 +709,7 @@ class StatsTabMixin(ExplorerMixinHost):
                     task_name,
                 ),
                 name_map=name_map,
-                index_snapshot=self.app.services.world_indexes.get(world_path),
+                index_snapshot=self.app.services.world_repository.get_index(world_path),
             )
             stats = self._late_bind_player_names(service, session, stats)
             self.app.page.run_task(

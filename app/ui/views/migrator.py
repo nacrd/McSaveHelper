@@ -27,12 +27,13 @@ from app.ui.views.migrator_options import (
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 class MigratorView(ft.Column):
     """存档转换视图 — 左右两栏布局（优化版）"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "Application | FeatureContext") -> None:
         """初始化存档转换视图。
 
         Args:
@@ -40,7 +41,7 @@ class MigratorView(ft.Column):
         """
         super().__init__(spacing=24, scroll=ft.ScrollMode.AUTO)
         self.expand = True
-        self.app: "Application" = app
+        self.app: "Application | FeatureContext" = app
         self._build()
 
     @property

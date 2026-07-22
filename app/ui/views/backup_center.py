@@ -24,6 +24,7 @@ from app.ui.view_actions import ViewAction
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 class BackupCenterView(ft.Column):
@@ -31,7 +32,7 @@ class BackupCenterView(ft.Column):
 
     def __init__(
         self,
-        app: "Application",
+        app: "Application | FeatureContext",
         service: Optional[BackupService] = None,
     ) -> None:
         """初始化备份中心视图。

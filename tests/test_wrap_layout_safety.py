@@ -13,6 +13,7 @@ from app.ui.views.backup_center import BackupCenterView
 from app.ui.views.compare import CompareView
 from app.ui.views.mappings import MappingsView
 from app.ui.views.server_properties import ServerPropertiesView
+from app.services.world_write_coordinator import WorldWriteCoordinator
 
 
 def _app(**values: object) -> Any:
@@ -20,8 +21,9 @@ def _app(**values: object) -> Any:
         "log": lambda message, level="INFO": None,
         "translate": lambda key, default: default,
         "services": SimpleNamespace(
-            backup=BackupService(),
+            backup=BackupService(WorldWriteCoordinator()),
             world_indexes=WorldIndexRegistry(),
+            world_repository=SimpleNamespace(get_index=lambda path: None),
         ),
         "execution_runtime": ExecutionRuntime(),
     }

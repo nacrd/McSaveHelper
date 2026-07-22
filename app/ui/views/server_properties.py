@@ -22,6 +22,7 @@ from app.ui.utils import safe_update
 
 if TYPE_CHECKING:
     from app.application import Application
+    from app.ui.feature_context import FeatureContext
 
 
 class ServerPropertiesView(ft.Column):
@@ -30,7 +31,7 @@ class ServerPropertiesView(ft.Column):
     支持选择服务器根目录、读取默认/现有配置项并写回文件。
     """
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "Application | FeatureContext") -> None:
         """初始化视图并构建表单控件。
 
         Args:
