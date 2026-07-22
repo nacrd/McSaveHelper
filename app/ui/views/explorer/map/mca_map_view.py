@@ -55,7 +55,12 @@ from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 from app.ui.views.explorer.map.marker_layer import MapMarkerLayer
 from app.ui.views.explorer.map.map_surface_layer import MapSurfaceLayer
 from app.controllers.topview_tile_requests import TopviewTileRequestCoordinator
-from core.mca.map_tiles import prioritize_regions
+from app.ui.views.explorer.map.map_tile_request_adapter import (
+    adapt_viewport_tile_requests,
+)
+from app.ui.views.explorer.map.map_interaction_state import (
+    snapshot_from_map_view,
+)
 from core.mca.map_coordinates import (
     format_region_coordinate_label,
 )
@@ -1018,7 +1023,14 @@ class McaMapView(ft.Container):
         ]
         if not pending:
             return
-        pending = prioritize_regions(pending, self._viewport_center_region())[:24]
+        batch = adapt_viewport_tile_requests(
+            pending,
+            center=self._viewport_center_region(),
+            preferred_tile_size=32,
+            limit=24,
+        )
+        pending = list(batch.coords)
+        self._interaction_snapshot = snapshot_from_map_view(self)
         self._metadata_pending.update(pending)
         self._schedule_task(self._load_visible_metadata(pending))
 

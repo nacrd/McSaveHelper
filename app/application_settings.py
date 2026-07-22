@@ -50,6 +50,7 @@ class SettingsCoordinationMixin:
             cache_snapshot=self.services.cache_registry.stats,
             clear_caches=self._clear_application_caches,
             cache_path=self._map_cache_path,
+            runtime_snapshot=self.services.execution_runtime.snapshot,
         ))
 
     def _clear_application_caches(self) -> dict[str, int]:

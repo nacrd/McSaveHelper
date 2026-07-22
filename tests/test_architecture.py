@@ -347,6 +347,16 @@ def test_explorer_progressive_shell_metadata_and_tile_adapter() -> None:
     )
     assert adapter.is_file()
     assert "adapt_viewport_tile_requests" in adapter.read_text(encoding="utf-8")
+    map_view = (
+        PROJECT_ROOT / "app/ui/views/explorer/map/mca_map_view.py"
+    ).read_text(encoding="utf-8")
+    assert "adapt_viewport_tile_requests" in map_view
+    assert "snapshot_from_map_view" in map_view
+    settings = (
+        PROJECT_ROOT / "app/ui/views/settings.py"
+    ).read_text(encoding="utf-8")
+    assert "format_runtime_snapshot" in settings
+    assert "format_cache_registry_report" in settings
 
 
 def test_explorer_surfaces_consume_view_state_presenters() -> None:

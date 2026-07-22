@@ -45,6 +45,7 @@ class SettingsViewDependencies:
     cache_snapshot: CacheSnapshot
     clear_caches: CacheClear
     cache_path: Callable[[], str]
+    runtime_snapshot: Callable[[], Any] = lambda: None
 
 
 class SettingsView(ft.Column):
@@ -409,9 +410,17 @@ class SettingsView(ft.Column):
     def _cache_summary_block(self) -> ft.Container:
         self._cache_summary = ft.Text(
             self._cache_summary_text(),
-            size=13,
+            size=12,
             color=THEME.text_primary,
             font_family="monospace",
+            selectable=True,
+        )
+        self._runtime_summary = ft.Text(
+            self._runtime_summary_text(),
+            size=12,
+            color=THEME.text_primary,
+            font_family="monospace",
+            selectable=True,
         )
         self._cache_path_label = ft.Text(
             self._cache_path_text(),
@@ -422,8 +431,9 @@ class SettingsView(ft.Column):
         return ft.Container(
             content=ft.Column([
                 self._cache_summary,
+                self._runtime_summary,
                 self._cache_path_label,
-            ], spacing=6),
+            ], spacing=8),
             padding=ft.Padding(left=16, right=16, bottom=10),
         )
 
@@ -451,18 +461,31 @@ class SettingsView(ft.Column):
 
     def _cache_summary_text(self) -> str:
         try:
+            from app.presenters.runtime_observability import (
+                format_cache_registry_report,
+            )
             from app.ui.utils import format_size
 
             snapshot = self._deps.cache_snapshot()
-            used = format_size(int(snapshot.bytes_used))
-            budget = format_size(int(snapshot.budget_bytes))
-            regions = len(snapshot.regions)
-            return (
-                f"应用缓存: {used} / {budget}"
-                f"  |  {regions} 个受管分区"
+            return format_cache_registry_report(
+                snapshot,
+                format_size=format_size,
             )
         except Exception as ex:
             return f"无法读取缓存信息: {ex}"
+
+    def _runtime_summary_text(self) -> str:
+        try:
+            from app.presenters.runtime_observability import (
+                format_runtime_snapshot,
+            )
+
+            snapshot = self._deps.runtime_snapshot()
+            if snapshot is None:
+                return "后台运行时: 不可用"
+            return format_runtime_snapshot(snapshot)
+        except Exception as ex:
+            return f"无法读取运行时信息: {ex}"
 
     def _cache_path_text(self) -> str:
         try:
@@ -473,11 +496,15 @@ class SettingsView(ft.Column):
     def _refresh_cache_stats(self) -> None:
         try:
             self._cache_summary.value = self._cache_summary_text()
+            if hasattr(self, "_runtime_summary"):
+                self._runtime_summary.value = self._runtime_summary_text()
             self._cache_path_label.value = self._cache_path_text()
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
         safe_update(self._cache_summary)
+        if hasattr(self, "_runtime_summary"):
+            safe_update(self._runtime_summary)
         safe_update(self._cache_path_label)
 
     def _clear_map_cache(self) -> None:

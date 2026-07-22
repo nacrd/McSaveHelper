@@ -60,6 +60,15 @@ REFERENCE_MACHINE = {
         "使用固定合成世界档位，而不是真实存档路径；"
         "跨机器比较相对耗时与缓存命中，而不是绝对 wall-clock 基线。"
     ),
+    "budget_module": "core.bench_budgets.DEFAULT_BUDGETS",
+    "how_to_run": (
+        "python scripts/bench_mca.py --sizes small medium large "
+        "--loops 3 --check-budgets --json"
+    ),
+    "true_machine_sla": (
+        "真机 p95 需在固定硬件上手动采集真实存档并归档；"
+        "本仓库默认门禁仅使用合成预算。"
+    ),
 }
 
 
