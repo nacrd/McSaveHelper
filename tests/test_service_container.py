@@ -113,11 +113,16 @@ def test_service_container_builds_in_dependency_order() -> None:
         events.append(("backup", received_world_writes))
         return backup
 
-    def create_save_repair(received_backup, received_transactions):
+    def create_save_repair(
+        received_backup,
+        received_transactions,
+        received_runtime,
+    ):
         events.append((
             "save_repair",
             received_backup,
             received_transactions,
+            received_runtime,
         ))
         return save_repair
 
@@ -165,7 +170,7 @@ def test_service_container_builds_in_dependency_order() -> None:
         "uuid",
         "item",
         ("texture", execution_runtime, cache_registry),
-        ("save_repair", backup, world_transactions),
+        ("save_repair", backup, world_transactions, execution_runtime),
     ]
 
 

@@ -55,6 +55,7 @@ def process_regions_parallel(
     mappings: List[UUIDMapping],
     progress_callback: Callable[[float], None],
     log_callback: LogCallback,
+    max_workers: Optional[int] = None,
 ) -> int:
     """使用线程池并发处理区域文件。
 
@@ -63,6 +64,7 @@ def process_regions_parallel(
         mappings: UUID 映射列表。
         progress_callback: 进度回调 ``(0..1)``。
         log_callback: 日志回调。
+        max_workers: 可选区域级并发上限；批量世界任务应传 1，避免嵌套扩张。
 
     Returns:
         int: 所有区域的修改总次数。
@@ -80,7 +82,9 @@ def process_regions_parallel(
         return 0
 
     errors: List[str] = []
-    with ThreadPoolExecutor(max_workers=min(8, total)) as executor:
+    requested_workers = 8 if max_workers is None else max(1, int(max_workers))
+    workers = min(requested_workers, 8, total)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [
             executor.submit(process_region_file, region_path, mappings)
             for region_path in files

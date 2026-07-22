@@ -116,7 +116,10 @@ class SaveRepairView(ft.Column):
         self._task_scope.submit(
             "detect_world",
             lambda token: self._detect_thread(world_path),
-            lane=ExecutionLane.CPU,
+            # The service fans region checks into the CPU lane.  Keep this
+            # orchestration task in the I/O lane so it cannot occupy a CPU
+            # worker while waiting for its own child operations.
+            lane=ExecutionLane.IO,
             priority=TaskPriority.INTERACTIVE,
         )
 
@@ -146,7 +149,7 @@ class SaveRepairView(ft.Column):
         self._task_scope.submit(
             "repair_world",
             lambda token: self._repair_thread(world_path, repair_options),
-            lane=ExecutionLane.CPU,
+            lane=ExecutionLane.IO,
             priority=TaskPriority.INTERACTIVE,
         )
 

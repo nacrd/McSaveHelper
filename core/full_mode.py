@@ -27,6 +27,7 @@ def run_full(
     log: LogCallback,
     progress: ProgressCallback,
     custom_mappings: Optional[Dict[str, str]] = None,
+    region_workers: Optional[int] = None,
 ) -> None:
     """执行完整模式迁移。
 
@@ -44,6 +45,7 @@ def run_full(
         log: 日志回调。
         progress: 进度回调 ``(0..1)`` 或带消息的实现。
         custom_mappings: 玩家名 → 自定义 UUID 覆盖。
+        region_workers: 区域级并发上限；批量世界迁移应传 1。
 
     Raises:
         ValueError / OSError: 路径或 I/O 失败时由底层工具抛出。
@@ -65,13 +67,19 @@ def run_full(
     )
     _process_core_nbt(dest_world, mappings, log)
     _rename_player_files(dest_world, mappings, log)
-    _process_regions(dest_world, mappings, progress, log)
+    _process_regions(
+        dest_world,
+        mappings,
+        progress,
+        log,
+        region_workers,
+    )
 
     # 6. 精简
     if do_clean:
         clean_world(dest_world, log)
 
-    _run_pure_clean(dest_world, pure_clean, log)
+    _run_pure_clean(dest_world, pure_clean, log, region_workers)
 
     # 8. 修改 server.properties
     update_server_properties(dest_dir, world_name, log)
@@ -156,12 +164,19 @@ def _process_regions(
     mappings: List[UUIDMapping],
     progress: ProgressCallback,
     log: LogCallback,
+    max_workers: Optional[int],
 ) -> None:
     log("扫描区域文件...", "MCA")
     mca_files = scan_all_regions(dest_world)
     log(f"发现 {len(mca_files)} 个 .mca 文件", "INFO")
     if mca_files:
-        process_regions_parallel(mca_files, mappings, progress, log)
+        process_regions_parallel(
+            mca_files,
+            mappings,
+            progress,
+            log,
+            max_workers=max_workers,
+        )
     else:
         log("没有区域文件需要处理", "INFO")
 
@@ -170,12 +185,17 @@ def _run_pure_clean(
     dest_world: Path,
     enabled: bool,
     log: LogCallback,
+    max_workers: Optional[int],
 ) -> None:
     if not enabled:
         log("跳过纯净扫描", "INFO")
         return
     log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
-    if not purge_mod_blocks_and_entities(dest_world, log):
+    if not purge_mod_blocks_and_entities(
+        dest_world,
+        log,
+        max_workers=max_workers,
+    ):
         raise RuntimeError("纯净扫描未完整处理所有区域文件")
 
 

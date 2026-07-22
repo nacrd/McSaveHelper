@@ -43,6 +43,8 @@ class BatchProcessor:
     结果键为 ``task-N``，单任务失败不中断其余任务聚合。
     """
 
+    MAX_WORKERS = 8
+
     def __init__(
         self,
         max_workers: Optional[int] = None,
@@ -59,7 +61,10 @@ class BatchProcessor:
             task_handler: 自定义单世界处理回调；None 时用内置
                 fast/full 路径。
         """
-        self.max_workers = max(1, max_workers or 2)
+        self.max_workers = min(
+            self.MAX_WORKERS,
+            max(1, max_workers or 2),
+        )
         self.version_detector = version_detector
         self.custom_mappings = custom_mappings
         self.task_handler = task_handler
@@ -306,6 +311,7 @@ class BatchProcessor:
                 pure_clean_mode,
                 manual_names,
                 log,
+                region_workers=1,
             )
             return
         from core.full_mode import run_full
@@ -322,6 +328,7 @@ class BatchProcessor:
             log,
             dummy_progress,
             self.custom_mappings,
+            region_workers=1,
         )
 
     def _future_result(

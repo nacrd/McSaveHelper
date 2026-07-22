@@ -324,6 +324,7 @@ class MigrationService:
                 log_cb=local_log,
                 progress_cb=lambda value: None,
                 cancel_event=cancel_event,
+                region_workers=1,
             )
             return {"success": True, "output_path": str(published)}
 
@@ -378,6 +379,7 @@ class MigrationService:
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
         cancel_event: Optional[threading.Event] = None,
+        region_workers: Optional[int] = None,
     ) -> Path:
         """在暂存目录完成迁移并原子发布到目标世界。"""
         manual = list(options.manual_names)
@@ -399,6 +401,7 @@ class MigrationService:
                     log_cb=log_cb,
                     progress_cb=progress_cb,
                     cancel_event=cancel_event,
+                    region_workers=region_workers,
                 )
             finally:
                 shutil.rmtree(staging_root, ignore_errors=True)
@@ -416,6 +419,7 @@ class MigrationService:
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
         cancel_event: Optional[threading.Event],
+        region_workers: Optional[int],
     ) -> Path:
         self._raise_if_batch_cancelled(cancel_event)
         self._run_migration_modes(
@@ -426,6 +430,7 @@ class MigrationService:
             manual=manual,
             log_cb=log_cb,
             progress_cb=progress_cb,
+            region_workers=region_workers,
         )
         prepared_world = staging_root / world_name
         self._publish_prepared_world(
@@ -489,6 +494,7 @@ class MigrationService:
         manual: List[str],
         log_cb: LogCallback,
         progress_cb: ProgressCallback,
+        region_workers: Optional[int],
     ) -> None:
         from core.fast_mode import run_fast
         from core.full_mode import run_full
@@ -503,6 +509,7 @@ class MigrationService:
                 options.pure_clean,
                 manual,
                 log_cb,
+                region_workers,
             )
             return
         custom_mappings = (
@@ -521,6 +528,7 @@ class MigrationService:
             log_cb,
             progress_cb,
             custom_mappings,
+            region_workers,
         )
 
     @staticmethod

@@ -5,13 +5,20 @@
 from __future__ import annotations
 
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional, Set
 
 import core.nbt as nbtlib
 
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    ExecutionRuntime,
+    OperationCancelledError,
+    TaskPriority,
+)
+from app.services.runtime_map import map_items
 from core.constants import MinecraftConstants
 from core.scanner import scan_all_regions
 from core.utils import list_player_dat_files
@@ -118,18 +125,31 @@ class WorldDetector:
     不写入或移动任何世界文件。
     """
 
-    def __init__(self, cancel_event: threading.Event) -> None:
+    def __init__(
+        self,
+        cancel_event: threading.Event,
+        execution_runtime: Optional[ExecutionRuntime] = None,
+    ) -> None:
         """初始化检测器。
 
         Args:
             cancel_event: 协作式取消事件。
+            execution_runtime: 可选共享运行时；缺省创建本地有界运行时。
         """
         self._cancel_event = cancel_event
+        self._execution_runtime = execution_runtime or ExecutionRuntime()
+        self._owns_execution_runtime = execution_runtime is None
 
     @property
     def is_cancelled(self) -> bool:
         """当前检测是否已被请求取消。"""
         return self._cancel_event.is_set()
+
+    def close(self) -> None:
+        """释放本地拥有的运行时；可重复调用。"""
+        if self._owns_execution_runtime:
+            self._execution_runtime.shutdown(wait=False)
+            self._owns_execution_runtime = False
 
     def detect_world(
         self,
@@ -273,35 +293,44 @@ class WorldDetector:
         log(f"找到 {total} 个区域文件，开始逐块检测...", "INFO")
         report.chunks_checked = total * 1024
         max_workers = min(max(1, (total + 3) // 4), 8)
+        completed = 0
 
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(self._detect_region, region_file, log): region_file
-                for region_file in region_files
-            }
-            completed = 0
-            for future in as_completed(futures):
-                if self.is_cancelled:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    break
-                region_file = futures[future]
-                try:
-                    result = future.result(timeout=120)
-                except TimeoutError as exc:
-                    log(f"检测 {region_file.name} 超时: {exc}", "ERROR")
-                except (OSError, ValueError, RuntimeError) as exc:
-                    log(f"检测 {region_file.name} 异常: {exc}", "ERROR")
-                except Exception as exc:
-                    log(f"检测 {region_file.name} 异常: {exc}", "ERROR")
-                else:
-                    report.chunks_damaged += result.damaged_chunks
-                    if result.unreadable_error is not None:
-                        report.unreadable_regions.append(region_file.name)
-                completed += 1
-                progress(
-                    0.15 + (completed / total) * 0.65,
-                    f"检测区块文件 {completed}/{total}",
-                )
+        def on_item_done(index: int, value: object) -> None:
+            nonlocal completed
+            completed += 1
+            region_file = region_files[index]
+            if isinstance(value, RegionDetectionResult):
+                report.chunks_damaged += value.damaged_chunks
+                if value.unreadable_error is not None:
+                    report.unreadable_regions.append(region_file.name)
+            elif isinstance(value, BaseException):
+                log(f"检测 {region_file.name} 异常: {value}", "ERROR")
+            progress(
+                0.15 + (completed / total) * 0.65,
+                f"检测区块文件 {completed}/{total}",
+            )
+
+        def worker(
+            token: CancellationToken,
+            region_file: Path,
+        ) -> RegionDetectionResult:
+            del token
+            return self._detect_region(region_file, log)
+
+        try:
+            map_items(
+                self._execution_runtime,
+                "detect_region",
+                region_files,
+                worker,
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.BACKGROUND,
+                cancel_check=lambda: self.is_cancelled,
+                on_item_done=on_item_done,
+                max_in_flight=max_workers,
+            )
+        except OperationCancelledError:
+            log("区块检测已取消", "WARNING")
 
     def _detect_region(
         self,

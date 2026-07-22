@@ -86,7 +86,7 @@ class ServiceFactories:
     world_writes: Callable[[], WorldWriteCoordinator] = WorldWriteCoordinator
     backup: Callable[[WorldWriteCoordinator], BackupService] = BackupService
     save_repair: Callable[
-        [BackupService, WorldTransactionService],
+        [BackupService, WorldTransactionService, ExecutionRuntime],
         SaveRepairService,
     ] = SaveRepairService
 
@@ -144,6 +144,7 @@ def create_app_services(
         selected.save_repair,
         backup,
         world_transactions,
+        execution_runtime,
     )
     return AppServices(
         config=config,

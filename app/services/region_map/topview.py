@@ -675,7 +675,9 @@ class RegionMapTopviewMixin(RegionMapHost):
             path,
             tile_size=tile_size,
             cancel_check=cancel_event.is_set,
-            decode_workers=2 if tile_size >= LEAF_TILE_SIZE else 1,
+            # Tile jobs already occupy the shared CPU lane.  A nested decoder
+            # pool would multiply concurrency and can starve sibling tiles.
+            decode_workers=1,
             status_out=render_status,
         )
         render_complete = render_status[-1] if render_status else True

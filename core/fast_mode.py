@@ -111,7 +111,8 @@ def run_fast(
     do_clean: bool,
     pure_clean: bool,
     manual_names: Optional[List[str]],
-    log: LogCallback
+    log: LogCallback,
+    region_workers: Optional[int] = None,
 ) -> None:
     """执行快速模式迁移。
 
@@ -126,6 +127,7 @@ def run_fast(
         pure_clean: 是否执行纯净清理（移除模组方块/实体）。
         manual_names: 额外手动玩家名列表。
         log: 日志回调。
+        region_workers: 区域级并发上限；批量世界迁移应传 1。
 
     Raises:
         ValueError / OSError: 目标路径不安全或复制失败时由工具函数抛出。
@@ -153,7 +155,13 @@ def run_fast(
         offline_mode,
         log,
     )
-    _apply_fast_mode_cleanup(dest_world, do_clean, pure_clean, log)
+    _apply_fast_mode_cleanup(
+        dest_world,
+        do_clean,
+        pure_clean,
+        log,
+        region_workers,
+    )
     update_server_properties(dest_dir, world_name, log)
 
 
@@ -162,6 +170,7 @@ def _apply_fast_mode_cleanup(
     do_clean: bool,
     pure_clean: bool,
     log: LogCallback,
+    region_workers: Optional[int],
 ) -> None:
     if do_clean:
         log("正在精简存档...", "CLEAN")
@@ -171,7 +180,11 @@ def _apply_fast_mode_cleanup(
 
     if pure_clean:
         log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
-        if not purge_mod_blocks_and_entities(dest_world, log):
+        if not purge_mod_blocks_and_entities(
+            dest_world,
+            log,
+            max_workers=region_workers,
+        ):
             raise RuntimeError("纯净扫描未完整处理所有区域文件")
     else:
         log("跳过纯净扫描", "INFO")

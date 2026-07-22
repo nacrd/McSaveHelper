@@ -16,6 +16,7 @@ from app.services.backup_service import (
     BackupError,
     BackupService,
 )
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.world_write_coordinator import WorldOperationBusyError
 from app.services.world_transaction import (
     WorldTransactionCancelledError,
@@ -95,16 +96,20 @@ class SaveRepairService:
         self,
         backup_service: BackupService,
         world_transactions: WorldTransactionService,
+        execution_runtime: Optional[ExecutionRuntime] = None,
     ) -> None:
         """初始化服务。
 
         Args:
             backup_service: 应用共享备份服务。
             world_transactions: 强制备份、暂存与原子发布事务。
+            execution_runtime: 可选共享后台运行时。
         """
         self._cancel_event = threading.Event()
         self._backup_service = backup_service
         self._world_transactions = world_transactions
+        self._execution_runtime = execution_runtime or ExecutionRuntime()
+        self._owns_execution_runtime = execution_runtime is None
 
     def cancel(self) -> None:
         """请求取消正在进行的修复/检测操作。"""
@@ -115,6 +120,12 @@ class SaveRepairService:
     def is_cancelled(self) -> bool:
         """是否已请求取消。"""
         return self._cancel_event.is_set()
+
+    def close(self) -> None:
+        """释放本地拥有的运行时；可重复调用。"""
+        if self._owns_execution_runtime:
+            self._execution_runtime.shutdown(wait=False)
+            self._owns_execution_runtime = False
 
     # ── 存档检测（只读）────────────────────────────────────
 
@@ -150,13 +161,19 @@ class SaveRepairService:
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
             callbacks.log(f"开始检测存档: {world_path}")
-            detector = WorldDetector(self._cancel_event)
-            detector.detect_world(
-                world_path,
-                report,
-                callbacks.log,
-                callbacks.progress,
+            detector = WorldDetector(
+                self._cancel_event,
+                self._execution_runtime,
             )
+            try:
+                detector.detect_world(
+                    world_path,
+                    report,
+                    callbacks.log,
+                    callbacks.progress,
+                )
+            finally:
+                detector.close()
 
             if self.is_cancelled:
                 report.cancelled = True
@@ -347,13 +364,19 @@ class SaveRepairService:
             )
         if fix_chunks and not self.is_cancelled:
             callbacks.progress(0.10, "扫描区块文件...")
-            chunk_repairer = ChunkRepairer(self._cancel_event)
-            chunk_repairer.repair_chunks(
-                world_path,
-                report,
-                callbacks.log,
-                callbacks.progress,
+            chunk_repairer = ChunkRepairer(
+                self._cancel_event,
+                self._execution_runtime,
             )
+            try:
+                chunk_repairer.repair_chunks(
+                    world_path,
+                    report,
+                    callbacks.log,
+                    callbacks.progress,
+                )
+            finally:
+                chunk_repairer.close()
         if fix_players and not self.is_cancelled:
             callbacks.progress(0.75, "修复玩家数据...")
             player_repairer = PlayerRepairer(self._cancel_event)

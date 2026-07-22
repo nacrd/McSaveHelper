@@ -55,12 +55,17 @@ def _process_one_region(
         return region_file.name, 0, 0, 0, str(exc)
 
 
-def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> bool:
+def purge_mod_blocks_and_entities(
+    world_path: Path,
+    log: LogCallback,
+    max_workers: Optional[int] = None,
+) -> bool:
     """从世界存档中移除所有模组相关的方块和实体
 
     Args:
         world_path: 世界存档路径
         log: 日志回调函数
+        max_workers: 可选区域级并发上限；批量世界任务应传 1。
     """
     log("开始纯净扫描：移除模组方块和实体", "PURE")
     region_files = scan_all_regions(world_path) + scan_all_entity_regions(world_path)
@@ -76,7 +81,8 @@ def purge_mod_blocks_and_entities(world_path: Path, log: LogCallback) -> bool:
 
     # region 级并发（各处理独立文件，写回安全）
     # 参照 core/worker.py process_regions_parallel 的 ThreadPoolExecutor 模式
-    workers = min(8, total_regions)
+    requested_workers = 8 if max_workers is None else max(1, int(max_workers))
+    workers = min(requested_workers, 8, total_regions)
     done = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [
