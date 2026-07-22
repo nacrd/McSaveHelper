@@ -4,6 +4,10 @@
     "title": "MCSaveHelper · 存档管理工具",
     "subtitle": "存档管理工具"
   },
+  "nbt_commit": {
+    "world_changed_title": "存档已切换",
+    "world_changed_message": "当前存档已改变，请重新打开提交预览。"
+  },
   "top_bar": {
     "ready": "就绪",
     "start_conversion": "开始转换",

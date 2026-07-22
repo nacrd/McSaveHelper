@@ -3,8 +3,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from app.bootstrap.services import _default_world_repository
+from app.services.backup_service import BackupService
 from app.services.world_index_service import WorldIndexRegistry, WorldIndexRegistryClosedError
 from app.services.world_repository import WorldRepository, WorldSessionPorts
+from app.services.world_transaction import WorldTransactionService
+from app.services.world_write_coordinator import WorldWriteCoordinator
 from core.nbt import Compound, File, Int
 from core.omni.world_session import WorldSession
 
@@ -53,6 +57,37 @@ def test_repository_open_session_uses_index_snapshot(tmp_path: Path, monkeypatch
     registry.close()
 
 
+def test_session_spawn_reuses_current_repository_snapshot(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    registry = WorldIndexRegistry()
+    repository = WorldRepository(registry)
+    session = repository.open_session(world)
+
+    spawned = session.spawn()
+
+    assert spawned is not session
+    assert registry.stats().builds == 1
+    assert registry.stats().hits == 1
+    registry.close()
+
+
+def test_repository_open_session_normalizes_expanded_user_path(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    world = _world(home)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    registry = WorldIndexRegistry()
+    repository = WorldRepository(registry)
+
+    session = repository.open_session(Path("~/world"))
+
+    assert session.world_path == world.resolve()
+    registry.close()
+
+
 def test_repository_ports_are_injected(tmp_path: Path) -> None:
     world = _world(tmp_path)
     registry = WorldIndexRegistry()
@@ -84,6 +119,34 @@ def test_repository_ports_are_injected(tmp_path: Path) -> None:
     assert session._write_lease_factory is lease
     assert session._backup_callback is backup
     assert session._transaction_callback is transaction
+    registry.close()
+
+
+def test_default_repository_commit_refreshes_session_index(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    coordinator = WorldWriteCoordinator()
+    backup = BackupService(coordinator)
+    registry = WorldIndexRegistry()
+    transactions = WorldTransactionService(
+        coordinator,
+        backup,
+        registry.invalidate,
+    )
+    repository = _default_world_repository(
+        registry,
+        coordinator,
+        backup,
+        transactions,
+    )
+    session = repository.open_session(world)
+    session.queue_delete_region(0, 0, Path("region/r.0.0.mca"))
+
+    assert session.commit() is True
+    refreshed = session.spawn()
+
+    assert refreshed is not session
+    assert refreshed.get_region(0, 0) is None
+    assert refreshed._transaction_callback is not None
     registry.close()
 
 

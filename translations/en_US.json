@@ -4,6 +4,10 @@
     "title": "MCSaveHelper · Save Manager",
     "subtitle": "Save Manager"
   },
+  "nbt_commit": {
+    "world_changed_title": "Save changed",
+    "world_changed_message": "The current save changed. Reopen the commit preview."
+  },
   "top_bar": {
     "ready": "Ready",
     "start_conversion": "Start Conversion",

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services.cache_registry import CachePolicy, CacheRegistry
+from app.services.cache_registry import CacheRegistry
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.player_avatar_service import PlayerAvatarService
 from app.services.world_index_service import WorldIndexRegistry
@@ -25,6 +25,7 @@ def test_invalidate_world_drops_index_entries(tmp_path: Path) -> None:
         builder=WorldIndexBuilder(),
         cache_registry=cache,
         max_entries=4,
+        max_bytes=8 * 1024 * 1024,
     )
     try:
         first = indexes.get(world)

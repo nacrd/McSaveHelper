@@ -1,4 +1,5 @@
 """NBT tab mixin for ExplorerView - 三栏布局版本"""
+from pathlib import Path
 from typing import Any, List, Optional
 
 import flet as ft
@@ -21,7 +22,6 @@ from app.ui.views.explorer.nbt_tab_chrome import (
     NbtTabCallbacks,
     build_nbt_tab_chrome,
 )
-from core.omni.world_session import WorldSession
 
 
 class NbtTabMixin(ExplorerMixinHost):
@@ -206,10 +206,20 @@ class NbtTabMixin(ExplorerMixinHost):
         return NbtCommitHandler(
             store=self._nbt_stage_store,
             get_world_session=lambda: self.world_session,
-            replace_world_session=self._replace_world_session,
             get_page=lambda: self.app.page,
             refresh_stage=self._stage_manager.update_stage_status,
-            reload_current_target=self._data_loader.reload_current_nbt_target,
+            reload_world=self._load_world,
+            is_world_current=self._is_nbt_world_current,
+            world_changed_text=(
+                self._translate_nbt_commit(
+                    "nbt_commit.world_changed_title",
+                    "存档已切换",
+                ),
+                self._translate_nbt_commit(
+                    "nbt_commit.world_changed_message",
+                    "当前存档已改变，请重新打开提交预览。",
+                ),
+            ),
             warn=self.app.warn_dialog,
             info=self.app.info_dialog,
             error=self.app.error_dialog,
@@ -219,8 +229,25 @@ class NbtTabMixin(ExplorerMixinHost):
             log=self.app.log,
         )
 
-    def _replace_world_session(self, session: WorldSession) -> None:
-        self.world_session = session
+    def _translate_nbt_commit(self, key: str, fallback: str) -> str:
+        """Translate new commit guard text while supporting lightweight test hosts."""
+        translate = getattr(self.app, "translate", None)
+        if callable(translate):
+            return str(translate(key, fallback))
+        return fallback
+
+    def _is_nbt_world_current(self, world_path: Path) -> bool:
+        """提交前确认暂存变更仍属于应用当前选择的世界。"""
+        current_path = self.app.current_save_path
+        if not current_path:
+            return False
+        try:
+            return (
+                Path(current_path).expanduser().resolve()
+                == world_path.expanduser().resolve()
+            )
+        except (OSError, RuntimeError):
+            return False
 
     def _set_nbt_view_state(
         self,

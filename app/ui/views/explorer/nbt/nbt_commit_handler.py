@@ -15,7 +15,8 @@ from core.types import LogCallback
 
 DialogCallback = Callable[[str, str], None]
 ErrorCallback = Callable[[Exception, str], None]
-SessionFactory = Callable[[Path, LogCallback], WorldSession]
+ReloadWorld = Callable[[Path], None]
+WorldIdentityCheck = Callable[[Path], bool]
 
 
 class NbtCommitHandler:
@@ -26,30 +27,30 @@ class NbtCommitHandler:
         *,
         store: NbtStageStore,
         get_world_session: Callable[[], Optional[WorldSession]],
-        replace_world_session: Callable[[WorldSession], None],
         get_page: Callable[[], Optional[ft.Page]],
         refresh_stage: Callable[[], None],
-        reload_current_target: Callable[[], None],
+        reload_world: ReloadWorld,
+        is_world_current: WorldIdentityCheck,
+        world_changed_text: tuple[str, str],
         warn: DialogCallback,
         info: DialogCallback,
         error: DialogCallback,
         handle_error: ErrorCallback,
         log: LogCallback,
-        session_factory: Optional[SessionFactory] = None,
     ) -> None:
         """注入提交所需的会话与 UI 端口。"""
         self._store = store
         self._get_world_session = get_world_session
-        self._replace_world_session = replace_world_session
         self._get_page = get_page
         self._refresh_stage = refresh_stage
-        self._reload_current_target = reload_current_target
+        self._reload_world = reload_world
+        self._is_world_current = is_world_current
+        self._world_changed_text = world_changed_text
         self._warn = warn
         self._info = info
         self._error = error
         self._handle_error = handle_error
         self._log = log
-        self._session_factory = session_factory
 
     def commit_changes(self, e: object = None) -> None:
         """验证当前状态并打开提交预览。"""
@@ -145,12 +146,16 @@ class NbtCommitHandler:
             if not self._store:
                 self._info("提示", "暂存区没有可提交的变更。")
                 return
+            if not self._is_world_current(session.world_path):
+                self._warn(*self._world_changed_text)
+                return
 
+            commit_session = session.new_action_session()
             changes = self._store.changes
             chunk_changes, normal_changes = self._partition_changes(changes)
-            self._queue_normal_changes(session, normal_changes)
+            self._queue_normal_changes(commit_session, normal_changes)
             for target, target_changes in chunk_changes.values():
-                loaded = session.load_chunk_nbt(
+                loaded = commit_session.load_chunk_nbt(
                     target.region_path,
                     target.chunk_x,
                     target.chunk_z,
@@ -160,15 +165,15 @@ class NbtCommitHandler:
                 chunk_data = loaded[0]
                 for change in target_changes:
                     self._apply_change(chunk_data, change)
-                session.queue_modify_chunk(
+                commit_session.queue_modify_chunk(
                     target.region_path,
                     target.chunk_x,
                     target.chunk_z,
                     chunk_data,
                 )
 
-            queued = session.get_queue_size()
-            if not session.commit(backup=True):
+            queued = commit_session.get_queue_size()
+            if not commit_session.commit(backup=True):
                 self._error(
                     "提交失败",
                     f"已排队 {queued} 个操作，但提交失败。请查看日志。",
@@ -177,13 +182,12 @@ class NbtCommitHandler:
 
             committed = self._store.clear()
             self._refresh_stage()
-            new_session = (
-                self._session_factory(session.world_path, self._log)
-                if self._session_factory
-                else session.spawn()
-            )
-            self._replace_world_session(new_session)
-            self._reload_current_target()
+            try:
+                self._reload_world(commit_session.world_path)
+            except Exception as exc:
+                # The transaction already succeeded; a UI reload fault must not
+                # be reported as a failed disk commit.
+                self._log(f"提交成功，但刷新世界会话失败: {exc}", "WARNING")
             self._info(
                 "提交完成",
                 f"已提交 {committed} 个 NBT/JSON/区块变更。提交前已创建备份。",

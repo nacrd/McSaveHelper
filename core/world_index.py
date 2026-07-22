@@ -17,6 +17,7 @@ from core.utils import (
     find_player_data_dirs,
     find_stats_dirs,
 )
+from core.uuid_utils import normalize_uuid
 
 
 @dataclass(frozen=True, order=True)
@@ -45,6 +46,7 @@ class WorldIndexProbe:
 
     fingerprint: str
     files: tuple[WorldFileStamp, ...]
+    dimensions: tuple[DimensionRegionDirectory, ...]
 
 
 @dataclass(frozen=True)
@@ -138,33 +140,28 @@ class WorldIndexBuilder:
             FileNotFoundError: 路径不是有效世界。
         """
         world = self._validate_world(world_path)
-        from core.omni.world_scanner import WorldScanner
+        return self._build_snapshot(world, self._current_probe(world))
 
-        scanner = WorldScanner(world)
-        scanned = scanner.scan_all()
-        player_files = tuple(sorted(scanned["player_files"].items()))
-        region_files = tuple(
-            sorted(set(scanned["region_files"].values()), key=str)
-        )
-        data_files = tuple(sorted(set(scanned["data_files"]), key=str))
-        stats_files = self._glob_files(find_stats_dirs(world), "*.json")
-        advancement_files = self._glob_files(
-            find_advancements_dirs(world),
-            "*.json",
-        )
-        usercache = tuple(sorted(scanned["usercache"].items()))
-        dimensions = self._build_dimensions(world, region_files)
-        stamped_paths = self._stamped_paths(
+    def _build_snapshot(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+    ) -> WorldIndexSnapshot:
+        """从同一份文件探针派生路径索引，避免扫描与签名发生漂移。"""
+        player_files = self._player_files_from_probe(world, probe)
+        region_files = self._region_files_from_probe(world, probe)
+        data_files = self._data_files_from_probe(world, probe)
+        stats_files = self._probe_paths(world, probe, "stats")
+        advancement_files = self._probe_paths(
             world,
-            player_files=(path for _, path in player_files),
-            region_files=region_files,
-            data_files=data_files,
-            stats_files=stats_files,
-            advancement_files=advancement_files,
+            probe,
+            "advancements",
         )
+        usercache = self._load_usercache(world, player_files, probe)
+        dimensions = self._build_dimensions(region_files, probe.dimensions)
         return WorldIndexSnapshot(
             world_path=world,
-            probe=self._probe_from_paths(world, stamped_paths),
+            probe=probe,
             player_files=player_files,
             region_files=region_files,
             data_files=data_files,
@@ -174,36 +171,306 @@ class WorldIndexBuilder:
             dimensions=dimensions,
         )
 
+    def _player_files_from_probe(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+    ) -> tuple[tuple[str, Path], ...]:
+        """Build the player index from the exact paths captured by a probe."""
+        paths = self._probe_paths(world, probe, "players")
+        return tuple(sorted(self._select_player_files(world, paths).items()))
+
+    def _region_files_from_probe(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+    ) -> tuple[Path, ...]:
+        """Build the region index from the exact paths captured by a probe."""
+        return tuple(sorted(
+            (
+                path
+                for path in self._probe_paths(world, probe, "regions")
+                if path.suffix.lower() == ".mca"
+            ),
+            key=str,
+        ))
+
+    def _data_files_from_probe(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+    ) -> tuple[Path, ...]:
+        """Build the data index from the exact paths captured by a probe."""
+        paths = self._probe_paths(world, probe, "data")
+        return self._select_data_files(world, paths)
+
+    def _load_usercache(
+        self,
+        world: Path,
+        player_files: tuple[tuple[str, Path], ...],
+        probe: WorldIndexProbe,
+    ) -> tuple[tuple[str, str], ...]:
+        """Load names from the exact candidates represented by the probe."""
+        from core.omni.world_scanner import load_usercache_candidate
+
+        player_ids = {player_id for player_id, _path in player_files}
+        available = set(self._probe_paths(world, probe, "usercache"))
+        candidates = tuple(
+            path for path in self._usercache_candidates(world)
+            if path in available
+        )
+        best_cache: dict[str, str] = {}
+        best_match = -1
+        read_errors: list[OSError] = []
+        for path in candidates:
+            try:
+                cache, match_count = load_usercache_candidate(path, player_ids)
+            except OSError as exc:
+                read_errors.append(exc)
+                continue
+            except (TypeError, ValueError, UnicodeError):
+                continue
+            if match_count > best_match:
+                best_cache = cache
+                best_match = match_count
+            if match_count == len(player_ids):
+                break
+        if best_match < 0 and read_errors:
+            raise OSError(
+                f"读取 usercache 失败: {candidates[0]}"
+            ) from read_errors[0]
+        return tuple(sorted(best_cache.items()))
+
+    def _probe_paths(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+        category: str,
+    ) -> tuple[Path, ...]:
+        """Return deterministic paths of one category from a probe snapshot."""
+        paths = {
+            self._path_from_probe(world, stamp.relative_path)
+            for stamp in probe.files
+            if self._path_category(stamp.relative_path) == category
+        }
+        return tuple(sorted(paths, key=str))
+
+    @staticmethod
+    def _path_from_probe(world: Path, value: str) -> Path:
+        """Resolve a world-relative or external probe path without I/O."""
+        path = Path(value)
+        return path if path.is_absolute() else world / path
+
+    @staticmethod
+    def _select_player_files(
+        world: Path,
+        paths: tuple[Path, ...],
+    ) -> dict[str, Path]:
+        """Apply the scanner's 26.1-first duplicate UUID precedence."""
+        ordered = WorldIndexBuilder._order_paths_by_directories(
+            paths,
+            (world / "players" / "data", world / "playerdata"),
+        )
+        selected: dict[str, Path] = {}
+        for path in ordered:
+            selected.setdefault(normalize_uuid(path.stem), path)
+        return selected
+
+    @staticmethod
+    def _select_data_files(
+        world: Path,
+        paths: tuple[Path, ...],
+    ) -> tuple[Path, ...]:
+        """Apply the scanner's 26.1-first duplicate filename precedence."""
+        ordered = WorldIndexBuilder._order_paths_by_directories(
+            paths,
+            (world / "data" / "minecraft", world / "data"),
+        )
+        selected: dict[str, Path] = {}
+        for path in ordered:
+            selected.setdefault(path.name, path)
+        return tuple(selected.values())
+
+    @staticmethod
+    def _order_paths_by_directories(
+        paths: tuple[Path, ...],
+        directories: Iterable[Path],
+    ) -> tuple[Path, ...]:
+        """Sort paths by configured directory precedence, then by path."""
+        ranks = {directory: index for index, directory in enumerate(directories)}
+        fallback_rank = len(ranks)
+        return tuple(sorted(
+            paths,
+            key=lambda path: (ranks.get(path.parent, fallback_rank), str(path)),
+        ))
+
     def probe(self, world_path: Path | str) -> WorldIndexProbe:
         """重新枚举相关文件并返回当前失效签名。"""
         world = self._validate_world(world_path)
-        return self._probe_from_paths(world, self._enumerate_stamped_paths(world))
+        return self._current_probe(world)
+
+    def _current_probe(self, world: Path) -> WorldIndexProbe:
+        """为已经验证的世界生成当前完整探针。"""
+        dimensions = tuple(discover_dimension_region_dirs(world))
+        paths, active_dimensions = self._enumerate_stamped_paths(
+            world,
+            dimensions,
+        )
+        return self._probe_from_paths(world, paths, active_dimensions)
 
     def refresh(
         self,
         previous: WorldIndexSnapshot,
+        *,
+        current_probe: WorldIndexProbe | None = None,
     ) -> WorldIndexSnapshot:
-        """探针未变则复用快照，否则全量重建（增量一致性入口）。
+        """探针未变复用快照，变化时仅重扫受影响的文件类别。
 
         Args:
             previous: 此前构建的不可变快照。
+            current_probe: 调用方已经获取的当前探针，避免重复目录遍历。
 
         Returns:
             仍有效时返回同一 ``previous`` 实例，否则返回新快照。
         """
         world = self._validate_world(previous.world_path)
-        current_probe = self._probe_from_paths(
-            world,
-            self._enumerate_stamped_paths(world),
-        )
+        if current_probe is None:
+            current_probe = self._current_probe(world)
         if current_probe == previous.probe:
             return previous
-        return self.build(world)
+        categories = self._changed_categories(previous.probe, current_probe)
+        if "unknown" in categories:
+            return self.build(world)
+        return self._refresh_categories(
+            previous,
+            current_probe,
+            categories,
+        )
 
-    def _enumerate_stamped_paths(self, world: Path) -> tuple[Path, ...]:
+    def _refresh_categories(
+        self,
+        previous: WorldIndexSnapshot,
+        current_probe: WorldIndexProbe,
+        categories: set[str],
+    ) -> WorldIndexSnapshot:
+        """复用未变化分片，从同一份新探针派生变化类别。"""
+        world = previous.world_path
+        player_files = previous.player_files
+        if "players" in categories:
+            player_files = self._player_files_from_probe(world, current_probe)
+
+        region_files = previous.region_files
+        dimensions = previous.dimensions
+        if "regions" in categories:
+            region_files = self._region_files_from_probe(world, current_probe)
+            dimensions = self._build_dimensions(
+                region_files,
+                current_probe.dimensions,
+            )
+
+        data_files = previous.data_files
+        if "data" in categories:
+            data_files = self._data_files_from_probe(world, current_probe)
+
+        stats_files = previous.stats_files
+        if "stats" in categories:
+            stats_files = self._probe_paths(world, current_probe, "stats")
+
+        advancement_files = previous.advancement_files
+        if "advancements" in categories:
+            advancement_files = self._probe_paths(
+                world,
+                current_probe,
+                "advancements",
+            )
+
+        usercache = previous.usercache
+        if categories.intersection({"players", "usercache"}):
+            usercache = self._load_usercache(
+                world,
+                player_files,
+                current_probe,
+            )
+
+        return WorldIndexSnapshot(
+            world_path=world,
+            probe=current_probe,
+            player_files=player_files,
+            region_files=region_files,
+            data_files=data_files,
+            stats_files=stats_files,
+            advancement_files=advancement_files,
+            usercache=usercache,
+            dimensions=dimensions,
+        )
+
+    @staticmethod
+    def _changed_categories(
+        previous: WorldIndexProbe,
+        current: WorldIndexProbe,
+    ) -> set[str]:
+        """根据新增、删除或属性变化的文件推导需重扫的分片。"""
+        old_stamps = {stamp.relative_path: stamp for stamp in previous.files}
+        new_stamps = {stamp.relative_path: stamp for stamp in current.files}
+        changed_paths = {
+            path
+            for path in old_stamps.keys() | new_stamps.keys()
+            if old_stamps.get(path) != new_stamps.get(path)
+        }
+        categories = {
+            WorldIndexBuilder._path_category(path)
+            for path in changed_paths
+        }
+        if previous.dimensions != current.dimensions:
+            categories.add("regions")
+        return categories
+
+    @staticmethod
+    def _path_category(relative_path: str) -> str:
+        """把探针路径映射到一个可独立更新的索引分片。"""
+        normalized = relative_path.replace("\\", "/").lower()
+        parts = tuple(part for part in normalized.split("/") if part)
+        name = parts[-1] if parts else normalized
+        if name == "usercache.json":
+            return "usercache"
+        if normalized == "level.dat":
+            return "level"
+        if name == "region":
+            return "regions"
+        if name.endswith(".mca") and "region" in parts:
+            return "regions"
+        if name.endswith(".dat") and (
+            "playerdata" in parts
+            or WorldIndexBuilder._contains_parts(parts, "players", "data")
+        ):
+            return "players"
+        if name.endswith(".json") and "stats" in parts:
+            return "stats"
+        if name.endswith(".json") and "advancements" in parts:
+            return "advancements"
+        if name.endswith(".dat") and "data" in parts:
+            return "data"
+        return "unknown"
+
+    @staticmethod
+    def _contains_parts(
+        parts: tuple[str, ...],
+        parent: str,
+        child: str,
+    ) -> bool:
+        """判断路径部件中是否出现相邻的 parent/child。"""
+        return any(
+            left == parent and right == child
+            for left, right in zip(parts, parts[1:])
+        )
+
+    def _enumerate_stamped_paths(
+        self,
+        world: Path,
+        dimensions: tuple[DimensionRegionDirectory, ...],
+    ) -> tuple[tuple[Path, ...], tuple[DimensionRegionDirectory, ...]]:
         """枚举会影响读模型的全部文件路径。"""
         player_files = self._glob_files(find_player_data_dirs(world), "*.dat")
-        dimensions = discover_dimension_region_dirs(world)
         region_files = tuple(
             sorted(
                 {
@@ -220,7 +487,7 @@ class WorldIndexBuilder:
             find_advancements_dirs(world),
             "*.json",
         )
-        return self._stamped_paths(
+        paths = self._stamped_paths(
             world,
             player_files=player_files,
             region_files=region_files,
@@ -228,13 +495,24 @@ class WorldIndexBuilder:
             stats_files=stats_files,
             advancement_files=advancement_files,
         )
+        safe_paths = set(paths)
+        active_region_dirs = {
+            path.parent for path in region_files if path in safe_paths
+        }
+        paths = tuple(sorted({*paths, *active_region_dirs}, key=str))
+        active_dimensions = tuple(
+            dimension
+            for dimension in dimensions
+            if dimension.region_dir in active_region_dirs
+        )
+        return paths, active_dimensions
 
     def _build_dimensions(
         self,
-        world: Path,
         region_files: tuple[Path, ...],
+        dimensions: tuple[DimensionRegionDirectory, ...],
     ) -> tuple[WorldDimensionIndex, ...]:
-        """按已扫描文件分组构造维度索引，避免再次枚举目录。"""
+        """按同一探针的维度描述和文件分组构造维度索引。"""
         files_by_directory: dict[Path, list[Path]] = {}
         for region_file in region_files:
             files_by_directory.setdefault(region_file.parent, []).append(
@@ -245,7 +523,7 @@ class WorldIndexBuilder:
                 dimension,
                 tuple(files_by_directory.get(dimension.region_dir, ())),
             )
-            for dimension in discover_dimension_region_dirs(world)
+            for dimension in dimensions
         )
 
     @staticmethod
@@ -271,23 +549,109 @@ class WorldIndexBuilder:
         data_files: Iterable[Path],
         stats_files: Iterable[Path],
         advancement_files: Iterable[Path],
+        extra_paths: Iterable[Path] = (),
     ) -> tuple[Path, ...]:
         """汇总所有会改变读模型的文件路径。"""
-        paths = {
+        world_paths = {
             world / "level.dat",
             *player_files,
             *region_files,
             *data_files,
             *stats_files,
             *advancement_files,
-            *self._usercache_candidates(world),
+            *extra_paths,
         }
-        return tuple(sorted((path for path in paths if path.is_file()), key=str))
+        directory_safety: dict[Path, bool] = {}
+        paths = {
+            path for path in world_paths
+            if self._is_safe_world_content_path_cached(
+                world,
+                path,
+                directory_safety,
+            )
+        }
+        for candidate in self._usercache_candidates(world):
+            if self._is_lexically_within(candidate, world):
+                if self._is_safe_world_content_path(world, candidate):
+                    paths.add(candidate)
+            else:
+                paths.add(candidate)
+        return tuple(sorted(
+            (path for path in paths if path.is_file() or path.is_dir()),
+            key=str,
+        ))
+
+    @staticmethod
+    def _is_safe_world_content_path(world: Path, path: Path) -> bool:
+        """Reject linked or escaped paths discovered inside the world tree."""
+        return WorldIndexBuilder._is_safe_world_content_path_cached(
+            world,
+            path,
+            {},
+        )
+
+    @staticmethod
+    def _is_safe_world_content_path_cached(
+        world: Path,
+        path: Path,
+        directory_safety: dict[Path, bool],
+    ) -> bool:
+        """Validate each parent chain once, then reject linked leaf files."""
+        candidate = path.absolute()
+        try:
+            candidate.relative_to(world)
+        except ValueError:
+            return False
+        is_directory = candidate.is_dir()
+        directory = candidate if is_directory else candidate.parent
+        is_safe_directory = directory_safety.get(directory)
+        if is_safe_directory is None:
+            is_safe_directory = WorldIndexBuilder._is_safe_world_directory(
+                world,
+                directory,
+            )
+            directory_safety[directory] = is_safe_directory
+        if not is_safe_directory:
+            return False
+        if not is_directory:
+            is_junction = getattr(candidate, "is_junction", lambda: False)
+            if candidate.is_symlink() or bool(is_junction()):
+                return False
+        return True
+
+    @staticmethod
+    def _is_safe_world_directory(world: Path, directory: Path) -> bool:
+        """Validate one content directory and every world-relative ancestor."""
+        try:
+            relative = directory.relative_to(world)
+        except ValueError:
+            return False
+        current = world
+        for part in relative.parts:
+            current /= part
+            is_junction = getattr(current, "is_junction", lambda: False)
+            if current.is_symlink() or bool(is_junction()):
+                return False
+        try:
+            directory.resolve().relative_to(world)
+        except (OSError, RuntimeError, ValueError):
+            return False
+        return True
+
+    @staticmethod
+    def _is_lexically_within(path: Path, root: Path) -> bool:
+        """Return whether a path is expressed below root without resolving links."""
+        try:
+            path.absolute().relative_to(root)
+            return True
+        except ValueError:
+            return False
 
     @staticmethod
     def _probe_from_paths(
         world: Path,
         paths: Iterable[Path],
+        dimensions: tuple[DimensionRegionDirectory, ...],
     ) -> WorldIndexProbe:
         """为有序路径生成确定性 SHA-256 签名。"""
         stamps: list[WorldFileStamp] = []
@@ -312,7 +676,19 @@ class WorldIndexBuilder:
                     "utf-8"
                 )
             )
-        return WorldIndexProbe(digest.hexdigest(), tuple(stamps))
+        for dimension in dimensions:
+            digest.update(
+                (
+                    f"{dimension.id}\0{dimension.name}\0"
+                    f"{WorldIndexBuilder._display_path(world, dimension.region_dir)}\0"
+                    f"{dimension.coordinate_scale}\n"
+                ).encode("utf-8")
+            )
+        return WorldIndexProbe(
+            digest.hexdigest(),
+            tuple(stamps),
+            dimensions,
+        )
 
     @staticmethod
     def _display_path(world: Path, path: Path) -> str:

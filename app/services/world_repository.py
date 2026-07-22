@@ -73,7 +73,6 @@ class WorldRepository:
         world_path: Path | str,
         *,
         log: Optional[LogCallback] = None,
-        ports: Optional[WorldSessionPorts] = None,
         force_refresh: bool = False,
     ) -> WorldSession:
         """打开带共享索引的世界会话。
@@ -81,15 +80,14 @@ class WorldRepository:
         Args:
             world_path: 有效世界根路径。
             log: 可选日志回调。
-            ports: 覆盖默认写安全端口。
             force_refresh: 是否强制重建索引。
 
         Returns:
             已注入索引快照的 WorldSession。
         """
-        world = Path(world_path)
+        world = Path(world_path).expanduser().resolve()
         snapshot = self.get_index(world, force_refresh=force_refresh)
-        selected = ports or self._default_ports
+        selected = self._default_ports
         return WorldSession(
             world,
             log=log,
@@ -97,7 +95,16 @@ class WorldRepository:
             write_lease_factory=selected.write_lease_factory,
             backup_callback=selected.backup_callback,
             transaction_callback=selected.transaction_callback,
+            index_provider=self._provide_index,
         )
+
+    def _provide_index(
+        self,
+        world_path: Path,
+        force_refresh: bool,
+    ) -> WorldIndexSnapshot:
+        """为会话刷新提供同一注册表中的最新索引快照。"""
+        return self.get_index(world_path, force_refresh=force_refresh)
 
     def invalidate(self, world_path: Path | str) -> None:
         """丢弃一个世界的缓存索引。"""

@@ -73,7 +73,6 @@ class RegionMapService(
         self._execution_runtime = execution_runtime
         self._topview_handles: set[OperationHandle[None]] = set()
         self._cache_registration: Optional[CacheRegistration] = None
-        self._chunk_cache_registration: Optional[CacheRegistration] = None
         if cache_registry is not None:
             self._cache_registration = cache_registry.register_external(
                 f"map.topview.{id(self)}",
@@ -81,51 +80,11 @@ class RegionMapService(
                 self._topview_cache_stats,
                 self._clear_topview_memory_cache,
             )
-            try:
-                self._chunk_cache_registration = cache_registry.register_external(
-                    "mca.chunk",
-                    CachePolicy(512, 64 * 1024 * 1024),
-                    self._chunk_decode_cache_stats,
-                    self._clear_chunk_decode_cache_safe,
-                )
-            except ValueError:
-                # Another map session already owns the process-level chunk cache slot.
-                self._chunk_cache_registration = None
 
     @property
     def execution_runtime(self) -> ExecutionRuntime:
         """返回本地图会话使用的统一后台运行时。"""
         return self._execution_runtime
-
-    @staticmethod
-    def _chunk_decode_cache_stats() -> Any:
-        from app.services.cache_registry import CacheStats
-        from core.mca.surface import (
-            chunk_decode_cache_bytes,
-            chunk_decode_cache_size,
-        )
-
-        entries = int(chunk_decode_cache_size())
-        used = int(chunk_decode_cache_bytes())
-        return CacheStats(
-            name="mca.chunk",
-            entries=entries,
-            bytes_used=used,
-            max_entries=512,
-            max_bytes=64 * 1024 * 1024,
-            hits=0,
-            misses=0,
-            evictions=0,
-        )
-
-    @staticmethod
-    def _clear_chunk_decode_cache_safe() -> None:
-        try:
-            from core.mca.surface import clear_chunk_decode_cache
-
-            clear_chunk_decode_cache()
-        except (ImportError, RuntimeError, AttributeError):
-            pass
 
     def clear_data(self) -> None:
         """清空所有缓存数据"""
@@ -144,6 +103,9 @@ class RegionMapService(
             self._topview_tile_sizes.clear()
             self._topview_tile_complete.clear()
             self._topview_tile_revisions.clear()
+            self._topview_tile_sources.clear()
+            self._topview_source_checked_at.clear()
+            self._topview_source_pending.clear()
             self._topview_revision_counter = 0
             self._topview_failed_sizes.clear()
             self._topview_failed_mtimes.clear()
@@ -167,14 +129,6 @@ class RegionMapService(
             self._cached_snapshot_count = -1
         for meta_handle in meta_tasks:
             meta_handle.cancel()
-        # A new scan represents a new world/dimension, so release old-world
-        # compact surface entries instead of carrying them into the next map.
-        try:
-            from core.mca.surface import clear_chunk_decode_cache
-
-            clear_chunk_decode_cache()
-        except (ImportError, RuntimeError, AttributeError):
-            pass
 
     def close(self) -> None:
         """释放回调、队列与工作线程资源（幂等）。
@@ -219,6 +173,9 @@ class RegionMapService(
             self._topview_failure_counts.clear()
             self._topview_tile_revisions.clear()
             self._topview_tile_complete.clear()
+            self._topview_tile_sources.clear()
+            self._topview_source_checked_at.clear()
+            self._topview_source_pending.clear()
         for meta_handle in meta_tasks:
             meta_handle.cancel()
         with self._data_lock:
@@ -231,10 +188,6 @@ class RegionMapService(
         self._cache_registration = None
         if registration is not None:
             registration.close()
-        chunk_registration = self._chunk_cache_registration
-        self._chunk_cache_registration = None
-        if chunk_registration is not None:
-            chunk_registration.close()
 
 
 __all__ = ["RegionMapService", "ScanProgress"]

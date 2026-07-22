@@ -687,7 +687,8 @@ class RegionTabMixin(ExplorerMixinHost):
                     f"安全备份: {result.backup.backup_path.name}",
                 )
                 self._selected_region_coord = None
-                self._refresh_map()
+                # 事务已使共享索引失效；异步重载会话，避免继续使用旧维度快照。
+                self._load_world(world_path)
             else:
                 self.app.warn_dialog("失败", "区域删除失败，请查看日志。")
         except Exception as ex:

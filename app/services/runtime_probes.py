@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Optional
 
 from app.services.execution_runtime import (
+    CancellationToken,
     ExecutionLane,
     ExecutionRuntime,
     TaskPriority,
@@ -34,7 +34,7 @@ def probe_cancel_latency_ms(
     started = threading.Event()
     observed = threading.Event()
 
-    def work(token) -> bool:
+    def work(token: CancellationToken) -> bool:
         started.set()
         deadline = time.perf_counter() + 5.0
         while time.perf_counter() < deadline:

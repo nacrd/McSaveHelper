@@ -407,27 +407,9 @@ class ExplorerView(
                 raise TypeError("open_world_session must return WorldSession")
             return session
         repository = self.app.services.world_repository
-        from app.services.world_repository import WorldSessionPorts
-
         return repository.open_session(
             path,
             log=log or self.app.log,
-            ports=WorldSessionPorts(
-                write_lease_factory=self.app.services.world_writes.reserve,
-                backup_callback=lambda world: (
-                    self.app.services.backup.create_backup(
-                        world,
-                        label="NBT 提交前自动备份",
-                    ).backup_path
-                ),
-                transaction_callback=lambda world, mutation: (
-                    self.app.services.world_transactions.mutate(
-                        world,
-                        mutation,
-                        backup_label="NBT 提交前自动备份",
-                    )
-                ),
-            ),
         )
 
     async def _apply_loaded_world(

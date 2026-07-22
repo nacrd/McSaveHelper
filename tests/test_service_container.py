@@ -6,6 +6,7 @@ import pytest
 from app.bootstrap.services import (
     ServiceFactories,
     ServiceInitializationError,
+    _default_cache_registry,
     create_app_services,
 )
 from app.services.config_service import ConfigService
@@ -22,6 +23,7 @@ from app.services.world_write_coordinator import WorldWriteCoordinator
 from app.services.world_index_service import WorldIndexRegistry
 from app.services.world_repository import WorldRepository
 from app.services.world_transaction import WorldTransactionService
+from core.mca.surface import CHUNK_DECODE_CACHE_MAX_BYTES
 
 
 def test_service_container_builds_in_dependency_order() -> None:
@@ -42,6 +44,7 @@ def test_service_container_builds_in_dependency_order() -> None:
         SimpleNamespace(invalidate=lambda world: None),
     )
     world_transactions = cast(WorldTransactionService, object())
+    world_repository = cast(WorldRepository, object())
 
     def create_config():
         events.append("config")
@@ -110,6 +113,16 @@ def test_service_container_builds_in_dependency_order() -> None:
         ))
         return world_transactions
 
+    def create_world_repository(
+        received_indexes,
+        received_world_writes,
+        received_backup,
+        received_transactions,
+    ):
+        del received_world_writes, received_backup, received_transactions
+        events.append(("world_repository", received_indexes))
+        return world_repository
+
     def create_backup(received_world_writes):
         events.append(("backup", received_world_writes))
         return backup
@@ -138,6 +151,7 @@ def test_service_container_builds_in_dependency_order() -> None:
             cache_registry=create_cache_registry,
             execution_runtime=create_execution_runtime,
             world_indexes=create_world_indexes,
+            world_repository=create_world_repository,
             world_transactions=create_world_transactions,
             world_writes=create_world_writes,
             backup=create_backup,
@@ -157,7 +171,7 @@ def test_service_container_builds_in_dependency_order() -> None:
     assert services.execution_runtime is execution_runtime
     assert services.cache_registry is cache_registry
     assert services.world_indexes is world_indexes
-    assert isinstance(services.world_repository, WorldRepository)
+    assert services.world_repository is world_repository
     assert services.world_transactions is world_transactions
     assert events == [
         "config",
@@ -168,6 +182,7 @@ def test_service_container_builds_in_dependency_order() -> None:
         "cache_registry",
         "world_indexes",
         ("world_transactions", world_writes, backup),
+        ("world_repository", world_indexes),
         ("migration", config, backup, world_transactions),
         "uuid",
         "item",
@@ -213,3 +228,16 @@ def test_service_container_reports_failed_service_and_stops() -> None:
     assert isinstance(captured.value.__cause__, OSError)
     assert "migration unavailable" in str(captured.value)
     assert uuid_created is False
+
+
+def test_default_cache_registry_owns_process_mca_cache() -> None:
+    registry = _default_cache_registry()
+    try:
+        mca_stats = next(
+            region
+            for region in registry.stats().regions
+            if region.name == "mca.chunk"
+        )
+        assert mca_stats.max_bytes == CHUNK_DECODE_CACHE_MAX_BYTES
+    finally:
+        registry.close()

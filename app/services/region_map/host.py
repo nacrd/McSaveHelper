@@ -50,6 +50,9 @@ class RegionMapHost:
     _topview_tile_sizes: Dict[Tuple[int, int], int]
     _topview_tile_complete: Dict[Tuple[int, int], bool]
     _topview_tile_revisions: Dict[Tuple[int, int], int]
+    _topview_tile_sources: Dict[Tuple[int, int], Tuple[int, int, str]]
+    _topview_source_checked_at: Dict[Tuple[int, int], float]
+    _topview_source_pending: set[Tuple[int, int]]
     _topview_revision_counter: int
     _topview_failed_sizes: Dict[Tuple[int, int], int]
     _topview_failed_mtimes: Dict[Tuple[int, int], int]

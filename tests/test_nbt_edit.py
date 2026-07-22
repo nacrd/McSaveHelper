@@ -76,11 +76,27 @@ def test_stage_store_owns_mutation_and_groups_targets() -> None:
 
 
 class FakeSession(WorldSession):
-    def __init__(self, world_path: Path, chunk_data: Any = None) -> None:
+    def __init__(
+        self,
+        world_path: Path,
+        chunk_data: Any = None,
+        commit_results: list[bool] | None = None,
+    ) -> None:
         self.world_path = world_path
         self.queued = []
         self.committed_with_backup = False
         self.chunk_data = chunk_data or {"Data": {"value": 1}, "sections": []}
+        self.commit_results = commit_results if commit_results is not None else [True]
+        self.batches: list[FakeSession] = []
+
+    def new_action_session(self) -> "FakeSession":
+        batch = FakeSession(
+            self.world_path,
+            self.chunk_data,
+            self.commit_results,
+        )
+        self.batches.append(batch)
+        return batch
 
     def queue_modify_nbt(self, target, path, value, operation="set") -> None:
         self.queued.append(("nbt", target, path, value, operation))
@@ -99,7 +115,7 @@ class FakeSession(WorldSession):
 
     def commit(self, backup: bool = True) -> bool:
         self.committed_with_backup = backup
-        return True
+        return self.commit_results.pop(0)
 
 
 def test_commit_handler_queues_typed_changes_and_refreshes_session() -> None:
@@ -113,33 +129,68 @@ def test_commit_handler_queues_typed_changes_and_refreshes_session() -> None:
     store.add(_change(target=chunk_target, format="chunk", new_value=4))
 
     session = FakeSession(Path("world"))
-    replacements = []
     refreshed = []
     messages = []
 
     handler = NbtCommitHandler(
         store=store,
         get_world_session=lambda: session,
-        replace_world_session=replacements.append,
         get_page=lambda: None,
         refresh_stage=lambda: refreshed.append("stage"),
-        reload_current_target=lambda: refreshed.append("target"),
+        reload_world=lambda path: refreshed.append(str(path)),
+        is_world_current=lambda _path: True,
+        world_changed_text=("存档已切换", "当前存档已改变，请重新打开提交预览。"),
         warn=lambda title, message: messages.append((title, message)),
         info=lambda title, message: messages.append((title, message)),
         error=lambda title, message: messages.append((title, message)),
         handle_error=lambda error, title: messages.append((title, str(error))),
         log=lambda message, level: None,
-        session_factory=lambda path, log: FakeSession(path),
     )
 
     handler.execute_commit()
+    batch = session.batches[0]
 
-    assert [queued[0] for queued in session.queued] == ["nbt", "json", "chunk"]
-    assert session.committed_with_backup is True
+    assert [queued[0] for queued in batch.queued] == ["nbt", "json", "chunk"]
+    assert batch.committed_with_backup is True
     assert not store
-    assert refreshed == ["stage", "target"]
-    assert len(replacements) == 1
+    assert refreshed == ["stage", "world"]
     assert messages[-1][0] == "提交完成"
+
+
+def test_commit_success_is_not_reclassified_when_world_reload_fails() -> None:
+    store = NbtStageStore()
+    store.add(_change())
+    session = FakeSession(Path("world"))
+    messages = []
+    handled_errors = []
+    logs = []
+
+    def fail_reload(_path: Path) -> None:
+        raise RuntimeError("reload failed")
+
+    handler = NbtCommitHandler(
+        store=store,
+        get_world_session=lambda: session,
+        get_page=lambda: None,
+        refresh_stage=lambda: None,
+        reload_world=fail_reload,
+        is_world_current=lambda _path: True,
+        world_changed_text=("存档已切换", "当前存档已改变，请重新打开提交预览。"),
+        warn=lambda title, message: messages.append((title, message)),
+        info=lambda title, message: messages.append((title, message)),
+        error=lambda title, message: messages.append((title, message)),
+        handle_error=lambda error, title: handled_errors.append((title, error)),
+        log=lambda message, level: logs.append((level, message)),
+    )
+
+    handler.execute_commit()
+    batch = session.batches[0]
+
+    assert batch.committed_with_backup is True
+    assert not store
+    assert handled_errors == []
+    assert messages[-1][0] == "提交完成"
+    assert logs == [("WARNING", "提交成功，但刷新世界会话失败: reload failed")]
 
 
 def test_chunk_commit_replays_only_remaining_changes_from_disk() -> None:
@@ -170,22 +221,79 @@ def test_chunk_commit_replays_only_remaining_changes_from_disk() -> None:
     handler = NbtCommitHandler(
         store=store,
         get_world_session=lambda: session,
-        replace_world_session=lambda _session: None,
         get_page=lambda: None,
         refresh_stage=lambda: None,
-        reload_current_target=lambda: None,
+        reload_world=lambda _path: None,
+        is_world_current=lambda _path: True,
+        world_changed_text=("存档已切换", "当前存档已改变，请重新打开提交预览。"),
         warn=lambda _title, _message: None,
         info=lambda _title, _message: None,
         error=lambda _title, _message: None,
         handle_error=lambda error, _title: (_ for _ in ()).throw(error),
         log=lambda _message, _level: None,
-        session_factory=lambda path, _log: FakeSession(path),
     )
 
     handler.execute_commit()
 
-    committed = session.queued[0][4]
+    committed = session.batches[0].queued[0][4]
     assert committed["Data"] == {"kept": 2, "removed": 0}
+
+
+def test_commit_retry_uses_a_fresh_action_queue() -> None:
+    store = NbtStageStore()
+    store.add(_change(old_value=None, new_value=2, path=["Data", "items", 0]))
+    session = FakeSession(Path("world"), commit_results=[False, True])
+    messages = []
+    handler = NbtCommitHandler(
+        store=store,
+        get_world_session=lambda: session,
+        get_page=lambda: None,
+        refresh_stage=lambda: None,
+        reload_world=lambda _path: None,
+        is_world_current=lambda _path: True,
+        world_changed_text=("存档已切换", "当前存档已改变，请重新打开提交预览。"),
+        warn=lambda title, message: messages.append((title, message)),
+        info=lambda title, message: messages.append((title, message)),
+        error=lambda title, message: messages.append((title, message)),
+        handle_error=lambda error, title: messages.append((title, str(error))),
+        log=lambda _message, _level: None,
+    )
+
+    handler.execute_commit()
+    assert len(store) == 1
+    handler.execute_commit()
+
+    assert len(session.batches) == 2
+    assert [len(batch.queued) for batch in session.batches] == [1, 1]
+    assert not store
+    assert [message[0] for message in messages] == ["提交失败", "提交完成"]
+
+
+def test_commit_rejects_staged_world_after_current_save_switch() -> None:
+    store = NbtStageStore()
+    store.add(_change())
+    session = FakeSession(Path("world-a"))
+    messages = []
+    handler = NbtCommitHandler(
+        store=store,
+        get_world_session=lambda: session,
+        get_page=lambda: None,
+        refresh_stage=lambda: None,
+        reload_world=lambda _path: None,
+        is_world_current=lambda _path: False,
+        world_changed_text=("存档已切换", "当前存档已改变，请重新打开提交预览。"),
+        warn=lambda title, message: messages.append((title, message)),
+        info=lambda title, message: messages.append((title, message)),
+        error=lambda title, message: messages.append((title, message)),
+        handle_error=lambda error, title: messages.append((title, str(error))),
+        log=lambda _message, _level: None,
+    )
+
+    handler.execute_commit()
+
+    assert session.batches == []
+    assert len(store) == 1
+    assert messages == [("存档已切换", "当前存档已改变，请重新打开提交预览。")]
 
 
 class FakeBlockService(BlockDataService):

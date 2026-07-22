@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 
 
 def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -123,7 +123,7 @@ def _cell(value: object) -> str:
     if value is None:
         return "—"
     try:
-        return f"{float(value):.3f}"
+        return f"{float(str(value)):.3f}"
     except (TypeError, ValueError):
         return str(value)
 

@@ -311,11 +311,14 @@ def check_world_index_cache() -> CheckResult:
     from app.services.cache_registry import CacheRegistry
     from app.services.world_index_service import WorldIndexRegistry
 
-    cache_registry = CacheRegistry(budget_bytes=4 * 1024 * 1024)
+    max_entries = 2
+    cache_registry = CacheRegistry(
+        budget_bytes=max_entries * WorldIndexRegistry.ENTRY_BUDGET_BYTES,
+    )
     world_indexes = None
     try:
         world_indexes = WorldIndexRegistry(
-            max_entries=2,
+            max_entries=max_entries,
             cache_registry=cache_registry,
         )
         names = {item.name for item in cache_registry.stats().regions}

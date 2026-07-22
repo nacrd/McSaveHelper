@@ -46,6 +46,14 @@ class WorldScanner:
         """Public: discover player ``*.dat`` files (26.1 + legacy)."""
         return self._scan_players()
 
+    def scan_region_files(self) -> Dict[object, Path]:
+        """Public: discover region files without scanning other categories."""
+        return self._scan_regions()
+
+    def scan_data_files(self) -> List[Path]:
+        """Public: discover world data files without parsing player data."""
+        return self._scan_data()
+
     def scan_usercache(self, player_set: Optional[Set[str]] = None) -> Dict[str, str]:
         """Public: load best-matching usercache entries.
 
@@ -149,7 +157,7 @@ class WorldScanner:
                 continue
 
             try:
-                cache_map, match_count = _load_usercache_candidate(path, player_set)
+                cache_map, match_count = load_usercache_candidate(path, player_set)
             except Exception as e:
                 self._log(f"解析 usercache {path} 失败: {e}", "WARNING")
                 continue
@@ -231,10 +239,11 @@ class WorldScanner:
         return normalize_uuid(uuid)
 
 
-def _load_usercache_candidate(
+def load_usercache_candidate(
     path: Path,
     player_set: Set[str],
 ) -> tuple[Dict[str, str], int]:
+    """Parse one usercache candidate and count matching player identities."""
     with open(path, "r", encoding="utf-8") as file:
         entries = json.load(file)
     cache_map: Dict[str, str] = {}

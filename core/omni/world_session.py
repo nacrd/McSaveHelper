@@ -21,6 +21,9 @@ from core.nbt import Compound
 from core.world_index import WorldIndexSnapshot
 
 
+IndexProvider = Callable[[Path, bool], WorldIndexSnapshot]
+
+
 class WorldSession:
     """存档会话管理器，提供延迟加载与任务队列（门面模式）。"""
 
@@ -36,6 +39,7 @@ class WorldSession:
         transaction_callback: Optional[
             Callable[[Path, Callable[[Path], None]], Any]
         ] = None,
+        index_provider: Optional[IndexProvider] = None,
     ) -> None:
         """初始化会话：扫描目录、加载 level.dat 并装配队列。
 
@@ -46,6 +50,7 @@ class WorldSession:
             backup_callback: 可选提交前备份钩子，返回备份路径。
             index_snapshot: 可选共享只读索引，避免重复目录扫描。
             transaction_callback: 可选统一世界事务提交端口。
+            index_provider: 可选索引提供端口；会话刷新时用它获取最新快照。
         """
         self.world_path = world_path.resolve()
         self.log = log or (lambda msg, lvl="INFO": None)
@@ -53,6 +58,7 @@ class WorldSession:
         self._backup_callback = backup_callback
         self._transaction_callback = transaction_callback
         self._index_snapshot = index_snapshot
+        self._index_provider = index_provider
 
         self._scanner = WorldScanner(self.world_path, self.log)
         self._nbt_loader = NbtLoader(self.world_path, self.log)
@@ -381,13 +387,28 @@ class WorldSession:
 
     def spawn(self) -> "WorldSession":
         """Reload this world while preserving application write dependencies."""
+        index_snapshot = self._index_snapshot
+        if self._index_provider is not None:
+            index_snapshot = self._index_provider(self.world_path, False)
+        return self._copy_with_index(index_snapshot)
+
+    def new_action_session(self) -> "WorldSession":
+        """Create an empty action queue over the current immutable read model."""
+        return self._copy_with_index(self._index_snapshot)
+
+    def _copy_with_index(
+        self,
+        index_snapshot: Optional[WorldIndexSnapshot],
+    ) -> "WorldSession":
+        """Copy session dependencies while allocating fresh mutable state."""
         return WorldSession(
             self.world_path,
             log=self.log,
             write_lease_factory=self._write_lease_factory,
             backup_callback=self._backup_callback,
-            index_snapshot=self._index_snapshot,
+            index_snapshot=index_snapshot,
             transaction_callback=self._transaction_callback,
+            index_provider=self._index_provider,
         )
 
     def _validate_index_snapshot(

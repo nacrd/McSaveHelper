@@ -3,9 +3,19 @@ import threading
 
 import pytest
 
+from app.services import mca_cache_adapter
+from app.services.cache_registry import CacheRegistry
 from app.services.region_map import topview as region_map_topview
-from app.services.execution_runtime import ExecutionRuntime
+from app.services.execution_runtime import (
+    ExecutionLane,
+    ExecutionRuntime,
+    LaneLimits,
+)
 from app.services.region_map import RegionMapService
+from core.mca.surface import (
+    CHUNK_DECODE_CACHE_MAX_BYTES,
+    CHUNK_DECODE_CACHE_MAX_ENTRIES,
+)
 
 
 def test_region_map_services_do_not_share_mutable_state() -> None:
@@ -206,6 +216,230 @@ def test_topview_cache_hit_miss_and_stale_discard_are_measurable() -> None:
     finally:
         service.close()
         runtime.shutdown(wait=False)
+
+
+def test_topview_tile_invalidates_when_region_source_changes(tmp_path) -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    service.TOPVIEW_SOURCE_CHECK_INTERVAL_SECONDS = 0.0
+    invalidated = threading.Event()
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"initial")
+    coord = (0, 0)
+    service._region_paths[coord] = str(region_path)
+    source_stat = region_path.stat()
+    with service._data_lock:
+        service._store_topview_tile_locked(
+            coord,
+            b"cached-png",
+            32,
+            True,
+            source_stat.st_mtime_ns,
+            source_stat.st_size,
+            "",
+        )
+    service.set_tile_ready_callback(lambda _coord: invalidated.set())
+
+    try:
+        region_path.write_bytes(b"changed-source")
+        assert service.has_topview_tile(coord, min_size=32) is True
+        assert invalidated.wait(1)
+        assert service.has_topview_tile(coord, min_size=32) is False
+        assert service.get_topview_tile(coord) is None
+        assert service.get_topview_tile_size(coord) == 0
+    finally:
+        service.close()
+        runtime.shutdown(wait=False)
+
+
+def test_topview_source_stat_runs_without_holding_data_lock(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"region")
+    coord = (0, 0)
+    service._region_paths[coord] = str(region_path)
+    source_stat = region_path.stat()
+    with service._data_lock:
+        service._store_topview_tile_locked(
+            coord,
+            b"cached-png",
+            32,
+            True,
+            source_stat.st_mtime_ns,
+            source_stat.st_size,
+            "",
+        )
+    original_stat = type(region_path).stat
+    lock_was_available = []
+    stat_threads = []
+    stat_checked = threading.Event()
+    caller_thread = threading.get_ident()
+
+    def checked_stat(path, *args, **kwargs):
+        if path == region_path:
+            acquired = service._data_lock.acquire(blocking=False)
+            lock_was_available.append(acquired)
+            stat_threads.append(threading.get_ident())
+            if acquired:
+                service._data_lock.release()
+            stat_checked.set()
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(region_path), "stat", checked_stat)
+    try:
+        assert service.get_topview_tile(coord) == b"cached-png"
+        assert stat_checked.wait(1)
+        assert lock_was_available
+        assert all(lock_was_available)
+        assert all(thread_id != caller_thread for thread_id in stat_threads)
+    finally:
+        service.close()
+        runtime.shutdown(wait=False)
+
+
+def test_topview_tile_invalidates_when_external_signature_changes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    service.TOPVIEW_SOURCE_CHECK_INTERVAL_SECONDS = 0.0
+    region_path = tmp_path / "r.0.0.mca"
+    external_path = tmp_path / "c.0.0.mcc"
+    region_path.write_bytes(b"region")
+    external_path.write_bytes(b"external")
+    coord = (0, 0)
+    service._region_paths[coord] = str(region_path)
+
+    def external_signature(*_args, **_kwargs):
+        stats = external_path.stat()
+        return f"{stats.st_mtime_ns}:{stats.st_size}"
+
+    monkeypatch.setattr(
+        service,
+        "_topview_source_signature",
+        external_signature,
+    )
+    source_stat = region_path.stat()
+    with service._data_lock:
+        service._store_topview_tile_locked(
+            coord,
+            b"cached-png",
+            32,
+            True,
+            source_stat.st_mtime_ns,
+            source_stat.st_size,
+            external_signature(),
+        )
+    invalidated = threading.Event()
+    service.set_tile_ready_callback(lambda _coord: invalidated.set())
+
+    try:
+        external_path.write_bytes(b"changed-external-stream")
+        assert service.has_topview_tile(coord, min_size=32) is True
+        assert invalidated.wait(1)
+        assert service.has_topview_tile(coord, min_size=32) is False
+    finally:
+        service.close()
+        runtime.shutdown(wait=False)
+
+
+def test_cancelled_queued_topview_job_releases_local_worker_slot() -> None:
+    limits = LaneLimits(max_workers=1, queue_capacity=2)
+    runtime = ExecutionRuntime(io_limits=limits, cpu_limits=limits)
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+
+    def block_cpu(_token):
+        blocker_started.set()
+        if not release_blocker.wait(2):
+            raise RuntimeError("测试阻塞任务等待超时")
+
+    blocker = runtime.submit("block_cpu", block_cpu, lane=ExecutionLane.CPU)
+    assert blocker_started.wait(1)
+    service = RegionMapService(runtime)
+    coord = (0, 0)
+    service._region_paths[coord] = "r.0.0.mca"
+
+    try:
+        assert service.request_topview_tiles([coord]) == {coord}
+        handle = next(iter(service._topview_handles))
+        assert service._topview_active == 1
+        assert service.request_topview_tiles([coord], tile_size=64) == {coord}
+        assert service._topview_upgrade_sizes[coord] == 64
+
+        assert handle.cancel() is True
+
+        assert service._topview_active == 0
+        assert coord not in service._topview_pending
+        assert coord not in service._topview_upgrade_sizes
+        assert service._topview_handles == set()
+    finally:
+        service.close()
+        release_blocker.set()
+        blocker.result(timeout=2)
+        runtime.shutdown(wait=False)
+
+
+def test_process_mca_cache_is_owned_by_application_registry(monkeypatch) -> None:
+    clears = []
+    monkeypatch.setattr(
+        mca_cache_adapter,
+        "clear_chunk_decode_cache",
+        lambda: clears.append("clear"),
+    )
+    registry = CacheRegistry()
+    mca_cache_adapter.register_mca_chunk_cache(registry)
+    runtime = ExecutionRuntime()
+    first = RegionMapService(runtime, registry)
+    second = RegionMapService(runtime, registry)
+
+    try:
+        first.clear_data()
+        first.close()
+        second.close()
+        assert clears == []
+        assert "mca.chunk" in {
+            region.name for region in registry.stats().regions
+        }
+        mca_stats = next(
+            region
+            for region in registry.stats().regions
+            if region.name == "mca.chunk"
+        )
+        assert mca_stats.max_entries == CHUNK_DECODE_CACHE_MAX_ENTRIES
+        assert mca_stats.max_bytes == CHUNK_DECODE_CACHE_MAX_BYTES
+
+        registry.close()
+        assert clears == ["clear"]
+    finally:
+        first.close()
+        second.close()
+        registry.close()
+        runtime.shutdown(wait=False)
+
+
+def test_process_mca_cache_clears_after_last_registry_owner(monkeypatch) -> None:
+    clears = []
+    monkeypatch.setattr(
+        mca_cache_adapter,
+        "clear_chunk_decode_cache",
+        lambda: clears.append("clear"),
+    )
+    first = CacheRegistry()
+    second = CacheRegistry()
+    mca_cache_adapter.register_mca_chunk_cache(first)
+    mca_cache_adapter.register_mca_chunk_cache(second)
+
+    first.close()
+    assert clears == []
+
+    second.close()
+    assert clears == ["clear"]
 
 
 def test_close_releases_executor_and_rejects_new_scan(tmp_path) -> None:

@@ -94,8 +94,10 @@ _CHUNK_LRU_LOCK = threading.Lock()
 _CHUNK_LRU_EPOCH = 0
 # Keep the compact derived cache bounded while preserving full tile sampling
 # precision. Values are only strings/coordinates, never complete NBT trees.
-_CHUNK_LRU_MAX = 4096
-_CHUNK_LRU_MAX_BYTES = 128 * 1024 * 1024
+CHUNK_DECODE_CACHE_MAX_ENTRIES = 4096
+CHUNK_DECODE_CACHE_MAX_BYTES = 128 * 1024 * 1024
+_CHUNK_LRU_MAX = CHUNK_DECODE_CACHE_MAX_ENTRIES
+_CHUNK_LRU_MAX_BYTES = CHUNK_DECODE_CACHE_MAX_BYTES
 _CHUNK_LRU_BYTES = 0
 
 

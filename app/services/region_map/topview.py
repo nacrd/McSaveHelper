@@ -1,10 +1,11 @@
 """俯视瓦片队列、渲染与内存缓存。"""
 from __future__ import annotations
 
-from app.services.region_map.host import RegionMapHost
 import hashlib
 import threading
+import time
 from collections import OrderedDict, deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, Optional, Tuple
 
@@ -16,13 +17,33 @@ from app.services.execution_runtime import (
     OperationHandle,
     TaskPriority,
 )
+from app.services.region_map.host import RegionMapHost
 from core.mca.errors import McaError
 from core.mca.region_file import RegionFile
 from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
 
 
+TopviewCoord = Tuple[int, int]
+TopviewSourceStamp = Tuple[int, int]
+TopviewSourceState = Tuple[int, int, str]
+TopviewFailureState = Tuple[int, int, Optional[int], str]
+TopviewJob = Tuple[TopviewCoord, str, int, int, threading.Event, int]
+
+
+@dataclass(frozen=True)
+class _TopviewSourceCheck:
+    """A lock-free filesystem probe requested from a consistent state snapshot."""
+
+    coord: TopviewCoord
+    path: str
+    tile_state: Optional[TopviewSourceState]
+    failure_state: Optional[TopviewFailureState]
+
+
 class RegionMapTopviewMixin(RegionMapHost):
     """Mixin host contract is fulfilled by RegionMapService."""
+
+    TOPVIEW_SOURCE_CHECK_INTERVAL_SECONDS = 1.0
 
     def _init_topview_state(self) -> None:
         # region 坐标 → PNG bytes（顶视瓦片缓存）
@@ -41,6 +62,12 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._topview_tile_sizes: Dict[Tuple[int, int], int] = {}
         self._topview_tile_complete: Dict[Tuple[int, int], bool] = {}
         self._topview_tile_revisions: Dict[Tuple[int, int], int] = {}
+        # coord -> MCA stamp plus external MCC signature for stale PNG detection.
+        self._topview_tile_sources: Dict[
+            Tuple[int, int], TopviewSourceState
+        ] = {}
+        self._topview_source_checked_at: Dict[Tuple[int, int], float] = {}
+        self._topview_source_pending: set[Tuple[int, int]] = set()
         self._topview_revision_counter = 0
         # A failed tile should not be retried on every rebuild.  A later,
         # higher-resolution request may still retry it.
@@ -102,6 +129,9 @@ class RegionMapTopviewMixin(RegionMapHost):
             self._topview_tile_sizes.clear()
             self._topview_tile_complete.clear()
             self._topview_tile_revisions.clear()
+            self._topview_tile_sources.clear()
+            self._topview_source_checked_at.clear()
+            self._topview_source_pending.clear()
             self._data_revision += 1
 
     def set_tile_ready_callback(self, callback: Optional[Any]) -> None:
@@ -123,6 +153,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         Returns:
             PNG 字节；未缓存为 None。
         """
+        self._schedule_topview_source_checks([coord])
         with self._data_lock:
             tile = self._topview_tiles.get(coord)
             if tile is not None:
@@ -144,6 +175,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         Returns:
             是否可作为当前 LOD 使用。
         """
+        self._schedule_topview_source_checks([coord])
         with self._data_lock:
             if coord not in self._topview_tiles:
                 return False
@@ -166,6 +198,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         Returns:
             像素边长；无缓存为 0。
         """
+        self._schedule_topview_source_checks([coord])
         with self._data_lock:
             return int(self._topview_tile_sizes.get(coord, 0) or 0)
 
@@ -219,6 +252,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         Returns:
             ``(generation, tiles, revisions)``；generation 用于丢弃过期帧。
         """
+        self._schedule_topview_source_checks(coords)
         tiles: Dict[Tuple[int, int], bytes] = {}
         revisions: Dict[Tuple[int, int], int] = {}
         with self._data_lock:
@@ -299,7 +333,6 @@ class RegionMapTopviewMixin(RegionMapHost):
         self,
         coord: Tuple[int, int],
         size: int,
-        _force: bool,
     ) -> Optional[str]:
         existing = self._topview_tiles.get(coord)
         existing_size = int(self._topview_tile_sizes.get(coord, 0) or 0)
@@ -315,33 +348,242 @@ class RegionMapTopviewMixin(RegionMapHost):
             return None
         if int(self._topview_failed_sizes.get(coord, 0) or 0) < size:
             return path
-        try:
-            current_stat = Path(path).stat()
-            current_mtime = int(current_stat.st_mtime_ns)
-            current_size = int(current_stat.st_size)
-        except OSError:
-            current_mtime = 0
-            current_size = 0
-        current_signature = self._topview_source_signature(
-            path,
-            coord,
-            current_mtime,
-            current_size,
+        return None
+
+    def _schedule_topview_source_checks(
+        self,
+        coords: list[TopviewCoord],
+        *,
+        failure_size: Optional[int] = None,
+        force: bool = False,
+    ) -> None:
+        """Submit throttled source probes without blocking the UI caller."""
+        checks = self._collect_topview_source_checks(
+            coords,
+            failure_size=failure_size,
+            force=force,
         )
-        if (
-            self._topview_failed_signatures.get(coord) == current_signature
-            or (
-                not self._topview_failed_signatures.get(coord)
-                and self._topview_failed_mtimes.get(coord) == current_mtime
-                and (
-                    self._topview_failed_file_sizes.get(coord) is None
-                    or self._topview_failed_file_sizes.get(coord) == current_size
-                )
+        if not checks:
+            return
+        try:
+            handle = self._execution_runtime.submit(
+                "probe_topview_sources",
+                lambda token: self._run_topview_source_checks(token, checks),
+                lane=ExecutionLane.IO,
+                priority=TaskPriority.BACKGROUND,
             )
-        ):
+        except (RuntimeError, ValueError):
+            self._release_topview_source_checks(checks)
+            return
+        self._track_topview_source_handle(handle, checks)
+
+    def _run_topview_source_checks(
+        self,
+        token: CancellationToken,
+        checks: tuple[_TopviewSourceCheck, ...],
+    ) -> None:
+        """Probe one batch on the shared I/O lane and publish current results."""
+        for check in checks:
+            if token.is_cancelled:
+                return
+            current_stamp = self._read_topview_source_stat(check.path, 0)
+            current_signature = self._source_signature_for_check(
+                check,
+                current_stamp,
+                token,
+            )
+            if token.is_cancelled:
+                return
+            callback = self._apply_topview_source_check(
+                check,
+                current_stamp,
+                current_signature,
+            )
+            self._notify_topview_ready(callback, check.coord)
+
+    def _track_topview_source_handle(
+        self,
+        handle: OperationHandle[None],
+        checks: tuple[_TopviewSourceCheck, ...],
+    ) -> None:
+        """Own a source-probe handle until completion or service close."""
+        with self._data_lock:
+            should_cancel = self._closed
+            if not should_cancel:
+                self._topview_handles.add(handle)
+        handle.add_done_callback(
+            lambda completed: self._complete_topview_source_handle(
+                completed,
+                checks,
+            )
+        )
+        if should_cancel:
+            handle.cancel()
+
+    def _complete_topview_source_handle(
+        self,
+        handle: OperationHandle[None],
+        checks: tuple[_TopviewSourceCheck, ...],
+    ) -> None:
+        """Release in-flight source identities after every completion path."""
+        with self._data_lock:
+            self._topview_handles.discard(handle)
+        self._release_topview_source_checks(checks)
+
+    def _release_topview_source_checks(
+        self,
+        checks: tuple[_TopviewSourceCheck, ...],
+    ) -> None:
+        """Allow later probes for coordinates in a completed batch."""
+        with self._data_lock:
+            for check in checks:
+                self._topview_source_pending.discard(check.coord)
+
+    def _collect_topview_source_checks(
+        self,
+        coords: list[TopviewCoord],
+        *,
+        failure_size: Optional[int],
+        force: bool,
+    ) -> tuple[_TopviewSourceCheck, ...]:
+        """Capture source identities under the lock without touching the disk."""
+        now = time.monotonic()
+        checks: list[_TopviewSourceCheck] = []
+        with self._data_lock:
+            for coord in dict.fromkeys(coords):
+                path = self._region_paths.get(coord)
+                if not path:
+                    continue
+                if coord in self._topview_source_pending:
+                    continue
+                checked_at = self._topview_source_checked_at.get(coord, 0.0)
+                due = force or (
+                    now - checked_at >= self.TOPVIEW_SOURCE_CHECK_INTERVAL_SECONDS
+                )
+                if not due:
+                    continue
+                tile_state = self._topview_tile_sources.get(coord)
+                failure_state = self._topview_failure_state_locked(
+                    coord,
+                    failure_size,
+                )
+                if tile_state is None and failure_state is None:
+                    continue
+                self._topview_source_checked_at[coord] = now
+                self._topview_source_pending.add(coord)
+                checks.append(_TopviewSourceCheck(
+                    coord=coord,
+                    path=path,
+                    tile_state=tile_state,
+                    failure_state=failure_state,
+                ))
+        return tuple(checks)
+
+    def _topview_failure_state_locked(
+        self,
+        coord: TopviewCoord,
+        failure_size: Optional[int],
+    ) -> Optional[TopviewFailureState]:
+        if failure_size is None:
             return None
-        self._clear_topview_failure_locked(coord)
-        return path
+        failed_size = int(self._topview_failed_sizes.get(coord, 0) or 0)
+        if failed_size < failure_size:
+            return None
+        return (
+            failed_size,
+            int(self._topview_failed_mtimes.get(coord, 0) or 0),
+            self._topview_failed_file_sizes.get(coord),
+            self._topview_failed_signatures.get(coord, ""),
+        )
+
+    def _source_signature_for_check(
+        self,
+        check: _TopviewSourceCheck,
+        current_stamp: TopviewSourceStamp,
+        token: CancellationToken,
+    ) -> str:
+        failure_state = check.failure_state
+        needs_signature = check.tile_state is not None or (
+            failure_state is not None and bool(failure_state[3])
+        )
+        if not needs_signature:
+            return ""
+        return self._topview_source_signature(
+            check.path,
+            check.coord,
+            current_stamp[0],
+            current_stamp[1],
+            cancel_check=lambda: token.is_cancelled,
+        )
+
+    def _apply_topview_source_check(
+        self,
+        check: _TopviewSourceCheck,
+        current_stamp: TopviewSourceStamp,
+        current_signature: str,
+    ) -> Optional[Any]:
+        callback = None
+        with self._data_lock:
+            if self._region_paths.get(check.coord) != check.path:
+                return None
+            compared_signature = (
+                current_signature
+                if check.tile_state is not None and check.tile_state[2]
+                else ""
+            )
+            current_state = (
+                current_stamp[0],
+                current_stamp[1],
+                compared_signature,
+            )
+            if (
+                check.tile_state is not None
+                and self._topview_tile_sources.get(check.coord) == check.tile_state
+                and current_state != check.tile_state
+            ):
+                self._drop_topview_tile_locked(check.coord)
+                callback = self._tile_ready_callback
+            if check.failure_state != self._topview_failure_state_locked(
+                check.coord,
+                check.failure_state[0] if check.failure_state else None,
+            ):
+                return callback
+            if self._topview_failure_changed(
+                check.failure_state,
+                current_stamp,
+                current_signature,
+            ):
+                self._clear_topview_failure_locked(check.coord)
+                callback = self._tile_ready_callback
+        return callback
+
+    @staticmethod
+    def _topview_failure_changed(
+        failure_state: Optional[TopviewFailureState],
+        current_stamp: TopviewSourceStamp,
+        current_signature: str,
+    ) -> bool:
+        if failure_state is None:
+            return False
+        _size, failed_mtime, failed_file_size, failed_signature = failure_state
+        if failed_signature:
+            return failed_signature != current_signature
+        return failed_mtime != current_stamp[0] or (
+            failed_file_size is not None
+            and failed_file_size != current_stamp[1]
+        )
+
+    def _drop_topview_tile_locked(self, coord: TopviewCoord) -> None:
+        """Remove one cached tile after its source identity changed."""
+        previous = self._topview_tiles.pop(coord, None)
+        if previous is not None:
+            self._topview_memory_bytes -= len(previous)
+        self._topview_tile_sizes.pop(coord, None)
+        self._topview_tile_complete.pop(coord, None)
+        self._topview_tile_revisions.pop(coord, None)
+        self._topview_tile_sources.pop(coord, None)
+        self._topview_source_checked_at.pop(coord, None)
+        self._data_revision += 1
 
     def _make_topview_queue_room_locked(
         self,
@@ -385,6 +627,11 @@ class RegionMapTopviewMixin(RegionMapHost):
             8,
             min(LEAF_TILE_SIZE, int(tile_size or self._topview_tile_size)),
         )
+        self._schedule_topview_source_checks(
+            coords,
+            failure_size=size,
+            force=force,
+        )
         accepted: set[Tuple[int, int]] = set()
         with self._data_lock:
             if self._closed or not self._topview_enabled:
@@ -396,7 +643,6 @@ class RegionMapTopviewMixin(RegionMapHost):
                 queued, keep_going = self._enqueue_topview_coord_locked(
                     coord=coord,
                     size=size,
-                    force=force,
                     priority=priority,
                     generation=generation,
                     cancel_event=cancel_event,
@@ -413,7 +659,6 @@ class RegionMapTopviewMixin(RegionMapHost):
         *,
         coord: Tuple[int, int],
         size: int,
-        force: bool,
         priority: bool,
         generation: int,
         cancel_event: threading.Event,
@@ -430,7 +675,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         ):
             accepted.add(coord)
             return queued, True
-        path = self._topview_path_for_request_locked(coord, size, force)
+        path = self._topview_path_for_request_locked(coord, size)
         if path is None:
             return queued, True
         # A large modded save can contain thousands of visible regions.
@@ -463,9 +708,7 @@ class RegionMapTopviewMixin(RegionMapHost):
 
     def _pump_topview_queue(self) -> None:
         """Start queued jobs up to the worker cap."""
-        jobs: list[
-            Tuple[Tuple[int, int], str, int, int, threading.Event, int]
-        ] = []
+        jobs: list[TopviewJob] = []
         with self._data_lock:
             while (
                 self._topview_active < self._topview_max_workers
@@ -494,14 +737,15 @@ class RegionMapTopviewMixin(RegionMapHost):
             self._rollback_topview_jobs(jobs)
             return
         for job in jobs:
+            started = threading.Event()
             try:
                 handle = executor.submit(
                     "render_topview_tile",
-                    self._make_topview_work(job),
+                    self._make_topview_work(job, started),
                     lane=ExecutionLane.CPU,
                     priority=TaskPriority.VISIBLE,
                 )
-                self._track_topview_handle(handle)
+                self._track_topview_handle(handle, job, started)
             except (RuntimeError, ValueError):
                 self._rollback_topview_jobs([job])
             except Exception:
@@ -510,42 +754,63 @@ class RegionMapTopviewMixin(RegionMapHost):
     def _run_topview_job(
         self,
         token: CancellationToken,
-        render_job: Tuple[Tuple[int, int], str, int, int, threading.Event, int],
+        render_job: TopviewJob,
     ) -> None:
         """运行时适配：取消时通知旧队列协议并执行一个瓦片任务。"""
         if token.is_cancelled:
             render_job[4].set()
         self._render_topview_worker(*render_job)
 
-    def _track_topview_handle(self, handle: OperationHandle[None]) -> None:
-        """登记瓦片任务，并在完成回调中以同一锁安全移除。"""
+    def _track_topview_handle(
+        self,
+        handle: OperationHandle[None],
+        job: TopviewJob,
+        started: threading.Event,
+    ) -> None:
+        """登记瓦片任务，并统一处理执行前取消与正常完成。"""
         with self._data_lock:
-            if self._closed:
-                handle.cancel()
-                return
-            self._topview_handles.add(handle)
-        handle.add_done_callback(self._discard_topview_handle)
+            should_cancel = self._closed
+            if not should_cancel:
+                self._topview_handles.add(handle)
+        handle.add_done_callback(
+            lambda completed: self._complete_topview_handle(
+                completed,
+                job,
+                started,
+            )
+        )
+        if should_cancel:
+            handle.cancel()
 
-    def _discard_topview_handle(self, handle: OperationHandle[None]) -> None:
-        """后台完成回调：释放任务身份，不直接触碰 UI。"""
+    def _complete_topview_handle(
+        self,
+        handle: OperationHandle[None],
+        job: TopviewJob,
+        started: threading.Event,
+    ) -> None:
+        """释放任务身份，并回收执行前取消任务占用的本地名额。"""
         with self._data_lock:
             self._topview_handles.discard(handle)
+        if started.is_set():
+            return
+        self._rollback_topview_jobs([job])
+        self._safe_pump_topview_queue()
 
     def _make_topview_work(
         self,
-        render_job: Tuple[Tuple[int, int], str, int, int, threading.Event, int],
+        render_job: TopviewJob,
+        started: threading.Event,
     ) -> Callable[[CancellationToken], None]:
         """将旧队列任务绑定为统一运行时可提交的单参数函数。"""
         def work(token: CancellationToken) -> None:
+            started.set()
             self._run_topview_job(token, render_job)
 
         return work
 
     def _rollback_topview_jobs(
         self,
-        jobs: list[
-            Tuple[Tuple[int, int], str, int, int, threading.Event, int]
-        ],
+        jobs: list[TopviewJob],
     ) -> None:
         """Return jobs that could not be submitted after a close race."""
         with self._data_lock:
@@ -554,6 +819,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                 if self._topview_pending.get(coord) == generation:
                     self._topview_pending.pop(coord, None)
                     self._topview_pending_sizes.pop(coord, None)
+                    self._topview_upgrade_sizes.pop(coord, None)
 
     def _clear_topview_failure_locked(self, coord: Tuple[int, int]) -> None:
         self._topview_failed_sizes.pop(coord, None)
@@ -759,7 +1025,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                 and not cancel_event.is_set()
                 and not self._closed
             )
-        if result_is_current and (png is None or not render_complete):
+        if result_is_current:
             return self._topview_source_signature(
                 path,
                 coord,
@@ -889,6 +1155,12 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._topview_memory_bytes += len(png)
         self._topview_tile_sizes[coord] = int(tile_size)
         self._topview_tile_complete[coord] = render_complete
+        self._topview_tile_sources[coord] = (
+            int(source_mtime_ns),
+            int(source_file_size),
+            source_signature,
+        )
+        self._topview_source_checked_at.pop(coord, None)
         self._topview_revision_counter += 1
         self._topview_tile_revisions[coord] = self._topview_revision_counter
         while (
@@ -900,3 +1172,5 @@ class RegionMapTopviewMixin(RegionMapHost):
             self._topview_tile_sizes.pop(old_coord, None)
             self._topview_tile_complete.pop(old_coord, None)
             self._topview_tile_revisions.pop(old_coord, None)
+            self._topview_tile_sources.pop(old_coord, None)
+            self._topview_source_checked_at.pop(old_coord, None)

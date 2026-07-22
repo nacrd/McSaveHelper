@@ -77,6 +77,23 @@ def test_external_registration_reserves_budget_until_closed() -> None:
     assert region.stats().max_bytes == 3
 
 
+def test_external_registration_uses_distinct_clear_and_close_callbacks() -> None:
+    registry = CacheRegistry(budget_bytes=10)
+    calls: list[str] = []
+    registration = registry.register_external(
+        "shared",
+        CachePolicy(1, 1),
+        lambda: CacheStats("shared", 0, 0, 1, 1, 0, 0, 0),
+        lambda: calls.append("clear"),
+        on_close=lambda: calls.append("close"),
+    )
+
+    registry.clear_all()
+    registration.close()
+
+    assert calls == ["clear", "close"]
+
+
 def test_close_rejects_new_region_and_closes_existing_region() -> None:
     registry = CacheRegistry()
     region = registry.create_region("textures", CachePolicy(2, 10))
@@ -87,3 +104,23 @@ def test_close_rejects_new_region_and_closes_existing_region() -> None:
         registry.create_region("late", CachePolicy(1, 1))
     with pytest.raises(RuntimeError, match="已关闭"):
         region.put("x", "x", 1)
+
+
+def test_close_removes_world_invalidators() -> None:
+    registry = CacheRegistry()
+    calls: list[str] = []
+    registry.register_external(
+        "world.index",
+        CachePolicy(1, 1),
+        lambda: CacheStats("world.index", 0, 0, 1, 1, 0, 0, 0),
+        lambda: None,
+    )
+    registry.register_world_invalidator(
+        "world.index",
+        calls.append,
+    )
+
+    registry.close()
+
+    assert registry.invalidate_world("/tmp/world") == 0
+    assert calls == []

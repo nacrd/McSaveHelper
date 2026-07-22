@@ -190,6 +190,16 @@ ExternalStats = Callable[[], CacheStats]
 ExternalClear = Callable[[], None]
 
 
+@dataclass(frozen=True)
+class _ExternalCache:
+    """Callbacks and budget reserved for one externally owned cache."""
+
+    policy: CachePolicy
+    stats: ExternalStats
+    clear: ExternalClear
+    on_close: ExternalClear
+
+
 class CacheRegistry:
     """管理应用缓存分区并聚合内置与外部缓存统计。"""
 
@@ -200,10 +210,7 @@ class CacheRegistry:
         self._budget_bytes = budget_bytes
         self._lock = threading.Lock()
         self._regions: dict[str, CacheRegion[Any, Any]] = {}
-        self._external: dict[
-            str,
-            tuple[CachePolicy, ExternalStats, ExternalClear],
-        ] = {}
+        self._external: dict[str, _ExternalCache] = {}
         self._world_invalidators: dict[str, WorldInvalidator] = {}
         self._closed = False
 
@@ -235,8 +242,21 @@ class CacheRegistry:
         policy: CachePolicy,
         stats: ExternalStats,
         clear: ExternalClear,
+        *,
+        on_close: Optional[ExternalClear] = None,
     ) -> CacheRegistration:
-        """注册不可直接托管、但可统计和清理的缓存适配器。"""
+        """注册不可直接托管、但可统计和清理的缓存适配器。
+
+        Args:
+            name: 缓存分区名称。
+            policy: 条目数与字节预算。
+            stats: 当前统计回调。
+            clear: 显式全局清理时调用。
+            on_close: 注销或注册表关闭时调用；缺省复用 ``clear``。
+
+        Returns:
+            可幂等注销该外部缓存的注册凭据。
+        """
         normalized = name.strip()
         if not normalized:
             raise ValueError("外部缓存名称不能为空")
@@ -245,7 +265,12 @@ class CacheRegistry:
             if normalized in self._regions or normalized in self._external:
                 raise ValueError(f"缓存分区已注册: {normalized}")
             self._ensure_budget_locked(policy.max_bytes)
-            self._external[normalized] = (policy, stats, clear)
+            self._external[normalized] = _ExternalCache(
+                policy=policy,
+                stats=stats,
+                clear=clear,
+                on_close=on_close or clear,
+            )
         return CacheRegistration(self, normalized)
 
     def unregister(self, name: str) -> None:
@@ -254,8 +279,13 @@ class CacheRegistry:
         if not normalized:
             return
         with self._lock:
-            self._external.pop(normalized, None)
+            external = self._external.pop(normalized, None)
             self._world_invalidators.pop(normalized, None)
+        if external is not None:
+            try:
+                external.on_close()
+            except (OSError, RuntimeError, ValueError, TypeError):
+                pass
 
     def register_world_invalidator(
         self,
@@ -289,6 +319,8 @@ class CacheRegistry:
         world = Path(world_path).expanduser().resolve()
         key = os.path.normcase(str(world))
         with self._lock:
+            if self._closed:
+                return 0
             invalidators = tuple(self._world_invalidators.items())
         called = 0
         for _name, invalidate in invalidators:
@@ -306,9 +338,9 @@ class CacheRegistry:
             external = tuple(self._external.values())
             budget = self._budget_bytes
         snapshots = [region.stats() for region in regions]
-        for _policy, stats, _clear in external:
+        for item in external:
             try:
-                snapshots.append(stats())
+                snapshots.append(item.stats())
             except (OSError, RuntimeError, ValueError, TypeError):
                 continue
         snapshots.sort(key=lambda item: item.name)
@@ -325,9 +357,9 @@ class CacheRegistry:
             external = tuple(self._external.values())
         for region in regions:
             region.clear()
-        for _policy, _stats, clear in external:
+        for item in external:
             try:
-                clear()
+                item.clear()
             except (OSError, RuntimeError, ValueError, TypeError):
                 continue
 
@@ -341,11 +373,12 @@ class CacheRegistry:
             external = tuple(self._external.values())
             self._regions.clear()
             self._external.clear()
+            self._world_invalidators.clear()
         for region in regions:
             region.close()
-        for _policy, _stats, clear in external:
+        for item in external:
             try:
-                clear()
+                item.on_close()
             except (OSError, RuntimeError, ValueError, TypeError):
                 continue
 
@@ -358,7 +391,7 @@ class CacheRegistry:
             region.stats().max_bytes for region in self._regions.values()
         )
         allocated += sum(
-            policy.max_bytes for policy, _stats, _clear in self._external.values()
+            item.policy.max_bytes for item in self._external.values()
         )
         if allocated + requested_bytes > self._budget_bytes:
             raise ValueError(
