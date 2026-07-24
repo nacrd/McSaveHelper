@@ -1,4 +1,7 @@
 """Behavioral tests for the pure MCA map viewport."""
+import flet.canvas as cv
+import pytest
+
 from core.mca.viewport import (
     MAX_SCALE,
     MIN_SCALE,
@@ -8,8 +11,11 @@ from core.mca.viewport import (
     view_level_from_scale,
 )
 from core.mca.map_models import MapMarker
-from app.services.region_map_service import RegionMapService
+from app.services.cache_registry import CacheRegistry
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.mca_map_view import McaMapView
+from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 
 
 def test_view_level_thresholds() -> None:
@@ -144,7 +150,7 @@ def test_nearest_block_follows_the_contiguous_region_projection() -> None:
 
 
 def test_map_view_center_uses_contiguous_block_projection() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service, width=640, height=360)
     view._viewport.offset_x = 320.0 - 33.75
     view._viewport.offset_y = 180.0 - 4.0
@@ -154,7 +160,7 @@ def test_map_view_center_uses_contiguous_block_projection() -> None:
 
 
 def test_map_view_selects_marker_from_external_list_action() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service)
     view.set_markers(
         [
@@ -176,7 +182,7 @@ def test_map_view_selects_marker_from_external_list_action() -> None:
 
 
 def test_map_view_rebuild_consumes_core_viewport() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     service._mca_data.update({(-1, 0): 1024, (0, 0): 2048})
     view = McaMapView(map_service=service, width=640, height=360)
     view._use_topview = False
@@ -190,13 +196,146 @@ def test_map_view_rebuild_consumes_core_viewport() -> None:
 
 
 def test_map_view_unmount_releases_only_its_own_tile_callback() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     first = McaMapView(map_service=service)
     second = McaMapView(map_service=service)
+    first.did_mount()
+    second.did_mount()
 
-    first.did_unmount()
+    first.will_unmount()
     assert service._tile_ready_callback is second._tile_ready_callback
 
-    second.did_unmount()
+    second.will_unmount()
     assert service._tile_ready_callback is None
     service.close()
+
+
+def test_map_view_sparse_remote_regions_use_complete_canvas_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = RegionMapService(ExecutionRuntime())
+    service._mca_data.update({(-14, -19): 1024, (195, 195): 2048})
+    view = McaMapView(map_service=service, width=1760, height=1050)
+    view._use_topview = False
+    rendered_shapes: list[cv.Shape] = []
+
+    def capture_shapes(shapes: list[cv.Shape]) -> None:
+        rendered_shapes.extend(shapes)
+
+    monkeypatch.setattr(view, "_apply_shapes", capture_shapes)
+
+    view._rebuild_canvas()
+
+    assert view._scale < 0.2
+    assert view._surface_enabled is False
+    assert view._surface_layer.covers_viewport is False
+    assert view._visible_regions == {(-14, -19), (195, 195)}
+    assert set(view._cell_bounds) == {(-14, -19), (195, 195)}
+    assert len(rendered_shapes) > len(view._empty_shapes())
+
+    view._scale = 1.0
+    view.fit_to_view()
+    assert view._scale < 0.2
+    view.dispose()
+    service.close()
+
+
+def test_map_view_falls_back_to_canvas_when_surface_becomes_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = RegionMapService(ExecutionRuntime())
+    service._mca_data[(0, 0)] = 2048
+    view = McaMapView(map_service=service, width=640, height=360)
+    view._use_topview = False
+    rendered_shapes: list[cv.Shape] = []
+
+    def capture_shapes(shapes: list[cv.Shape]) -> None:
+        rendered_shapes.extend(shapes)
+
+    monkeypatch.setattr(view, "_apply_shapes", capture_shapes)
+
+    view._rebuild_canvas()
+
+    assert view._surface_enabled is False
+    assert view._surface_layer.enabled is True
+    assert set(view._cell_bounds) == {(0, 0)}
+    assert len(rendered_shapes) > len(view._empty_shapes())
+
+    rendered_shapes.clear()
+    view._surface_layer._disable_after_upload_failure(TimeoutError())
+    view._rebuild_canvas()
+
+    assert view._surface_enabled is False
+    assert view._surface_layer.enabled is False
+    assert set(view._cell_bounds) == {(0, 0)}
+    assert len(rendered_shapes) > len(view._empty_shapes())
+    view.dispose()
+    service.close()
+
+
+def test_map_view_dispose_unregisters_tile_source_cache() -> None:
+    runtime = ExecutionRuntime()
+    registry = CacheRegistry(budget_bytes=32 * 1024 * 1024)
+    service = RegionMapService(runtime)
+    view = McaMapView(map_service=service, cache_registry=registry)
+
+    assert any(
+        item.name.startswith(TileSourceCache.CACHE_NAME_PREFIX)
+        for item in registry.stats().regions
+    )
+
+    view.dispose()
+    view.dispose()
+
+    assert registry.stats().regions == ()
+    service.close()
+    runtime.shutdown()
+
+
+def test_map_view_constructor_failure_releases_tile_source_registration(
+    monkeypatch,
+) -> None:
+    runtime = ExecutionRuntime()
+    registry = CacheRegistry(budget_bytes=32 * 1024 * 1024)
+    service = RegionMapService(runtime)
+
+    def fail_interaction_state(_view) -> None:
+        raise RuntimeError("interaction setup failed")
+
+    monkeypatch.setattr(McaMapView, "_init_interaction_state", fail_interaction_state)
+    try:
+        with pytest.raises(RuntimeError, match="interaction setup failed"):
+            McaMapView(map_service=service, cache_registry=registry)
+        assert registry.stats().regions == ()
+    finally:
+        service.close()
+        runtime.shutdown()
+        registry.close()
+
+
+def test_map_view_remount_rebuilds_after_detached_resize() -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    view = McaMapView(map_service=service)
+    view._mounted = True
+    view._needs_initial_draw = False
+    view._surface_layer._dirty = False
+    surface_token = view._surface_layer._token
+
+    view.will_unmount()
+    view.resize_map(1200, 700)
+
+    assert view._mounted is False
+    assert view._needs_initial_draw is True
+    assert view._surface_layer._dirty is True
+    assert view._surface_layer._token == surface_token + 1
+
+    rebuilds = []
+    setattr(view, "_request_rebuild", lambda: rebuilds.append("rebuild"))
+    view.did_mount()
+
+    assert view._mounted is True
+    assert rebuilds == ["rebuild"]
+    view.dispose()
+    service.close()
+    runtime.shutdown()

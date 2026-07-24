@@ -333,6 +333,8 @@ class PlayerHUDCard(ft.Column):
         if x is None and y is None and z is None:
             return "--"
         try:
+            if x is None or y is None or z is None:
+                raise TypeError("坐标不完整")
             coords = f"{float(x):.0f},{float(y):.0f},{float(z):.0f}"
         except (TypeError, ValueError):
             coords = f"{x},{y},{z}"

@@ -10,6 +10,18 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from app.services.cache_registry import (
+    CachePolicy,
+    CacheRegistration,
+    CacheRegistry,
+    CacheStats,
+)
+from app.services.execution_runtime import (
+    ExecutionRuntime,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
 from core.io_atomic import atomic_write_bytes
 from core.uuid_utils import normalize_uuid
 
@@ -24,6 +36,9 @@ _SESSION_URL = (
 )
 _REQUEST_TIMEOUT = 5
 _MAX_MEMORY = 128
+_MEMORY_ENTRY_BUDGET_BYTES = 1024
+_MEMORY_CACHE_BUDGET_BYTES = _MAX_MEMORY * _MEMORY_ENTRY_BUDGET_BYTES
+_MEMORY_CACHE_NAME = "player.avatar"
 _FACE_SIZE = 64  # output face size in pixels
 
 
@@ -122,15 +137,19 @@ class PlayerAvatarService:
 
     def __init__(
         self,
+        execution_runtime: ExecutionRuntime,
         cache_dir: Optional[Path] = None,
         *,
         enabled: bool = True,
+        cache_registry: Optional[CacheRegistry] = None,
     ) -> None:
         """初始化头像缓存目录与内存索引。
 
         Args:
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
             cache_dir: 本地 PNG 缓存目录；缺省 ``~/.mc_save_helper/avatars``。
             enabled: 是否启用远程拉取；为 False 时仅读本地缓存。
+            cache_registry: 可选应用缓存注册表，用于登记 ``player.avatar`` 预算。
         """
         self._enabled = enabled
         self._cache_dir = (
@@ -143,6 +162,19 @@ class PlayerAvatarService:
         self._lock = threading.Lock()
         self._inflight: Dict[str, list[Callable[[Optional[str]], None]]] = {}
         self._failed: set[str] = set()
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_evictions = 0
+        self._execution_runtime = execution_runtime
+        self._closed = False
+        self._cache_registration: Optional[CacheRegistration] = None
+        if cache_registry is not None:
+            self._cache_registration = cache_registry.register_external(
+                _MEMORY_CACHE_NAME,
+                CachePolicy(_MAX_MEMORY, _MEMORY_CACHE_BUDGET_BYTES),
+                self._avatar_cache_stats,
+                self._clear_memory_paths,
+            )
 
     @property
     def enabled(self) -> bool:
@@ -166,20 +198,38 @@ class PlayerAvatarService:
         norm = normalize_uuid(uuid)
         if not norm:
             return None
-        with self._lock:
-            cached = self._memory.get(norm)
-            if cached is not None and cached.is_file():
-                self._memory.move_to_end(norm)
+        cached = self._get_memory_cached_path(norm)
+        if cached is not None:
+            if cached.is_file():
                 return cached
+            with self._lock:
+                if self._memory.get(norm) == cached:
+                    self._memory.pop(norm, None)
         path = self._cache_dir / f"{norm}.png"
         if path.is_file():
             with self._lock:
-                self._memory[norm] = path
-                self._memory.move_to_end(norm)
-                while len(self._memory) > _MAX_MEMORY:
-                    self._memory.popitem(last=False)
+                self._remember_path_locked(norm, path)
             return path
         return None
+
+    def _get_memory_cached_path(self, norm: str) -> Optional[Path]:
+        """读取内存索引，不触发文件系统查询。"""
+        with self._lock:
+            cached = self._memory.get(norm)
+            if cached is not None:
+                self._memory.move_to_end(norm)
+                self._cache_hits += 1
+                return cached
+            self._cache_misses += 1
+        return None
+
+    def _remember_path_locked(self, norm: str, path: Path) -> None:
+        """在持锁状态下更新 LRU 路径索引。"""
+        self._memory[norm] = path
+        self._memory.move_to_end(norm)
+        while len(self._memory) > _MAX_MEMORY:
+            self._memory.popitem(last=False)
+            self._cache_evictions += 1
 
     def load_avatar_async(
         self,
@@ -194,7 +244,7 @@ class PlayerAvatarService:
             uuid: 玩家 UUID。
             on_loaded: 完成回调 ``(path_or_none)``。
         """
-        if not self._enabled:
+        if self._closed or not self._enabled:
             on_loaded(None)
             return
         norm = normalize_uuid(uuid)
@@ -202,7 +252,9 @@ class PlayerAvatarService:
             on_loaded(None)
             return
 
-        cached = self.get_cached_path(norm)
+        # Only an in-memory hit may complete on the caller thread. Disk stat
+        # and potential network I/O are both performed by ``_fetch_worker``.
+        cached = self._get_memory_cached_path(norm)
         if cached is not None:
             on_loaded(str(cached))
             return
@@ -216,19 +268,73 @@ class PlayerAvatarService:
                 return
             self._inflight[norm] = [on_loaded]
 
-        thread = threading.Thread(
-            target=self._fetch_worker,
-            args=(norm,),
-            name=f"avatar-{norm[:8]}",
-            daemon=True,
+        try:
+            self._execution_runtime.submit(
+                "fetch_player_avatar",
+                lambda token: self._fetch_worker(norm),
+                priority=TaskPriority.VISIBLE,
+            )
+        except (RuntimeClosedError, TaskQueueFullError) as exc:
+            logger.debug("avatar task rejected for %s: %s", norm[:8], exc)
+            with self._lock:
+                callbacks = self._inflight.pop(norm, [])
+            for callback in callbacks:
+                try:
+                    callback(None)
+                except Exception:
+                    # UI callbacks are best-effort during queue pressure/teardown.
+                    pass
+
+    def _avatar_cache_stats(self) -> CacheStats:
+        """向 CacheRegistry 报告内存路径索引规模。"""
+        with self._lock:
+            entries = len(self._memory)
+            bytes_used = sum(
+                128 + len(uuid) * 2 + len(str(path)) * 2
+                for uuid, path in self._memory.items()
+            )
+            hits = self._cache_hits
+            misses = self._cache_misses
+            evictions = self._cache_evictions
+        return CacheStats(
+            name=_MEMORY_CACHE_NAME,
+            entries=entries,
+            bytes_used=bytes_used,
+            max_entries=_MAX_MEMORY,
+            max_bytes=_MEMORY_CACHE_BUDGET_BYTES,
+            hits=hits,
+            misses=misses,
+            evictions=evictions,
         )
-        thread.start()
+
+    def _clear_memory_paths(self) -> None:
+        """仅清理可重建的内存路径索引。"""
+        with self._lock:
+            self._memory.clear()
+
+    def close(self) -> None:
+        """丢弃内存状态；不关闭共享运行时（由组合根释放）。"""
+        if self._closed:
+            return
+        self._closed = True
+        with self._lock:
+            self._memory.clear()
+            self._inflight.clear()
+            self._failed.clear()
+        registration = self._cache_registration
+        self._cache_registration = None
+        if registration is not None:
+            registration.close()
 
     def _fetch_worker(self, norm: str) -> None:
-        """Background worker: fetch/cache avatar and invoke waiters."""
+        """后台获取并缓存头像，再通知仍然有效的等待者。"""
+        if self._closed:
+            return
         path: Optional[Path] = None
         try:
-            path = self._fetch_and_cache(norm)
+            path = self.get_cached_path(norm)
+            if path is None and not self._closed:
+                path = self._fetch_and_cache(norm)
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             logger.debug(
                 "avatar fetch failed for %s: %s",
@@ -246,13 +352,12 @@ class PlayerAvatarService:
             path = None
         with self._lock:
             callbacks = self._inflight.pop(norm, [])
+            if self._closed:
+                return
             if path is None:
                 self._failed.add(norm)
             else:
-                self._memory[norm] = path
-                self._memory.move_to_end(norm)
-                while len(self._memory) > _MAX_MEMORY:
-                    self._memory.popitem(last=False)
+                self._remember_path_locked(norm, path)
         result = str(path) if path is not None else None
         for callback in callbacks:
             try:

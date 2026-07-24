@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
+from core.io_atomic import atomic_write_text
+
 NameMap = Dict[str, str]
 EnchantMap = Dict[str, str]
 
@@ -140,14 +142,12 @@ def save_custom_mapping(
         for k, v in enchantment_names.items()
         if vanilla_enchants.get(k) != v
     }
-    path.write_text(
-        json.dumps(
-            {"items": items, "enchantments": enchants},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    content = json.dumps(
+        {"items": items, "enchantments": enchants},
+        ensure_ascii=False,
+        indent=2,
     )
+    atomic_write_text(path, content)
 
 
 def normalize_locale(locale: str) -> str:

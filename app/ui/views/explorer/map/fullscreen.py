@@ -1,15 +1,19 @@
 """Lifecycle controller for the region map fullscreen overlay."""
 from __future__ import annotations
 
-import threading
 from typing import Callable, Optional, Tuple
 
 import flet as ft
 
 from app.ui.components.buttons import btn_ghost, btn_primary
+from app.ui.delayed_scheduler import (
+    DelayScheduler,
+    ScheduledCall,
+    UiDelayedScheduler,
+)
 from app.ui.icons import IconSet
 from app.ui.theme import THEME, mc_border
-from app.ui.utils import run_on_ui, safe_update
+from app.ui.utils import safe_update
 from app.ui.views.explorer.map.mca_map_view import McaMapView
 
 
@@ -36,6 +40,7 @@ class MapFullscreenController:
         zoom_out: Callable[[], None],
         reset: Callable[[], None],
         translate: Optional[Translate] = None,
+        schedule_delayed: Optional[DelayScheduler] = None,
     ) -> None:
         """绑定页面、地图与工具栏回调。
 
@@ -50,6 +55,7 @@ class MapFullscreenController:
             zoom_out: 缩小。
             reset: 重置视口。
             translate: 可选 ``(key, fallback) -> str`` 翻译函数。
+            schedule_delayed: 可选 UI 延迟调度端口，主要用于测试替换。
         """
         self._page = page
         self._map_view = map_view
@@ -61,13 +67,17 @@ class MapFullscreenController:
         self._zoom_out = zoom_out
         self._reset = reset
         self._translate = translate or (lambda _key, fallback: fallback)
+        self._schedule_delayed = schedule_delayed or UiDelayedScheduler(
+            lambda: self._page,
+        )
         self._overlay: Optional[ft.Container] = None
         self._body: Optional[ft.Container] = None
         self._inline_content: Optional[ft.Control] = None
         self._pre_fullscreen_size: Optional[Tuple[int, int]] = None
         self._pre_side_visible = True
-        self._enter_timer: Optional[threading.Timer] = None
-        self._exit_timer: Optional[threading.Timer] = None
+        self._enter_call: Optional[ScheduledCall] = None
+        self._exit_call: Optional[ScheduledCall] = None
+        self._transition_generation = 0
         self.active = False
 
     def toggle(self) -> None:
@@ -81,6 +91,8 @@ class MapFullscreenController:
         """进入全屏：卸下内嵌地图、创建 overlay 并调度进入动画。"""
         if self.active or self._overlay is not None:
             return
+        self._transition_generation += 1
+        generation = self._transition_generation
         self.active = True
         self._set_toggle_state(True)
         self._pre_side_visible = self._side_panel.visible is not False
@@ -113,12 +125,14 @@ class MapFullscreenController:
         except Exception:
             self._restore()
             return
-        self._schedule_enter_animation(width, height, bar_height)
+        self._schedule_enter_animation(width, height, bar_height, generation)
 
     def exit(self) -> None:
         """播放退出动画并延迟还原到内嵌宿主。"""
-        self._cancel_timer(self._enter_timer)
-        self._enter_timer = None
+        self._transition_generation += 1
+        generation = self._transition_generation
+        self._cancel_call(self._enter_call)
+        self._enter_call = None
         overlay = self._overlay
         body = self._body
         if overlay is None or body is None:
@@ -133,17 +147,26 @@ class MapFullscreenController:
             pass
         safe_update(overlay)
         safe_update(body)
-        self._cancel_timer(self._exit_timer)
-        self._exit_timer = threading.Timer(0.18, self._restore_on_ui)
-        self._exit_timer.daemon = True
-        self._exit_timer.start()
+        self._cancel_call(self._exit_call)
+        try:
+            self._exit_call = self._schedule_delayed(
+                0.18,
+                lambda: self._restore_on_ui(generation),
+            )
+        except Exception:
+            self._exit_call = None
+            self._restore()
+            raise
+        if self._exit_call is None:
+            self._restore_on_ui(generation)
 
     def dispose(self) -> None:
         """取消定时器并立即还原；可重复调用。"""
-        self._cancel_timer(self._enter_timer)
-        self._cancel_timer(self._exit_timer)
-        self._enter_timer = None
-        self._exit_timer = None
+        self._transition_generation += 1
+        self._cancel_call(self._enter_call)
+        self._cancel_call(self._exit_call)
+        self._enter_call = None
+        self._exit_call = None
         self._restore()
 
     @staticmethod
@@ -266,26 +289,32 @@ class MapFullscreenController:
         width: int,
         height: int,
         bar_height: int,
+        generation: int,
     ) -> None:
-        self._cancel_timer(self._enter_timer)
+        self._cancel_call(self._enter_call)
 
-        def animate() -> None:
-            if self._page is None:
-                return
-            run_on_ui(
-                self._page,
-                self._animate_in,
-                width,
-                height,
-                bar_height,
+        try:
+            self._enter_call = self._schedule_delayed(
+                0.02,
+                lambda: self._animate_in(width, height, bar_height, generation),
             )
+        except Exception:
+            self._enter_call = None
+            self._restore()
+            raise
+        if self._enter_call is None:
+            self._animate_in(width, height, bar_height, generation)
 
-        self._enter_timer = threading.Timer(0.02, animate)
-        self._enter_timer.daemon = True
-        self._enter_timer.start()
-
-    def _animate_in(self, width: int, height: int, bar_height: int) -> None:
-        self._enter_timer = None
+    def _animate_in(
+        self,
+        width: int,
+        height: int,
+        bar_height: int,
+        generation: int,
+    ) -> None:
+        if generation != self._transition_generation:
+            return
+        self._enter_call = None
         overlay = self._overlay
         body = self._body
         if overlay is None or body is None or self._page is None:
@@ -305,17 +334,17 @@ class MapFullscreenController:
         safe_update(overlay)
         safe_update(body)
 
-    def _restore_on_ui(self) -> None:
-        if self._page is None:
-            self._restore()
-        else:
-            run_on_ui(self._page, self._restore)
+    def _restore_on_ui(self, generation: int) -> None:
+        if generation != self._transition_generation:
+            return
+        self._restore()
 
     def _restore(self) -> None:
-        self._cancel_timer(self._enter_timer)
-        self._cancel_timer(self._exit_timer)
-        self._enter_timer = None
-        self._exit_timer = None
+        self._transition_generation += 1
+        self._cancel_call(self._enter_call)
+        self._cancel_call(self._exit_call)
+        self._enter_call = None
+        self._exit_call = None
         if not self.active and self._overlay is None and self._inline_content is None:
             return
         overlay = self._overlay
@@ -345,6 +374,6 @@ class MapFullscreenController:
         self._map_view.resize_map(width, height, refit=refit)
 
     @staticmethod
-    def _cancel_timer(timer: Optional[threading.Timer]) -> None:
-        if timer is not None:
-            timer.cancel()
+    def _cancel_call(call: Optional[ScheduledCall]) -> None:
+        if call is not None:
+            call.cancel()

@@ -87,6 +87,24 @@ def test_surface_downsampling_preserves_mixed_terrain_coverage() -> None:
     assert (green, blue, alpha) == (red, red, 255)
 
 
+def test_surface_renderer_close_releases_decoded_tiles_idempotently() -> None:
+    renderer = MapSurfaceRenderer()
+    spec = MapSurfaceSpec(0, 0, 0, 0, pixels_per_region=4)
+    renderer.compose(
+        spec,
+        {(0, 0): 1},
+        {(0, 0): _png((10, 20, 30))},
+        {(0, 0): 1},
+        {(0, 0): (0, 0, 0)},
+    )
+    assert renderer._decoded
+
+    renderer.close()
+    renderer.close()
+
+    assert not renderer._decoded
+
+
 def test_surface_spec_rejects_more_than_sixteen_megapixels() -> None:
     with pytest.raises(ValueError, match="16 megapixel"):
         MapSurfaceSpec(0, 99, 0, 99, pixels_per_region=41)

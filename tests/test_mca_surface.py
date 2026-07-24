@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, cast
 
 import core.mca.surface as surface_module
@@ -14,13 +15,135 @@ from core.mca.surface import (
     _sample_coarse_grid,
     _shade_color,
     _load_chunk_views,
+    _lru_epoch,
+    _lru_get,
+    _lru_merge,
+    chunk_decode_cache_evictions,
+    chunk_decode_cache_hits,
+    chunk_decode_cache_misses,
     clear_chunk_decode_cache,
+    invalidate_chunk_decode_cache_for_world,
 )
+
+
+def _surface_samples(block_id: str) -> surface_module.SurfaceSamples:
+    return {(0, 0): block_id}
 
 
 def test_nested_chunk_decode_pool_keeps_a_small_cpu_budget() -> None:
     assert 1 <= _DECODE_WORKERS <= 2
     assert _CHUNK_LRU_MAX == 4096
+
+
+def test_progressive_chunk_batches_publish_before_final_and_honor_cancel(
+    monkeypatch: Any,
+) -> None:
+    clear_chunk_decode_cache()
+    decode_calls: list[tuple[int, int]] = []
+    callbacks: list[tuple[int, int, int]] = []
+    cancelled = False
+
+    def decode(_region, chunk_x, chunk_z, samples):
+        decode_calls.append((chunk_x, chunk_z))
+        return (
+            (chunk_x, chunk_z),
+            {position: "minecraft:stone" for position in samples},
+        )
+
+    def publish(views, refined, processed, total):
+        nonlocal cancelled
+        callbacks.append((len(refined), processed, total))
+        assert len(views) == len(refined)
+        cancelled = True
+
+    monkeypatch.setattr(surface_module, "_decode_one", decode)
+    misses = [(index, 0, [(0, 0)]) for index in range(5)]
+    views: surface_module.ChunkViews = {}
+
+    surface_module._decode_misses_with_runner(
+        cast(Any, object()),
+        misses,
+        "progressive-test.mca",
+        1,
+        10,
+        views,
+        _lru_epoch(),
+        workers=1,
+        cancel_check=lambda: cancelled,
+        progress_callback=publish,
+        progress_batch_chunks=2,
+    )
+
+    assert callbacks == [(2, 2, 5)]
+    assert decode_calls == [(0, 0), (1, 0)]
+    assert set(views) == {(0, 0), (1, 0)}
+    clear_chunk_decode_cache()
+
+
+def test_chunk_decode_cache_reports_real_hit_and_miss_counts() -> None:
+    clear_chunk_decode_cache()
+    key = ("region", 1, 2, 0, 0, "")
+    assert _lru_get(key)[0] is False
+    _lru_merge(key, _surface_samples("minecraft:stone"), _lru_epoch())
+    assert _lru_get(key)[0] is True
+    assert chunk_decode_cache_hits() == 1
+    assert chunk_decode_cache_misses() == 1
+    assert chunk_decode_cache_evictions() == 0
+    clear_chunk_decode_cache()
+
+
+def test_chunk_decode_cache_accounts_for_empty_sample_merges() -> None:
+    clear_chunk_decode_cache()
+    key = ("empty-region", 1, 2, 0, 0, "")
+
+    _lru_merge(key, {}, _lru_epoch())
+    first_bytes = surface_module.chunk_decode_cache_bytes()
+    samples = _surface_samples("minecraft:stone")
+    _lru_merge(key, samples, _lru_epoch())
+
+    assert first_bytes == surface_module._estimate_surface_samples_bytes({})
+    assert (
+        surface_module.chunk_decode_cache_bytes()
+        == surface_module._estimate_surface_samples_bytes(samples)
+    )
+    clear_chunk_decode_cache()
+
+
+def test_chunk_decode_cache_invalidation_is_scoped_to_one_world(tmp_path) -> None:
+    clear_chunk_decode_cache()
+    first_world = tmp_path / "first"
+    second_world = tmp_path / "second"
+    first_key = (str(first_world / "region" / "r.0.0.mca"), 1, 2, 0, 0, "")
+    second_key = (
+        str(second_world / "region" / "r.0.0.mca"),
+        1,
+        2,
+        0,
+        0,
+        "",
+    )
+    _lru_merge(first_key, _surface_samples("minecraft:stone"), _lru_epoch())
+    _lru_merge(second_key, _surface_samples("minecraft:dirt"), _lru_epoch())
+
+    assert invalidate_chunk_decode_cache_for_world(first_world) == 1
+    assert _lru_get(first_key)[0] is False
+    assert _lru_get(second_key)[0] is True
+    clear_chunk_decode_cache()
+
+
+def test_world_invalidation_rejects_inflight_decode_without_cached_entry(
+    tmp_path: Path,
+) -> None:
+    clear_chunk_decode_cache()
+    world = tmp_path / "world"
+    key = (str(world / "region" / "r.0.0.mca"), 1, 2, 0, 0, "")
+    decode_epoch = _lru_epoch()
+
+    assert invalidate_chunk_decode_cache_for_world(world) == 0
+    _lru_merge(key, {(0, 0): "minecraft:stone"}, decode_epoch)
+
+    assert _lru_get(key)[0] is False
+    clear_chunk_decode_cache()
 
 
 def test_topview_chunk_decode_uses_world_surface_view(monkeypatch) -> None:
@@ -103,13 +226,18 @@ def test_topview_chunk_decode_keeps_biome_and_transparent_stratum(
     )
 
 
-def test_topview_sampling_keeps_original_sampling_quality() -> None:
-    assert _coarse_edge(16) == 8
-    assert _coarse_edge(32) == 32
+def test_topview_preview_limits_cold_chunk_decodes() -> None:
+    assert _coarse_edge(16) == 4
+    assert _coarse_edge(32) == 16
     assert _coarse_edge(64) == 64
     assert _coarse_edge(128) == 128
     assert _coarse_edge(256) == 256
     assert _coarse_edge(512) == 512
+
+    preview_jobs = _build_sample_jobs(_coarse_edge(16))
+    assert len(_needed_chunks(cast(Any, _FullRegion()), preview_jobs)) == 16
+    progressive_jobs = _build_sample_jobs(_coarse_edge(32))
+    assert len(_needed_chunks(cast(Any, _FullRegion()), progressive_jobs)) == 256
 
 
 class _Region:
@@ -220,6 +348,19 @@ def test_leaf_lod_does_not_expand_normal_lod_chunk_sampling(monkeypatch) -> None
         # The focused cache merges the staggered 64/128/256 grids, but must
         # remain far below the 256 columns required by a full 512 leaf tile.
         assert max(sample_counts) <= 96
+
+        sample_counts.clear()
+        clear_chunk_decode_cache()
+        jobs = _build_sample_jobs(256)
+        _load_chunk_views(
+            region,
+            _needed_chunks(region, jobs),
+            "visible-lod",
+            1,
+            jobs,
+            decode_workers=1,
+        )
+        assert set(sample_counts) == {64}
 
         sample_counts.clear()
         clear_chunk_decode_cache()

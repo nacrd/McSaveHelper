@@ -16,7 +16,14 @@ from app.services.backup_service import (
     BackupError,
     BackupService,
 )
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.world_write_coordinator import WorldOperationBusyError
+from app.services.world_transaction import (
+    WorldTransactionCancelledError,
+    WorldTransactionError,
+    WorldTransactionMutationError,
+    WorldTransactionService,
+)
 from core.logger import logger
 
 from .save_repair.chunk_repairer import ChunkRepairer
@@ -37,6 +44,15 @@ _ISSUE_LEVELS = {
     "ERROR": IssueLevel.ERROR,
     "SUCCESS": IssueLevel.FIXED,
 }
+
+
+class _RepairMutationFailed(WorldTransactionMutationError):
+    """携带暂存修复报告并阻止事务发布。"""
+
+    def __init__(self, report: RepairReport) -> None:
+        """保留原报告供服务边界返回。"""
+        self.report = report
+        super().__init__("暂存世界修复失败")
 
 
 @dataclass(frozen=True)
@@ -76,24 +92,36 @@ class SaveRepairService:
     写路径通过 ``BackupService.exclusive_operation`` 与备份/恢复互斥。
     """
 
-    def __init__(self, backup_service: Optional[BackupService] = None) -> None:
+    def __init__(
+        self,
+        backup_service: BackupService,
+        world_transactions: WorldTransactionService,
+        execution_runtime: ExecutionRuntime,
+    ) -> None:
         """初始化服务。
 
         Args:
-            backup_service: 可选共享备份服务；默认新建实例。
+            backup_service: 应用共享备份服务。
+            world_transactions: 强制备份、暂存与原子发布事务。
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
         """
         self._cancel_event = threading.Event()
-        self._backup_service = backup_service or BackupService()
+        self._backup_service = backup_service
+        self._world_transactions = world_transactions
+        self._execution_runtime = execution_runtime
 
     def cancel(self) -> None:
         """请求取消正在进行的修复/检测操作。"""
         self._cancel_event.set()
-        self._backup_service.cancel()
 
     @property
     def is_cancelled(self) -> bool:
         """是否已请求取消。"""
         return self._cancel_event.is_set()
+
+    def close(self) -> None:
+        """幂等关闭钩子；共享运行时由组合根释放。"""
+        return
 
     # ── 存档检测（只读）────────────────────────────────────
 
@@ -129,13 +157,19 @@ class SaveRepairService:
                 raise FileNotFoundError(f"存档路径不存在: {world_path}")
 
             callbacks.log(f"开始检测存档: {world_path}")
-            detector = WorldDetector(self._cancel_event)
-            detector.detect_world(
-                world_path,
-                report,
-                callbacks.log,
-                callbacks.progress,
+            detector = WorldDetector(
+                self._cancel_event,
+                self._execution_runtime,
             )
+            try:
+                detector.detect_world(
+                    world_path,
+                    report,
+                    callbacks.log,
+                    callbacks.progress,
+                )
+            finally:
+                detector.close()
 
             if self.is_cancelled:
                 report.cancelled = True
@@ -171,30 +205,82 @@ class SaveRepairService:
         progress_callback: Optional[Callable[[float, str], None]] = None,
         log_callback: Optional[Callable[[str, str], None]] = None,
     ) -> RepairReport:
-        """Run one repair while excluding backup and restore publication."""
+        """在完整暂存副本中修复，成功验证后原子发布。"""
+        if not any((fix_chunks, fix_players, fix_level_dat)):
+            return self._repair_world_exclusive(
+                world_path=world_path,
+                fix_chunks=False,
+                fix_players=False,
+                fix_level_dat=False,
+                backup=False,
+                progress_callback=progress_callback,
+                log_callback=log_callback,
+            )
+        self._cancel_event.clear()
+        del backup  # 任何实际写入都必须创建安全备份。
         try:
-            with self._backup_service.exclusive_operation(world_path):
-                return self._repair_world_exclusive(
-                    world_path=world_path,
+            transaction = self._world_transactions.mutate(
+                world_path,
+                lambda staged: self._repair_staged_world(
+                    staged,
                     fix_chunks=fix_chunks,
                     fix_players=fix_players,
                     fix_level_dat=fix_level_dat,
-                    backup=backup,
                     progress_callback=progress_callback,
                     log_callback=log_callback,
-                )
-        except (BackupError, WorldOperationBusyError) as exc:
-            logger.error(str(exc), module="SaveRepair")
+                ),
+                backup_label="修复前自动备份",
+                cancel_check=lambda: self.is_cancelled,
+            )
+            transaction.value.backup_path = str(transaction.backup.backup_path)
+            return transaction.value
+        except _RepairMutationFailed as exc:
+            return exc.report
+        except WorldTransactionCancelledError:
+            return RepairReport(success=False, cancelled=True)
+        except (
+            BackupError,
+            WorldOperationBusyError,
+            WorldTransactionError,
+        ) as exc:
+            message = f"安全事务失败，已中止修复: {exc}"
+            logger.error(message, module="SaveRepair")
             if log_callback:
-                log_callback(str(exc), "ERROR")
+                log_callback(message, "ERROR")
             return RepairReport(
                 success=False,
                 issues=[RepairIssue(
                     level=IssueLevel.ERROR,
                     category="general",
-                    message=str(exc),
+                    message=message,
                 )],
             )
+
+    def _repair_staged_world(
+        self,
+        staged_world: Path,
+        *,
+        fix_chunks: bool,
+        fix_players: bool,
+        fix_level_dat: bool,
+        progress_callback: Optional[Callable[[float, str], None]],
+        log_callback: Optional[Callable[[str, str], None]],
+    ) -> RepairReport:
+        """执行暂存副本修复，失败或取消时阻止事务发布。"""
+        report = self._repair_world_exclusive(
+            world_path=staged_world,
+            fix_chunks=fix_chunks,
+            fix_players=fix_players,
+            fix_level_dat=fix_level_dat,
+            backup=False,
+            progress_callback=progress_callback,
+            log_callback=log_callback,
+        )
+        if report.cancelled:
+            raise WorldTransactionCancelledError("修复操作已取消")
+        if not report.success:
+            raise _RepairMutationFailed(report)
+        return report
 
     def _repair_world_exclusive(
         self,
@@ -220,7 +306,6 @@ class SaveRepairService:
         Returns:
             RepairReport 修复报告
         """
-        self._cancel_event.clear()
         report = RepairReport()
         start_time = time.monotonic()
         callbacks = _RepairCallbacks(report, progress_callback, log_callback)
@@ -275,13 +360,19 @@ class SaveRepairService:
             )
         if fix_chunks and not self.is_cancelled:
             callbacks.progress(0.10, "扫描区块文件...")
-            chunk_repairer = ChunkRepairer(self._cancel_event)
-            chunk_repairer.repair_chunks(
-                world_path,
-                report,
-                callbacks.log,
-                callbacks.progress,
+            chunk_repairer = ChunkRepairer(
+                self._cancel_event,
+                self._execution_runtime,
             )
+            try:
+                chunk_repairer.repair_chunks(
+                    world_path,
+                    report,
+                    callbacks.log,
+                    callbacks.progress,
+                )
+            finally:
+                chunk_repairer.close()
         if fix_players and not self.is_cancelled:
             callbacks.progress(0.75, "修复玩家数据...")
             player_repairer = PlayerRepairer(self._cancel_event)
@@ -324,6 +415,7 @@ class SaveRepairService:
                     0.02 + value * 0.08,
                     message,
                 ),
+                cancel_check=lambda: self.is_cancelled,
             )
         except BackupCancelledError:
             raise

@@ -9,6 +9,7 @@ import threading
 from dataclasses import dataclass
 from typing import Collection, Dict, Iterable, List, Mapping, Optional, Protocol, Set, Tuple
 
+from app.services.region_map.types import TopviewTileState
 from core.mca.map_tiles import (
     HIGH_DETAIL_TILE_LADDER,
     MapTileRequest,
@@ -29,43 +30,14 @@ RegionCoord = Tuple[int, int]
 class TopviewTileServicePort(Protocol):
     """瓦片协调器使用的服务最小端口。"""
 
-    def has_topview_tile(self, coord: RegionCoord, min_size: int = 0) -> bool:
-        """是否已有不低于 ``min_size`` 的可用瓦片。
-
-        Args:
-            coord: 区域坐标。
-            min_size: 最小边长；0 表示任意缓存。
-
-        Returns:
-            是否可直接使用。
-        """
-        ...
-
-    def get_topview_tile_size(self, coord: RegionCoord) -> int:
-        """返回已缓存瓦片边长。
+    def get_topview_tile_state(self, coord: RegionCoord) -> TopviewTileState:
+        """返回当前代数的一致瓦片状态。
 
         Args:
             coord: 区域坐标。
 
         Returns:
-            像素边长；无缓存为 0。
-        """
-        ...
-
-    def is_topview_tile_pending(
-        self,
-        coord: RegionCoord,
-        *,
-        min_size: int = 0,
-    ) -> bool:
-        """服务当前代数是否仍持有该坐标的请求。
-
-        Args:
-            coord: 区域坐标。
-            min_size: 要求的最小请求尺寸。
-
-        Returns:
-            是否仍在队列或升级账本中。
+            可用 LOD、请求目标、修订号和源完整性。
         """
         ...
 
@@ -158,8 +130,13 @@ class TopviewTileRequestCoordinator:
         Returns:
             若存在推迟请求则为 True，调用方应再次 ``request_visible``。
         """
+        state = self._service.get_topview_tile_state(coord)
         with self._state_lock:
-            self._requested_sizes.pop(coord, None)
+            if state.is_pending:
+                if coord in self._requested_sizes:
+                    self._requested_sizes[coord] = state.requested_size
+            else:
+                self._requested_sizes.pop(coord, None)
             return self._has_deferred_requests
 
     def visible_tile_size(self, scale: float) -> int:
@@ -254,7 +231,9 @@ class TopviewTileRequestCoordinator:
         missing = [
             coord
             for coord in nearby
-            if not self._service.has_topview_tile(coord, min_size=detail_size)
+            if not self._service.get_topview_tile_state(coord).is_usable(
+                detail_size
+            )
         ]
         return self.request_detail(
             missing,
@@ -342,9 +321,10 @@ class TopviewTileRequestCoordinator:
             if coord not in visible or coord not in missing:
                 self._requested_sizes.pop(coord, None)
                 continue
-            if not self._service.is_topview_tile_pending(
-                coord,
-                min_size=requested_size,
+            state = self._service.get_topview_tile_state(coord)
+            if not (
+                state.is_pending
+                and state.requested_size >= requested_size
             ):
                 self._requested_sizes.pop(coord, None)
 
@@ -366,11 +346,13 @@ class TopviewTileRequestCoordinator:
 
     def _visible_request_size(self, request: MapTileRequest) -> int:
         requested_size = min(request.tile_size, self._policy.visible_max_size)
-        if (
-            requested_size > self._policy.preview_upgrade_threshold
-            and self._service.get_topview_tile_size(request.coord) <= 0
-        ):
-            return self._policy.preview_size
+        state = self._service.get_topview_tile_state(request.coord)
+        cached_size = state.available_size
+        if requested_size > self._policy.preview_upgrade_threshold:
+            if cached_size <= 0:
+                return self._policy.preview_size
+            if cached_size < self._policy.preview_upgrade_threshold:
+                return self._policy.preview_upgrade_threshold
         return requested_size
 
     def _submit_visible_groups(

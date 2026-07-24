@@ -9,11 +9,13 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterator, Optional
 
+from core.cancellable_copy import copy_file_with_checkpoints
 from core.logger import logger
 from app.services.world_write_coordinator import (
     WorldWriteCoordinator,
@@ -22,11 +24,14 @@ from app.services.world_write_coordinator import (
 
 
 ProgressCallback = Callable[[float, str], None]
+CancelCheck = Callable[[], bool]
 _BACKUP_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
 _METADATA_FILE = "backup.json"
 _MANIFEST_FILE = "manifest.json"
 _SNAPSHOT_DIR = "world"
 _REPOSITORY_DIR = ".mcsavehelper_backups"
+_SESSION_LOCK_FILE = "session.lock"
+_PUBLISH_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.4)
 
 
 class BackupError(RuntimeError):
@@ -85,7 +90,7 @@ class BackupService:
 
     def __init__(
         self,
-        coordinator: Optional[WorldWriteCoordinator] = None,
+        coordinator: WorldWriteCoordinator,
     ) -> None:
         """构造备份服务。
 
@@ -93,7 +98,11 @@ class BackupService:
             coordinator: 世界写租约协调器；缺省使用进程内共享默认实例。
         """
         self._cancel_event = threading.Event()
-        self._coordinator = coordinator or WorldWriteCoordinator()
+        self._coordinator = coordinator
+        # Windows can transiently reject concurrent directory renames that
+        # target the same repository parent.  Keep only the tiny publication
+        # window serialized; snapshot copying remains concurrent per world.
+        self._publication_lock = threading.Lock()
 
     def cancel(self) -> None:
         """Request cancellation at the next copy checkpoint."""
@@ -104,6 +113,7 @@ class BackupService:
         world_path: Path | str,
         label: str = "",
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> BackupRecord:
         """创建完整世界快照并以目录替换原子发布。
 
@@ -111,6 +121,7 @@ class BackupService:
             world_path: 有效世界路径（含 ``level.dat``）。
             label: 可选用户标签。
             progress_callback: 可选进度回调 ``(0..1, message)``。
+            cancel_check: 可选的操作级协作取消检查。
 
         Returns:
             BackupRecord: 已发布备份的元数据。
@@ -123,7 +134,8 @@ class BackupService:
         world = self._validate_world(world_path)
         clean_label = self._validate_label(label)
         with self.exclusive_operation(world):
-            self._cancel_event.clear()
+            if cancel_check is None:
+                self._cancel_event.clear()
             repository = self._ensure_repository(world)
             backup_id = self._new_backup_id(repository)
             final_dir = repository / backup_id
@@ -136,6 +148,7 @@ class BackupService:
                     temp_dir=temp_dir,
                     final_dir=final_dir,
                     progress_callback=progress_callback,
+                    cancel_check=cancel_check,
                 )
             except Exception:
                 # 失败时清理暂存目录；取消/校验/I/O 均需保留原始异常。
@@ -151,6 +164,7 @@ class BackupService:
         temp_dir: Path,
         final_dir: Path,
         progress_callback: Optional[ProgressCallback],
+        cancel_check: Optional[CancelCheck],
     ) -> BackupRecord:
         """在 temp_dir 中组装快照、写清单并原子发布到 final_dir。"""
         files = list(self._iter_source_files(world))
@@ -164,9 +178,15 @@ class BackupService:
             progress_callback,
             0.0,
             0.92,
+            cancel_check,
         )
-        self._check_cancelled()
-        manifest_sha256 = self._write_manifest(temp_dir, snapshot, files)
+        self._check_cancelled(cancel_check)
+        manifest_sha256 = self._write_manifest(
+            temp_dir,
+            snapshot,
+            files,
+            cancel_check,
+        )
         record = BackupRecord(
             backup_id=backup_id,
             label=label,
@@ -181,10 +201,31 @@ class BackupService:
         self._write_metadata(temp_dir, record)
         self._progress(progress_callback, 0.96, "正在验证备份...")
         self._validate_snapshot(snapshot)
-        os.replace(temp_dir, final_dir)
+        self._check_cancelled(cancel_check)
+        self._publish_backup_directory(temp_dir, final_dir)
         self._progress(progress_callback, 1.0, "备份创建完成")
         logger.info(f"已创建存档备份: {final_dir}", module="Backup")
         return record
+
+    def _publish_backup_directory(
+        self,
+        temp_dir: Path,
+        final_dir: Path,
+    ) -> None:
+        """在短发布锁内完成备份目录的原子落盘。"""
+        with self._publication_lock:
+            if final_dir.exists():
+                raise BackupError(f"备份标识已存在，拒绝覆盖: {final_dir.name}")
+            for attempt, delay in enumerate(_PUBLISH_RETRY_DELAYS):
+                try:
+                    os.replace(temp_dir, final_dir)
+                    return
+                except PermissionError:
+                    if final_dir.exists() or attempt == len(_PUBLISH_RETRY_DELAYS) - 1:
+                        raise
+                    # Windows scanners may briefly retain a directory handle;
+                    # retry only this I/O boundary, never business coordination.
+                    time.sleep(delay)
 
     def list_backups(self, world_path: Path | str) -> list[BackupRecord]:
         """List managed backups, including damaged entries with an error state."""
@@ -227,6 +268,7 @@ class BackupService:
         world_path: Path | str,
         backup_id: str,
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> BackupRecord:
         """从托管快照恢复世界（目录交换 + 失败回滚）。
 
@@ -234,6 +276,7 @@ class BackupService:
             world_path: 当前世界路径。
             backup_id: 备份 ID。
             progress_callback: 可选进度回调 ``(0..1, message)``。
+            cancel_check: 可选的操作级协作取消检查。
 
         Returns:
             BackupRecord: 已用于恢复的备份元数据。
@@ -244,14 +287,22 @@ class BackupService:
             OSError: 复制或目录交换失败（原世界应保持可用）。
         """
         world = self._validate_world(world_path)
-        with self.exclusive_operation(world):
-            self._cancel_event.clear()
+        with self.exclusive_operation(world) as lease:
+            if cancel_check is None:
+                self._cancel_event.clear()
+            self._check_cancelled(cancel_check)
             record = self._require_valid_record(world, backup_id)
-            self._ensure_restore_integrity(record, progress_callback)
+            self._ensure_restore_integrity(
+                record,
+                progress_callback,
+                cancel_check,
+            )
             return self._restore_record_transaction(
                 world,
                 record,
                 progress_callback,
+                cancel_check,
+                lease,
             )
 
     def verify_backup(
@@ -259,6 +310,7 @@ class BackupService:
         world_path: Path | str,
         backup_id: str,
         progress_callback: Optional[ProgressCallback] = None,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> BackupVerification:
         """校验托管快照完整性，不修改世界数据。
 
@@ -266,14 +318,20 @@ class BackupService:
             world_path: 世界路径。
             backup_id: 备份 ID。
             progress_callback: 可选进度回调。
+            cancel_check: 可选的操作级协作取消检查。
 
         Returns:
             BackupVerification: 校验结果。
         """
         world = self._validate_world(world_path)
         with self.exclusive_operation(world):
+            self._check_cancelled(cancel_check)
             record = self._get_record(world, backup_id)
-            return self._verify_record(record, progress_callback)
+            return self._verify_record(
+                record,
+                progress_callback,
+                cancel_check,
+            )
 
     def _require_valid_record(
         self,
@@ -290,6 +348,7 @@ class BackupService:
         self,
         record: BackupRecord,
         progress_callback: Optional[ProgressCallback],
+        cancel_check: Optional[CancelCheck],
     ) -> None:
         """恢复前执行完整性校验；失败则拒绝恢复。"""
         verification = self._verify_record(
@@ -299,6 +358,7 @@ class BackupService:
                 value * 0.25,
                 message,
             ),
+            cancel_check,
         )
         if verification.complete and not verification.valid:
             details = "; ".join(verification.issues[:3])
@@ -309,6 +369,8 @@ class BackupService:
         world: Path,
         record: BackupRecord,
         progress_callback: Optional[ProgressCallback],
+        cancel_check: Optional[CancelCheck],
+        lease: WorldWriteLease,
     ) -> BackupRecord:
         """在暂存目录准备快照并以目录交换发布。"""
         snapshot = record.backup_path / _SNAPSHOT_DIR
@@ -332,16 +394,26 @@ class BackupService:
                 progress_callback,
                 0.25,
                 0.63,
+                cancel_check,
             )
-            self._check_cancelled()
+            self._check_cancelled(cancel_check)
             self._progress(progress_callback, 0.92, "正在验证恢复数据...")
             self._validate_snapshot(prepared)
+            self._check_cancelled(cancel_check)
 
-            published = self._exchange_world_directories(
-                world,
-                prepared,
-                rollback,
-            )
+            with lease.publication_window():
+                published = self._exchange_world_directories(
+                    world,
+                    prepared,
+                    rollback,
+                )
+            publication_error = lease.consume_publication_error()
+            if publication_error is not None:
+                logger.warning(
+                    "备份恢复已发布，但无法重新持有存档运行锁: "
+                    f"{world}: {publication_error}",
+                    module="Backup",
+                )
             self._cleanup_rollback_dir(rollback, progress_callback)
             self._progress(progress_callback, 1.0, "备份恢复完成")
             logger.info(
@@ -394,17 +466,27 @@ class BackupService:
         self,
         world_path: Path | str,
         keep_latest: int,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> list[BackupRecord]:
-        """Delete older managed snapshots while retaining the newest entries."""
+        """删除旧恢复点，并把实际删除阶段作为不可取消提交段。
+
+        取消只在任何目录被删除前生效。一旦开始提交，会完成全部已验证候选项并
+        返回成功，避免已经部分删除后再抛出取消异常。
+        """
         if keep_latest < 1:
             raise BackupError("至少需要保留 1 个恢复点")
         world = self._validate_world(world_path)
         with self.exclusive_operation(world):
             records = self.list_backups(world)
-            removed: list[BackupRecord] = []
             repository = self._repository_path(world)
-            for record in records[keep_latest:]:
+            candidates = records[keep_latest:]
+            for record in candidates:
                 self._assert_safe_directory(record.backup_path, repository)
+            if not candidates:
+                return []
+            self._check_cancelled(cancel_check)
+            removed: list[BackupRecord] = []
+            for record in candidates:
                 shutil.rmtree(record.backup_path)
                 removed.append(record)
             if removed:
@@ -414,10 +496,16 @@ class BackupService:
                 )
             return removed
 
-    def delete_backup(self, world_path: Path | str, backup_id: str) -> None:
+    def delete_backup(
+        self,
+        world_path: Path | str,
+        backup_id: str,
+        cancel_check: Optional[CancelCheck] = None,
+    ) -> None:
         """Delete one managed backup selected by its generated identifier."""
         world = self._validate_world(world_path)
         with self.exclusive_operation(world):
+            self._check_cancelled(cancel_check)
             if not _BACKUP_ID_RE.fullmatch(backup_id):
                 raise BackupError("无效的备份标识")
             repository = self._repository_path(world)
@@ -550,6 +638,12 @@ class BackupService:
                     raise BackupError(f"存档中包含不支持的目录链接: {candidate}")
             for filename in filenames:
                 candidate = root_path / filename
+                relative = candidate.relative_to(source)
+                if (
+                    len(relative.parts) == 1
+                    and relative.name.casefold() == _SESSION_LOCK_FILE
+                ):
+                    continue
                 if self._is_link_or_reparse(candidate):
                     raise BackupError(f"存档中包含不支持的文件链接: {candidate}")
                 try:
@@ -558,7 +652,7 @@ class BackupService:
                     raise BackupError(f"无法读取存档文件: {candidate}") from exc
                 yield (
                     candidate,
-                    candidate.relative_to(source),
+                    relative,
                     stat.st_size,
                     stat.st_mtime_ns,
                 )
@@ -571,14 +665,19 @@ class BackupService:
         progress_callback: Optional[ProgressCallback],
         progress_start: float,
         progress_span: float,
+        cancel_check: Optional[CancelCheck] = None,
     ) -> int:
         copied_size = 0
         for index, source_file in enumerate(files, start=1):
             source, relative, expected_size, expected_mtime = source_file
-            self._check_cancelled()
+            self._check_cancelled(cancel_check)
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
+            copy_file_with_checkpoints(
+                source,
+                target,
+                lambda: self._check_cancelled(cancel_check),
+            )
             current_stat = source.stat()
             if (
                 current_stat.st_size != expected_size
@@ -594,7 +693,14 @@ class BackupService:
             )
         return copied_size
 
-    def _check_cancelled(self) -> None:
+    def _check_cancelled(
+        self,
+        cancel_check: Optional[CancelCheck] = None,
+    ) -> None:
+        if cancel_check is not None:
+            if cancel_check():
+                raise BackupCancelledError("备份操作已取消")
+            return
         if self._cancel_event.is_set():
             raise BackupCancelledError("备份操作已取消")
 
@@ -627,14 +733,16 @@ class BackupService:
         directory: Path,
         snapshot: Path,
         files: list[tuple[Path, Path, int, int]],
+        cancel_check: Optional[CancelCheck] = None,
     ) -> str:
         entries = []
         for _, relative, expected_size, _ in files:
+            self._check_cancelled(cancel_check)
             target = snapshot / relative
             entries.append({
                 "path": relative.as_posix(),
                 "size": expected_size,
-                "sha256": self._hash_file(target),
+                "sha256": self._hash_file(target, cancel_check),
             })
         payload = json.dumps(
             {"schema_version": 1, "files": entries},
@@ -648,7 +756,9 @@ class BackupService:
         self,
         record: BackupRecord,
         progress_callback: Optional[ProgressCallback],
+        cancel_check: Optional[CancelCheck] = None,
     ) -> BackupVerification:
+        self._check_cancelled(cancel_check)
         if not record.integrity_available:
             return self._legacy_verification(progress_callback)
         try:
@@ -667,6 +777,7 @@ class BackupService:
             entries,
             snapshot,
             progress_callback,
+            cancel_check,
         )
         manifest_result.issues.extend(
             self._manifest_path_issues(snapshot, manifest_result.expected_paths)
@@ -685,17 +796,20 @@ class BackupService:
         entries: list[object],
         snapshot: Path,
         progress_callback: Optional[ProgressCallback],
+        cancel_check: Optional[CancelCheck],
     ) -> _ManifestVerification:
         expected_paths: set[str] = set()
         checked_files = 0
         checked_bytes = 0
         issues: list[str] = []
         for index, entry in enumerate(entries, start=1):
+            self._check_cancelled(cancel_check)
             try:
                 checked_size = self._verify_manifest_entry(
                     entry,
                     snapshot,
                     expected_paths,
+                    cancel_check,
                 )
                 checked_files += 1
                 checked_bytes += checked_size
@@ -718,6 +832,7 @@ class BackupService:
         entry: object,
         snapshot: Path,
         expected_paths: set[str],
+        cancel_check: Optional[CancelCheck],
     ) -> int:
         relative, expected_size, expected_hash = self._manifest_entry(entry)
         path_key = relative.as_posix()
@@ -731,7 +846,7 @@ class BackupService:
         stat = target.stat()
         if stat.st_size != expected_size:
             raise BackupError(f"备份文件大小不匹配: {path_key}")
-        if self._hash_file(target) != expected_hash:
+        if self._hash_file(target, cancel_check) != expected_hash:
             raise BackupError(f"备份文件摘要不匹配: {path_key}")
         return stat.st_size
 
@@ -812,11 +927,15 @@ class BackupService:
             raise BackupError(f"备份清单摘要无效: {raw_path}")
         return Path(*pure_path.parts), size, digest
 
-    @staticmethod
-    def _hash_file(path: Path) -> str:
+    def _hash_file(
+        self,
+        path: Path,
+        cancel_check: Optional[CancelCheck] = None,
+    ) -> str:
         digest = hashlib.sha256()
         with path.open("rb") as stream:
             while chunk := stream.read(1024 * 1024):
+                self._check_cancelled(cancel_check)
                 digest.update(chunk)
         return digest.hexdigest()
 
@@ -826,8 +945,15 @@ class BackupService:
         value: float,
         message: str,
     ) -> None:
-        if callback:
+        if callback is None:
+            return
+        try:
             callback(min(max(value, 0.0), 1.0), message)
+        except Exception as exc:
+            logger.warning(
+                f"忽略备份进度观察器异常: {type(exc).__name__}: {exc}",
+                module="Backup",
+            )
 
     @staticmethod
     def _new_backup_id(repository: Path) -> str:

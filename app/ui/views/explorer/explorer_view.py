@@ -1,31 +1,27 @@
 """Explorer View - 存档浏览器主视图"""
-import threading
 import flet as ft
-from typing import TYPE_CHECKING, Any, Optional, Dict, Tuple
+from typing import Any, Callable, Optional, Dict, Tuple
 from pathlib import Path
 
 from app.ui.theme import THEME
 from app.ui.theme import TEXT_CAPTION_SIZE, TEXT_SECONDARY_SIZE
 from app.models.nbt_edit import (
-    ChunkNbtTarget,
-    NbtEditFormat,
     NbtStageStore,
-    NbtTarget,
 )
+from app.presenters.nbt_view_state import NbtViewState, clear_nbt_target
 from app.ui.icons import IconSet
 from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_bar
 from app.ui.view_actions import ViewAction
 
-if TYPE_CHECKING:
-    from app.application import Application
-
 from core.omni.world_session import WorldSession
 from app.ui.views.explorer.utils import safe_update
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
 from app.ui.views.explorer.player_tab import PlayerTabMixin
 from app.ui.views.explorer.region_tab import RegionTabMixin
 from app.ui.views.explorer.stats_tab import StatsTabMixin
 from app.ui.views.explorer.nbt_tab import NbtTabMixin
+from app.ui.views.explorer.mixin_context import ExplorerHost
 from app.ui.views.entity_block_search import EntityBlockSearchView
 from app.ui.views.explorer.explorer_helpers import (
     tag_display_value,
@@ -33,6 +29,15 @@ from app.ui.views.explorer.explorer_helpers import (
     world_coords_to_region_chunk,
 )
 from app.controllers.map_controller import MapController
+from app.controllers.region_delete_controller import RegionDeleteController
+from app.services.execution_runtime import (
+    OperationCancelledError,
+    OperationContext,
+    TaskPriority,
+)
+from app.services.map_marker_service import MapMarkerService
+from app.services.ui_delivery import UiDeliverySpec
+from app.services.world_repository import WorldReadContext
 
 
 class ExplorerView(
@@ -44,32 +49,42 @@ class ExplorerView(
         ft.Column):
     """存档浏览器视图"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "ExplorerHost") -> None:
         """初始化存档浏览器主视图及其子 Tab 状态。
 
         Args:
-            app: 应用组合根，提供地图/玩家等服务工厂。
+            app: Explorer 各 Tab 所需的显式 UI 与服务端口。
         """
         super().__init__(spacing=0)
         self.expand = True
-        self.app: "Application" = app
+        self.app = app
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
         self._current_player_data: Optional[Any] = None
-        self._current_nbt_target: Optional[NbtTarget] = None
-        self._current_nbt_label = "未加载 NBT"
-        self._current_edit_format: NbtEditFormat = "nbt"
-        self._current_chunk_target: Optional[ChunkNbtTarget] = None
+        self._nbt_view_state = NbtViewState()
         self._nbt_stage_store = NbtStageStore()
         self._map_service = self.app.create_region_map_service()
-        self._map_controller = MapController()
+        self._task_scope = self.app.execution_runtime.create_scope(
+            "explorer_view"
+        )
+        self._world_load_generation = 0
+        self._disposed = False
+        self._region_delete_controller = RegionDeleteController(
+            self._task_scope,
+            self.app.world_transactions,
+        )
+        self._map_controller = MapController(
+            MapMarkerService(),
+            task_scope=self._task_scope,
+            post_to_ui=lambda callback: run_on_ui(self.app.page, callback),
+            get_generation=lambda: self._world_load_generation,
+        )
         self._current_dimension = "overworld"
         self._dimension_region_dirs: Dict[str, str] = {}
         self._selected_region_coord: Optional[Tuple[int, int]] = None
         self._map_view: Optional[Any] = None
         self._compact_mode = False
-        self._world_load_generation = 0
         self._build()
 
     @property
@@ -339,59 +354,156 @@ class ExplorerView(
             safe_update(self._world_label)
             self._world_load_generation += 1
             generation = self._world_load_generation
+            self._invalidate_quick_backup_state()
+            self._invalidate_stats_analysis_state()
+            self._set_map_marker_busy(False)
+            self.app.hide_progress()
 
-            threading.Thread(
-                target=self._load_world_worker,
-                args=(str(path), generation),
-                daemon=True,
-            ).start()
+            self._task_scope.cancel_all()
+            self._task_scope.submit(
+                "load_world",
+                lambda token: self._load_world_worker(
+                    str(path),
+                    generation,
+                    token,
+                ),
+                priority=TaskPriority.VISIBLE,
+                feature="explorer",
+                world_id=str(path),
+                generation=generation,
+            )
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
 
-    def _load_world_worker(self, path: str, generation: int) -> None:
-        """Load a world off the UI thread and schedule one result callback."""
+    def _load_world_worker(
+        self,
+        path: str,
+        generation: int,
+        context: OperationContext,
+    ) -> None:
+        """Load shell metadata first, then full session (progressive publish)."""
         try:
-            session = self._create_world_session(Path(path), self.app.log)
-            self.app.page.run_task(self._apply_loaded_world, session, generation)
+            context.report_progress(0, 3, "open_world")
+            context.raise_if_cancelled()
+            world = Path(path)
+            repository = self.app.world_repository
+            read_context: Optional[WorldReadContext] = None
+            try:
+                read_context = repository.open(world)
+                context.raise_if_cancelled()
+                self._post_world_ui(
+                    context,
+                    "shell",
+                    lambda: self._apply_shell_metadata(
+                        read_context.shell,
+                        generation,
+                    ),
+                )
+            except (OSError, ValueError, FileNotFoundError, TypeError):
+                # Shell metadata is best-effort; full load still proceeds.
+                pass
+            context.report_progress(1, 3, "shell_ready")
+            context.raise_if_cancelled()
+            session = self._create_world_session(
+                world,
+                self.app.log,
+                read_context=read_context,
+            )
+            context.report_progress(2, 3, "session_ready")
+            context.raise_if_cancelled()
+            self._post_world_ui(
+                context,
+                "result",
+                lambda: self._apply_loaded_world(session, generation),
+            )
+            context.report_progress(3, 3, "delivered")
+        except OperationCancelledError:
+            return
         except Exception as exc:
-            self.app.page.run_task(self._show_world_load_error, exc, generation)
+            if context.is_cancelled:
+                return
+            self._post_world_ui(
+                context,
+                "error",
+                lambda error=exc: self._show_world_load_error(
+                    error,
+                    generation,
+                ),
+            )
+
+    def _post_world_ui(
+        self,
+        context: OperationContext,
+        event: str,
+        callback: Callable[[], None],
+    ) -> None:
+        """将世界加载投影交给统一 UI 通道并附带 generation 守卫。"""
+        self.app.ui_delivery.post(
+            UiDeliverySpec(
+                task_id=context.task_id,
+                operation=context.operation,
+                feature=context.feature,
+                world_id=context.world_id,
+                generation=context.generation,
+                event=event,
+                metadata=context.metadata,
+            ),
+            callback,
+            is_current=lambda: self._is_world_load_current(
+                context.generation
+            ),
+        )
+
+    def _apply_shell_metadata(
+        self,
+        shell: Any,
+        generation: int,
+    ) -> None:
+        """首屏：在完整会话前显示世界名与区域规模提示。"""
+        if not self._is_world_load_current(generation):
+            return
+        name = getattr(shell, "display_name", None) or "..."
+        regions = int(getattr(shell, "overworld_region_count", 0) or 0)
+        dims = int(getattr(shell, "dimension_hint_count", 0) or 0)
+        self._world_label.value = (
+            f"⏳ {name} · 区域 {regions} · 维度提示 {dims} · 加载中..."
+        )
+        self._world_label.color = THEME.mc_gold
+        safe_update(self._world_label)
 
     def _create_world_session(
         self,
         path: Path,
         log: Any = None,
+        *,
+        read_context: Optional[WorldReadContext] = None,
     ) -> WorldSession:
         """Compose a session with application-scoped write safety ports."""
-        return WorldSession(
+        if read_context is not None:
+            return read_context.open_session(log=log or self.app.log)
+        return self.app.world_repository.open_session(
             path,
             log=log or self.app.log,
-            write_lease_factory=self.app.services.world_writes.reserve,
-            backup_callback=lambda world: (
-                self.app.services.backup.create_backup(
-                    world,
-                    label="NBT 提交前自动备份",
-                ).backup_path
-            ),
         )
 
-    async def _apply_loaded_world(
+    def _apply_loaded_world(
         self,
         session: WorldSession,
         generation: int,
     ) -> None:
-        if generation != self._world_load_generation:
+        if not self._is_world_load_current(generation):
             return
         try:
             self._populate_world(session)
         except Exception as exc:
             self.app.handle_exception(exc, title="更新存档界面失败")
 
-    async def _show_world_load_error(
+    def _show_world_load_error(
         self,
         error: Exception,
         generation: int,
     ) -> None:
-        if generation != self._world_load_generation:
+        if not self._is_world_load_current(generation):
             return
         if isinstance(error, FileNotFoundError):
             self._world_label.value = "存档无效"
@@ -420,17 +532,36 @@ class ExplorerView(
 
     def dispose(self) -> None:
         """Release session-scoped background resources."""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._world_load_generation += 1
+        self._invalidate_quick_backup_state()
+        self._invalidate_stats_analysis_state()
+        self._map_controller.close()
+        data_loader = getattr(self, "_data_loader", None)
+        if data_loader is not None:
+            data_loader.dispose()
+        self._task_scope.close()
+        if hasattr(self, "_entity_block_search_view"):
+            self._entity_block_search_view.dispose()
+        self._dispose_player_tab()
         self._dispose_region_tab()
         self._map_service.close()
+
+    def _is_world_load_current(self, generation: int) -> bool:
+        """Return whether a delayed world-load callback still owns the view."""
+        return (
+            not self._disposed
+            and generation == self._world_load_generation
+        )
 
     def _populate_world(self, session: WorldSession) -> None:
         """在 WorldSession 加载完成后填充 UI（可在后台线程调用）"""
         self.world_session = session
         self._world_label.value = f"当前存档: {session.world_path.name}"
         self._world_label.color = THEME.text_muted
-        self._current_nbt_target = None
-        self._current_chunk_target = None
-        self._current_nbt_label = "未加载 NBT"
+        self._nbt_view_state = clear_nbt_target(self._nbt_view_state)
         self._nbt_stage_store.clear()
         self._update_nbt_target_options()
         self._update_nbt_stage_status()
@@ -440,6 +571,7 @@ class ExplorerView(
         world_info = session.get_world_info()
         dimensions = session.get_dimensions()
         self._map_controller.bind_world(session.world_path, dimensions)
+        self._request_map_marker_load()
         stats = {
             "world_path": str(session.world_path),
             "player_count": len(session.get_player_uuids()),

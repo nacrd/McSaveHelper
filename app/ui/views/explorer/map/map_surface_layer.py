@@ -6,12 +6,18 @@ geometry updates while the user pans or zooms.
 """
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, replace
+from threading import Lock
 from typing import TYPE_CHECKING, Callable, Coroutine, Dict, Mapping, Optional, Tuple
 
 import flet as ft
 
+from app.services.execution_runtime import (
+    ExecutionLane,
+    ExecutionRuntime,
+    OperationHandle,
+    TaskPriority,
+)
 from app.ui.utils import ScheduledTask, safe_update
 from app.ui.views.explorer.map.surface_renderer import (
     MapSurfaceFrame,
@@ -19,12 +25,13 @@ from app.ui.views.explorer.map.surface_renderer import (
     MapSurfaceSpec,
     _rgb,
 )
+from core.logger import logger
 from core.mca.map_tiles import HIGH_DETAIL_TILE_LADDER, choose_tile_size
 from core.mca.topview_renderer import ULTRA_TILE_SIZE
 from core.mca.viewport import McaViewport
 
 if TYPE_CHECKING:
-    from app.services.region_map_service import RegionMapService
+    from app.services.region_map import RegionMapService
 
 
 RegionCoord = Tuple[int, int]
@@ -59,10 +66,13 @@ class MapSurfaceLayer:
         self,
         service: RegionMapService,
         *,
+        execution_runtime: ExecutionRuntime,
         schedule_task: TaskScheduler,
         request_rebuild: Callable[[], None],
         is_active: Callable[[], bool],
         background_color: str,
+        on_ready: Optional[Callable[[], None]] = None,
+        on_unavailable: Optional[Callable[[Exception], None]] = None,
         cell_size: float = 32.0,
         buffer_regions: int = 2,
         max_regions: int = 192,
@@ -72,19 +82,25 @@ class MapSurfaceLayer:
 
         Args:
             service: 区域地图数据与俯视瓦片服务。
+            execution_runtime: 应用级有界后台运行时。
             schedule_task: 将协程调度到 UI 任务循环。
             request_rebuild: 需要重绘时回调宿主。
             is_active: 图层所属页面是否仍活跃。
             background_color: 缓冲表面背景色。
+            on_ready: 第一帧成功上传后的通知回调。
+            on_unavailable: RawImage 运行时不可用时的通知回调。
             cell_size: 单区域基础像素边长。
             buffer_regions: 可见区外缓冲环数。
             max_regions: 单轴最大区域数。
             max_pixels: 表面像素预算上限。
         """
         self._service = service
+        self._execution_runtime = execution_runtime
         self._schedule_task = schedule_task
         self._request_rebuild = request_rebuild
         self._is_active = is_active
+        self._on_ready = on_ready
+        self._on_unavailable = on_unavailable
         self._cell_size = max(1.0, float(cell_size))
         self._buffer_regions = max(1, int(buffer_regions))
         self._max_regions = max(8, int(max_regions))
@@ -94,6 +110,9 @@ class MapSurfaceLayer:
         self._frame: Optional[MapSurfaceFrame] = None
         self._spec: Optional[MapSurfaceSpec] = None
         self._task: Optional[ScheduledTask] = None
+        self._compose_handle: Optional[OperationHandle[MapSurfaceFrame]] = None
+        self._lifecycle_lock = Lock()
+        self._closed = False
         self._request_spec: Optional[MapSurfaceSpec] = None
         self._request_data: Dict[RegionCoord, int] = {}
         self._request_colors: Dict[RegionCoord, RgbColor] = {}
@@ -102,6 +121,8 @@ class MapSurfaceLayer:
         self._rendering = False
         self._blocked_spec: Optional[MapSurfaceSpec] = None
         self._visible_regions: set[RegionCoord] = set()
+        self._covers_viewport = False
+        self._latest_visible_bounds: Optional[RegionBounds] = None
         self._scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
@@ -158,6 +179,11 @@ class MapSurfaceLayer:
         return set(self._visible_regions)
 
     @property
+    def covers_viewport(self) -> bool:
+        """当前已上传表面是否完整覆盖并匹配视口。"""
+        return self._covers_viewport
+
+    @property
     def rendering(self) -> bool:
         """后台合成循环是否正在运行。"""
         return self._rendering
@@ -174,7 +200,7 @@ class MapSurfaceLayer:
         Returns:
             已标脏为 True；与可见集无关时为 False。
         """
-        if coord not in self._visible_regions:
+        if self._is_closed() or coord not in self._visible_regions:
             return False
         # Tile revision is part of the decoded-image cache key, so the next
         # compose cannot reuse stale pixels.  Avoid taking the renderer lock
@@ -185,8 +211,22 @@ class MapSurfaceLayer:
 
     def mark_dirty(self) -> None:
         """强制下次 ``sync`` 重新排队合成。"""
+        if self._is_closed():
+            return
         self._dirty = True
         self._blocked_spec = None
+
+    def suspend(self) -> None:
+        """使在途帧失效，但保留已上传表面供临时重挂过渡。"""
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._token += 1
+            self._dirty = True
+            self._request_spec = None
+            self._request_data.clear()
+            self._request_colors.clear()
+            self._blocked_spec = None
 
     def clear(self) -> None:
         """丢弃旧世界帧，但不取消进行中的上传 ACK。
@@ -202,7 +242,37 @@ class MapSurfaceLayer:
         self._frame = None
         self._spec = None
         self._blocked_spec = None
+        self._covers_viewport = False
+        self._latest_visible_bounds = None
         self.hide()
+
+    def close(self) -> None:
+        """取消在途工作并释放解码图像；可重复调用。"""
+        with self._lifecycle_lock:
+            if self._closed:
+                return
+            self._closed = True
+            task = self._task
+            compose_handle = self._compose_handle
+            self._task = None
+            self._compose_handle = None
+        self.clear()
+        self._rendering = False
+        if compose_handle is not None:
+            compose_handle.cancel()
+        if task is not None and not task.done():
+            task.cancel()
+        if compose_handle is None:
+            self._renderer.close()
+        else:
+            compose_handle.add_done_callback(
+                lambda _completed: self._renderer.close()
+            )
+
+    def _is_closed(self) -> bool:
+        """返回图层是否已进入最终关闭状态。"""
+        with self._lifecycle_lock:
+            return self._closed
 
     def hide(self) -> None:
         """隐藏表面宿主控件。"""
@@ -236,7 +306,7 @@ class MapSurfaceLayer:
         Returns:
             仍缺俯视瓦片的区域坐标列表；未启用时为空。
         """
-        if not self.enabled:
+        if self._is_closed() or not self.enabled:
             return []
         self._sync_viewport_geometry(viewport)
         if not data:
@@ -245,6 +315,14 @@ class MapSurfaceLayer:
 
         candidate, visible_bounds = self._surface_candidate(
             viewport, width, height, display_mode, use_topview
+        )
+        self._latest_visible_bounds = visible_bounds
+        if not self._contains(candidate, visible_bounds):
+            self._use_canvas_fallback()
+            return []
+        self._covers_viewport = self._frame_matches_viewport(
+            candidate,
+            visible_bounds,
         )
         reused = self._reuse_active_surface(data, candidate, visible_bounds)
         if reused is not None:
@@ -267,6 +345,28 @@ class MapSurfaceLayer:
             self._update_geometry(self._frame.spec)
 
         return self._missing_tiles(surface_data, candidate)
+
+    def _use_canvas_fallback(self) -> None:
+        """使裁剪候选失效，避免不完整表面遮住 Canvas。"""
+        self._token += 1
+        self._dirty = True
+        self._covers_viewport = False
+        self._request_spec = None
+        self._request_data.clear()
+        self._request_colors.clear()
+        self._visible_regions.clear()
+        self._blocked_spec = None
+        self.hide()
+
+    def _frame_matches_viewport(
+        self,
+        candidate: MapSurfaceSpec,
+        visible_bounds: RegionBounds,
+    ) -> bool:
+        frame = self._frame
+        if frame is None or not self._contains(frame.spec, visible_bounds):
+            return False
+        return self._same_surface_format(frame.spec, candidate)
 
     def _sync_viewport_geometry(self, viewport: McaViewport) -> None:
         self._scale = max(0.001, float(viewport.scale))
@@ -559,6 +659,8 @@ class MapSurfaceLayer:
         data: Mapping[RegionCoord, int],
         colors: Mapping[RegionCoord, RgbColor],
     ) -> None:
+        if self._is_closed():
+            return
         self._request_spec = spec
         self._request_data = dict(data)
         self._request_colors = dict(colors)
@@ -574,12 +676,17 @@ class MapSurfaceLayer:
         task = self._schedule_task(self._render_loop())
         if task is None:
             self._rendering = False
-        else:
+            return
+        with self._lifecycle_lock:
+            if self._closed:
+                task.cancel()
+                self._rendering = False
+                return
             self._task = task
 
     async def _render_loop(self) -> None:
         try:
-            while self._is_active() and self.image is not None:
+            while self._can_render() and self.image is not None:
                 request = self._capture_request()
                 if request is None:
                     break
@@ -588,9 +695,14 @@ class MapSurfaceLayer:
                 break
         finally:
             self._rendering = False
-            self._task = None
-            if self._is_active() and self._dirty:
+            with self._lifecycle_lock:
+                self._task = None
+            if self._can_render() and self._dirty:
                 self._request_rebuild()
+
+    def _can_render(self) -> bool:
+        """仅允许仍存活且挂载的图层执行或发布表面。"""
+        return self.enabled and not self._is_closed() and self._is_active()
 
     async def _render_request(self, request: _RenderRequest) -> bool:
         """Render one request and report whether a newer request should retry."""
@@ -613,14 +725,22 @@ class MapSurfaceLayer:
         return request.token == self._token
 
     def _request_is_current(self, request: _RenderRequest) -> bool:
-        return self._request_token_matches(request) and self._is_active()
+        return self._request_token_matches(request) and self._can_render()
 
     def _store_frame(self, request: _RenderRequest, frame: MapSurfaceFrame) -> None:
+        was_ready = self._covers_viewport
         self._frame = frame
         self._spec = request.spec
         self._dirty = False
         self._blocked_spec = None
+        visible_bounds = self._latest_visible_bounds
+        self._covers_viewport = (
+            visible_bounds is not None
+            and self._contains(request.spec, visible_bounds)
+        )
         self._update_geometry(request.spec)
+        if self._covers_viewport and not was_ready and self._on_ready is not None:
+            self._on_ready()
 
     def _capture_request(self) -> Optional[_RenderRequest]:
         spec = self._request_spec
@@ -650,21 +770,39 @@ class MapSurfaceLayer:
         self,
         request: _RenderRequest,
     ) -> Optional[MapSurfaceFrame]:
+        handle: Optional[OperationHandle[MapSurfaceFrame]] = None
         try:
-            return await asyncio.to_thread(
-                self._renderer.compose,
-                request.spec,
-                request.data,
-                request.tile_bytes,
-                request.tile_revisions,
-                request.colors,
-                cancel_check=lambda: not self._request_is_current(request),
-            )
+            with self._lifecycle_lock:
+                if self._closed:
+                    return None
+                handle = self._execution_runtime.submit(
+                    "compose_map_surface",
+                    lambda token: self._renderer.compose(
+                        request.spec,
+                        request.data,
+                        request.tile_bytes,
+                        request.tile_revisions,
+                        request.colors,
+                        cancel_check=lambda: (
+                            token.is_cancelled
+                            or not self._request_is_current(request)
+                        ),
+                    ),
+                    lane=ExecutionLane.CPU,
+                    priority=TaskPriority.VISIBLE,
+                )
+                self._compose_handle = handle
+            return await handle.wait_async()
         except Exception:
             if self._request_token_matches(request):
                 self._blocked_spec = request.spec
                 self._dirty = False
             return None
+        finally:
+            if handle is not None:
+                with self._lifecycle_lock:
+                    if self._compose_handle is handle:
+                        self._compose_handle = None
 
     def _source_is_current(self, spec: MapSurfaceSpec) -> bool:
         return (
@@ -690,17 +828,38 @@ class MapSurfaceLayer:
                 frame.pixels,
                 premultiplied=True,
             )
-        except Exception:
-            self._blocked_spec = request.spec
-            self._dirty = False
-            if self._frame is None:
-                self.hide()
+        except Exception as exc:
+            self._disable_after_upload_failure(exc)
             return False
         # ``clear()`` may invalidate this frame while its ACK is pending.  Do
         # not resurrect pixels from the previous world or camera generation.
         return request.token == self._token and self._is_active()
 
+    def _disable_after_upload_failure(self, error: Exception) -> None:
+        """禁用失效的 RawImage 通道并通知宿主切换到 Canvas。"""
+        with self._lifecycle_lock:
+            if self._closed or not self.enabled:
+                return
+            self.enabled = False
+            self._covers_viewport = False
+            self._token += 1
+            self._dirty = False
+            self._request_spec = None
+            self._request_data.clear()
+            self._request_colors.clear()
+            self._blocked_spec = None
+        self.hide()
+        logger.warning(
+            "RawImage 地图表面上传失败，已回退到 Canvas: "
+            f"{type(error).__name__}: {error}",
+            module="McaMapSurface",
+        )
+        if self._on_unavailable is not None:
+            self._on_unavailable(error)
+
     def _show(self) -> None:
+        if self._is_closed():
+            return
         host = self.control
         if host is not None and not getattr(host, "visible", True):
             host.visible = True

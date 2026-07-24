@@ -1,6 +1,7 @@
 """NBT 编辑会话使用的纯数据模型。"""
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Literal, Optional, Tuple, Union
@@ -158,6 +159,28 @@ class NbtStageStore:
         count = len(self._changes)
         self._changes.clear()
         return count
+
+    def remove_snapshot(self, changes: Iterable[NbtChange]) -> int:
+        """移除提交快照中的原对象，同时保留提交期间新增的变更。
+
+        Args:
+            changes: 先前从 ``changes`` 属性取得的对象序列。
+
+        Returns:
+            实际移除的条目数。
+        """
+        pending = Counter(id(change) for change in changes)
+        remaining: list[NbtChange] = []
+        removed = 0
+        for change in self._changes:
+            identity = id(change)
+            if pending[identity] > 0:
+                pending[identity] -= 1
+                removed += 1
+            else:
+                remaining.append(change)
+        self._changes = remaining
+        return removed
 
     def grouped_by_target(self) -> Dict[str, list[Tuple[int, NbtChange]]]:
         """按 ``target_key`` 分组，保留原始索引。

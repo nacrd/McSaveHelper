@@ -4,10 +4,13 @@ from __future__ import annotations
 import base64
 import io
 import json
+import threading
 from pathlib import Path
+from typing import cast
 
 from PIL import Image
 
+from app.services.execution_runtime import ExecutionRuntime, LaneLimits
 from app.services.player_avatar_service import (
     PlayerAvatarService,
     crop_face_png,
@@ -67,13 +70,15 @@ def test_crop_face_png_from_synthetic_skin() -> None:
     assert face_bytes.startswith(b"\x89PNG")
     with Image.open(io.BytesIO(face_bytes)) as face:
         assert face.size == (32, 32)
-        pixel = face.getpixel((0, 0))
+        rgba = face.convert("RGBA")
+        pixel = cast(tuple[int, int, int, int], rgba.getpixel((0, 0)))
         assert pixel[0] > 200  # red channel
-        assert face.getpixel((16, 16))[0] > 200
+        center = cast(tuple[int, int, int, int], rgba.getpixel((16, 16)))
+        assert center[0] > 200
 
 
 def test_get_cached_path_reads_disk(tmp_path: Path) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=True)
+    service = PlayerAvatarService(ExecutionRuntime(), cache_dir=tmp_path, enabled=True)
     uuid = "11111111222233334444555555555555"
     path = tmp_path / f"{uuid}.png"
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
@@ -84,7 +89,7 @@ def test_get_cached_path_reads_disk(tmp_path: Path) -> None:
 
 
 def test_disabled_service_skips_fetch(tmp_path: Path) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=False)
+    service = PlayerAvatarService(ExecutionRuntime(), cache_dir=tmp_path, enabled=False)
     results: list[object] = []
     service.load_avatar_async(
         "11111111222233334444555555555555",
@@ -94,7 +99,107 @@ def test_disabled_service_skips_fetch(tmp_path: Path) -> None:
 
 
 def test_invalid_uuid_callback_none(tmp_path: Path) -> None:
-    service = PlayerAvatarService(cache_dir=tmp_path, enabled=True)
+    service = PlayerAvatarService(ExecutionRuntime(), cache_dir=tmp_path, enabled=True)
     results: list[object] = []
     service.load_avatar_async("not-a-uuid", lambda path: results.append(path))
     assert results == [None]
+
+
+def test_avatar_fetch_uses_injected_runtime(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime = ExecutionRuntime()
+    service = PlayerAvatarService(runtime, cache_dir=tmp_path, enabled=True)
+    fetched = threading.Event()
+    worker_names: list[str] = []
+    monkeypatch.setattr(
+        service,
+        "_fetch_and_cache",
+        lambda _uuid: worker_names.append(threading.current_thread().name)
+        or None,
+    )
+    try:
+        service.load_avatar_async(
+            "11111111222233334444555555555555",
+            lambda _path: fetched.set(),
+        )
+
+        assert fetched.wait(1)
+        assert worker_names[0].startswith("mcsavehelper-io-")
+        assert service._execution_runtime is runtime
+    finally:
+        service.close()
+        # Service must not shut down the injected shared runtime.
+        assert runtime.is_closed is False
+        runtime.shutdown(wait=False)
+
+
+def test_async_avatar_disk_lookup_runs_on_io_lane(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    runtime = ExecutionRuntime()
+    service = PlayerAvatarService(runtime, cache_dir=tmp_path, enabled=True)
+    uuid = "11111111222233334444555555555555"
+    path = tmp_path / f"{uuid}.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    completed = threading.Event()
+    worker_names: list[str] = []
+    original = service.get_cached_path
+
+    def get_cached_path(value: str) -> Path | None:
+        worker_names.append(threading.current_thread().name)
+        return original(value)
+
+    monkeypatch.setattr(service, "get_cached_path", get_cached_path)
+    try:
+        service.load_avatar_async(
+            uuid,
+            lambda result: completed.set() if result == str(path) else None,
+        )
+
+        assert completed.wait(1)
+        assert worker_names[0].startswith("mcsavehelper-io-")
+    finally:
+        service.close()
+        runtime.shutdown(wait=True)
+
+
+def test_queue_full_falls_back_and_allows_retry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    limits = LaneLimits(max_workers=1, queue_capacity=0)
+    runtime = ExecutionRuntime(io_limits=limits, cpu_limits=limits)
+    service = PlayerAvatarService(runtime, cache_dir=tmp_path, enabled=True)
+    blocker_started = threading.Event()
+    release_blocker = threading.Event()
+    fetched = threading.Event()
+    results: list[object] = []
+
+    def block_runtime(_token) -> None:
+        blocker_started.set()
+        release_blocker.wait(1)
+
+    blocker = runtime.submit("blocker", block_runtime)
+    assert blocker_started.wait(1)
+    try:
+        service.load_avatar_async(
+            "11111111222233334444555555555555",
+            lambda path: results.append(path),
+        )
+        assert results == [None]
+
+        release_blocker.set()
+        blocker.result(timeout=1)
+        monkeypatch.setattr(service, "_fetch_and_cache", lambda _uuid: None)
+        service.load_avatar_async(
+            "11111111222233334444555555555555",
+            lambda _path: fetched.set(),
+        )
+        assert fetched.wait(1)
+    finally:
+        release_blocker.set()
+        service.close()
+        runtime.shutdown(wait=True)

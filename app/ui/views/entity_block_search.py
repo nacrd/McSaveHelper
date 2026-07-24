@@ -1,26 +1,50 @@
 """Entity/Block Search View - 实体/方块搜索视图（三栏布局重构版）"""
-import threading
+from __future__ import annotations
+
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import Any, Callable, List, Protocol
 
 import flet as ft
 
-from app.ui.theme import THEME
-from app.ui.icons import IconSet
-from app.ui.components.buttons import btn_primary, btn_ghost
-from app.ui.components.fields import text_field, checkbox, current_save_field, dropdown
-from app.ui.components.cards import placeholder
-from app.ui.components.layout import page_header
-from app.ui.utils import run_on_ui, safe_update
+from app.controllers.entity_block_search_controller import (
+    EntityBlockExportCompletion,
+    EntityBlockSearchBusyError,
+    EntityBlockSearchCompletion,
+    EntityBlockSearchController,
+    EntityBlockSearchUiPorts,
+)
+from app.services.entity_block_search.constants import get_preset_options
+from app.services.entity_block_search.models import SearchCondition
 from app.services.entity_block_search_service import (
     EntityBlockSearchService,
     SearchResult,
 )
-from app.services.entity_block_search.constants import get_preset_options
-from app.services.entity_block_search.models import SearchCondition
+from app.ui.components.buttons import btn_ghost, btn_primary
+from app.ui.components.cards import placeholder
+from app.ui.components.fields import (
+    checkbox,
+    current_save_field,
+    dropdown,
+    text_field,
+)
+from app.ui.components.layout import page_header
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+)
+from app.ui.icons import IconSet
+from app.ui.theme import THEME
+from app.ui.utils import run_on_ui, safe_update
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+class EntityBlockSearchHost(
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the entity and block search view."""
 
 
 def _icon_heading(icon: ft.IconData, text: str) -> ft.Row:
@@ -44,35 +68,50 @@ class EntityBlockSearchView(ft.Column):
     """实体/方块/容器搜索视图 - 三栏布局：左侧条件 + 中央结果 + 右侧统计"""
 
     DISPLAY_LIMIT = 300
-    TYPE_LABELS = {
-        "entity": "实体",
-        "block": "方块",
-        "container": "容器",
-    }
     DIMENSION_LABELS = {
         "overworld": "主世界",
         "nether": "下界",
         "end": "末地",
     }
 
-    def __init__(self, app: "Application", compact: bool = False) -> None:
+    def __init__(
+        self,
+        app: "EntityBlockSearchHost",
+        compact: bool = False,
+    ) -> None:
         """初始化实体/方块/容器搜索视图。
 
         Args:
-            app: 应用组合根。
+            app: 搜索页面所需的对话框、文件选择和运行时端口。
             compact: 是否使用紧凑布局（嵌入浏览器子页时）。
         """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.app = app
         self._compact = compact
         self.service = EntityBlockSearchService()
+        self._task_scope = app.execution_runtime.create_scope(
+            "entity_block_search_view"
+        )
         self.expand = True
 
-        self._searching = False
         self._search_results: List[SearchResult] = []
-        self._last_search_meta: Dict[str, Any] = {}
 
         self._init_controls()
+        self._controller = EntityBlockSearchController(
+            self.service,
+            self._task_scope,
+            EntityBlockSearchUiPorts(
+                dispatch=self._dispatch_ui,
+                search_started=self._apply_search_started,
+                search_succeeded=self._apply_search_success,
+                search_failed=self._apply_search_failure,
+                search_cancelled=self._apply_search_cancelled,
+                export_started=self._apply_export_started,
+                export_succeeded=self._apply_export_success,
+                export_failed=self._apply_export_failure,
+                export_cancelled=self._apply_export_cancelled,
+            ),
+        )
         self._build_ui()
 
     def _init_controls(self) -> None:
@@ -352,9 +391,25 @@ class EntityBlockSearchView(ft.Column):
 
     def on_save_selected(self, path: str) -> None:
         """当存档被选择时调用"""
+        self._controller.select_world(Path(path))
         self._world_path_field.value = path
+        self._search_results = []
+        self._results_list.controls.clear()
+        self._search_btn.disabled = False
+        self._search_btn.set_text("开始搜索")
+        self._export_btn.disabled = False
+        self._status_title_text.value = "未开始搜索"
+        self._status_title_text.color = THEME.text_primary
+        self._status_summary_text.value = ""
+        self._status_progress.visible = False
         if hasattr(self._world_path_field, 'update'):
             self._world_path_field.update()
+        safe_update(self._results_list)
+        safe_update(self._search_btn)
+        safe_update(self._export_btn)
+        safe_update(self._status_title_text)
+        safe_update(self._status_summary_text)
+        safe_update(self._status_progress)
 
     def _on_search_type_change(self, e: Any) -> None:
         """搜索范围改变时更新预设标签"""
@@ -388,20 +443,18 @@ class EntityBlockSearchView(ft.Column):
 
     def _start_search(self, e: Any = None) -> None:
         """开始搜索"""
-        if self._searching:
-            self.app.warn_dialog("搜索中", "当前正在搜索，请等待完成")
-            return
+        del e
 
         condition = self._build_search_condition()
         if condition is None:
             return
 
-        self._set_searching_ui(True)
-        threading.Thread(
-            target=self._run_search_worker,
-            args=(condition,),
-            daemon=True,
-        ).start()
+        try:
+            self._controller.start_search(condition)
+        except EntityBlockSearchBusyError:
+            self.app.warn_dialog("操作进行中", "请等待当前搜索或导出完成")
+        except Exception as error:
+            self.app.handle_exception(error, title="搜索失败")
 
     def _build_search_condition(self) -> SearchCondition | None:
         """Validate form inputs and return a search condition."""
@@ -433,88 +486,69 @@ class EntityBlockSearchView(ft.Column):
             return None
         return condition
 
-    def _set_searching_ui(self, searching: bool) -> None:
-        """Toggle busy state widgets for a search run."""
-        self._searching = searching
-        self._search_btn.disabled = searching
-        self._search_btn.set_text(
-            "搜索中..." if searching else "开始搜索"
-        )
-        if searching:
-            self._status_title_text.value = "搜索中..."
-            self._status_title_text.color = THEME.mc_gold
-            self._status_icon.icon = IconSet.SYNC
-            self._status_icon.color = THEME.mc_gold
-            self._status_progress.visible = True
-        safe_update(self._search_btn)
+    def _apply_search_started(self) -> None:
+        """投影搜索开始状态。"""
+        self._search_btn.set_text("搜索中...")
+        self._set_actions_busy(True)
+        self._status_title_text.value = "搜索中..."
+        self._status_title_text.color = THEME.mc_gold
+        self._status_icon.icon = IconSet.SYNC
+        self._status_icon.color = THEME.mc_gold
+        self._status_progress.visible = True
         safe_update(self._status_title_text)
         safe_update(self._status_icon)
         safe_update(self._status_progress)
 
-    def _run_search_worker(self, condition: SearchCondition) -> None:
-        """Background search + UI update dispatch."""
-        try:
-            results = self.service.search(
-                world_path=condition.world_path,
-                search_type=condition.search_type,
-                target=condition.target,
-                dimensions=condition.dimensions,
-            )
-            result_controls = self._build_result_controls(results)
-            run_on_ui(
-                self.app.page,
-                self._apply_search_success,
-                results,
-                result_controls,
-                condition,
-            )
-        except Exception as ex:
-            run_on_ui(self.app.page, self._apply_search_failure, ex)
-
     def _apply_search_success(
         self,
-        results: List[SearchResult],
-        result_controls: List[ft.Control],
-        condition: SearchCondition,
+        completion: EntityBlockSearchCompletion,
     ) -> None:
-        self._search_results = results
-        self._last_search_meta = {
-            "type": condition.search_type,
-            "target": condition.target,
-            "dimensions": condition.dimensions,
-        }
-        self._render_results(result_controls)
+        """投影当前搜索的成功结果。"""
+        self._search_results = list(completion.results)
+        self._render_results()
         self._status_title_text.value = "搜索完成"
         self._status_title_text.color = THEME.mc_grass
         self._status_icon.icon = IconSet.SUCCESS
         self._status_icon.color = THEME.success
-        self._status_summary_text.value = f"找到 {len(results)} 个结果"
+        self._status_summary_text.value = (
+            f"找到 {len(completion.results)} 个结果"
+        )
         self._status_progress.visible = False
-        self._searching = False
-        self._search_btn.disabled = False
         self._search_btn.set_text("开始搜索")
+        self._set_actions_busy(False)
         safe_update(self._status_title_text)
         safe_update(self._status_icon)
         safe_update(self._status_summary_text)
         safe_update(self._status_progress)
-        safe_update(self._search_btn)
 
     def _apply_search_failure(self, exception: Exception) -> None:
+        """投影当前搜索的失败结果。"""
         self._status_title_text.value = "搜索失败"
         self._status_title_text.color = THEME.error
         self._status_icon.icon = IconSet.ERROR
         self._status_icon.color = THEME.error
         self._status_summary_text.value = str(exception)
         self._status_progress.visible = False
-        self._searching = False
-        self._search_btn.disabled = False
         self._search_btn.set_text("开始搜索")
+        self._set_actions_busy(False)
         safe_update(self._status_title_text)
         safe_update(self._status_icon)
         safe_update(self._status_summary_text)
         safe_update(self._status_progress)
-        safe_update(self._search_btn)
         self.app.handle_exception(exception, title="搜索失败")
+
+    def _apply_search_cancelled(self) -> None:
+        """投影当前搜索的取消终态。"""
+        self._status_title_text.value = "搜索已取消"
+        self._status_title_text.color = THEME.text_secondary
+        self._status_icon.icon = IconSet.INFO
+        self._status_icon.color = THEME.text_secondary
+        self._status_progress.visible = False
+        self._search_btn.set_text("开始搜索")
+        self._set_actions_busy(False)
+        safe_update(self._status_title_text)
+        safe_update(self._status_icon)
+        safe_update(self._status_progress)
 
     def _build_result_controls(
         self,
@@ -548,16 +582,9 @@ class EntityBlockSearchView(ft.Column):
                 )
         return controls
 
-    def _render_results(
-        self,
-        controls: List[ft.Control] | None = None,
-    ) -> None:
-        """Attach prepared search controls and refresh once."""
-        rendered = (
-            controls
-            if controls is not None
-            else self._build_result_controls(self._search_results)
-        )
+    def _render_results(self) -> None:
+        """Build and attach result controls on the Flet UI thread."""
+        rendered = self._build_result_controls(self._search_results)
         self._results_list.controls.clear()
         self._results_list.controls.extend(rendered)
         self._results_list.update()
@@ -591,6 +618,7 @@ class EntityBlockSearchView(ft.Column):
 
     def _export_results(self, e: Any = None) -> None:
         """导出搜索结果"""
+        del e
         if not self._search_results:
             self.app.warn_dialog("提示", "没有可导出的搜索结果")
             return
@@ -601,9 +629,62 @@ class EntityBlockSearchView(ft.Column):
                 default_ext=".csv",
                 file_types=[("CSV 文件", "*.csv")]
             )
-            if path:
-                self.service.export_results(self._search_results, Path(path))
-                self.app.info_dialog(
-                    "导出成功", f"已导出 {len(self._search_results)} 个结果到：\n{path}")
-        except Exception as ex:
-            self.app.handle_exception(ex, title="导出失败")
+        except Exception as error:
+            self.app.handle_exception(error, title="导出失败")
+            return
+        if not path:
+            return
+        try:
+            self._controller.start_export(
+                tuple(self._search_results),
+                Path(path),
+            )
+        except EntityBlockSearchBusyError:
+            self.app.warn_dialog("操作进行中", "请等待当前搜索或导出完成")
+        except Exception as error:
+            self.app.handle_exception(error, title="导出失败")
+
+    def _apply_export_started(self) -> None:
+        """投影导出开始状态。"""
+        self._set_actions_busy(True)
+
+    def _apply_export_success(
+        self,
+        completion: EntityBlockExportCompletion,
+    ) -> None:
+        """投影当前导出的成功结果。"""
+        self._set_actions_busy(False)
+        self.app.info_dialog(
+            "导出成功",
+            f"已导出 {completion.result_count} 个结果到：\n"
+            f"{completion.output_path}",
+        )
+
+    def _apply_export_failure(self, error: Exception) -> None:
+        """投影当前导出的失败结果。"""
+        self._set_actions_busy(False)
+        self.app.handle_exception(error, title="导出失败")
+
+    def _apply_export_cancelled(self) -> None:
+        """投影当前导出的取消终态。"""
+        self._set_actions_busy(False)
+
+    def _set_actions_busy(self, busy: bool) -> None:
+        """同步搜索与导出按钮的互斥忙碌状态。"""
+        self._search_btn.disabled = busy
+        self._export_btn.disabled = busy
+        safe_update(self._search_btn)
+        safe_update(self._export_btn)
+
+    def _dispatch_ui(self, callback: Callable[[], None]) -> None:
+        """投递后台结果；无页面测试环境直接执行回调。"""
+        page = getattr(self.app, "page", None)
+        if page is None:
+            callback()
+            return
+        run_on_ui(page, callback)
+
+    def dispose(self) -> None:
+        """取消搜索任务并阻止页面释放后的新提交。"""
+        self._controller.close()
+        self._task_scope.close()

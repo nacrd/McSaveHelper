@@ -1,8 +1,9 @@
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .cleaner import clean_world
+from .parallel import ParallelRunner
 from .pure_cleaner import purge_mod_blocks_and_entities
 from .uuid_utils import get_offline_uuid_str, load_usercache, get_online_uuid, get_name_from_uuid
 from .utils import (
@@ -111,7 +112,10 @@ def run_fast(
     do_clean: bool,
     pure_clean: bool,
     manual_names: Optional[List[str]],
-    log: LogCallback
+    log: LogCallback,
+    region_workers: Optional[int] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> None:
     """执行快速模式迁移。
 
@@ -126,6 +130,8 @@ def run_fast(
         pure_clean: 是否执行纯净清理（移除模组方块/实体）。
         manual_names: 额外手动玩家名列表。
         log: 日志回调。
+        region_workers: 区域级并发上限；批量世界迁移应传 1。
+        parallel_runner: 可选区域并行端口；未提供时区域操作串行执行。
 
     Raises:
         ValueError / OSError: 目标路径不安全或复制失败时由工具函数抛出。
@@ -135,7 +141,13 @@ def run_fast(
     if dest_world.exists():
         log("目标文件夹已存在，正在安全替换...", "WARN")
     log(f"正在复制存档到 {dest_world}", "FILE")
-    replace_directory_tree(src_world, dest_world)
+    replace_directory_tree(
+        src_world,
+        dest_world,
+        cancel_check=cancel_check,
+    )
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("快速迁移已取消")
 
     cache = load_usercache(src_world)
     log(f"从 usercache 加载了 {len(cache)} 条记录", "CACHE")
@@ -153,7 +165,17 @@ def run_fast(
         offline_mode,
         log,
     )
-    _apply_fast_mode_cleanup(dest_world, do_clean, pure_clean, log)
+    _apply_fast_mode_cleanup(
+        dest_world,
+        do_clean,
+        pure_clean,
+        log,
+        region_workers,
+        parallel_runner,
+        cancel_check,
+    )
+    if cancel_check is not None and cancel_check():
+        raise RuntimeError("快速迁移已取消")
     update_server_properties(dest_dir, world_name, log)
 
 
@@ -162,6 +184,9 @@ def _apply_fast_mode_cleanup(
     do_clean: bool,
     pure_clean: bool,
     log: LogCallback,
+    region_workers: Optional[int],
+    parallel_runner: Optional[ParallelRunner] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> None:
     if do_clean:
         log("正在精简存档...", "CLEAN")
@@ -171,7 +196,13 @@ def _apply_fast_mode_cleanup(
 
     if pure_clean:
         log("正在执行纯净扫描：移除模组方块和实体...", "PURE")
-        if not purge_mod_blocks_and_entities(dest_world, log):
+        if not purge_mod_blocks_and_entities(
+            dest_world,
+            log,
+            max_workers=region_workers,
+            parallel_runner=parallel_runner,
+            cancel_check=cancel_check,
+        ):
             raise RuntimeError("纯净扫描未完整处理所有区域文件")
     else:
         log("跳过纯净扫描", "INFO")

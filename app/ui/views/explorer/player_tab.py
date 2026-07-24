@@ -1,15 +1,22 @@
 """Player tab mixin for ExplorerView — three-column player browser."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import flet as ft
 
-from app.presenters.player_presenter import format_export_bundle_text
+from app.presenters.nbt_view_state import clear_chunk_target, set_nbt_target
+from app.presenters.player_avatar_state import (
+    AvatarRequestKind,
+    PlayerAvatarState,
+    avatar_generation,
+    begin_avatar_requests,
+    close_avatar_requests,
+    owns_avatar_request,
+)
 from app.services.asset_import import (
-    import_assets_from_sources,
+    AssetImportCounts,
     pick_asset_sources,
     preferred_mc_locale,
     configured_minecraft_dir,
@@ -18,6 +25,7 @@ from app.services.asset_import import (
 from app.services.player.models import PLAYER_EDIT_SPECS, PlayerEditSpec
 from app.services.player_avatar_service import PlayerAvatarService
 from app.services.player_service import PlayerService
+from app.services.execution_runtime import CancellationToken
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.cards import card
 from app.ui.components.fields import text_field
@@ -28,6 +36,15 @@ from app.ui.views.explorer.equipment_preview import EquipmentPreview
 from app.ui.views.explorer.inventory_grid import InventoryGrid
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.ui.views.explorer.player_hud import PlayerHUDCard
+from app.ui.views.explorer.player_tab_operations import (
+    AssetImportRequest as _AssetImportRequest,
+    PlayerLoadResult as _PlayerLoadResult,
+    PlayerTabOperations,
+    export_player_summary as export_player_summary_operation,
+    import_player_assets as import_player_assets_operation,
+    import_usercache as import_usercache_operation,
+    load_player_data as load_player_data_operation,
+)
 from app.ui.views.explorer.utils import safe_update
 from core.omni.player_manager import PlayerManager
 
@@ -134,13 +151,31 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _player_avatar_service(self) -> PlayerAvatarService:
         service = getattr(self, "_player_avatar_service_instance", None)
         if service is None:
-            service = PlayerAvatarService(enabled=True)
+            service = PlayerAvatarService(
+                self.app.execution_runtime,
+                enabled=True,
+                cache_registry=self.app.cache_registry,
+            )
             self._player_avatar_service_instance = service
         return service
 
+    def _player_tab_operations(self) -> PlayerTabOperations:
+        """惰性创建复用 Explorer 任务作用域的玩家后台协调器。"""
+        operations = getattr(self, "_player_tab_operations_instance", None)
+        if operations is None:
+            operations = PlayerTabOperations(
+                self._task_scope,
+                get_page=lambda: getattr(self.app, "page", None),
+                get_world_session=lambda: self.world_session,
+                get_current_uuid=lambda: self.current_uuid,
+            )
+            self._player_tab_operations_instance = operations
+        return operations
+
     def _build_player_tab(self) -> None:
         t = self._t
-        self._player_avatar_generation = 0
+        self._player_avatar_state = PlayerAvatarState()
+        self._player_tab_operations()
         self._player_refs_cache: List[Any] = []
         self._player_list_tiles: Dict[str, ft.Container] = {}
         self._player_container_index = 0
@@ -788,28 +823,32 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _apply_player_list(self) -> None:
         if not hasattr(self, "_player_list_column"):
             return
+        from app.presenters.player_list_state import build_player_list_state
+
         query = ""
         if hasattr(self, "_player_filter") and self._player_filter.value:
-            query = str(self._player_filter.value).strip().lower()
+            query = str(self._player_filter.value).strip()
+        refs = list(getattr(self, "_player_refs_cache", []))
+        page_size = 40
+        page_index = int(getattr(self, "_player_list_page", 0) or 0)
+        list_state = build_player_list_state(
+            refs,
+            query=query,
+            page_index=page_index,
+            page_size=page_size,
+        )
+        self._player_list_page = list_state.page_index
+        self._last_player_list_state = list_state
+        by_uuid = {ref.uuid_norm: ref for ref in refs}
 
         tiles: List[ft.Control] = []
         self._player_list_tiles = {}
         self._player_list_avatars: Dict[str, ft.CircleAvatar] = {}
-        self._player_list_avatar_gen = (
-            getattr(self, "_player_list_avatar_gen", 0) + 1
+        self._player_avatar_state = begin_avatar_requests(
+            self._player_avatar_state,
+            AvatarRequestKind.LIST,
         )
-        for ref in getattr(self, "_player_refs_cache", []):
-            haystack = (
-                f"{ref.display_name} {ref.uuid_norm} {ref.uuid_hyphen}".lower()
-            )
-            if query and query not in haystack:
-                continue
-            tile = self._build_player_list_tile(ref)
-            self._player_list_tiles[ref.uuid_norm] = tile
-            tiles.append(tile)
-            self._load_list_avatar(ref)
-
-        if not tiles:
+        if list_state.total_count == 0:
             tiles.append(
                 ft.Text(
                     self._t("player.list_empty", "没有匹配的玩家"),
@@ -817,8 +856,59 @@ class PlayerTabMixin(ExplorerMixinHost):
                     color=THEME.text_muted,
                 )
             )
+        else:
+            for item in list_state.items:
+                ref = by_uuid.get(item.uuid)
+                if ref is None:
+                    continue
+                tile = self._build_player_list_tile(ref)
+                self._player_list_tiles[ref.uuid_norm] = tile
+                tiles.append(tile)
+                self._load_list_avatar(ref)
+            if list_state.page_count > 1:
+                tiles.append(
+                    ft.Row(
+                        [
+                            ft.TextButton(
+                                self._t("player.page_prev", "上一页"),
+                                on_click=self._player_list_prev_page,
+                                disabled=list_state.page_index <= 0,
+                            ),
+                            ft.Text(
+                                self._t(
+                                    "player.page_status",
+                                    "第 {page}/{pages} 页（{total}）",
+                                    page=list_state.page_index + 1,
+                                    pages=list_state.page_count,
+                                    total=list_state.total_count,
+                                ),
+                                size=12,
+                                color=THEME.text_muted,
+                            ),
+                            ft.TextButton(
+                                self._t("player.page_next", "下一页"),
+                                on_click=self._player_list_next_page,
+                                disabled=(
+                                    list_state.page_index
+                                    >= list_state.page_count - 1
+                                ),
+                            ),
+                        ],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    )
+                )
         self._player_list_column.controls = tiles
         safe_update(self._player_list_column)
+
+    def _player_list_prev_page(self, _e: Any = None) -> None:
+        page = int(getattr(self, "_player_list_page", 0) or 0)
+        self._player_list_page = max(0, page - 1)
+        self._apply_player_list()
+
+    def _player_list_next_page(self, _e: Any = None) -> None:
+        page = int(getattr(self, "_player_list_page", 0) or 0)
+        self._player_list_page = page + 1
+        self._apply_player_list()
 
     def _build_player_list_tile(self, ref: Any) -> ft.Container:
         selected = False
@@ -919,16 +1009,18 @@ class PlayerTabMixin(ExplorerMixinHost):
         if avatar is None:
             return
         service = self._player_avatar_service()
-        generation = getattr(self, "_player_list_avatar_gen", 0)
-
-        cached = service.get_cached_path(ref.uuid_norm)
-        if cached is not None:
-            self._set_list_avatar_image(avatar, str(cached))
-            return
+        generation = avatar_generation(
+            self._player_avatar_state,
+            AvatarRequestKind.LIST,
+        )
 
         def on_loaded(path: Optional[str]) -> None:
             def apply() -> None:
-                if generation != getattr(self, "_player_list_avatar_gen", 0):
+                if not owns_avatar_request(
+                    self._player_avatar_state,
+                    AvatarRequestKind.LIST,
+                    generation,
+                ):
                     return
                 current = getattr(self, "_player_list_avatars", {}).get(
                     ref.uuid_norm
@@ -976,31 +1068,56 @@ class PlayerTabMixin(ExplorerMixinHost):
     # ── Load / apply player data ──────────────────────────────
 
     def _load_player_data(self, uuid: str) -> None:
+        session = self.world_session
+        if session is None:
+            return
+        self.current_uuid = uuid
+        self._nbt_view_state = clear_chunk_target(self._nbt_view_state)
+        service = self._player_service()
         try:
-            if not self.world_session:
-                return
-            self.current_uuid = uuid
-            self._current_chunk_target = None
-
-            service = self._player_service()
-            player_data = self.world_session.load_player_data(uuid)
-            self._current_player_data = player_data
-
-            summary = service.load_summary(self.world_session, uuid)
-            containers = service.load_containers(self.world_session, uuid)
-            attributes = service.load_attributes(self.world_session, uuid)
-            effects = service.load_effects(self.world_session, uuid)
-            self._apply_player_summary_ui(summary, player_data)
-            self._apply_player_containers_ui(uuid, containers)
-            self._apply_attributes_ui(attributes)
-            self._apply_effects_ui(effects)
-            self._apply_player_nbt_target(uuid)
-            self._apply_player_list()
+            self._player_tab_operations().submit_player_load(
+                service,
+                session,
+                uuid,
+                lambda result: self._apply_player_load_result(result, uuid),
+                self._apply_player_load_error,
+            )
         except Exception as exc:
             self.app.handle_exception(
                 exc,
                 title=self._t("player.error.load", "加载玩家数据失败"),
             )
+
+    @staticmethod
+    def _load_player_data_worker(
+        service: PlayerService,
+        session: Any,
+        uuid: str,
+        token: CancellationToken,
+    ) -> _PlayerLoadResult:
+        return load_player_data_operation(service, session, uuid, token)
+
+    def _apply_player_load_result(
+        self,
+        result: _PlayerLoadResult,
+        uuid: str,
+    ) -> None:
+        self._current_player_data = result.player_data
+        self._apply_player_summary_ui(result.summary, result.player_data)
+        self._apply_player_containers_ui(uuid, result.containers)
+        self._apply_attributes_ui(result.attributes)
+        self._apply_effects_ui(result.effects)
+        self._apply_player_nbt_target(uuid, result.player_data)
+        self._apply_player_list()
+
+    def _apply_player_load_error(
+        self,
+        error: Exception,
+    ) -> None:
+        self.app.handle_exception(
+            error,
+            title=self._t("player.error.load", "加载玩家数据失败"),
+        )
 
     def _apply_player_summary_ui(
         self,
@@ -1105,16 +1222,22 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._effects_list.controls = rows
         safe_update(self._effects_list)
 
-    def _apply_player_nbt_target(self, uuid: str) -> None:
+    def _apply_player_nbt_target(self, uuid: str, nbt: Any) -> None:
+        """将后台已读取的玩家 NBT 投影到 NBT 标签，避免 UI 重复读盘。"""
         if not self.world_session:
             return
-        nbt = self.world_session.load_player_nbt(uuid)
-        self._current_nbt_target = uuid
-        self._current_nbt_label = (
+        label = (
             f"{self._t('player.nbt_label', '玩家 NBT')}: {uuid}"
         )
+        self._nbt_view_state = set_nbt_target(
+            self._nbt_view_state,
+            uuid,
+            label,
+            "nbt",
+            None,
+        )
         if hasattr(self, "_nbt_target_label"):
-            self._nbt_target_label.value = self._current_nbt_label
+            self._nbt_target_label.value = self._nbt_view_state.label
             safe_update(self._nbt_target_label)
         if hasattr(self, "_nbt_tree"):
             self._nbt_tree.load_nbt(nbt)
@@ -1126,23 +1249,23 @@ class PlayerTabMixin(ExplorerMixinHost):
     ) -> None:
         if not hasattr(self, "_player_hud"):
             return
-        self._player_avatar_generation = getattr(
-            self, "_player_avatar_generation", 0
-        ) + 1
-        generation = self._player_avatar_generation
+        self._player_avatar_state = begin_avatar_requests(
+            self._player_avatar_state,
+            AvatarRequestKind.DETAIL,
+        )
+        generation = avatar_generation(
+            self._player_avatar_state,
+            AvatarRequestKind.DETAIL,
+        )
         service = self._player_avatar_service()
-
-        cached = service.get_cached_path(uuid_norm)
-        if cached is not None:
-            self._player_hud.set_avatar_src(
-                str(cached),
-                initial=(name or uuid_norm or "?")[:1],
-            )
-            return
 
         def on_loaded(path: Optional[str]) -> None:
             def apply() -> None:
-                if generation != getattr(self, "_player_avatar_generation", 0):
+                if not owns_avatar_request(
+                    self._player_avatar_state,
+                    AvatarRequestKind.DETAIL,
+                    generation,
+                ):
                     return
                 if not hasattr(self, "_player_hud"):
                     return
@@ -1349,25 +1472,16 @@ class PlayerTabMixin(ExplorerMixinHost):
             )
 
     def _export_player_summary(self, e: Any = None) -> None:
+        del e
         try:
-            if not self.world_session or not self.current_uuid:
+            session = self.world_session
+            uuid = self.current_uuid
+            if not session or not uuid:
                 self.app.warn_dialog(
                     self._t("dialogs.hint", "提示"),
                     self._t("player.need_select", "请先选择玩家。"),
                 )
                 return
-            bundle = self._player_service().build_export(
-                self.world_session,
-                self.current_uuid,
-                include_items=True,
-            )
-            if bundle is None:
-                self.app.warn_dialog(
-                    self._t("dialogs.hint", "提示"),
-                    self._t("player.export_failed", "无法导出玩家摘要。"),
-                )
-                return
-
             path = self.app.save_file(
                 title=self._t("player.export_dialog", "导出玩家摘要"),
                 default_ext=".json",
@@ -1378,22 +1492,15 @@ class PlayerTabMixin(ExplorerMixinHost):
             )
             if not path:
                 return
-            out = Path(path)
-            if out.suffix.lower() == ".txt":
-                text = format_export_bundle_text(bundle, translate=self._t)
-                out.write_text(text, encoding="utf-8")
-            else:
-                out.write_text(
-                    json.dumps(bundle.to_dict(), ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-            self.app.info_dialog(
-                self._t("player.export_ok_title", "导出成功"),
-                self._t(
-                    "player.export_ok_body",
-                    "已导出玩家摘要到：\n{path}",
-                    path=str(out),
-                ),
+            output_path = Path(path)
+            self._player_tab_operations().submit_player_export(
+                self._player_service(),
+                session,
+                uuid,
+                output_path,
+                self._t,
+                self._apply_player_export_success,
+                self._apply_player_export_error,
             )
         except Exception as ex:
             self.app.handle_exception(
@@ -1401,7 +1508,47 @@ class PlayerTabMixin(ExplorerMixinHost):
                 title=self._t("player.error.export", "导出玩家摘要失败"),
             )
 
+    def _export_player_worker(
+        self,
+        service: PlayerService,
+        session: Any,
+        uuid: str,
+        output_path: Path,
+        token: CancellationToken,
+    ) -> int:
+        return export_player_summary_operation(
+            service,
+            session,
+            uuid,
+            output_path,
+            lambda *args, **kwargs: self._t(*args, **kwargs),
+            token,
+        )
+
+    def _apply_player_export_success(
+        self,
+        output_path: Path,
+    ) -> None:
+        self.app.info_dialog(
+            self._t("player.export_ok_title", "导出成功"),
+            self._t(
+                "player.export_ok_body",
+                "已导出玩家摘要到：\n{path}",
+                path=str(output_path),
+            ),
+        )
+
+    def _apply_player_export_error(
+        self,
+        error: Exception,
+    ) -> None:
+        self.app.handle_exception(
+            error,
+            title=self._t("player.error.export", "导出玩家摘要失败"),
+        )
+
     def _import_usercache(self, e: Any = None) -> None:
+        del e
         try:
             path = self.app.pick_file(
                 title=self._t(
@@ -1410,26 +1557,15 @@ class PlayerTabMixin(ExplorerMixinHost):
                 ),
                 file_types=[("JSON (*.json)", "*.json")],
             )
-            if path and self.world_session:
-                imported = self.world_session.import_usercache(Path(path))
-                if imported > 0:
-                    self._refresh_player_list()
-                    self.app.info_dialog(
-                        self._t("dialogs.success", "成功"),
-                        self._t(
-                            "explorer.imported_cache",
-                            "成功导入 {count} 个玩家名称。",
-                            count=imported,
-                        ),
-                    )
-                else:
-                    self.app.info_dialog(
-                        self._t("dialogs.hint", "提示"),
-                        self._t(
-                            "player.import_empty",
-                            "未能导入任何玩家名称。",
-                        ),
-                    )
+            session = self.world_session
+            if not path or session is None:
+                return
+            self._player_tab_operations().submit_usercache_import(
+                session,
+                Path(path),
+                self._apply_usercache_import_result,
+                self._apply_usercache_import_error,
+            )
         except Exception as ex:
             self.app.handle_exception(
                 ex,
@@ -1438,8 +1574,53 @@ class PlayerTabMixin(ExplorerMixinHost):
                 ),
             )
 
+    @staticmethod
+    def _import_usercache_worker(
+        session: Any,
+        path: Path,
+        token: CancellationToken,
+    ) -> int:
+        """在 I/O 通道读取并合并 usercache。"""
+        return import_usercache_operation(session, path, token)
+
+    def _apply_usercache_import_result(
+        self,
+        imported: int,
+    ) -> None:
+        if imported > 0:
+            self._refresh_player_list()
+            self.app.info_dialog(
+                self._t("dialogs.success", "成功"),
+                self._t(
+                    "explorer.imported_cache",
+                    "成功导入 {count} 个玩家名称。",
+                    count=imported,
+                ),
+            )
+            return
+        self.app.info_dialog(
+            self._t("dialogs.hint", "提示"),
+            self._t(
+                "player.import_empty",
+                "未能导入任何玩家名称。",
+            ),
+        )
+
+    def _apply_usercache_import_error(
+        self,
+        error: Exception,
+    ) -> None:
+        self.app.handle_exception(
+            error,
+            title=self._t(
+                "player.error.import_usercache",
+                "导入 usercache 失败",
+            ),
+        )
+
     def _import_language_and_textures(self, e: Any = None) -> None:
         """Unified importer: language JSON/JAR and bulk jar textures."""
+        del e
         try:
             title = self._t(
                 "player.import_assets_title",
@@ -1449,21 +1630,14 @@ class PlayerTabMixin(ExplorerMixinHost):
             if not paths:
                 return
             locale = preferred_mc_locale(self.app)
-            counts = import_assets_from_sources(
-                item_service=self.app.item,
-                texture_service=self.app.texture,
-                paths=paths,
+            request = _AssetImportRequest(
+                paths=tuple(paths),
                 locale=locale,
                 configured_dir=configured_minecraft_dir(self.app),
                 start_path=current_save_start_path(self.app),
                 empty_jar_results_fallback=True,
             )
-            self._notify_asset_import(
-                lang_count=counts.lang_count,
-                texture_count=counts.texture_count,
-                jar_count=counts.jar_count,
-                lang_sources=counts.lang_sources,
-            )
+            self._start_asset_import(request)
         except Exception as ex:
             self.app.handle_exception(
                 ex,
@@ -1472,6 +1646,51 @@ class PlayerTabMixin(ExplorerMixinHost):
                     "导入语言/贴图失败",
                 ),
             )
+
+    def _start_asset_import(self, request: _AssetImportRequest) -> None:
+        """提交语言/贴图导入并只在最新 generation 投影结果。"""
+        self._player_tab_operations().submit_asset_import(
+            request,
+            self.app.item,
+            self.app.texture,
+            self._apply_asset_import_result,
+            self._apply_asset_import_error,
+        )
+
+    def _import_assets_worker(
+        self,
+        request: _AssetImportRequest,
+        token: CancellationToken,
+    ) -> AssetImportCounts:
+        return import_player_assets_operation(
+            request,
+            self.app.item,
+            self.app.texture,
+            token,
+        )
+
+    def _apply_asset_import_result(
+        self,
+        counts: AssetImportCounts,
+    ) -> None:
+        self._notify_asset_import(
+            lang_count=counts.lang_count,
+            texture_count=counts.texture_count,
+            jar_count=counts.jar_count,
+            lang_sources=counts.lang_sources,
+        )
+
+    def _apply_asset_import_error(
+        self,
+        error: Exception,
+    ) -> None:
+        self.app.handle_exception(
+            error,
+            title=self._t(
+                "player.error.import_assets",
+                "导入语言/贴图失败",
+            ),
+        )
 
     def _notify_asset_import(
         self,
@@ -1529,23 +1748,17 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._import_language_and_textures(e)
 
     def _import_language_from_minecraft(self, e: Any = None) -> None:
+        del e
         try:
             locale = preferred_mc_locale(self.app)
-            counts = import_assets_from_sources(
-                item_service=self.app.item,
-                texture_service=self.app.texture,
-                paths=[],
+            request = _AssetImportRequest(
+                paths=(),
                 locale=locale,
                 configured_dir=configured_minecraft_dir(self.app),
                 start_path=current_save_start_path(self.app),
                 empty_paths_fallback=True,
             )
-            self._notify_asset_import(
-                lang_count=counts.lang_count,
-                texture_count=counts.texture_count,
-                jar_count=counts.jar_count,
-                lang_sources=counts.lang_sources,
-            )
+            self._start_asset_import(request)
         except Exception as ex:
             self.app.handle_exception(
                 ex,
@@ -1554,6 +1767,30 @@ class PlayerTabMixin(ExplorerMixinHost):
                     "导入语言/贴图失败",
                 ),
             )
+
+    def _dispose_player_tab(self) -> None:
+        """使玩家页后台回调失效并释放头像服务。"""
+        operations = getattr(self, "_player_tab_operations_instance", None)
+        if operations is not None:
+            operations.close()
+        state = getattr(self, "_player_avatar_state", PlayerAvatarState())
+        self._player_avatar_state = close_avatar_requests(state)
+        for name in (
+            "_equipment",
+            "_inventory",
+            "_ender_inventory",
+            "_container_preview_grid",
+        ):
+            component = getattr(self, name, None)
+            if component is not None:
+                component.dispose()
+        avatar_service = getattr(
+            self,
+            "_player_avatar_service_instance",
+            None,
+        )
+        if avatar_service is not None:
+            avatar_service.close()
 
     def _active_edit_specs(self) -> List[PlayerEditSpec]:
         wanted = set(_FORM_FIELD_IDS)

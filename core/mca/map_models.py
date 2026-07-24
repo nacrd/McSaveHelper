@@ -409,6 +409,24 @@ class MapViewState:
         if self.selection is not None and not isinstance(self.selection, MapSelection):
             raise TypeError("selection must be a MapSelection or None")
 
+    def snapshot(self) -> "MapViewStateSnapshot":
+        """返回可跨线程发布的不可变视图快照。"""
+        return MapViewStateSnapshot(
+            dimension_id=self.dimension_id,
+            style=self.style,
+            center_x=self.center_x,
+            center_z=self.center_z,
+            scale=self.scale,
+            layers=MapLayerStateSnapshot(
+                show_grid=self.layers.show_grid,
+                show_coordinates=self.layers.show_coordinates,
+                show_markers=self.layers.show_markers,
+                show_empty_regions=self.layers.show_empty_regions,
+            ),
+            selection=self.selection,
+            generation=self.generation,
+        )
+
     @staticmethod
     def _finite_coordinate(value: Any, field_name: str) -> float:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -446,6 +464,30 @@ class MapViewState:
 
 
 @dataclass(frozen=True)
+class MapLayerStateSnapshot:
+    """地图图层开关的不可变 UI 投影。"""
+
+    show_grid: bool = False
+    show_coordinates: bool = False
+    show_markers: bool = True
+    show_empty_regions: bool = False
+
+
+@dataclass(frozen=True)
+class MapViewStateSnapshot:
+    """地图视图状态的不可变跨线程快照。"""
+
+    dimension_id: str
+    style: str
+    center_x: float
+    center_z: float
+    scale: float
+    layers: MapLayerStateSnapshot
+    selection: Optional[MapSelection]
+    generation: int
+
+
+@dataclass(frozen=True)
 class MapExportSpec:
     """描述一次地图导出的参数."""
 
@@ -477,10 +519,12 @@ __all__ = [
     "MapDimension",
     "MapExportSpec",
     "MapLayerState",
+    "MapLayerStateSnapshot",
     "MapMarker",
     "MapSelection",
     "MapTileKey",
     "MapUnit",
     "MapViewState",
+    "MapViewStateSnapshot",
     "SUPPORTED_MAP_STYLES",
 ]

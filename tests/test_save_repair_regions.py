@@ -2,6 +2,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.save_repair import chunk_repairer, detector
 from app.services.save_repair.chunk_repairer import ChunkRepairer
 from app.services.save_repair.detector import WorldDetector
@@ -60,7 +61,7 @@ def test_chunk_repair_region_counts_invalid_slots_and_closes_region(
     fake_region = _Region()
     _patch_damaged_scan(monkeypatch, chunk_repairer, region=fake_region)
 
-    result = ChunkRepairer(threading.Event())._repair_region(
+    result = ChunkRepairer(threading.Event(), ExecutionRuntime())._repair_region(
         tmp_path / "r.0.0.mca",
         lambda _message, _level: None,
     )
@@ -80,7 +81,7 @@ def test_chunk_repair_region_quarantines_unreadable_file(
         chunk_repairer,
         error=OSError("unreadable"),
     )
-    repairer = ChunkRepairer(threading.Event())
+    repairer = ChunkRepairer(threading.Event(), ExecutionRuntime())
     quarantined: list[Path] = []
     monkeypatch.setattr(
         chunk_repairer,
@@ -104,7 +105,7 @@ def test_detector_region_reports_damage_and_read_errors(
 ) -> None:
     fake_region = _Region()
     _patch_damaged_scan(monkeypatch, detector, region=fake_region)
-    world_detector = WorldDetector(threading.Event())
+    world_detector = WorldDetector(threading.Event(), ExecutionRuntime())
 
     result = world_detector._detect_region(
         tmp_path / "r.0.0.mca",

@@ -33,6 +33,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
+from app.ui.delayed_scheduler import UiDelayedScheduler
 from app.ui.utils import (
     ScheduledTask,
     run_on_ui,
@@ -55,11 +56,16 @@ from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 from app.ui.views.explorer.map.marker_layer import MapMarkerLayer
 from app.ui.views.explorer.map.map_surface_layer import MapSurfaceLayer
 from app.controllers.topview_tile_requests import TopviewTileRequestCoordinator
-from core.mca.map_tiles import prioritize_regions
+from app.ui.views.explorer.map.map_tile_request_adapter import (
+    adapt_viewport_tile_requests,
+)
+from app.ui.views.explorer.map.map_interaction_state import (
+    snapshot_from_map_view,
+)
 from core.mca.map_coordinates import (
     format_region_coordinate_label,
 )
-from core.mca.map_models import MapLayerState, MapMarker
+from core.mca.map_models import MapLayerState, MapLayerStateSnapshot, MapMarker
 from core.mca.map_navigation import (
     McaMapNavigator,
     SelectionNotification,
@@ -84,7 +90,9 @@ from core.mca.viewport import (
 )
 
 if TYPE_CHECKING:
-    from app.services.region_map_service import RegionMapService
+    from app.services.cache_registry import CacheRegistry
+    from app.services.execution_runtime import ExecutionRuntime
+    from app.services.region_map import RegionMapService
 
 
 MapSelectionCallback = Callable[
@@ -112,33 +120,48 @@ class McaMapView(ft.Container):
     def __init__(
         self,
         map_service: RegionMapService,
+        execution_runtime: Optional[ExecutionRuntime] = None,
         on_selection_changed: Optional[MapSelectionCallback] = None,
         on_marker_selected: Optional[MapMarkerCallback] = None,
         width: int = 700,
         height: int = 450,
+        cache_registry: Optional[CacheRegistry] = None,
         **kwargs: Any,
     ) -> None:
         """构建地图控件并挂到共享的 RegionMapService。
 
         Args:
             map_service: 区域扫描/瓦片服务；由 Explorer 会话持有生命周期。
+            execution_runtime: 应用级有界后台运行时。
             on_selection_changed: 区域/区块选择变化回调（UI 线程）。
             on_marker_selected: 标记被点中时的回调。
             width: 初始宽度像素。
             height: 初始高度像素。
+            cache_registry: 应用级缓存预算；视图释放时自动注销。
             **kwargs: 透传给 ``ft.Container``。
         """
         super().__init__(**kwargs)
         self._service = map_service
+        self._execution_runtime = (
+            execution_runtime or map_service.execution_runtime
+        )
         self._on_selection_changed = on_selection_changed
         self._on_marker_selected = on_marker_selected
-        self._init_viewport_state()
-        self._init_interaction_state()
-        self._init_layers_and_content(width, height)
-        # Progressive topview: service notifies when a tile finishes rendering.
-        self._service.set_tile_ready_callback(self._tile_ready_callback)
+        try:
+            self._init_viewport_state(cache_registry)
+            self._init_interaction_state()
+            self._init_layers_and_content(width, height)
+        except Exception:
+            # 可选 Flet/canvas 边界可能在预算登记后失败，必须归还视图缓存预算。
+            tile_sources = getattr(self, "_tile_sources", None)
+            if tile_sources is not None:
+                tile_sources.close()
+            raise
 
-    def _init_viewport_state(self) -> None:
+    def _init_viewport_state(
+        self,
+        cache_registry: Optional[CacheRegistry],
+    ) -> None:
         """Viewport, selection, and static map display flags."""
         self._viewport = McaViewport(
             cell_size=float(self.CELL_SIZE),
@@ -166,7 +189,7 @@ class McaMapView(ft.Container):
             Tuple[int, int], Tuple[float, float, float, float]
         ] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
-        self._tile_sources = TileSourceCache()
+        self._tile_sources = TileSourceCache(cache_registry)
         self._metadata_pending: set[Tuple[int, int]] = set()
         self._marker_layer = MapMarkerLayer()
         self._tile_ready_callback = self._on_tile_ready
@@ -180,10 +203,14 @@ class McaMapView(ft.Container):
         self._update_task: Optional[ScheduledTask] = None
         self._last_drawn_count = -1
         self._mounted = False
+        self._disposed = False
         self._visible_regions: set[Tuple[int, int]] = set()
         self._rebuild_state_lock = threading.Lock()
         self._rebuild_enqueued = False
         self._rebuild_dirty = False
+        self._delay_scheduler = UiDelayedScheduler(
+            lambda: cast(Optional[ft.Page], self.page),
+        )
 
         # Pointer used for level auto-switch while zooming.
         self._zoom_pivot_x = 0.0
@@ -196,10 +223,12 @@ class McaMapView(ft.Container):
             on_frame=self._on_camera_frame,
             on_complete=self._on_camera_complete,
             is_alive=lambda: self._mounted,
+            schedule=self._delay_scheduler,
         )
         self._rebuild_scheduler = RebuildScheduler(
             self._request_rebuild,
             is_active=lambda: self._mounted,
+            schedule_delayed=self._delay_scheduler,
             min_interval=1.0 / 30.0,
         )
 
@@ -213,15 +242,20 @@ class McaMapView(ft.Container):
 
         self._surface_layer = MapSurfaceLayer(
             self._service,
+            execution_runtime=self._execution_runtime,
             schedule_task=self._schedule_task,
             request_rebuild=self._request_rebuild,
             is_active=self._surface_is_active,
             background_color=self.BACKGROUND_COLOR,
+            on_ready=self._on_surface_ready,
+            on_unavailable=self._on_surface_unavailable,
             cell_size=self.CELL_SIZE,
             buffer_regions=self.SURFACE_BUFFER_REGIONS,
             max_regions=self.SURFACE_MAX_REGIONS,
         )
-        self._surface_enabled = self._surface_layer.enabled
+        # RawImage presence only means the transport can be attempted.  Keep
+        # Canvas active until the client acknowledges the first uploaded frame.
+        self._surface_enabled = False
         self._surface_host = self._surface_layer.control
         self._surface_image = self._surface_layer.image
 
@@ -249,6 +283,24 @@ class McaMapView(ft.Container):
             expand=True,
             fit=ft.StackFit.EXPAND,
         )
+
+    def _on_surface_ready(self) -> None:
+        """首次表面帧就绪后再让 RawImage 接管底图。"""
+        if (
+            self._disposed
+            or not self._surface_layer.enabled
+            or not self._surface_layer.covers_viewport
+        ):
+            return
+        self._surface_enabled = True
+        self._request_rebuild()
+
+    def _on_surface_unavailable(self, _error: Exception) -> None:
+        """RawImage 通道失效后切换到稳定的 Canvas 底图。"""
+        if self._disposed:
+            return
+        self._surface_enabled = False
+        self._request_rebuild()
 
     @property
     def _scale(self) -> float:
@@ -350,13 +402,18 @@ class McaMapView(ft.Container):
         Canvas.shapes must only be mutated on the UI thread. Background timers,
         topview workers, and off-loop scan tasks all funnel through here.
         """
+        if self._disposed:
+            return
         if not self._mounted:
+            self._needs_initial_draw = True
             return
         try:
             page = self.page
         except RuntimeError:
+            self._needs_initial_draw = True
             return
         if page is None:
+            self._needs_initial_draw = True
             return
         with self._rebuild_state_lock:
             if self._rebuild_enqueued:
@@ -718,16 +775,13 @@ class McaMapView(ft.Container):
         self._cached_stats = self._service.get_statistics()
         view_w = float(self.width or 800)
         view_h = float(self.height or 600)
-        # RawImage owns the opaque base layer.  Keeping the Canvas transparent
-        # is essential: a full-size background shape would cover the texture.
-        shapes: List[cv.Shape] = (
-            [] if self._surface_enabled else list(self._empty_shapes())
-        )
 
         if not self._current_data:
             self._visible_regions.clear()
             self._tile_requests.reset()
             self._surface_layer.clear()
+            self._surface_enabled = False
+            shapes = list(self._empty_shapes())
             shapes.extend(map_shapes.empty_state(view_w, view_h))
             shapes.extend(self._build_info_overlay())
             self._apply_shapes(shapes)
@@ -740,11 +794,24 @@ class McaMapView(ft.Container):
 
         draw_bounds = self._prepare_visible_bounds(coords, view_w, view_h)
         if draw_bounds is None:
-            self._apply_shapes(shapes)
+            self._apply_shapes(list(self._empty_shapes()))
             return
 
+        surface_missing: List[Tuple[int, int]] = []
+        if self._surface_layer.enabled:
+            surface_missing = self._prepare_surface(view_w, view_h)
+        self._surface_enabled = (
+            self._surface_layer.enabled
+            and self._surface_layer.frame is not None
+            and self._surface_layer.covers_viewport
+        )
+        # RawImage owns the opaque base layer only after a complete frame is
+        # ready.  Cropped or pending surfaces leave the Canvas background on.
+        shapes: List[cv.Shape] = (
+            [] if self._surface_enabled else list(self._empty_shapes())
+        )
         if self._surface_enabled:
-            missing = self._prepare_surface(view_w, view_h)
+            missing = surface_missing
             shapes.extend(self._build_surface_overlays(view_w, view_h))
         else:
             region_shapes, missing = self._build_visible_regions(
@@ -894,7 +961,7 @@ class McaMapView(ft.Container):
                 view_w,
                 view_h,
                 padding=0.78,
-                min_fit_scale=0.35,
+                min_fit_scale=self.MIN_SCALE,
                 max_fit_scale=3.0,
             )
             self._viewport.apply(target)
@@ -931,44 +998,59 @@ class McaMapView(ft.Container):
         show_block_grid = self._show_grid and (
             self._view_level == "block" or self._scale >= self.SCALE_BLOCK
         )
-        min_x, max_x, min_z, max_z = bounds
         desired_tile_size = self._tile_requests.visible_base_tile_size(
             self._scale,
         )
-        for z in range(min_z, max_z + 1):
-            for x in range(min_x, max_x + 1):
-                coord = (x, z)
-                rect = self._viewport.region_rect(coord)
-                if self._rect_outside_view(rect, view_w, view_h):
-                    continue
-                self._cell_bounds[coord] = rect
-                if coord in self._current_data:
-                    self._visible_regions.add(coord)
-                    if (
-                        self._display_mode in {"biome", "structure"}
-                        and not self._service.get_region_meta(coord)
-                    ):
-                        metadata_missing.append(coord)
-                    shapes.extend(self._build_present_region(
+        for coord in self._draw_coords(bounds):
+            rect = self._viewport.region_rect(coord)
+            if self._rect_outside_view(rect, view_w, view_h):
+                continue
+            self._cell_bounds[coord] = rect
+            if coord in self._current_data:
+                self._visible_regions.add(coord)
+                if (
+                    self._display_mode in {"biome", "structure"}
+                    and not self._service.get_region_meta(coord)
+                ):
+                    metadata_missing.append(coord)
+                shapes.extend(self._build_present_region(
+                    coord,
+                    rect,
+                    show_chunk_grid,
+                    show_block_grid,
+                ))
+                if (
+                    self._use_topview
+                    and not self._service.has_topview_tile(
                         coord,
-                        rect,
-                        show_chunk_grid,
-                        show_block_grid,
-                    ))
-                    if (
-                        self._use_topview
-                        and not self._service.has_topview_tile(
-                            coord,
-                            min_size=desired_tile_size,
-                        )
-                    ):
-                        missing.append(coord)
-                elif self._show_empty_regions:
-                    shapes.append(
-                        map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
+                        min_size=desired_tile_size,
                     )
+                ):
+                    missing.append(coord)
+            elif self._show_empty_regions:
+                shapes.append(
+                    map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
+                )
         self._request_visible_metadata(metadata_missing)
         return shapes, missing
+
+    def _draw_coords(
+        self,
+        bounds: Tuple[int, int, int, int],
+    ) -> Iterable[Tuple[int, int]]:
+        """按稳定顺序返回需要绘制的真实或空区域坐标。"""
+        min_x, max_x, min_z, max_z = bounds
+        if self._show_empty_regions:
+            return (
+                (x, z)
+                for z in range(min_z, max_z + 1)
+                for x in range(min_x, max_x + 1)
+            )
+        return (
+            coord
+            for coord in sorted(self._current_data)
+            if min_x <= coord[0] <= max_x and min_z <= coord[1] <= max_z
+        )
 
     @staticmethod
     def _rect_outside_view(
@@ -1011,7 +1093,14 @@ class McaMapView(ft.Container):
         ]
         if not pending:
             return
-        pending = prioritize_regions(pending, self._viewport_center_region())[:24]
+        batch = adapt_viewport_tile_requests(
+            pending,
+            center=self._viewport_center_region(),
+            preferred_tile_size=32,
+            limit=24,
+        )
+        pending = list(batch.coords)
+        self._interaction_snapshot = snapshot_from_map_view(self)
         self._metadata_pending.update(pending)
         self._schedule_task(self._load_visible_metadata(pending))
 
@@ -1196,6 +1285,8 @@ class McaMapView(ft.Container):
 
     def did_mount(self) -> None:
         """控件挂到页面后启用瓦片回调与扫描进度循环。"""
+        if self._disposed:
+            return
         super().did_mount()
         self._mounted = True
         self._service.set_tile_ready_callback(self._tile_ready_callback)
@@ -1204,14 +1295,35 @@ class McaMapView(ft.Container):
         if self._service.is_scanning:
             self._start_update_loop()
 
-    def did_unmount(self) -> None:
+    def will_unmount(self) -> None:
         """卸载时取消动画/循环，并摘掉可能指向本视图的服务回调。"""
+        self._mounted = False
+        self._needs_initial_draw = True
+        self._camera.cancel()
+        self._metadata_pending.clear()
+        self._rebuild_scheduler.cancel()
+        self._stop_update_loop()
+        self._surface_layer.suspend()
+        self._release_tile_ready_callback()
+        super().will_unmount()
+
+    def dispose(self) -> None:
+        """释放视图拥有的调度器与 Base64 瓦片缓存；可重复调用。"""
+        if self._disposed:
+            return
+        self._disposed = True
         self._mounted = False
         self._camera.cancel()
         self._metadata_pending.clear()
         self._rebuild_scheduler.cancel()
         self._stop_update_loop()
-        # Drop callback so worker threads do not touch a dead view.
+        self._tile_requests.reset()
+        self._surface_layer.close()
+        self._release_tile_ready_callback()
+        self._tile_sources.close()
+
+    def _release_tile_ready_callback(self) -> None:
+        """仅摘除当前视图仍拥有的服务回调。"""
         try:
             if (
                 getattr(self._service, "_tile_ready_callback", None)
@@ -1219,11 +1331,8 @@ class McaMapView(ft.Container):
             ):
                 self._service.set_tile_ready_callback(None)
         except Exception:
-            # UI best-effort: control may already be unmounted.
+            # UI teardown is best-effort; service may already be closed.
             pass
-        super_did_unmount = getattr(super(), "did_unmount", None)
-        if super_did_unmount:
-            super_did_unmount()
 
     def _schedule_task(
         self,
@@ -1289,7 +1398,7 @@ class McaMapView(ft.Container):
             view_w,
             view_h,
             padding=padding,
-            min_fit_scale=0.2,
+            min_fit_scale=self.MIN_SCALE,
             max_fit_scale=8.0,
         )
         self._viewport.apply(target)
@@ -1359,7 +1468,10 @@ class McaMapView(ft.Container):
         self._request_rebuild()
         return visible
 
-    def apply_layer_state(self, layers: MapLayerState) -> None:
+    def apply_layer_state(
+        self,
+        layers: MapLayerState | MapLayerStateSnapshot,
+    ) -> None:
         """Apply persisted layer switches when a dimension is restored."""
         self._show_coordinates = bool(layers.show_coordinates)
         self._show_grid = bool(layers.show_grid)

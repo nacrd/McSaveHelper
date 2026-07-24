@@ -6,6 +6,7 @@ from typing import cast
 
 import core.nbt as nbtlib
 
+from app.services.execution_runtime import ExecutionRuntime
 from app.services.save_repair.detector import (
     WorldDetector,
     _read_int_tag,
@@ -39,7 +40,7 @@ def test_detect_dimensions_includes_overworld_region_layout(tmp_path: Path) -> N
     (world / "DIM1" / "region" / "r.0.0.mca").write_bytes(b"\x00" * 4096)
 
     info = DetectReport().world_info
-    WorldDetector(threading.Event())._detect_dimensions(
+    WorldDetector(threading.Event(), ExecutionRuntime())._detect_dimensions(
         world,
         info,
     )

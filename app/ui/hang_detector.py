@@ -45,11 +45,12 @@ class HangDetector:
     专注于检测和记录卡死问题到日志系统。
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化 UI 挂起检测器。"""
         self._enabled = False
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
 
         # UI 心跳
         self._last_ui_heartbeat: float = time.time()
@@ -64,9 +65,11 @@ class HangDetector:
 
     def enable(self) -> None:
         """启用卡死检测"""
-        if self._enabled:
+        thread = self._thread
+        if self._enabled and thread is not None and thread.is_alive():
             return
 
+        self._stop_event.clear()
         self._enabled = True
         self._running = True
         self._last_ui_heartbeat = time.time()
@@ -80,8 +83,11 @@ class HangDetector:
         """禁用卡死检测"""
         self._enabled = False
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        if thread is None or not thread.is_alive():
             self._thread = None
 
     def ui_heartbeat(self) -> None:
@@ -95,7 +101,7 @@ class HangDetector:
         """检测循环"""
         check_interval = 3.0  # 每 3 秒检查一次
 
-        while self._running:
+        while self._running and not self._stop_event.is_set():
             try:
                 now = time.time()
 
@@ -109,7 +115,8 @@ class HangDetector:
                 # Detector must never crash the monitor thread.
                 pass
 
-            time.sleep(check_interval)
+            if self._stop_event.wait(check_interval):
+                return
 
     def _check_ui_hang(self, now: float) -> None:
         """检测 UI 卡死"""

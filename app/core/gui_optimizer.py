@@ -2,7 +2,7 @@
 
 负责性能监控、键盘快捷键、卡死检测、通知管理和可访问性验证的初始化和管理。
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import threading
 from typing import Any, Callable, Optional, Protocol, cast
 import flet as ft
@@ -24,7 +24,15 @@ from app.ui.notifications import NotificationManager
 from app.ui.accessibility import validate_theme_accessibility
 from app.ui.utils import run_on_ui
 from core.logger import logger
+from core.observability import OperationRecord
 from core.performance import PerformanceMetrics, set_metrics_sink
+
+
+def _default_operation_metrics_sink(
+    metrics: PerformanceMetrics,
+) -> OperationRecord:
+    """为未装配应用容器的测试/兼容入口提供协议适配。"""
+    return metrics.to_operation_record(feature="business")
 
 
 class ShortcutManagerPort(Protocol):
@@ -136,6 +144,22 @@ class HealthMonitorPort(Protocol):
         ...
 
 
+class HangDetectorPort(Protocol):
+    """卡死检测与 UI 心跳端口。"""
+
+    def enable(self) -> None:
+        """启动检测线程。"""
+        ...
+
+    def disable(self) -> None:
+        """停止检测线程并等待退出。"""
+        ...
+
+    def ui_heartbeat(self) -> None:
+        """记录 UI 线程心跳。"""
+        ...
+
+
 @dataclass(frozen=True)
 class GUIOptimizerDependencies:
     """GUIOptimizer 所需的页面、配置与可替换监控端口。"""
@@ -143,6 +167,9 @@ class GUIOptimizerDependencies:
     page: ft.Page
     get_ui_setting: Callable[[str, Any], Any]
     save_config: Callable[[], None]
+    operation_metrics_sink: Callable[
+        [PerformanceMetrics], OperationRecord
+    ] = _default_operation_metrics_sink
     shortcut_manager: ShortcutManagerPort = cast(
         ShortcutManagerPort,
         shortcut_manager,
@@ -159,6 +186,7 @@ class GUIOptimizerDependencies:
         HealthMonitorPort,
         health_monitor,
     )
+    hang_detector: HangDetectorPort = field(default_factory=get_hang_detector)
 
 
 class GUIOptimizer:
@@ -180,6 +208,8 @@ class GUIOptimizer:
         self._performance_monitor = dependencies.performance_monitor
         self._resource_monitor = dependencies.resource_monitor
         self._health_monitor = dependencies.health_monitor
+        self._hang_detector = dependencies.hang_detector
+        self._operation_metrics_sink = dependencies.operation_metrics_sink
         self.notification_manager: Optional[NotificationManager] = None
         self._heartbeat_stop = threading.Event()
         self._hang_heartbeat_stop = threading.Event()
@@ -194,8 +224,7 @@ class GUIOptimizer:
             set_metrics_sink(self._record_business_metric)
 
             # 2. 启用卡死检测器（静默启用）
-            hang_detector = get_hang_detector()
-            hang_detector.enable()
+            self._hang_detector.enable()
             self._start_hang_detector_heartbeat()
 
             # 3. 根据配置启用性能监控（可选）
@@ -253,9 +282,19 @@ class GUIOptimizer:
             self.notification_manager = None
 
     def _record_business_metric(self, metrics: PerformanceMetrics) -> None:
-        """Adapt core business metrics to the optional GUI monitor."""
+        """Adapt core business metrics via the unified OperationRecord protocol."""
+        record = self._operation_metrics_sink(metrics)
         if not self._performance_monitor.enabled:
             return
+        record_operation = getattr(
+            self._performance_monitor,
+            "record_operation",
+            None,
+        )
+        if callable(record_operation):
+            record_operation(record)
+            return
+        # Backward-compatible fallback for stripped test doubles.
         self._performance_monitor.record(
             f"biz_{metrics.operation}",
             metrics.duration_seconds * 1000,
@@ -434,9 +473,8 @@ class GUIOptimizer:
         self._hang_heartbeat_stop.clear()
 
         def _hang_beat_loop() -> None:
-            hang_detector = get_hang_detector()
             while not self._hang_heartbeat_stop.is_set():
-                run_on_ui(self.page, hang_detector.ui_heartbeat)
+                run_on_ui(self.page, self._hang_detector.ui_heartbeat)
                 self._hang_heartbeat_stop.wait(2.0)
 
         self._hang_heartbeat_thread = threading.Thread(
@@ -457,4 +495,5 @@ class GUIOptimizer:
         """停止GUI优化功能"""
         self.configure_performance_monitor(False)
         self._stop_hang_detector_heartbeat()
+        self._hang_detector.disable()
         set_metrics_sink(None)

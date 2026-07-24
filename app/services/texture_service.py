@@ -6,13 +6,20 @@ import logging
 import re
 import threading
 import zipfile
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
 import requests
 
+from app.services.cache_registry import CachePolicy, CacheRegion, CacheRegistry
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionRuntime,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
 from core.io_atomic import atomic_write_bytes
 from core.texture.block_guess import (
     guess_is_block,
@@ -34,6 +41,8 @@ _JAR_TEXTURE_PREFIX = "assets/minecraft/textures/"
 _REQUEST_TIMEOUT = 10
 _MAX_MEMORY_CACHE = 500
 _MAX_TEXTURE_BYTES = 16 * 1024 * 1024
+_PATH_CACHE_BUDGET_BYTES = 512 * 1024
+_BASE64_CACHE_BUDGET_BYTES = 32 * 1024 * 1024
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _RESOURCE_LOCATION_RE = re.compile(r"^[a-z0-9_.-]+:[a-z0-9_./-]+$")
 
@@ -65,14 +74,42 @@ class TextureService:
     查找优先级：内存缓存 → 本地文件缓存 → JAR 提取 → 在线资源 API。
     """
 
-    def __init__(self) -> None:
-        """初始化缓存目录与内存表。"""
+    def __init__(
+        self,
+        execution_runtime: ExecutionRuntime,
+        cache_registry: CacheRegistry,
+    ) -> None:
+        """初始化缓存目录与内存表。
+
+        Args:
+            execution_runtime: 应用组合根持有的共享后台运行时（必填）。
+            cache_registry: 应用组合根持有的共享缓存注册表（必填）。
+        """
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._jar_cache_dir = Path.home() / ".mc_save_helper" / "jars"
         self._jar_cache_dir.mkdir(parents=True, exist_ok=True)
-        self._memory_cache: OrderedDict[str, Path] = OrderedDict()
-        self._base64_cache: OrderedDict[str, str] = OrderedDict()
+        self._cache_registry = cache_registry
+        memory_cache: CacheRegion[str, Path] = self._cache_registry.create_region(
+            "textures.paths",
+            CachePolicy(_MAX_MEMORY_CACHE, _PATH_CACHE_BUDGET_BYTES),
+        )
+        try:
+            base64_cache: CacheRegion[str, str] = self._cache_registry.create_region(
+                "textures.base64",
+                CachePolicy(_MAX_MEMORY_CACHE, _BASE64_CACHE_BUDGET_BYTES),
+            )
+        except Exception:
+            memory_cache.close()
+            raise
+        try:
+            task_scope = execution_runtime.create_scope("texture_service")
+        except Exception:
+            base64_cache.close()
+            memory_cache.close()
+            raise
+        self._memory_cache = memory_cache
+        self._base64_cache = base64_cache
         self._minecraft_jar: Optional[Path] = None
         # Extra jars (resource packs / mods) searched after the client jar.
         self._extra_jars: List[Path] = []
@@ -82,6 +119,9 @@ class TextureService:
         self._lock = threading.Lock()
         self._jar_lock = threading.Lock()
         self._tried_paths: Dict[str, str] = {}
+        self._execution_runtime = execution_runtime
+        self._task_scope = task_scope
+        self._closed = False
 
     def get_texture_path(self, item_id: str) -> Optional[Path]:
         """解析物品纹理文件路径。
@@ -92,7 +132,7 @@ class TextureService:
         Returns:
             Path | None: 本地 PNG 路径；ID 不安全或找不到时为 None。
         """
-        if not self._is_safe_item_id(item_id):
+        if self._closed or not self._is_safe_item_id(item_id):
             return None
 
         cached = self._try_memory_cache(item_id)
@@ -129,13 +169,12 @@ class TextureService:
         Returns:
             str | None: ``data:image/png;base64,...`` 或 None。
         """
-        if not self._is_safe_item_id(item_id):
+        if self._closed or not self._is_safe_item_id(item_id):
             return None
 
-        with self._lock:
-            if item_id in self._base64_cache:
-                self._base64_cache.move_to_end(item_id)
-                return self._base64_cache[item_id]
+        cached_base64 = self._base64_cache.get(item_id)
+        if cached_base64 is not None:
+            return cached_base64
 
         path = self.get_texture_path(item_id)
         if path is None or not path.exists():
@@ -149,10 +188,8 @@ class TextureService:
                 return None
             b64 = base64.b64encode(data).decode("ascii")
             uri = f"data:image/png;base64,{b64}"
-            with self._lock:
-                self._base64_cache[item_id] = uri
-                while len(self._base64_cache) > _MAX_MEMORY_CACHE:
-                    self._base64_cache.popitem(last=False)
+            if not self._closed:
+                self._base64_cache.put(item_id, uri, len(uri))
             return uri
         except OSError:
             return None
@@ -169,8 +206,10 @@ class TextureService:
             on_loaded: 每完成一个调用 ``(item_id, base64_uri_or_None)``；
                 回调异常会被吞掉以免中断批量加载。
         """
-        def _worker() -> None:
+        def _worker(token: CancellationToken) -> None:
             for item_id in item_ids:
+                if token.is_cancelled or self._closed:
+                    return
                 uri = self.get_texture_base64(item_id)
                 if on_loaded is None:
                     continue
@@ -180,11 +219,25 @@ class TextureService:
                     # 回调由 UI 提供，失败不影响后续纹理。
                     pass
 
-        threading.Thread(
-            target=_worker,
-            name="texture-load",
-            daemon=True,
-        ).start()
+        if self._closed:
+            return
+        try:
+            self._task_scope.submit(
+                "load_textures",
+                _worker,
+                priority=TaskPriority.VISIBLE,
+            )
+        except (RuntimeClosedError, TaskQueueFullError) as exc:
+            logger.debug("texture task rejected: %s", exc)
+
+    def close(self) -> None:
+        """关闭任务作用域并释放内存索引；不关闭共享运行时。"""
+        if self._closed:
+            return
+        self._closed = True
+        self._task_scope.close()
+        self._memory_cache.close()
+        self._base64_cache.close()
 
     def import_textures_from_jars(
         self,
@@ -277,13 +330,11 @@ class TextureService:
         return count
 
     def _try_memory_cache(self, item_id: str) -> Optional[Path]:
-        with self._lock:
-            if item_id in self._memory_cache:
-                self._memory_cache.move_to_end(item_id)
-                path = self._memory_cache[item_id]
-                if path.exists():
-                    return path
-                del self._memory_cache[item_id]
+        path = self._memory_cache.get(item_id)
+        if path is not None:
+            if path.exists():
+                return path
+            self._memory_cache.remove(item_id)
         return None
 
     def _try_file_cache(self, item_id: str) -> Optional[Path]:
@@ -413,11 +464,10 @@ class TextureService:
         return ".." not in Path(local_id).parts
 
     def _put_memory_cache(self, item_id: str, path: Path) -> None:
-        with self._lock:
-            self._memory_cache[item_id] = path
-            self._memory_cache.move_to_end(item_id)
-            while len(self._memory_cache) > _MAX_MEMORY_CACHE:
-                self._memory_cache.popitem(last=False)
+        if self._closed:
+            return
+        estimated_bytes = len(item_id) + len(str(path)) + 64
+        self._memory_cache.put(item_id, path, estimated_bytes)
 
     def _find_or_get_jar(self) -> Optional[Path]:
         with self._jar_lock:
@@ -549,9 +599,9 @@ class TextureService:
             self._clear_jar_files()
 
     def _clear_memory_cache(self) -> None:
+        self._memory_cache.clear()
+        self._base64_cache.clear()
         with self._lock:
-            self._memory_cache.clear()
-            self._base64_cache.clear()
             self._tried_paths.clear()
 
     def _clear_texture_files(self) -> None:

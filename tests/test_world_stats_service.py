@@ -1,8 +1,9 @@
+import json
 from types import SimpleNamespace
 from typing import Any
-import json
 
 import core.mca
+import pytest
 from app.services import world_stats_service as world_stats_module
 from app.services.world_stats_service import (
     PLAYER_SORT_DEATHS,
@@ -10,10 +11,12 @@ from app.services.world_stats_service import (
     PLAYER_SORT_MOB_KILLS,
     PLAYER_SORT_NAME,
     PLAYER_SORT_PLAY_TIME,
+    WorldStatsCancelledError,
     WorldStatsService,
     DimensionSizeStats,
     PlayerPlaytimeStats,
 )
+from core.world_index import WorldIndexBuilder
 
 
 def test_analyze_chunk_counts_palette_and_entity_types() -> None:
@@ -277,6 +280,49 @@ def test_collect_player_playtimes_reads_legacy_and_modern_paths(tmp_path) -> Non
     assert by_name[legacy_uuid.replace("-", "").lower()] == "Alex"
 
 
+def test_collect_player_playtimes_uses_shared_index_without_rescanning(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    player_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    stats_dir = tmp_path / "stats"
+    player_dir = tmp_path / "playerdata"
+    stats_dir.mkdir()
+    player_dir.mkdir()
+    (tmp_path / "level.dat").write_bytes(b"level")
+    (player_dir / f"{player_uuid}.dat").write_bytes(b"player")
+    (stats_dir / f"{player_uuid}.json").write_text(
+        json.dumps({
+            "stats": {
+                "minecraft:custom": {
+                    "minecraft:play_time": 2400,
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / "usercache.json").write_text(
+        json.dumps([{"uuid": player_uuid, "name": "IndexedPlayer"}]),
+        encoding="utf-8",
+    )
+    snapshot = WorldIndexBuilder().build(tmp_path)
+
+    def fail_scan(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("共享索引路径不应重新扫描目录")
+
+    monkeypatch.setattr(world_stats_module, "find_stats_dirs", fail_scan)
+    monkeypatch.setattr(world_stats_module, "WorldScanner", fail_scan)
+
+    players = WorldStatsService().collect_player_playtimes(
+        tmp_path,
+        index_snapshot=snapshot,
+    )
+
+    assert len(players) == 1
+    assert players[0].name == "IndexedPlayer"
+    assert players[0].play_time_ticks == 2400
+
+
 def test_with_player_names_fills_missing_display_names() -> None:
     players = [
         PlayerPlaytimeStats(
@@ -515,3 +561,33 @@ def test_analyze_world_progress_handles_empty_regions(
     assert "finalizing" in stages
     assert stages[-1] == "done"
     assert events[-1][0] == 1.0
+
+
+def test_analyze_world_stops_between_region_files(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    region_paths = [
+        tmp_path / "region" / "r.0.0.mca",
+        tmp_path / "region" / "r.0.1.mca",
+    ]
+    analyzed = []
+    service = WorldStatsService()
+    monkeypatch.setattr(
+        world_stats_module,
+        "scan_all_regions",
+        lambda _world: region_paths,
+    )
+    monkeypatch.setattr(
+        service,
+        "_analyze_one_region",
+        lambda *args: analyzed.append(args[1]),
+    )
+
+    with pytest.raises(WorldStatsCancelledError, match="统计已取消"):
+        service.analyze_world(
+            tmp_path,
+            cancel_check=lambda: bool(analyzed),
+        )
+
+    assert analyzed == [region_paths[0]]

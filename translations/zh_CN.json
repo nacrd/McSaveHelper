@@ -4,6 +4,24 @@
     "title": "MCSaveHelper · 存档管理工具",
     "subtitle": "存档管理工具"
   },
+  "nbt_commit": {
+    "world_changed_title": "存档已切换",
+    "world_changed_message": "当前存档已改变，请重新打开提交预览。",
+    "busy_title": "提交进行中",
+    "busy_message": "已有 NBT 提交正在执行，请等待当前操作完成。",
+    "cancelled_title": "提交已取消",
+    "cancelled_message": "NBT 提交已在安全检查点取消，原存档保持不变。",
+    "queue_full_title": "后台任务繁忙",
+    "queue_full_message": "后台 I/O 队列已满，请稍后重试。"
+  },
+  "region_delete": {
+    "busy_title": "删除进行中",
+    "busy_message": "已有区域删除正在执行，请等待当前操作完成。",
+    "cancelled_title": "删除已取消",
+    "cancelled_message": "区域删除已在安全检查点取消，原存档保持不变。",
+    "queue_full_title": "后台任务繁忙",
+    "queue_full_message": "后台 I/O 队列已满，请稍后重试。"
+  },
   "top_bar": {
     "ready": "就绪",
     "start_conversion": "开始转换",
@@ -23,6 +41,7 @@
     "detect_save": "检测存档",
     "create_backup": "创建备份",
     "cancel_batch": "取消批量处理",
+    "cancel_migration": "取消迁移",
     "start_export": "开始导出",
     "start_compare": "开始对比",
     "import_lang": "导入语言文件",
@@ -376,7 +395,15 @@
     "import_assets": "导入语言/贴图",
     "assets_hint": "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。优先使用当前 UI 语言。",
     "import_assets_title": "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
-    "import_assets_empty": "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。"
+    "import_assets_empty": "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。",
+    "error": {
+      "import_assets": "导入语言/贴图失败",
+      "import_json": "导入 JSON 映射失败",
+      "export_json": "导出映射失败",
+      "uuid_import": "导入 UUID 映射失败",
+      "uuid_export": "导出 UUID 映射失败",
+      "uuid_save": "保存 UUID 映射失败"
+    }
   },
   "settings": {
     "general": {
@@ -403,6 +430,27 @@
       "max_concurrent": "最大并发处理数 (1‑16)",
       "preserve_structure": "保留原始文件结构"
     },
+    "cache": {
+      "title": "应用缓存",
+      "description": "统一管理世界索引、纹理和地图渲染缓存；内存受总预算约束，地图瓦片仍持久化到本地以加快再次打开。",
+      "refresh": "刷新",
+      "clear": "清理缓存",
+      "export": "导出诊断报告",
+      "export_title": "保存诊断报告",
+      "export_file": "文本文件",
+      "export_success": "诊断报告已导出到 {path}",
+      "report_title": "MCSaveHelper 诊断报告",
+      "loading": "正在读取缓存信息…",
+      "runtime_loading": "正在读取后台运行时…",
+      "runtime_unavailable": "后台运行时: 不可用",
+      "ui_delivery_loading": "正在读取 UI 投递指标…",
+      "ui_delivery_empty": "UI 投递: 暂无样本",
+      "ui_delivery_summary": "UI 投递: samples={samples} ok={ok} stale={stale} error={errors}\n调度等待: p95={queue_p95}ms max={queue_max}ms\n回调执行: p95={run_p95}ms max={run_max}ms",
+      "path_loading": "地图瓦片路径: —",
+      "path_value": "地图瓦片路径: {path}",
+      "read_failed": "无法读取缓存信息: {error}",
+      "clear_success": "已清理地图缓存：{deleted} 个文件（{freed}），内存 chunk {memory} 条"
+    },
     "uuid": {
       "title": "自定义 UUID 映射",
       "description": "在此添加玩家名与 UUID 的映射，用于离线模式下的玩家数据转换。"
@@ -420,7 +468,9 @@
     "save_status": {
       "auto": "更改会自动保存",
       "saved": "已保存",
-      "failed": "保存失败"
+      "failed": "保存失败",
+      "pending": "等待保存",
+      "resetting": "正在重置"
     },
     "auto_import_mc_lang_ok": "已自动导入 {count} 个 Minecraft 名称（{locale}）"
   },
@@ -487,6 +537,9 @@
     "batch_migration_started": "开始批量处理",
     "batch_cancel_requested": "已请求取消批量处理",
     "no_batch_running": "当前没有运行中的批量任务",
+    "migration_cancel_requested": "已请求取消迁移",
+    "no_migration_running": "当前没有运行中的迁移任务",
+    "migration_running": "已有迁移任务正在运行",
     "batch_migration_complete": "成功: {success}/{total}",
     "batch_result_details": "失败: {failed}，取消: {cancelled}",
     "cannot_open_folder": "无法打开文件夹: {error}",

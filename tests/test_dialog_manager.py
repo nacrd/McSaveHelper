@@ -28,6 +28,10 @@ class FakeFileDialogs:
         self.calls.append(("open", title, list(file_types)))
         return "input.dat"
 
+    def pick_files(self, title: str, file_types: FileTypes):
+        self.calls.append(("open_many", title, list(file_types)))
+        return ["input.dat"]
+
     def save_file(
         self,
         title: str,

@@ -1,11 +1,11 @@
 """Concurrent MCA UUID patching helpers for full-mode migration."""
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .nbt_utils import patch_nbt
+from .parallel import ParallelRunner, SerialParallelRunner, clamp_workers
 from .types import LogCallback, UUIDMapping
 
 
@@ -55,14 +55,21 @@ def process_regions_parallel(
     mappings: List[UUIDMapping],
     progress_callback: Callable[[float], None],
     log_callback: LogCallback,
+    max_workers: Optional[int] = None,
+    *,
+    parallel_runner: Optional[ParallelRunner] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> int:
-    """使用线程池并发处理区域文件。
+    """通过注入的有界并行端口处理区域文件。
 
     Args:
         files: 区域文件列表。
         mappings: UUID 映射列表。
         progress_callback: 进度回调 ``(0..1)``。
         log_callback: 日志回调。
+        max_workers: 可选区域级并发上限。
+        parallel_runner: 应用层提供的并行端口；默认在当前线程串行执行。
+        cancel_check: 可选取消探针，在区域边界检查。
 
     Returns:
         int: 所有区域的修改总次数。
@@ -71,7 +78,6 @@ def process_regions_parallel(
         RuntimeError: 至少一个区域处理失败时。
     """
     total = len(files)
-    done = 0
     total_changes = 0
 
     if total == 0:
@@ -80,25 +86,44 @@ def process_regions_parallel(
         return 0
 
     errors: List[str] = []
-    with ThreadPoolExecutor(max_workers=min(8, total)) as executor:
-        futures = [
-            executor.submit(process_region_file, region_path, mappings)
-            for region_path in files
-        ]
-        for future in as_completed(futures):
-            path, changes, error = future.result()
-            done += 1
-            progress_callback(done / total)
-            if changes > 0:
-                total_changes += changes
-                log_callback(
-                    f"MCA {Path(path).name}: 修改 {changes} 处",
-                    "INFO",
-                )
-            elif changes == -1:
-                err_msg = f"处理失败: {error}" if error else "未知错误"
-                log_callback(f"MCA {Path(path).name}: {err_msg}", "ERROR")
-                errors.append(f"{path}: {err_msg}")
+    workers = clamp_workers(max_workers, item_count=total)
+    runner = parallel_runner if parallel_runner is not None else SerialParallelRunner()
+    completed = 0
+
+    def on_item_done(
+        _index: int,
+        _result: Tuple[str, int, Optional[str]] | BaseException,
+    ) -> None:
+        nonlocal completed
+        completed += 1
+        progress_callback(completed / total)
+
+    results = runner.map(
+        "migration.patch-regions",
+        files,
+        lambda region_path: process_region_file(region_path, mappings),
+        max_workers=workers,
+        cancel_check=cancel_check,
+        on_item_done=on_item_done,
+    )
+    if len(results) != total:
+        raise RuntimeError(
+            f"区域并行端口返回数量不一致: expected={total}, actual={len(results)}"
+        )
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+        path, changes, error = result
+        if changes > 0:
+            total_changes += changes
+            log_callback(
+                f"MCA {Path(path).name}: 修改 {changes} 处",
+                "INFO",
+            )
+        elif changes == -1:
+            err_msg = f"处理失败: {error}" if error else "未知错误"
+            log_callback(f"MCA {Path(path).name}: {err_msg}", "ERROR")
+            errors.append(f"{path}: {err_msg}")
     if errors:
         raise RuntimeError(
             f"{len(errors)} 个区域文件处理失败: {errors[0]}"

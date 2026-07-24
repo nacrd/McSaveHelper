@@ -1,14 +1,25 @@
 """Stats tab mixin for ExplorerView."""
-import threading
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import flet as ft
 import flet.canvas as cv
 
+from app.presenters.stats_view_state import (
+    StatsAnalysisState,
+    begin_stats_analysis,
+    finish_stats_analysis,
+    invalidate_stats_analysis,
+    owns_stats_analysis,
+)
 from app.ui.theme import THEME
 from app.ui.components.cards import card
 from app.ui.utils import run_on_ui
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    TaskPriority,
+)
 from app.ui.views.explorer.utils import safe_update, format_size
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.services.world_stats_service import (
@@ -27,6 +38,7 @@ from app.services.world_stats_service import (
     DimensionSizeStats,
     PlayerPlaytimeStats,
     WorldStatistics,
+    WorldStatsCancelledError,
     WorldStatsService,
 )
 
@@ -59,8 +71,7 @@ class StatsTabMixin(ExplorerMixinHost):
 
     def _init_stats_state(self) -> None:
         """Create shared stats controls and analysis state."""
-        self._stats_generation = 0
-        self._stats_busy = False
+        self._stats_analysis_state = StatsAnalysisState()
         self._player_stats_cache: List[PlayerPlaytimeStats] = []
         self._stats_service_cache: Optional[WorldStatsService] = None
         self._player_sort_key = PLAYER_SORT_PLAY_TIME
@@ -264,7 +275,7 @@ class StatsTabMixin(ExplorerMixinHost):
         self,
         items: List[Tuple[str, int]],
         total: int,
-        colors: List[str],
+        colors: Sequence[str],
     ) -> List[cv.Shape]:
         shapes: List[cv.Shape] = []
         start = -90.0
@@ -486,7 +497,7 @@ class StatsTabMixin(ExplorerMixinHost):
         self._player_sort_key = str(value)
         if not self._player_stats_cache:
             return
-        service = self._stats_service_cache or WorldStatsService()
+        service = self._ensure_world_stats_service()
         sorted_players = WorldStatsService.sort_player_stats(
             self._player_stats_cache,
             self._player_sort_key,
@@ -625,7 +636,7 @@ class StatsTabMixin(ExplorerMixinHost):
                     ),
                 )
                 return
-            if getattr(self, "_stats_busy", False):
+            if self._get_stats_analysis_state().is_running:
                 return
             if not hasattr(self, "_stats_status"):
                 self._build_stats_tab()
@@ -648,26 +659,48 @@ class StatsTabMixin(ExplorerMixinHost):
                 title=self._t("stats.error_title", "统计存档失败"),
             )
 
-    def _start_stats_analysis(self, world_path: Path) -> None:
-        from app.services.world_stats_service import get_world_stats_service
+    def _ensure_world_stats_service(self) -> WorldStatsService:
+        """返回组合根装配的统计服务。"""
+        service = self.app.world_stats
+        self._stats_service_cache = service
+        return service
 
-        service = get_world_stats_service(log=self.app.log)
-        self._stats_generation = getattr(self, "_stats_generation", 0) + 1
-        generation = self._stats_generation
-        self._stats_busy = True
+    def _start_stats_analysis(self, world_path: Path) -> None:
+        service = self._ensure_world_stats_service()
+        state = begin_stats_analysis(
+            self._get_stats_analysis_state(),
+            world_path,
+            self._world_load_generation,
+        )
+        self._stats_analysis_state = state
+        generation = state.generation
         task_name = self._t("stats.progress_task", "统计存档")
         name_map = self._stats_name_map()
 
-        def run() -> None:
+        def run(token: CancellationToken) -> None:
             self._run_stats_analysis(
                 world_path=world_path,
                 service=service,
                 generation=generation,
                 task_name=task_name,
                 name_map=name_map,
+                cancel_check=lambda: token.is_cancelled,
             )
 
-        threading.Thread(target=run, daemon=True).start()
+        try:
+            self._task_scope.submit(
+                "analyze_world_stats",
+                run,
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.INTERACTIVE,
+            )
+        except Exception:
+            self._stats_analysis_state = finish_stats_analysis(
+                self._get_stats_analysis_state(),
+                generation,
+            )
+            self._set_stats_progress_visible(False)
+            raise
 
     def _stats_name_map(self) -> dict[str, str | None]:
         """Prefer the already-loaded WorldSession name map."""
@@ -689,11 +722,12 @@ class StatsTabMixin(ExplorerMixinHost):
         generation: int,
         task_name: str,
         name_map: dict[str, str | None],
+        cancel_check: Callable[[], bool],
     ) -> None:
         session = self.world_session
         try:
-            run_on_ui(
-                self.app.page,
+            self._post_stats_ui(
+                generation,
                 self.app.show_progress,
                 self._t("stats.analyzing", "正在分析存档..."),
             )
@@ -704,6 +738,8 @@ class StatsTabMixin(ExplorerMixinHost):
                     task_name,
                 ),
                 name_map=name_map,
+                index_snapshot=self.app.world_repository.get_index(world_path),
+                cancel_check=cancel_check,
             )
             stats = self._late_bind_player_names(service, session, stats)
             self.app.page.run_task(
@@ -712,6 +748,8 @@ class StatsTabMixin(ExplorerMixinHost):
                 service,
                 generation,
             )
+        except WorldStatsCancelledError:
+            return
         except Exception as ex:
             self.app.page.run_task(
                 self._handle_stats_error,
@@ -719,8 +757,7 @@ class StatsTabMixin(ExplorerMixinHost):
                 generation,
             )
         finally:
-            run_on_ui(self.app.page, self.app.hide_progress)
-            run_on_ui(self.app.page, self._finish_stats_busy, generation)
+            run_on_ui(self.app.page, self._finish_stats_analysis, generation)
 
     def _make_stats_progress_callback(
         self,
@@ -728,17 +765,17 @@ class StatsTabMixin(ExplorerMixinHost):
         task_name: str,
     ) -> Any:
         def progress(value: float, stage: str) -> None:
-            if generation != getattr(self, "_stats_generation", 0):
+            if not self._is_stats_analysis_current(generation):
                 return
             message = self._format_stats_stage(stage)
-            run_on_ui(
-                self.app.page,
+            self._post_stats_ui(
+                generation,
                 self.app.update_progress_with_task,
                 message or task_name,
                 value,
             )
-            run_on_ui(
-                self.app.page,
+            self._post_stats_ui(
+                generation,
                 self._apply_stats_progress,
                 value,
                 message,
@@ -766,10 +803,57 @@ class StatsTabMixin(ExplorerMixinHost):
             pass
         return stats
 
-    def _finish_stats_busy(self, generation: int) -> None:
-        if generation != getattr(self, "_stats_generation", 0):
+    def _finish_stats_analysis(self, generation: int) -> None:
+        state = self._get_stats_analysis_state()
+        next_state = finish_stats_analysis(
+            state,
+            generation,
+        )
+        if next_state is state:
             return
-        self._stats_busy = False
+        self._stats_analysis_state = next_state
+        self.app.hide_progress()
+
+    def _post_stats_ui(
+        self,
+        generation: int,
+        callback: Callable[..., object],
+        *args: object,
+    ) -> None:
+        """Dispatch statistics UI work with pre/post identity checks."""
+        if not self._is_stats_analysis_current(generation):
+            return
+
+        def guarded() -> None:
+            if self._is_stats_analysis_current(generation):
+                callback(*args)
+
+        run_on_ui(self.app.page, guarded)
+
+    def _get_stats_analysis_state(self) -> StatsAnalysisState:
+        """Return initialized state for full views and isolated mixin tests."""
+        return getattr(self, "_stats_analysis_state", StatsAnalysisState())
+
+    def _is_stats_analysis_current(self, generation: int) -> bool:
+        """Return whether a statistics callback still owns this world."""
+        state = self._get_stats_analysis_state()
+        session = self.world_session
+        return (
+            not getattr(self, "_disposed", False)
+            and session is not None
+            and owns_stats_analysis(
+                state,
+                generation,
+                session.world_path,
+                self._world_load_generation,
+            )
+        )
+
+    def _invalidate_stats_analysis_state(self) -> None:
+        """Drop pending statistics callbacks after host identity changes."""
+        self._stats_analysis_state = invalidate_stats_analysis(
+            self._get_stats_analysis_state()
+        )
 
     def _set_stats_progress_visible(self, visible: bool) -> None:
         if not hasattr(self, "_stats_progress_bar"):
@@ -828,17 +912,27 @@ class StatsTabMixin(ExplorerMixinHost):
         service: WorldStatsService,
         generation: int,
     ) -> None:
-        if generation != getattr(self, "_stats_generation", 0):
+        if not self._is_stats_analysis_current(generation):
             return
         try:
-            self._set_stats_summary(stats)
-            self._set_ranked_stats(stats, service)
-            self._fill_dimension_stats(stats.dimension_stats)
-            self._stats_service_cache = service
-            self._player_stats_cache = WorldStatsService.sort_player_stats(
-                list(stats.player_stats),
-                getattr(self, "_player_sort_key", PLAYER_SORT_PLAY_TIME),
+            from app.presenters.stats_view_state import build_stats_view_state
+            from app.ui.views.explorer.utils import format_size
+
+            view_state = build_stats_view_state(
+                stats,
+                player_sort_key=getattr(
+                    self,
+                    "_player_sort_key",
+                    PLAYER_SORT_PLAY_TIME,
+                ),
+                size_formatter=format_size,
             )
+            self._last_stats_view_state = view_state
+            self._set_stats_summary_from_view_state(view_state, stats)
+            self._set_ranked_stats_from_view_state(view_state)
+            self._fill_dimension_stats(list(view_state.dimensions))
+            self._stats_service_cache = service
+            self._player_stats_cache = list(view_state.players)
             self._fill_player_stats(self._player_stats_cache, service)
             self._apply_stats_progress(
                 1.0,
@@ -854,12 +948,31 @@ class StatsTabMixin(ExplorerMixinHost):
             )
 
     def _set_stats_summary(self, stats: WorldStatistics) -> None:
-        chunk_slots = stats.loaded_chunks + stats.empty_chunks
+        """兼容旧路径：直接从 ``WorldStatistics`` 渲染摘要。"""
+        from app.presenters.stats_view_state import build_stats_view_state
+
+        view_state = build_stats_view_state(
+            stats,
+            player_sort_key=getattr(
+                self,
+                "_player_sort_key",
+                PLAYER_SORT_PLAY_TIME,
+            ),
+            size_formatter=format_size,
+        )
+        self._set_stats_summary_from_view_state(view_state, stats)
+
+    def _set_stats_summary_from_view_state(
+        self,
+        view_state: Any,
+        stats: WorldStatistics,
+    ) -> None:
+        chunk_slots = view_state.loaded_chunks + view_state.empty_chunks
         loaded_ratio = (
-            stats.loaded_chunks / chunk_slots * 100 if chunk_slots else 0
+            view_state.loaded_chunks / chunk_slots * 100 if chunk_slots else 0
         )
         total_size = sum(stats.region_sizes.values())
-        dim_total = sum(item.total_bytes for item in stats.dimension_stats)
+        dim_total = sum(item.total_bytes for item in view_state.dimensions)
         self._stats_summary.value = self._t(
             "stats.summary_body",
             "区域: {regions}\n"
@@ -868,32 +981,49 @@ class StatsTabMixin(ExplorerMixinHost):
             "维度: {dim_count}（合计 {dim_size}）\n"
             "玩家统计文件: {players}\n"
             "方块条目: {blocks}，实体/方块实体: {entities}",
-            regions=stats.total_regions,
-            loaded=stats.loaded_chunks,
-            empty=stats.empty_chunks,
+            regions=view_state.total_regions,
+            loaded=view_state.loaded_chunks,
+            empty=view_state.empty_chunks,
             ratio=loaded_ratio,
             size=format_size(total_size),
-            dim_count=len(stats.dimension_stats),
+            dim_count=len(view_state.dimensions),
             dim_size=format_size(dim_total),
-            players=len(stats.player_stats),
-            blocks=stats.total_blocks,
-            entities=stats.total_entities,
+            players=len(view_state.players),
+            blocks=view_state.total_blocks,
+            entities=view_state.total_entities,
         )
 
     def _set_ranked_stats(
         self, stats: WorldStatistics, service: WorldStatsService
     ) -> None:
-        block_items = stats.block_stats.top_blocks if stats.block_stats else []
-        entity_items = (
-            stats.entity_stats.top_entities if stats.entity_stats else []
+        """兼容旧路径：从统计服务结果构建排行。"""
+        from app.presenters.stats_view_state import build_stats_view_state
+
+        view_state = build_stats_view_state(
+            stats,
+            player_sort_key=getattr(
+                self,
+                "_player_sort_key",
+                PLAYER_SORT_PLAY_TIME,
+            ),
+            size_formatter=format_size,
         )
+        self._set_ranked_stats_from_view_state(view_state)
+
+    def _set_ranked_stats_from_view_state(self, view_state: Any) -> None:
+        block_items = [
+            (item.label, item.value) for item in view_state.top_blocks
+        ]
+        entity_items = [
+            (item.label, item.value) for item in view_state.top_entities
+        ]
+        size_items = [
+            (item.label, item.value) for item in view_state.region_size_ranks
+        ]
         self._fill_rank(self._block_stats_col, block_items[:10])
         self._update_block_pie_chart(block_items[:7])
         self._fill_rank(self._entity_stats_col, entity_items[:10])
-        self._fill_rank(
-            self._size_stats_col,
-            list(service.get_region_size_distribution(stats).items()),
-        )
+        self._fill_rank(self._size_stats_col, size_items)
 
     async def _handle_stats_error(
         self,
@@ -902,7 +1032,7 @@ class StatsTabMixin(ExplorerMixinHost):
     ) -> None:
         if (
             generation is not None
-            and generation != getattr(self, "_stats_generation", 0)
+            and not self._is_stats_analysis_current(generation)
         ):
             return
         self._set_stats_progress_visible(False)

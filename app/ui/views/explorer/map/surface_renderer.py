@@ -133,6 +133,10 @@ class MapSurfaceRenderer:
                 image = self._decoded.pop(key)
                 image.close()
 
+    def close(self) -> None:
+        """关闭全部解码图像；可重复调用。"""
+        self.invalidate()
+
     def compose(
         self,
         spec: MapSurfaceSpec,

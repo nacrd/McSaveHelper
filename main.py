@@ -6,15 +6,12 @@
 打包后命令行调试：
   MCSaveHelper.exe --console
 """
-import sys
-import builtins
 import traceback
+import sys
 from pathlib import Path
 
-if not hasattr(builtins, 'exit'):
-    setattr(builtins, 'exit', sys.exit)
-if not hasattr(builtins, 'quit'):
-    setattr(builtins, 'quit', sys.exit)
+
+CONSOLE_FLAG = "--console"
 
 
 def _is_packaged() -> bool:
@@ -45,6 +42,15 @@ def _setup_console() -> None:
         pass
 
 
+def _consume_console_flag(argv: list[str]) -> bool:
+    """Remove the private console flag before Flet parses arguments."""
+    if CONSOLE_FLAG not in argv:
+        return False
+
+    argv[:] = [argument for argument in argv if argument != CONSOLE_FLAG]
+    return True
+
+
 def _get_log_path() -> Path:
     """获取启动错误日志路径"""
     if _is_packaged():
@@ -54,41 +60,56 @@ def _get_log_path() -> Path:
     return log_dir / "startup_error.log"
 
 
-def main() -> None:
+def _run_application() -> None:
+    """Configure shared runtime policy and start the Flet application."""
+    from core.threading_runtime import configure_thread_fairness
+
+    configure_thread_fairness()
+
+    import flet as ft
+
+    from app.application import Application
+
+    ft.run(Application)
+
+
+def _report_startup_failure(message: str) -> int:
+    """Report one fatal startup failure and return the process exit code."""
+    print(message)
+    _write_error_log(message)
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
     """应用主入口。
 
     解析 ``--console``、配置线程公平性并启动 Flet 应用。
     启动失败时写入 ``startup_error.log`` 并以非零状态退出。
+
+    Args:
+        argv: 进程参数；默认使用并原位更新 ``sys.argv``。
+
+    Returns:
+        进程退出码，成功为 0，启动失败为 1。
     """
-    if "--console" in sys.argv:
-        sys.argv.remove("--console")
+    process_args = sys.argv if argv is None else argv
+    if _consume_console_flag(process_args):
         _setup_console()
 
     try:
-        from core.threading_runtime import configure_thread_fairness
-
-        configure_thread_fairness()
-
-        import flet as ft
-
-        from app.application import Application
-
-        ft.run(Application)
-
+        _run_application()
     except ImportError as exc:
-        msg = (
+        message = (
             f"[FATAL] 缺少依赖: {exc}\n"
             "请运行: pip install -r requirements.txt"
         )
-        print(msg)
-        _write_error_log(msg)
-        sys.exit(1)
+        return _report_startup_failure(message)
     except Exception:
         # 进程入口边界：记录完整栈并退出，避免 GUI 子系统静默失败。
-        msg = "[FATAL] 应用启动失败:\n" + traceback.format_exc()
-        print(msg)
-        _write_error_log(msg)
-        sys.exit(1)
+        message = "[FATAL] 应用启动失败:\n" + traceback.format_exc()
+        return _report_startup_failure(message)
+
+    return 0
 
 
 def _write_error_log(msg: str) -> None:
@@ -99,8 +120,7 @@ def _write_error_log(msg: str) -> None:
     """
     try:
         log_path = _get_log_path()
-        with open(log_path, "w", encoding="utf-8") as handle:
-            handle.write(msg)
+        log_path.write_text(msg, encoding="utf-8")
         print(f"错误日志已保存到: {log_path}")
     except OSError:
         # best-effort：日志本身失败不应再抛出。
@@ -108,4 +128,4 @@ def _write_error_log(msg: str) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

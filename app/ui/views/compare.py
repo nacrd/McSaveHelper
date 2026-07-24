@@ -1,38 +1,76 @@
 """存档对比视图。"""
-import threading
+from __future__ import annotations
+
+from concurrent.futures import CancelledError
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import Optional, Protocol
 
 import flet as ft
 
-from app.services.world_compare_service import CompareItem, get_world_compare_service
+from app.presenters.compare_view_state import (
+    CompareGroupState,
+    begin_compare,
+    complete_compare,
+    fail_compare,
+    initial_compare_state,
+    invalidate_compare,
+)
+from app.services.world_compare_service import WorldCompareResult, WorldCompareService
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    OperationCancelledError,
+    OperationHandle,
+    TaskPriority,
+)
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeaturePagePort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+class CompareHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the compare view."""
+
+    @property
+    def world_compare(self) -> "WorldCompareService":
+        """Return the world comparison service."""
+        ...
 
 
 class CompareView(ft.Column):
     """双世界差异对比页：level.dat、玩家与区域文件。"""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "CompareHost") -> None:
         """绑定应用与对比服务。
 
         Args:
-            app: 应用组合根。
+            app: 对比页面所需的 UI、运行时和对比服务端口。
         """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self.app = app
-        self._service = get_world_compare_service(log=app.log)
-        self._comparing = False
+        self._task_scope = app.execution_runtime.create_scope("compare_view")
+        self._service = app.world_compare
+        self._state = initial_compare_state()
         self._build()
 
     def get_top_actions(self) -> list[ViewAction]:
@@ -85,7 +123,7 @@ class CompareView(ft.Column):
         self.controls.append(card(picker, padding=16))
 
         self._summary = ft.Text(
-            "通过侧边栏设置基准存档，再指定目标存档后开始对比。",
+            self._state.summary,
             size=12,
             color=THEME.text_muted)
         self._result = ft.Column(spacing=12)
@@ -100,72 +138,121 @@ class CompareView(ft.Column):
 
     def _compare(self, e: ft.ControlEvent) -> None:
         try:
-            if self._comparing:
+            if self._state.is_comparing:
                 self.app.warn_dialog("提示", "对比正在进行中，请稍候。")
                 return
             paths = self._validated_compare_paths()
             if paths is None:
                 return
-            self._summary.value = "正在对比，请稍候..."
-            self._result.controls.clear()
-            self._comparing = True
-            self.update()
-            threading.Thread(
-                target=self._run_compare,
-                args=paths,
-                daemon=True,
-            ).start()
+            self._state = begin_compare(self._state, *paths)
+            generation = self._state.generation
+            self._render_state()
+            handle = self._task_scope.submit(
+                "compare_worlds",
+                lambda token: self._run_compare(*paths, token),
+                lane=ExecutionLane.IO,
+                priority=TaskPriority.INTERACTIVE,
+            )
+            handle.add_done_callback(
+                lambda completed: self._finish_compare_task(
+                    completed,
+                    generation,
+                )
+            )
         except Exception as ex:
-            self._handle_compare_error(ex)
+            self._handle_compare_error(ex, self._state.generation)
 
-    def _validated_compare_paths(self) -> Optional[Tuple[Path, Path]]:
-        left = Path(self._left_field.value or "")
-        right = Path(self._right_field.value or "")
-        if not (left / "level.dat").exists():
+    def _validated_compare_paths(self) -> Optional[tuple[Path, Path]]:
+        left_text = str(self._left_field.value or "").strip()
+        right_text = str(self._right_field.value or "").strip()
+        if not left_text:
             self.app.warn_dialog("提示", "请先通过侧边栏设置有效基准存档目录。")
             return None
-        if not (right / "level.dat").exists():
+        if not right_text:
             self.app.warn_dialog("提示", "请指定包含 level.dat 的有效目标存档目录。")
             return None
-        return left, right
+        return Path(left_text), Path(right_text)
 
-    def _run_compare(self, left: Path, right: Path) -> None:
-        try:
-            result = self._service.compare_worlds(left, right)
-            total = sum(
-                value
-                for key, value in result.summary.items()
-                if key != "changed"
-            )
-            summary = f"变更项: {result.summary['changed']} / {total}"
-            groups = [
-                self._group("WorldInfo 差异", result.world_info),
-                self._group("玩家数据差异", result.players),
-                self._group("区域文件差异", result.regions),
-            ]
-            run_on_ui(self.app.page, self._finish_compare, summary, groups)
-        except Exception as ex:
-            run_on_ui(self.app.page, self._handle_compare_error, ex)
-
-    def _finish_compare(
+    def _run_compare(
         self,
-        summary: str,
-        groups: List[ft.Container],
-    ) -> None:
-        self._summary.value = summary
-        self._result.controls.extend(groups)
-        self._comparing = False
-        self.update()
+        left: Path,
+        right: Path,
+        token: CancellationToken,
+    ) -> WorldCompareResult:
+        """在 I/O 通道校验路径并生成纯对比结果。"""
+        token.raise_if_cancelled()
+        self._validate_world_path(left, "基准")
+        self._validate_world_path(right, "目标")
+        result = self._service.compare_worlds(left, right)
+        token.raise_if_cancelled()
+        return result
 
-    def _handle_compare_error(self, error: Exception) -> None:
-        self._comparing = False
+    @staticmethod
+    def _validate_world_path(path: Path, label: str) -> None:
+        if not (path / "level.dat").is_file():
+            raise ValueError(f"{label}存档目录缺少 level.dat: {path}")
+
+    def _finish_compare_task(
+        self,
+        handle: OperationHandle[WorldCompareResult],
+        generation: int,
+    ) -> None:
+        if handle.cancelled:
+            return
+        try:
+            result = handle.result()
+        except (CancelledError, OperationCancelledError):
+            return
+        except Exception as error:
+            run_on_ui(
+                self.app.page,
+                self._handle_compare_error,
+                error,
+                generation,
+            )
+            return
+        run_on_ui(
+            self.app.page,
+            self._apply_compare_result,
+            result,
+            generation,
+        )
+
+    def _apply_compare_result(
+        self,
+        result: WorldCompareResult,
+        generation: int,
+    ) -> None:
+        next_state = complete_compare(self._state, result, generation)
+        if next_state is self._state:
+            return
+        self._state = next_state
+        self._render_state()
+
+    def _handle_compare_error(
+        self,
+        error: Exception,
+        generation: int,
+    ) -> None:
+        next_state = fail_compare(self._state, generation)
+        if next_state is self._state:
+            return
+        self._state = next_state
+        self._render_state()
         self.app.handle_exception(error, title="存档对比失败")
 
-    def _group(self, title: str, items: List[CompareItem]) -> ft.Container:
+    def _render_state(self) -> None:
+        self._summary.value = self._state.summary
+        self._result.controls.clear()
+        self._result.controls.extend(
+            self._group(group)
+            for group in self._state.groups
+        )
+        self.update()
+
+    def _group(self, group: CompareGroupState) -> ft.Container:
         rows = []
-        for item in items:
-            if item.same:
-                continue
+        for item in group.items:
             rows.append(ft.Container(
                 content=ft.Column([
                     ft.Text(item.name, size=12, weight=ft.FontWeight.BOLD, color=THEME.mc_gold),
@@ -182,7 +269,7 @@ class CompareView(ft.Column):
                 subtitle="该分组中的两份存档数据一致",
                 height=110,
             ))
-        return card(ft.Column([ft.Text(title,
+        return card(ft.Column([ft.Text(group.title,
                                        size=14,
                                        weight=ft.FontWeight.BOLD,
                                        color=THEME.text_primary),
@@ -198,3 +285,8 @@ class CompareView(ft.Column):
             # UI best-effort: control may already be unmounted.
             pass
         safe_update(self._left_field)
+
+    def dispose(self) -> None:
+        """取消页面拥有的对比任务；可重复调用。"""
+        self._state = invalidate_compare(self._state)
+        self._task_scope.close()

@@ -1,12 +1,18 @@
-from pathlib import Path
 import os
 import threading
+from pathlib import Path
 
 import pytest
 
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
+from app.services.execution_runtime import ExecutionRuntime, LaneLimits
 from app.services.migration_service import MigrationOptions, MigrationService
+from app.services.parallel_runner import RuntimeParallelRunner
+from app.services.world_transaction import WorldTransactionService
+from app.services.world_write_coordinator import WorldWriteCoordinator
+from core.batch_processor import BatchCancelledError
+from core.parallel import ParallelRunner, SerialParallelRunner
 
 
 def test_migration_options_parses_manual_names() -> None:
@@ -25,10 +31,20 @@ def test_migration_options_parses_manual_names() -> None:
     assert options.manual_names == ("Alice", "Bob", "Carol")
 
 
-def _service(tmp_path: Path) -> tuple[MigrationService, BackupService]:
-    backup = BackupService()
+def _service(
+    tmp_path: Path,
+    runner: ParallelRunner | None = None,
+) -> tuple[MigrationService, BackupService]:
+    coordinator = WorldWriteCoordinator()
+    backup = BackupService(coordinator)
+    transaction = WorldTransactionService(coordinator, backup)
     config = ConfigService(tmp_path / "config")
-    return MigrationService(config, backup), backup
+    return MigrationService(
+        config,
+        backup,
+        transaction,
+        runner or SerialParallelRunner(),
+    ), backup
 
 
 def test_single_migration_builds_in_staging_and_backs_up_existing_target(
@@ -226,7 +242,11 @@ def test_batch_migration_is_concurrent_transactional_and_task_keyed(
         target = destination / name
         target.mkdir(parents=True)
         (target / "level.dat").write_bytes(f"old-{name}".encode())
-    service, backup = _service(tmp_path)
+    runtime = ExecutionRuntime(
+        io_limits=LaneLimits(1, 2),
+        cpu_limits=LaneLimits(2, 2),
+    )
+    service, backup = _service(tmp_path, RuntimeParallelRunner(runtime))
     service._batch_worlds = [first, second]
     barrier = threading.Barrier(2)
 
@@ -241,11 +261,14 @@ def test_batch_migration_is_concurrent_transactional_and_task_keyed(
 
     monkeypatch.setattr("core.fast_mode.run_fast", fake_run_fast)
 
-    results = service.run_batch(
-        str(destination), "fast", True, False, False,
-        "java", "", "", 2,
-        lambda message, level: None, lambda value: None,
-    )
+    try:
+        results = service.run_batch(
+            str(destination), "fast", True, False, False,
+            "java", "", "", 2,
+            lambda message, level: None, lambda value: None,
+        )
+    finally:
+        runtime.shutdown(wait=True)
 
     assert set(results) == {"task-1", "task-2"}
     assert all(result["success"] for result in results.values())
@@ -339,3 +362,134 @@ def test_batch_cancel_before_publish_keeps_existing_target(
     assert returned[0]["task-1"]["cancelled"] is True
     assert (target / "level.dat").read_bytes() == b"old"
     assert service.cancel_batch() is False
+
+
+def test_single_cancel_before_publish_keeps_existing_target(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "level.dat").write_bytes(b"source")
+    destination = tmp_path / "server"
+    target = destination / "world"
+    target.mkdir(parents=True)
+    (target / "level.dat").write_bytes(b"old")
+    service, _ = _service(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+    returned: list[BaseException] = []
+
+    def fake_run_fast(source_path, staging, world_name, *args):
+        del source_path, args
+        output = staging / world_name
+        output.mkdir()
+        (output / "level.dat").write_bytes(b"converted")
+        started.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr("core.fast_mode.run_fast", fake_run_fast)
+
+    def run() -> None:
+        try:
+            service.run_single(
+                str(source),
+                str(destination),
+                "world",
+                "fast",
+                True,
+                False,
+                False,
+                "java",
+                "",
+                "",
+                lambda message, level: None,
+                lambda value: None,
+            )
+        except BaseException as exc:
+            returned.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    assert started.wait(timeout=2)
+    assert service.cancel_active() is True
+    release.set()
+    thread.join(timeout=3)
+
+    assert not thread.is_alive()
+    assert returned
+    assert isinstance(returned[0], BatchCancelledError)
+    assert (target / "level.dat").read_bytes() == b"old"
+
+
+def test_migration_service_rejects_reentrant_operation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "level.dat").write_bytes(b"source")
+    destination = tmp_path / "server"
+    service, _ = _service(tmp_path)
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_run_fast(source_path, staging, world_name, *args):
+        del source_path, args
+        output = staging / world_name
+        output.mkdir()
+        (output / "level.dat").write_bytes(b"converted")
+        started.set()
+        release.wait(timeout=2)
+
+    monkeypatch.setattr("core.fast_mode.run_fast", fake_run_fast)
+
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            service.run_single(
+                str(source),
+                str(destination),
+                "world",
+                "fast",
+                True,
+                False,
+                False,
+                "java",
+                "",
+                "",
+                lambda message, level: None,
+                lambda value: None,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(
+        target=run,
+    )
+    thread.start()
+    assert started.wait(timeout=2)
+
+    with pytest.raises(RuntimeError, match="迁移任务"):
+        service.run_single(
+            str(source),
+            str(destination),
+            "world",
+            "fast",
+            True,
+            False,
+            False,
+            "java",
+            "",
+            "",
+            lambda message, level: None,
+            lambda value: None,
+        )
+
+    assert service.cancel_active() is True
+    release.set()
+    thread.join(timeout=3)
+    assert not thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], BatchCancelledError)

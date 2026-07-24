@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 
 import flet as ft
 
@@ -14,14 +14,32 @@ from app.services.map_export_service import (
     MapSelection,
     PIL_AVAILABLE,
 )
+from app.services.execution_runtime import ExecutionLane, TaskPriority
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.fields import dropdown, text_field
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
 from core.mca.map_models import MapUnit
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+class MapExportHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """UI and runtime ports required by the map export dialog."""
 
 
 @dataclass(frozen=True)
@@ -36,13 +54,16 @@ class MapExportSession:
 class MapExportDialog:
     """Modal export UI that reuses the map's current world/dimension/selection."""
 
-    def __init__(self, app: "Application") -> None:
+    def __init__(self, app: "MapExportHost") -> None:
         """绑定应用壳并尝试初始化导出服务。
 
         Args:
-            app: 应用组合根（对话框、翻译、文件选择）。
+            app: 地图导出所需的 UI 与运行时端口。
         """
         self.app = app
+        self._task_scope = app.execution_runtime.create_scope(
+            "map_export_dialog"
+        )
         self._exporting = False
         self._auto_output_path = ""
         self._cancel_event: Optional[threading.Event] = None
@@ -91,6 +112,7 @@ class MapExportDialog:
         self._exporting = False
         if self._cancel_event is not None:
             self._cancel_event.set()
+        self._task_scope.close()
         self._close_dialog()
 
     def _show_missing_pillow(self) -> None:
@@ -429,25 +451,26 @@ class MapExportDialog:
         self._exporting = True
         self._task_generation += 1
         generation = self._task_generation
-        self._cancel_event = threading.Event()
+        cancel_event = threading.Event()
+        self._cancel_event = cancel_event
         self._set_export_controls_enabled(False)
         self._result_text.value = self.app.translate(
             "map_export.exporting",
             "正在导出地图...",
         )
         safe_update(self._result_text)
-        thread = threading.Thread(
-            target=self._export_thread,
-            args=(
+        self._task_scope.submit(
+            "export_map",
+            lambda token: self._export_thread(
                 session.world_path,
                 Path(str(output_path)),
                 spec,
-                self._cancel_event,
+                cancel_event,
                 generation,
             ),
-            daemon=True,
+            lane=ExecutionLane.CPU,
+            priority=TaskPriority.INTERACTIVE,
         )
-        thread.start()
 
     def _resolve_export_scale(self) -> int:
         try:

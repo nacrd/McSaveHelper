@@ -1,7 +1,10 @@
 """JSON export helpers for NBT data."""
 
 import json
+from pathlib import Path
 from typing import Any
+
+from core.io_atomic import atomic_write_text
 
 
 def to_serializable(obj: Any) -> Any:
@@ -22,8 +25,12 @@ def export_json(data: Any, path: str) -> bool:
     try:
         if data is None:
             return False
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(to_serializable(data), f, ensure_ascii=False, indent=2)
+        content = json.dumps(
+            to_serializable(data),
+            ensure_ascii=False,
+            indent=2,
+        )
+        atomic_write_text(Path(path), content)
         return True
-    except Exception:
+    except (OSError, TypeError, ValueError, RecursionError):
         return False

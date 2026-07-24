@@ -2,28 +2,50 @@
 
 支持存档检测（只读诊断）和存档修复（修改文件）。
 """
-import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import flet as ft
 
+from app.controllers.save_repair_controller import (
+    RepairOptions,
+    SaveRepairController,
+    SaveRepairUiPorts,
+)
 from app.presenters.save_repair_presenter import (
     format_detect_report,
     format_repair_report,
+)
+from app.services.save_repair_service import (
+    DetectReport,
+    RepairReport,
+    SaveRepairService,
+)
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
 )
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 from app.ui.views.save_repair_chrome import build_save_repair_chrome
-from app.services.save_repair_service import (
-    SaveRepairService,
-    RepairReport,
-    DetectReport,
-)
 
-if TYPE_CHECKING:
-    from app.application import Application
+
+class SaveRepairHost(
+    FeaturePagePort,
+    FeatureDialogPort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the save repair view."""
+
+    @property
+    def save_repair(self) -> SaveRepairService:
+        """Return the shared save repair service."""
+        ...
 
 
 class SaveRepairView(ft.Column):
@@ -31,21 +53,39 @@ class SaveRepairView(ft.Column):
 
     def __init__(
         self,
-        app: "Application",
+        app: "SaveRepairHost",
         service: SaveRepairService | None = None,
     ) -> None:
         """初始化存档修复视图。
 
         Args:
-            app: 应用组合根。
-            service: 可选修复服务；缺省使用 ``app.services.save_repair``。
+            app: 修复页面所需的 UI、运行时和修复服务端口。
+            service: 可选修复服务；缺省使用上下文的修复端口。
         """
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
-        self.service = service or app.services.save_repair
+        self.service = service or app.save_repair
+        self._task_scope = app.execution_runtime.create_scope(
+            "save_repair_view"
+        )
         self.expand = True
         self._busy = False
         self._build_ui()
+        self._controller = SaveRepairController(
+            self.service,
+            self._task_scope,
+            SaveRepairUiPorts(
+                show_progress=self.app.show_progress,
+                update_progress=self.app.update_progress_with_task,
+                append_log=self._append_log,
+                show_detect_report=self._show_detect_report,
+                show_repair_report=self._show_repair_report,
+                show_detect_error=self._show_detect_error,
+                show_repair_error=self._show_repair_error,
+                finish_operation=self._finish_operation,
+            ),
+            post_ui=lambda callback: run_on_ui(self.app.page, callback),
+        )
 
     def get_top_actions(self) -> list[ViewAction]:
         """Keep detect/repair commands beside their configuration form."""
@@ -110,11 +150,11 @@ class SaveRepairView(ft.Column):
         self._world_info_card.visible = False
         safe_update(self._world_info_card)
 
-        threading.Thread(
-            target=self._detect_thread,
-            args=(world_path,),
-            daemon=True,
-        ).start()
+        try:
+            self._controller.start_detect(world_path)
+        except Exception as exc:
+            self._set_busy(False)
+            self.app.handle_exception(exc, title="启动存档检测失败")
 
     def _start_repair(self, e: ft.ControlEvent) -> None:
         if self._busy:
@@ -132,62 +172,35 @@ class SaveRepairView(ft.Column):
         self._log_column.controls.clear()
         safe_update(self._log_column)
 
-        repair_options = {
-            "fix_chunks": bool(self._fix_chunks_checkbox.value),
-            "fix_players": bool(self._fix_players_checkbox.value),
-            "fix_level_dat": bool(self._fix_level_dat_checkbox.value),
-            "backup": bool(self._backup_checkbox.value),
-        }
-
-        threading.Thread(
-            target=self._repair_thread,
-            args=(world_path, repair_options),
-            daemon=True,
-        ).start()
+        options = RepairOptions(
+            fix_chunks=bool(self._fix_chunks_checkbox.value),
+            fix_players=bool(self._fix_players_checkbox.value),
+            fix_level_dat=bool(self._fix_level_dat_checkbox.value),
+            backup=bool(self._backup_checkbox.value),
+        )
+        try:
+            self._controller.start_repair(world_path, options)
+        except Exception as exc:
+            self._set_busy(False)
+            self.app.handle_exception(exc, title="启动存档修复失败")
 
     def _cancel(self, e: ft.ControlEvent) -> None:
-        self.service.cancel()
+        del e
+        self._controller.cancel()
         self._cancel_btn.disabled = True
         safe_update(self._cancel_btn)
 
-    # ── 检测线程 ──────────────────────────────────────────
+    def _finish_operation(self) -> None:
+        """恢复由当前后台任务占用的 UI。"""
+        self.app.hide_progress()
+        self._set_busy(False)
 
-    def _detect_thread(self, world_path: Path) -> None:
-        try:
-            run_on_ui(self.app.page, self.app.show_progress, "正在检测存档...")
-
-            def progress_callback(value: float, msg: str) -> None:
-                run_on_ui(
-                    self.app.page,
-                    self.app.update_progress_with_task,
-                    msg or "检测中",
-                    value)
-
-            def log_callback(msg: str, level: str) -> None:
-                run_on_ui(self.app.page, self._append_log, msg, level)
-
-            report = self.service.detect_world(
-                world_path=world_path,
-                progress_callback=progress_callback,
-                log_callback=log_callback,
-            )
-
-            run_on_ui(self.app.page, self._show_detect_report, report)
-
-        except Exception as ex:
-            def _show_error(error: Exception) -> None:
-                self._detect_result_text.value = f"检测失败: {error}"
-                safe_update(self._detect_result_text)
-                self._detect_result_card.visible = True
-                safe_update(self._detect_result_card)
-                self.app.error_dialog("错误", f"检测失败: {error}")
-            run_on_ui(self.app.page, _show_error, ex)
-
-        finally:
-            def _finish() -> None:
-                self.app.hide_progress()
-                self._set_busy(False)
-            run_on_ui(self.app.page, _finish)
+    def _show_detect_error(self, error: Exception) -> None:
+        self._detect_result_text.value = f"检测失败: {error}"
+        safe_update(self._detect_result_text)
+        self._detect_result_card.visible = True
+        safe_update(self._detect_result_card)
+        self.app.error_dialog("错误", f"检测失败: {error}")
 
     def _show_detect_report(self, report: DetectReport) -> None:
         text = format_detect_report(report)
@@ -200,46 +213,10 @@ class SaveRepairView(ft.Column):
         self._detect_result_card.visible = True
         safe_update(self._detect_result_card)
 
-    # ── 修复线程 ──────────────────────────────────────────
-
-    def _repair_thread(self, world_path: Path, repair_options: dict) -> None:
-        try:
-            run_on_ui(self.app.page, self.app.show_progress, "正在修复存档...")
-
-            def progress_callback(value: float, msg: str) -> None:
-                run_on_ui(
-                    self.app.page,
-                    self.app.update_progress_with_task,
-                    msg or "修复中",
-                    value)
-
-            def log_callback(msg: str, level: str) -> None:
-                run_on_ui(self.app.page, self._append_log, msg, level)
-
-            report = self.service.repair_world(
-                world_path=world_path,
-                fix_chunks=repair_options["fix_chunks"],
-                fix_players=repair_options["fix_players"],
-                fix_level_dat=repair_options["fix_level_dat"],
-                backup=repair_options["backup"],
-                progress_callback=progress_callback,
-                log_callback=log_callback,
-            )
-
-            run_on_ui(self.app.page, self._show_repair_report, report)
-
-        except Exception as ex:
-            def _show_error(error: Exception) -> None:
-                self._result_text.value = f"修复失败: {error}"
-                safe_update(self._result_text)
-                self.app.error_dialog("错误", f"修复失败: {error}")
-            run_on_ui(self.app.page, _show_error, ex)
-
-        finally:
-            def _finish() -> None:
-                self.app.hide_progress()
-                self._set_busy(False)
-            run_on_ui(self.app.page, _finish)
+    def _show_repair_error(self, error: Exception) -> None:
+        self._result_text.value = f"修复失败: {error}"
+        safe_update(self._result_text)
+        self.app.error_dialog("错误", f"修复失败: {error}")
 
     # ── 结果展示 ──────────────────────────────────────────
 
@@ -279,6 +256,7 @@ class SaveRepairView(ft.Column):
 
     def on_save_selected(self, path: str) -> None:
         """统一入口设置当前存档回调"""
+        self._controller.select_world(path)
         try:
             self._world_path_field.value = path
             # 隐藏之前的结果
@@ -290,3 +268,8 @@ class SaveRepairView(ft.Column):
         safe_update(self._world_path_field)
         safe_update(self._world_info_card)
         safe_update(self._detect_result_card)
+
+    def dispose(self) -> None:
+        """取消检测/修复任务并释放页面作用域。"""
+        self._controller.close()
+        self._task_scope.close()

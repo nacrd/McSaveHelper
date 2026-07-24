@@ -59,7 +59,12 @@ class WindowManagerDependencies:
         get_sidebar_mode: 获取用户设置的侧栏模式。
         stop_gui_optimizer: 关闭时停止 GUI 优化后台任务。
         dispose_views: 关闭时释放视图资源。
+        close_ui_delivery: 关闭时拒绝新的 UI 投递。
         dispose_file_dialogs: 关闭时销毁 Tk 文件对话框工作线程。
+        close_texture_service: 关闭应用级纹理任务与内存缓存。
+        shutdown_execution_runtime: 关闭应用级后台任务运行时；False 表示有任务未退出。
+        close_world_indexes: 关闭共享世界只读索引缓存。
+        close_cache_registry: 关闭应用缓存注册表。
     """
 
     page: ft.Page
@@ -68,7 +73,12 @@ class WindowManagerDependencies:
     get_sidebar_mode: Callable[[], str]
     stop_gui_optimizer: Callable[[], None]
     dispose_views: Callable[[], None]
+    close_ui_delivery: Callable[[], None] = lambda: None
     dispose_file_dialogs: Callable[[], None] = lambda: None
+    close_texture_service: Callable[[], None] = lambda: None
+    shutdown_execution_runtime: Callable[[], Optional[bool]] = lambda: None
+    close_world_indexes: Callable[[], None] = lambda: None
+    close_cache_registry: Callable[[], None] = lambda: None
 
 
 class WindowManager:
@@ -483,10 +493,18 @@ class WindowManager:
         self._shutdown_started = True
 
         self._set_closing_flag()
+        self._close_ui_delivery()
         self._stop_gui_optimizer()
         self._dispose_views()
         self._dispose_file_dialogs()
-        self._shutdown_logger()
+        runtime_terminated = self._shutdown_execution_runtime()
+        if runtime_terminated:
+            self._close_texture_service()
+            self._close_world_indexes()
+            self._close_cache_registry()
+            self._shutdown_logger()
+        else:
+            self._log_runtime_shutdown_timeout()
         self._destroy_window_async()
 
     def _set_closing_flag(self) -> None:
@@ -513,6 +531,55 @@ class WindowManager:
         """Destroy the platform file-dialog host on its owning thread."""
         try:
             self._deps.dispose_file_dialogs()
+        except Exception:
+            pass
+
+    def _close_ui_delivery(self) -> None:
+        """拒绝关闭阶段新的 UI 结果投递。"""
+        try:
+            self._deps.close_ui_delivery()
+        except Exception:
+            # Teardown must continue even when the scheduler is already gone.
+            pass
+
+    def _close_texture_service(self) -> None:
+        """停止应用级纹理任务并释放其缓存分区。"""
+        try:
+            self._deps.close_texture_service()
+        except Exception:
+            pass
+
+    def _shutdown_execution_runtime(self) -> bool:
+        """取消并关闭应用后台执行器，报告依赖资源是否可安全释放。"""
+        try:
+            result = self._deps.shutdown_execution_runtime()
+            return result is not False
+        except Exception:
+            # 关闭流程必须继续执行，运行时清理失败只影响后台资源。
+            return False
+
+    @staticmethod
+    def _log_runtime_shutdown_timeout() -> None:
+        """记录有界 drain 超时，不让日志异常阻止窗口关闭。"""
+        try:
+            logger.warning(
+                "后台任务未在关闭期限内退出，保留其依赖资源直到进程结束",
+                module="WindowManager",
+            )
+        except Exception:
+            pass
+
+    def _close_world_indexes(self) -> None:
+        """关闭应用作用域的世界索引缓存。"""
+        try:
+            self._deps.close_world_indexes()
+        except Exception:
+            pass
+
+    def _close_cache_registry(self) -> None:
+        """清理应用作用域缓存并注销全部外部分区。"""
+        try:
+            self._deps.close_cache_registry()
         except Exception:
             pass
 

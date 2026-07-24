@@ -95,6 +95,7 @@ class ResourceUsageMonitor:
         self._health_monitor = health_monitor
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
         self._process: Any = (
             psutil.Process()
             if _PSUTIL_AVAILABLE and psutil is not None
@@ -109,15 +110,12 @@ class ResourceUsageMonitor:
         if self._process is None:
             return
 
-        # 如果已经在运行且线程存活，不重复启动
-        if self._running and self._thread and self._thread.is_alive():
+        thread = self._thread
+        if thread is not None and thread.is_alive():
             return
 
-        # 如果状态异常（标记为运行但线程不存活），先清理
-        if self._running and (not self._thread or not self._thread.is_alive()):
-            self._running = False
-            self._thread = None
-
+        self._thread = None
+        self._stop_event.clear()
         self._running = True
         self._last_print_time = time.time()
         self._thread = threading.Thread(
@@ -130,9 +128,12 @@ class ResourceUsageMonitor:
     def stop(self) -> None:
         """停止采样并等待线程结束（最长约 2 秒）。"""
         self._running = False
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=2.0)
-        self._thread = None
+        self._stop_event.set()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+        if thread is None or not thread.is_alive():
+            self._thread = None
 
     def set_print_interval(self, seconds: float) -> None:
         """设置摘要日志间隔（秒），下限 5。
@@ -150,9 +151,10 @@ class ResourceUsageMonitor:
             if self._process:
                 self._process.cpu_percent()
 
-            while self._running:
+            while self._running and not self._stop_event.is_set():
                 self._sample_metrics()
-                time.sleep(self.sample_interval)
+                if self._stop_event.wait(self.sample_interval):
+                    return
         except Exception:
             # Sampler thread boundary: never crash the process.
             pass
