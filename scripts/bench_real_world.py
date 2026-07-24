@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 
 from app.services.world_index_service import WorldIndexRegistry
 from app.services.world_repository import WorldRepository
+from core.bench_samples import SampleSize
 from core.mca import (
     RegionFile,
     chunk_decode_cache_bytes,
@@ -374,21 +375,25 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
 
 def run_real_world_benchmark(
     world_path: Path | str,
+    *,
+    sample_size: SampleSize | str,
     loops: int = 3,
 ) -> dict[str, Any]:
     """Run a read-only benchmark against one supplied real Java world.
 
     Args:
         world_path: World root containing ``level.dat`` and overworld regions.
+        sample_size: Caller-assigned real-world sample class.
         loops: Timed samples after one untimed warmup.
     Returns:
         JSON-compatible benchmark report with read-only verification.
     Raises:
         FileNotFoundError: The path is not a Java world.
         RuntimeError: Benchmarking changed the source or a metric failed.
-        ValueError: The world contains a linked path.
+        ValueError: The sample class is invalid or the world contains a linked path.
     """
     world = Path(world_path).expanduser().resolve()
+    classified_size = SampleSize(sample_size)
     if not (world / "level.dat").is_file():
         raise FileNotFoundError(f"真实世界缺少 level.dat: {world}")
     before = _capture_world_manifest(world)
@@ -399,7 +404,7 @@ def run_real_world_benchmark(
     target = _representative_region(world)
     sample: dict[str, Any] = {
         "size": "real",
-        "scale_hint": "large" if len(regions) >= 16 else "unclassified",
+        "sample_size": classified_size.value,
         "label": f"real world: {world.name}",
         "source": {
             "world_name": world.name,

@@ -5,7 +5,8 @@ Examples
 --------
   python scripts/archive_bench_report.py
   python scripts/archive_bench_report.py --sizes small --loops 1
-  python scripts/archive_bench_report.py --world example_saves/world --loops 3
+  python scripts/archive_bench_report.py --world example_saves/world \
+      --sample-size small --loops 3
   python scripts/archive_bench_report.py --from-json path/to/report.json
 """
 from __future__ import annotations
@@ -58,6 +59,12 @@ def main() -> int:
     source.add_argument("--from-json", default="")
     source.add_argument("--world", default="")
     parser.add_argument(
+        "--sample-size",
+        choices=[item.value for item in SampleSize],
+        default=None,
+        help="Required caller-assigned class for --world",
+    )
+    parser.add_argument(
         "--machine-notes",
         default="",
         help="Optional free-text hardware notes for true-machine archives",
@@ -70,17 +77,24 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.from_json:
+        if args.sample_size is not None:
+            parser.error("--sample-size 仅适用于 --world")
         report = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
     elif args.world:
+        if args.sample_size is None:
+            parser.error("--world 必须同时指定 --sample-size")
         if args.check_budgets:
             parser.error("--check-budgets 仅适用于固定合成样本")
         from scripts.bench_real_world import run_real_world_benchmark
 
         report = run_real_world_benchmark(
             args.world,
+            sample_size=args.sample_size,
             loops=max(1, args.loops),
         )
     else:
+        if args.sample_size is not None:
+            parser.error("--sample-size 仅适用于 --world")
         from scripts.bench_mca import evaluate_report_budgets, run_benchmark
 
         sizes = [SampleSize(item) for item in args.sizes]

@@ -91,7 +91,10 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "mca_read_p95_ms": mca.get("read_batch_p95_ms"),
                 "level_nbt_p95_ms": level_nbt.get("p95_ms"),
                 "player_nbt_p95_ms": player_nbt.get("p95_ms"),
-                "scale_hint": sample.get("scale_hint"),
+                "sample_size": sample.get(
+                    "sample_size",
+                    sample.get("scale_hint"),
+                ),
                 "source_file_count": source.get("file_count"),
                 "source_size_bytes": source.get("size_bytes"),
                 "source_region_count": source.get("region_count"),
@@ -185,7 +188,7 @@ def render_markdown_report(
                 "",
                 "## Real sample metadata",
                 "",
-                "| size | scale hint | files | bytes | regions | read-only verified | "
+                "| size | sample class | files | bytes | regions | read-only verified | "
                 "preview size | progressive size | visible size | tile path |",
                 "|---|---|---:|---:|---:|---|---:|---:|---:|---|",
             ]
@@ -198,7 +201,7 @@ def render_markdown_report(
                 "{read_only} | {tile_size} | {progressive_size} | "
                 "{visible_size} | {tile_path} |".format(
                     size=row.get("size") or row.get("label") or "?",
-                    scale=_plain_cell(row.get("scale_hint")),
+                    scale=_plain_cell(row.get("sample_size")),
                     files=_plain_cell(row.get("source_file_count")),
                     bytes_=_plain_cell(row.get("source_size_bytes")),
                     regions=_plain_cell(row.get("source_region_count")),

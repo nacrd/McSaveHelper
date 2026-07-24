@@ -1,11 +1,16 @@
 """固定合成样本与 MCA 架构基准不变量。"""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
+
+import pytest
 
 from core.bench_samples import SAMPLE_SPECS, SampleSize, create_sample_world
 from core.mca.topview_renderer import PREVIEW_TILE_SIZE, ULTRA_TILE_SIZE
+from scripts.archive_bench_report import main as archive_bench_main
+from scripts.bench_mca import main as bench_main
 from scripts.bench_mca import run_benchmark
 from scripts.bench_real_world import run_real_world_benchmark
 
@@ -51,7 +56,11 @@ def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> N
         if path.is_file()
     }
 
-    report = run_real_world_benchmark(world, loops=1)
+    report = run_real_world_benchmark(
+        world,
+        sample_size=SampleSize.SMALL,
+        loops=1,
+    )
 
     sample = cast(list[dict[str, Any]], report["samples"])[0]
     after = {
@@ -60,6 +69,7 @@ def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> N
         if path.is_file()
     }
     assert sample["read_only_verified"] is True
+    assert sample["sample_size"] == "small"
     assert sample["backup"]["skipped"] is True
     assert sample["nbt"]["level"]["p95_ms"] >= 0.0
     assert sample["world_index"]["cold_p95_ms"] >= 0.0
@@ -74,3 +84,23 @@ def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> N
     assert sample["topview"]["visible_upgrade_p95_ms"] >= 0.0
     assert sample["topview"]["visible_cache_entries"] >= 1
     assert after == before
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "program_name"),
+    [
+        (bench_main, "bench_mca.py"),
+        (archive_bench_main, "archive_bench_report.py"),
+    ],
+)
+def test_real_world_cli_requires_explicit_sample_size(
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: Callable[[], int],
+    program_name: str,
+) -> None:
+    monkeypatch.setattr(sys, "argv", [program_name, "--world", "missing"])
+
+    with pytest.raises(SystemExit) as error:
+        entrypoint()
+
+    assert error.value.code == 2

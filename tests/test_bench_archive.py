@@ -72,7 +72,7 @@ def test_render_real_sample_metadata_and_process_warm_metrics() -> None:
     sample = report["samples"][0]
     sample.update(
         {
-            "scale_hint": "large",
+            "sample_size": "small",
             "read_only_verified": True,
             "source": {
                 "file_count": 79,
@@ -101,7 +101,9 @@ def test_render_real_sample_metadata_and_process_warm_metrics() -> None:
     assert rows[0]["topview_visible_upgrade_p95_ms"] == 6500.0
     assert rows[0]["topview_progressive_upgrade_p95_ms"] == 1600.0
     assert rows[0]["read_only_verified"] is True
+    assert rows[0]["sample_size"] == "small"
     assert "Real sample metadata" in markdown
+    assert "sample class" in markdown
     assert "105143991" in markdown
     assert "ui_initial_preview_largest_overworld_region" in markdown
     assert "6500.000" in markdown
