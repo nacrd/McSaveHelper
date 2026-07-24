@@ -366,11 +366,12 @@ class TopviewTileRequestCoordinator:
 
     def _visible_request_size(self, request: MapTileRequest) -> int:
         requested_size = min(request.tile_size, self._policy.visible_max_size)
-        if (
-            requested_size > self._policy.preview_upgrade_threshold
-            and self._service.get_topview_tile_size(request.coord) <= 0
-        ):
-            return self._policy.preview_size
+        cached_size = self._service.get_topview_tile_size(request.coord)
+        if requested_size > self._policy.preview_upgrade_threshold:
+            if cached_size <= 0:
+                return self._policy.preview_size
+            if cached_size < self._policy.preview_upgrade_threshold:
+                return self._policy.preview_upgrade_threshold
         return requested_size
 
     def _submit_visible_groups(

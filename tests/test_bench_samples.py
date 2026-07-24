@@ -69,6 +69,8 @@ def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> N
         "ui_initial_preview_largest_overworld_region"
     )
     assert sample["topview"]["visible_upgrade_tile_size"] == ULTRA_TILE_SIZE
+    assert sample["topview"]["progressive_upgrade_tile_size"] == 32
+    assert sample["topview"]["progressive_upgrade_p95_ms"] >= 0.0
     assert sample["topview"]["visible_upgrade_p95_ms"] >= 0.0
     assert sample["topview"]["visible_cache_entries"] >= 1
     assert after == before

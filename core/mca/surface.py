@@ -128,11 +128,11 @@ def _coarse_edge(tile_size: int) -> int:
         # upgrade. Sampling 4x4 representative chunks keeps its cold path
         # interactive without reducing the quality of persistent LODs.
         return 4
-    # Focused LODs retain their requested spatial resolution.  A 512px leaf
-    # tile samples every block, matching the native region resolution used by
-    # JourneyMap and the finest Xaero world-map texture level.
     if tile_size <= 32:
-        return 32
+        return 16
+    # Persistent LODs from 64px retain their requested spatial resolution. A
+    # 512px leaf tile samples every block, matching the native region
+    # resolution used by JourneyMap and the finest Xaero world-map level.
     return min(512, int(tile_size))
 
 

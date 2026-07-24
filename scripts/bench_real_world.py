@@ -277,6 +277,7 @@ def _bench_cache_hit(
 def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
     """Measure the UI's preview and subsequent ordinary visible LOD."""
     preview_size = PREVIEW_TILE_SIZE
+    progressive_size = 32
     visible_size = ULTRA_TILE_SIZE
 
     def render(tile_size: int) -> Optional[bytes]:
@@ -304,14 +305,18 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
     if not png:
         raise RuntimeError(f"真实世界俯视图渲染没有生成瓦片: {target}")
 
+    progressive_upgrade_samples: list[float] = []
     visible_upgrade_samples: list[float] = []
     visible_png: Optional[bytes] = None
     clear_chunk_decode_cache()
     render(preview_size)
+    render(progressive_size)
     render(visible_size)
     for _ in range(loops):
         clear_chunk_decode_cache()
         render(preview_size)
+        progressive_ms, _ = _timed(lambda: render(progressive_size))
+        progressive_upgrade_samples.append(progressive_ms)
         upgrade_ms, visible_png = _timed(lambda: render(visible_size))
         visible_upgrade_samples.append(upgrade_ms)
     visible_warm_samples: list[float] = []
@@ -333,6 +338,15 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
         "tile_p95_ms": round(p95(cold_samples), 3),
         "memory_warm_median_ms": round(_median(warm_samples), 3),
         "memory_warm_p95_ms": round(p95(warm_samples), 3),
+        "progressive_upgrade_tile_size": progressive_size,
+        "progressive_upgrade_median_ms": round(
+            _median(progressive_upgrade_samples),
+            3,
+        ),
+        "progressive_upgrade_p95_ms": round(
+            p95(progressive_upgrade_samples),
+            3,
+        ),
         "visible_upgrade_tile_size": visible_size,
         "visible_upgrade_median_ms": round(
             _median(visible_upgrade_samples),

@@ -61,7 +61,7 @@ class _TileService:
         self.cached_sizes[coord] = size
 
 
-def test_visible_requests_bootstrap_preview_then_cap_ordinary_lod_at_256() -> None:
+def test_visible_requests_progress_from_preview_to_ordinary_lod() -> None:
     service = _TileService()
     coordinator = TopviewTileRequestCoordinator(service)
     coords = [(-1, 0), (0, 0), (1, 0)]
@@ -73,9 +73,26 @@ def test_visible_requests_bootstrap_preview_then_cap_ordinary_lod_at_256() -> No
         center=(0, 0),
     )
 
-    assert service.calls[-1] == _RequestCall(tuple([(0, 0), (-1, 0), (1, 0)]), 16, False, False)
+    assert service.calls[-1] == _RequestCall(
+        tuple([(0, 0), (-1, 0), (1, 0)]),
+        16,
+        False,
+        False,
+    )
     for coord in coords:
         service.finish(coord, 16)
+        coordinator.on_tile_ready(coord)
+
+    coordinator.request_visible(
+        coords,
+        visible_regions=coords,
+        scale=8.0,
+        center=(0, 0),
+    )
+
+    assert service.calls[-1].tile_size == 32
+    for coord in coords:
+        service.finish(coord, 32)
         coordinator.on_tile_ready(coord)
 
     coordinator.request_visible(
