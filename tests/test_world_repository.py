@@ -85,6 +85,30 @@ def test_repository_open_returns_lazy_read_context(tmp_path: Path) -> None:
         repository.close()
 
 
+def test_progressive_context_reuses_completed_index_for_session(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    world = _world(tmp_path)
+    registry = WorldIndexRegistry()
+    repository = WorldRepository(registry)
+    context = repository.open(world)
+    snapshot = context.get_index_progressive(batch_size=1)
+
+    monkeypatch.setattr(
+        registry,
+        "get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("创建会话不应再次获取或探测索引")
+        ),
+    )
+    session = context.open_session_with_index(snapshot)
+
+    assert session.world_path == world.resolve()
+    assert session.get_player_uuids() == ["aabb"]
+    registry.close()
+
+
 def test_session_spawn_reuses_current_repository_snapshot(tmp_path: Path) -> None:
     world = _world(tmp_path)
     registry = WorldIndexRegistry()

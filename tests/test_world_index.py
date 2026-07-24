@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
-from dataclasses import replace
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from typing import cast
 
@@ -16,7 +16,13 @@ from app.services.world_index_service import (
 )
 from core.nbt import Compound, File, Int
 from core.region_utils import DimensionRegionDirectory
-from core.world_index import WorldIndexBuilder, WorldIndexSnapshot
+from core.world_index import (
+    WorldIndexBuildCancelledError,
+    WorldIndexBuildPhase,
+    WorldIndexBuilder,
+    WorldIndexProgressFrame,
+    WorldIndexSnapshot,
+)
 
 
 def _world(tmp_path: Path, name: str = "world") -> Path:
@@ -53,6 +59,81 @@ def test_builder_returns_deterministic_immutable_world_snapshot(
     assert snapshot.dimensions[0].id == "overworld"
     assert snapshot.dimensions[0].region_files == snapshot.region_files
     assert snapshot.probe.fingerprint
+
+
+def test_progressive_builder_publishes_monotonic_frames_and_same_snapshot(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    frames: list[WorldIndexProgressFrame] = []
+    builder = WorldIndexBuilder()
+    expected = builder.build(world)
+
+    snapshot = builder.build_progressive(
+        world,
+        batch_size=1,
+        progress_callback=frames.append,
+    )
+
+    assert snapshot == expected
+    assert frames[-1].phase is WorldIndexBuildPhase.COMPLETE
+    assert frames[-1].snapshot is snapshot
+    assert frames[-1].is_complete is True
+    assert [frame.discovered_files for frame in frames] == sorted(
+        frame.discovered_files for frame in frames
+    )
+    with pytest.raises(FrozenInstanceError):
+        setattr(frames[-1], "completed", 2)
+
+
+def test_progressive_builder_cancellation_does_not_publish_complete_frame(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    frames: list[WorldIndexProgressFrame] = []
+    cancelled = False
+
+    def capture(frame: WorldIndexProgressFrame) -> None:
+        nonlocal cancelled
+        frames.append(frame)
+        if frame.phase is WorldIndexBuildPhase.DISCOVERING:
+            cancelled = True
+
+    with pytest.raises(WorldIndexBuildCancelledError):
+        WorldIndexBuilder().build_progressive(
+            world,
+            batch_size=1,
+            cancel_check=lambda: cancelled,
+            progress_callback=capture,
+        )
+
+    assert frames
+    assert not any(frame.is_complete for frame in frames)
+
+
+def test_registry_cancellation_does_not_cache_partial_snapshot(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    registry = WorldIndexRegistry()
+    cancelled = False
+
+    def capture(frame: WorldIndexProgressFrame) -> None:
+        nonlocal cancelled
+        if frame.phase is WorldIndexBuildPhase.DISCOVERING:
+            cancelled = True
+
+    with pytest.raises(WorldIndexBuildCancelledError):
+        registry.get_progressive(
+            world,
+            batch_size=1,
+            cancel_check=lambda: cancelled,
+            progress_callback=capture,
+        )
+
+    assert registry.stats().entries == 0
+    assert registry.stats().inflight == 0
+    registry.close()
 
 
 def test_builder_preserves_new_player_and_data_path_precedence(

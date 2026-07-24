@@ -71,9 +71,11 @@ def test_world_worker_publishes_shell_then_opens_same_read_context() -> None:
     posted: list[tuple[Any, ...]] = []
     opened: list[object] = []
     session = object()
+    snapshot = object()
     read_context = SimpleNamespace(
         shell="shell",
-        open_session=lambda **_kwargs: session,
+        get_index_progressive=lambda **_kwargs: snapshot,
+        open_session_with_index=lambda _snapshot, **_kwargs: session,
     )
     repository = SimpleNamespace(
         open=lambda world: opened.append(world) or read_context,

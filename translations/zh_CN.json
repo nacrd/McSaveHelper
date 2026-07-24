@@ -336,6 +336,7 @@
   },
   "explorer": {
     "title": "存档浏览器",
+    "index_loading": "正在建立索引 · 已发现 {count} 个文件",
     "no_world_loaded": "未加载存档",
     "load_world": "加载存档",
     "tab_players": "玩家",

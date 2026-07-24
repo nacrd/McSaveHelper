@@ -336,6 +336,7 @@
   },
   "explorer": {
     "title": "Save Explorer",
+    "index_loading": "Building index · {count} files discovered",
     "no_world_loaded": "No Save Loaded",
     "load_world": "Load Save",
     "tab_players": "Players",

@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from core.region_utils import (
     DimensionRegionDirectory,
@@ -18,6 +18,13 @@ from core.utils import (
     find_stats_dirs,
 )
 from core.uuid_utils import normalize_uuid
+from core.world_index_progress import (
+    WorldIndexBuildCancelledError,
+    WorldIndexBuildPhase,
+    WorldIndexCancelCheck,
+    WorldIndexProgressCallback,
+    WorldIndexProgressFrame,
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -141,6 +148,59 @@ class WorldIndexBuilder:
         """
         world = self._validate_world(world_path)
         return self._build_snapshot(world, self._current_probe(world))
+
+    def build_progressive(
+        self,
+        world_path: Path | str,
+        *,
+        batch_size: int = 512,
+        cancel_check: Optional[WorldIndexCancelCheck] = None,
+        progress_callback: Optional[WorldIndexProgressCallback] = None,
+    ) -> WorldIndexSnapshot:
+        """以可取消批次构造完整索引，并发布不可变阶段帧。
+
+        渐进帧不包含可供 ``WorldSession`` 使用的半成品快照；只有最终帧
+        才携带完整索引。这样调用方可以展示冷启动进度，同时保持现有
+        ``WorldIndexSnapshot`` 的完整性契约。
+
+        Args:
+            world_path: 含 ``level.dat`` 的世界根目录。
+            batch_size: 每发布一次进度帧处理的路径数量。
+            cancel_check: 在批次边界检查取消请求的回调。
+            progress_callback: 接收不可变进度帧的回调。
+
+        Returns:
+            完整世界索引快照。
+
+        Raises:
+            WorldIndexBuildCancelledError: 构建期间收到取消请求。
+            FileNotFoundError: 路径不是有效世界。
+        """
+        from core.world_index_progress import ProgressiveWorldIndexBuild
+
+        operation = ProgressiveWorldIndexBuild(
+            self,
+            batch_size=batch_size,
+            cancel_check=cancel_check,
+            progress_callback=progress_callback,
+        )
+        return operation.build(world_path)
+
+    @staticmethod
+    def _iter_glob_files(
+        directories: Iterable[Path],
+        pattern: str,
+    ) -> Iterable[Path]:
+        """逐项枚举直接文件，避免渐进扫描先物化整个目录。"""
+        for directory in directories:
+            if not directory.is_dir():
+                continue
+            try:
+                for path in directory.glob(pattern):
+                    if path.is_file():
+                        yield path
+            except OSError:
+                continue
 
     def _build_snapshot(
         self,
@@ -669,6 +729,15 @@ class WorldIndexBuilder:
             except OSError:
                 continue
         stamps.sort()
+        return WorldIndexBuilder._probe_from_stamps(world, stamps, dimensions)
+
+    @staticmethod
+    def _probe_from_stamps(
+        world: Path,
+        stamps: list[WorldFileStamp],
+        dimensions: tuple[DimensionRegionDirectory, ...],
+    ) -> WorldIndexProbe:
+        """从已读取的文件签名生成确定性探针。"""
         digest = hashlib.sha256()
         for stamp in stamps:
             digest.update(
@@ -705,13 +774,7 @@ class WorldIndexBuilder:
         pattern: str,
     ) -> tuple[Path, ...]:
         """确定性枚举存在目录中的直接文件。"""
-        files = {
-            path
-            for directory in directories
-            if directory.is_dir()
-            for path in directory.glob(pattern)
-            if path.is_file()
-        }
+        files = set(WorldIndexBuilder._iter_glob_files(directories, pattern))
         return tuple(sorted(files, key=str))
 
     @staticmethod
@@ -739,9 +802,14 @@ class WorldIndexBuilder:
 
 
 __all__ = [
+    "WorldIndexBuildCancelledError",
+    "WorldIndexBuildPhase",
     "WorldDimensionIndex",
     "WorldFileStamp",
     "WorldIndexBuilder",
+    "WorldIndexCancelCheck",
+    "WorldIndexProgressCallback",
+    "WorldIndexProgressFrame",
     "WorldIndexProbe",
     "WorldIndexSnapshot",
     "WorldShellMetadata",

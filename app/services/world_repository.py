@@ -16,7 +16,13 @@ from app.services.world_index_service import (
 )
 from core.omni.world_session import WorldSession
 from core.types import LogCallback
-from core.world_index import WorldIndexBuilder, WorldIndexSnapshot, WorldShellMetadata
+from core.world_index import (
+    WorldIndexBuilder,
+    WorldIndexCancelCheck,
+    WorldIndexProgressCallback,
+    WorldIndexSnapshot,
+    WorldShellMetadata,
+)
 
 
 WorldMutation = Callable[[Path], Any]
@@ -61,6 +67,18 @@ class WorldReadContext:
         [Optional[LogCallback], bool],
         WorldSession,
     ] = field(repr=False, compare=False)
+    _progressive_index_loader: Callable[
+        [
+            int,
+            Optional[WorldIndexCancelCheck],
+            Optional[WorldIndexProgressCallback],
+        ],
+        WorldIndexSnapshot,
+    ] = field(repr=False, compare=False)
+    _session_index_loader: Callable[
+        [WorldIndexSnapshot, Optional[LogCallback]],
+        WorldSession,
+    ] = field(repr=False, compare=False)
 
     def get_index(
         self,
@@ -76,6 +94,20 @@ class WorldReadContext:
             The current full world index.
         """
         return self._index_loader(force_refresh)
+
+    def get_index_progressive(
+        self,
+        *,
+        batch_size: int = 512,
+        cancel_check: Optional[WorldIndexCancelCheck] = None,
+        progress_callback: Optional[WorldIndexProgressCallback] = None,
+    ) -> WorldIndexSnapshot:
+        """以可取消批次加载完整索引，并发布不可变进度帧。"""
+        return self._progressive_index_loader(
+            batch_size,
+            cancel_check,
+            progress_callback,
+        )
 
     def open_session(
         self,
@@ -93,6 +125,17 @@ class WorldReadContext:
             A world session backed by the application read model.
         """
         return self._session_loader(log, force_refresh)
+
+    def open_session_with_index(
+        self,
+        index_snapshot: WorldIndexSnapshot,
+        *,
+        log: Optional[LogCallback] = None,
+    ) -> WorldSession:
+        """使用已经完成的索引快照装配会话，避免重复探针扫描。"""
+        if index_snapshot.world_path != self.world_path:
+            raise ValueError("索引快照不属于当前世界")
+        return self._session_index_loader(index_snapshot, log)
 
 
 class WorldRepository:
@@ -121,6 +164,22 @@ class WorldRepository:
     ) -> WorldIndexSnapshot:
         """返回世界只读索引快照。"""
         return self._indexes.get(world_path, force_refresh=force_refresh)
+
+    def get_index_progressive(
+        self,
+        world_path: Path | str,
+        *,
+        batch_size: int = 512,
+        cancel_check: Optional[WorldIndexCancelCheck] = None,
+        progress_callback: Optional[WorldIndexProgressCallback] = None,
+    ) -> WorldIndexSnapshot:
+        """渐进加载完整索引，并将最终快照发布到共享注册表。"""
+        return self._indexes.get_progressive(
+            world_path,
+            batch_size=batch_size,
+            cancel_check=cancel_check,
+            progress_callback=progress_callback,
+        )
 
     def open(self, world_path: Path | str) -> WorldReadContext:
         """Validate a world and return a lightweight read context.
@@ -152,6 +211,22 @@ class WorldRepository:
                 log=log,
                 force_refresh=force_refresh,
             ),
+            _progressive_index_loader=(
+                lambda batch_size, cancel_check, progress_callback:
+                self.get_index_progressive(
+                    world,
+                    batch_size=batch_size,
+                    cancel_check=cancel_check,
+                    progress_callback=progress_callback,
+                )
+            ),
+            _session_index_loader=(
+                lambda snapshot, log: self._open_session_with_index(
+                    world,
+                    snapshot,
+                    log=log,
+                )
+            ),
         )
 
     def get_shell_metadata(
@@ -180,6 +255,18 @@ class WorldRepository:
         """
         world = Path(world_path).expanduser().resolve()
         snapshot = self.get_index(world, force_refresh=force_refresh)
+        return self._open_session_with_index(world, snapshot, log=log)
+
+    def _open_session_with_index(
+        self,
+        world: Path,
+        snapshot: WorldIndexSnapshot,
+        *,
+        log: Optional[LogCallback] = None,
+    ) -> WorldSession:
+        """使用调用方已验证的完整快照创建会话。"""
+        if snapshot.world_path != world:
+            raise ValueError("索引快照不属于目标世界")
         selected = self._default_ports
         return WorldSession(
             world,

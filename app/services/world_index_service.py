@@ -17,7 +17,11 @@ from app.services.cache_registry import (
 )
 from core.world_index import (
     WorldIndexBuilder,
+    WorldIndexBuildPhase,
+    WorldIndexCancelCheck,
     WorldIndexProbe,
+    WorldIndexProgressCallback,
+    WorldIndexProgressFrame,
     WorldIndexSnapshot,
 )
 
@@ -142,6 +146,41 @@ class WorldIndexRegistry:
             observed=inspection,
         )
 
+    def get_progressive(
+        self,
+        world_path: Path | str,
+        *,
+        batch_size: int = 512,
+        cancel_check: Optional[WorldIndexCancelCheck] = None,
+        progress_callback: Optional[WorldIndexProgressCallback] = None,
+        force_refresh: bool = False,
+    ) -> WorldIndexSnapshot:
+        """渐进构建世界索引，并仅缓存最终完整快照。
+
+        现有 ``get()`` 保持同步完整构建契约；本入口仅增加可取消进度帧，
+        不会把半成品索引交给缓存或会话消费者。
+        """
+        world = Path(world_path).expanduser().resolve()
+        inspection: Optional[_CacheInspection] = None
+        if not force_refresh:
+            inspection = self._inspect_cached(os.path.normcase(str(world)), world)
+            if inspection is not None and inspection.is_current:
+                self._publish_cached_progress(
+                    inspection.snapshot,
+                    progress_callback,
+                )
+                return inspection.snapshot
+        return self._get_or_build(
+            os.path.normcase(str(world)),
+            world,
+            force_rebuild=True,
+            observed=inspection,
+            batch_size=batch_size,
+            cancel_check=cancel_check,
+            progress_callback=progress_callback,
+            progressive=True,
+        )
+
     def refresh(
         self,
         world_path: Path | str,
@@ -182,6 +221,10 @@ class WorldIndexRegistry:
         *,
         force_rebuild: bool = False,
         observed: Optional[_CacheInspection] = None,
+        batch_size: int = 512,
+        cancel_check: Optional[WorldIndexCancelCheck] = None,
+        progress_callback: Optional[WorldIndexProgressCallback] = None,
+        progressive: bool = False,
     ) -> WorldIndexSnapshot:
         """选出唯一构建者，其余调用方等待同一 Future。"""
         with self._lock:
@@ -205,7 +248,16 @@ class WorldIndexRegistry:
             return inflight.future.result()
         while True:
             try:
-                if previous is not None and not force_rebuild:
+                if progressive:
+                    snapshot = self._builder.build_progressive(
+                        world,
+                        batch_size=batch_size,
+                        cancel_check=cancel_check,
+                        progress_callback=self._without_complete_frame(
+                            progress_callback
+                        ),
+                    )
+                elif previous is not None and not force_rebuild:
                     snapshot = self._builder.refresh(
                         previous,
                         current_probe=current_probe,
@@ -213,11 +265,52 @@ class WorldIndexRegistry:
                 else:
                     snapshot = self._builder.build(world)
                 if self._publish(key, inflight, snapshot):
+                    if progressive:
+                        self._publish_cached_progress(
+                            snapshot,
+                            progress_callback,
+                        )
                     return snapshot
                 current_probe = None
             except BaseException as exc:
                 self._publish_failure(key, inflight, exc)
                 raise
+
+    @staticmethod
+    def _publish_cached_progress(
+        snapshot: WorldIndexSnapshot,
+        callback: Optional[WorldIndexProgressCallback],
+    ) -> None:
+        """缓存命中时发布统一的完成帧。"""
+        if callback is None:
+            return
+        count = len(snapshot.probe.files)
+        callback(
+            WorldIndexProgressFrame(
+                snapshot.world_path,
+                WorldIndexBuildPhase.COMPLETE,
+                1,
+                1,
+                count,
+                count,
+                is_complete=True,
+                snapshot=snapshot,
+            )
+        )
+
+    @staticmethod
+    def _without_complete_frame(
+        callback: Optional[WorldIndexProgressCallback],
+    ) -> Optional[WorldIndexProgressCallback]:
+        """延迟完成帧，直到注册表通过 epoch 校验并发布缓存。"""
+        if callback is None:
+            return None
+
+        def publish(frame: WorldIndexProgressFrame) -> None:
+            if not frame.is_complete:
+                callback(frame)
+
+        return publish
 
     def _publish(
         self,

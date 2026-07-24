@@ -38,6 +38,7 @@ from app.services.execution_runtime import (
 from app.services.map_marker_service import MapMarkerService
 from app.services.ui_delivery import UiDeliverySpec
 from app.services.world_repository import WorldReadContext
+from core.world_index import WorldIndexBuildPhase, WorldIndexProgressFrame
 
 
 class ExplorerView(
@@ -404,11 +405,26 @@ class ExplorerView(
                 pass
             context.report_progress(1, 3, "shell_ready")
             context.raise_if_cancelled()
-            session = self._create_world_session(
-                world,
-                self.app.log,
-                read_context=read_context,
-            )
+            if read_context is not None:
+                snapshot = read_context.get_index_progressive(
+                    cancel_check=lambda: context.is_cancelled,
+                    progress_callback=lambda frame: self._publish_index_progress(
+                        context,
+                        frame,
+                        generation,
+                    ),
+                )
+                context.raise_if_cancelled()
+                session = read_context.open_session_with_index(
+                    snapshot,
+                    log=self.app.log,
+                )
+            else:
+                session = self._create_world_session(
+                    world,
+                    self.app.log,
+                    read_context=read_context,
+                )
             context.report_progress(2, 3, "session_ready")
             context.raise_if_cancelled()
             self._post_world_ui(
@@ -454,6 +470,20 @@ class ExplorerView(
             ),
         )
 
+    def _publish_index_progress(
+        self,
+        context: OperationContext,
+        frame: WorldIndexProgressFrame,
+        generation: int,
+    ) -> None:
+        """将索引阶段帧投递到 UI，并沿用世界加载代次守卫。"""
+        context.raise_if_cancelled()
+        self._post_world_ui(
+            context,
+            "index_progress",
+            lambda frame=frame: self._apply_index_progress(frame, generation),
+        )
+
     def _apply_shell_metadata(
         self,
         shell: Any,
@@ -468,6 +498,23 @@ class ExplorerView(
         self._world_label.value = (
             f"⏳ {name} · 区域 {regions} · 维度提示 {dims} · 加载中..."
         )
+        self._world_label.color = THEME.mc_gold
+        safe_update(self._world_label)
+
+    def _apply_index_progress(
+        self,
+        frame: WorldIndexProgressFrame,
+        generation: int,
+    ) -> None:
+        """显示渐进索引状态；完整快照仍在最终帧后才发布。"""
+        if not self._is_world_load_current(generation):
+            return
+        if frame.phase is WorldIndexBuildPhase.COMPLETE:
+            return
+        self._world_label.value = self._t(
+            "explorer.index_loading",
+            "正在建立索引 · 已发现 {count} 个文件",
+        ).format(count=frame.discovered_files)
         self._world_label.color = THEME.mc_gold
         safe_update(self._world_label)
 
