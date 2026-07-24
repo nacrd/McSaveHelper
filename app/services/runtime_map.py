@@ -1,7 +1,7 @@
 """在统一 ExecutionRuntime 上批量并行处理条目。"""
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence, TypeVar
+from typing import Callable, Mapping, Optional, Sequence, TypeVar
 
 from app.services.execution_runtime import (
     CancellationToken,
@@ -15,6 +15,13 @@ from app.services.execution_runtime import (
 
 ItemT = TypeVar("ItemT")
 ResultT = TypeVar("ResultT")
+
+
+class _MissingResult:
+    """Internal marker distinct from every valid worker result."""
+
+
+_MISSING_RESULT = _MissingResult()
 
 
 def _resolve_in_flight_limit(
@@ -72,6 +79,10 @@ def _submit_more(
     pending: dict[OperationHandle[ResultT], int],
     next_index: int,
     in_flight_limit: int,
+    feature: str,
+    world_id: str,
+    generation: int,
+    metadata: Optional[Mapping[str, object]],
 ) -> int:
     """在容量允许时继续提交条目，返回新的 next_index。"""
     total = len(items)
@@ -80,12 +91,18 @@ def _submit_more(
         item_index = next_index
         item = items[item_index]
         next_index += 1
+        item_metadata = dict(metadata or {})
+        item_metadata["item_index"] = item_index
         try:
             handle = runtime.submit(
                 f"{operation}[{item_index}]",
                 _make_item_worker(worker, item, cancel_check),
                 lane=lane,
                 priority=priority,
+                feature=feature,
+                world_id=world_id,
+                generation=generation,
+                metadata=item_metadata,
             )
         except TaskQueueFullError:
             if not pending:
@@ -114,7 +131,7 @@ def _publish_done(
     *,
     pending: dict[OperationHandle[ResultT], int],
     done_handles: list[OperationHandle[ResultT]],
-    results: list[ResultT | BaseException | None],
+    results: list[ResultT | BaseException | _MissingResult],
     on_item_done: Optional[Callable[[int, ResultT | BaseException], None]],
 ) -> int:
     """把完成句柄写入结果槽，返回本次完成数量。"""
@@ -133,22 +150,31 @@ def _publish_done(
 
 
 def _cancel_pending(pending: dict[OperationHandle[ResultT], int]) -> None:
-    """取消并尽量排空在途任务以释放容量。"""
-    for handle in tuple(pending):
+    """取消并等待在途任务到达终态以释放容量。
+
+    A bounded wait here would let a world transaction publish while a
+    cooperative worker still holds files in its staging directory.  Cancel
+    every handle first so workers can observe the request concurrently, then
+    drain each result; workers are required to check cancellation at safe
+    checkpoints.
+    """
+    handles = tuple(pending)
+    for handle in handles:
         handle.cancel()
+    for handle in handles:
         try:
-            handle.result(timeout=0.01)
+            handle.result()
         except Exception:
-            pass
+            continue
 
 
 def _finalize_results(
-    results: list[ResultT | BaseException | None],
+    results: list[ResultT | BaseException | _MissingResult],
 ) -> list[ResultT | BaseException]:
-    """把可空结果槽物化为最终列表。"""
+    """物化结果槽，同时保留合法的 ``None`` 返回值。"""
     finalized: list[ResultT | BaseException] = []
     for index, value in enumerate(results):
-        if value is None:
+        if isinstance(value, _MissingResult):
             finalized.append(RuntimeError(f"missing result at {index}"))
         else:
             finalized.append(value)
@@ -168,6 +194,10 @@ def map_items(
         Callable[[int, ResultT | BaseException], None]
     ] = None,
     max_in_flight: Optional[int] = None,
+    feature: str = "parallel",
+    world_id: str = "",
+    generation: int = 0,
+    metadata: Optional[Mapping[str, object]] = None,
 ) -> list[ResultT | BaseException]:
     """在有界通道中并行处理条目，结果顺序与输入一致。
 
@@ -184,6 +214,10 @@ def map_items(
         cancel_check: 额外取消探针。
         on_item_done: 每个条目完成时回调。
         max_in_flight: 最大在途任务数。
+        feature: 操作所属功能域。
+        world_id: 可选世界身份。
+        generation: 调用方的会话代次。
+        metadata: 共享诊断维度。
 
     Returns:
         与输入等长的结果列表；失败项为异常实例。
@@ -203,7 +237,9 @@ def map_items(
         total,
         max_in_flight,
     )
-    results: list[ResultT | BaseException | None] = [None] * total
+    results: list[ResultT | BaseException | _MissingResult] = [
+        _MISSING_RESULT
+    ] * total
     pending: dict[OperationHandle[ResultT], int] = {}
     next_index = 0
     completed = 0
@@ -222,6 +258,10 @@ def map_items(
                 pending=pending,
                 next_index=next_index,
                 in_flight_limit=in_flight_limit,
+                feature=feature,
+                world_id=world_id,
+                generation=generation,
+                metadata=metadata,
             )
             if not pending:
                 continue

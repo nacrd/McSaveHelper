@@ -24,6 +24,8 @@ def test_mca_benchmark_reports_core_metrics() -> None:
     assert sample["mca"]["chunk_count"] == SAMPLE_SPECS[SampleSize.SMALL].chunks_per_region
     assert sample["world_index"]["regions"] == 1
     assert sample["world_session"]["region_count"] == 1
+    assert sample["world_session"]["shell_open_p95_ms"] < 500.0
+    assert sample["world_session"]["cold_open_p95_ms"] >= 0.0
     assert sample["backup"]["file_count"] >= 1
     assert sample["backup"]["backup_p95_ms"] >= 0.0
     assert sample["topview"]["cache_hit_count"] >= 1

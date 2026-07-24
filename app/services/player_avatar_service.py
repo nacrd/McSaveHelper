@@ -10,6 +10,12 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from app.services.cache_registry import (
+    CachePolicy,
+    CacheRegistration,
+    CacheRegistry,
+    CacheStats,
+)
 from app.services.execution_runtime import (
     ExecutionRuntime,
     RuntimeClosedError,
@@ -30,6 +36,9 @@ _SESSION_URL = (
 )
 _REQUEST_TIMEOUT = 5
 _MAX_MEMORY = 128
+_MEMORY_ENTRY_BUDGET_BYTES = 1024
+_MEMORY_CACHE_BUDGET_BYTES = _MAX_MEMORY * _MEMORY_ENTRY_BUDGET_BYTES
+_MEMORY_CACHE_NAME = "player.avatar"
 _FACE_SIZE = 64  # output face size in pixels
 
 
@@ -132,7 +141,7 @@ class PlayerAvatarService:
         cache_dir: Optional[Path] = None,
         *,
         enabled: bool = True,
-        cache_registry: Optional[Any] = None,
+        cache_registry: Optional[CacheRegistry] = None,
     ) -> None:
         """初始化头像缓存目录与内存索引。
 
@@ -153,15 +162,16 @@ class PlayerAvatarService:
         self._lock = threading.Lock()
         self._inflight: Dict[str, list[Callable[[Optional[str]], None]]] = {}
         self._failed: set[str] = set()
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._cache_evictions = 0
         self._execution_runtime = execution_runtime
         self._closed = False
-        self._cache_registration: Optional[Any] = None
+        self._cache_registration: Optional[CacheRegistration] = None
         if cache_registry is not None:
-            from app.services.cache_registry import CachePolicy
-
             self._cache_registration = cache_registry.register_external(
-                "player.avatar",
-                CachePolicy(128, 8 * 1024 * 1024),
+                _MEMORY_CACHE_NAME,
+                CachePolicy(_MAX_MEMORY, _MEMORY_CACHE_BUDGET_BYTES),
                 self._avatar_cache_stats,
                 self._clear_memory_paths,
             )
@@ -189,15 +199,16 @@ class PlayerAvatarService:
         if not norm:
             return None
         cached = self._get_memory_cached_path(norm)
-        if cached is not None and cached.is_file():
-            return cached
+        if cached is not None:
+            if cached.is_file():
+                return cached
+            with self._lock:
+                if self._memory.get(norm) == cached:
+                    self._memory.pop(norm, None)
         path = self._cache_dir / f"{norm}.png"
         if path.is_file():
             with self._lock:
-                self._memory[norm] = path
-                self._memory.move_to_end(norm)
-                while len(self._memory) > _MAX_MEMORY:
-                    self._memory.popitem(last=False)
+                self._remember_path_locked(norm, path)
             return path
         return None
 
@@ -207,8 +218,18 @@ class PlayerAvatarService:
             cached = self._memory.get(norm)
             if cached is not None:
                 self._memory.move_to_end(norm)
+                self._cache_hits += 1
                 return cached
+            self._cache_misses += 1
         return None
+
+    def _remember_path_locked(self, norm: str, path: Path) -> None:
+        """在持锁状态下更新 LRU 路径索引。"""
+        self._memory[norm] = path
+        self._memory.move_to_end(norm)
+        while len(self._memory) > _MAX_MEMORY:
+            self._memory.popitem(last=False)
+            self._cache_evictions += 1
 
     def load_avatar_async(
         self,
@@ -264,22 +285,26 @@ class PlayerAvatarService:
                     # UI callbacks are best-effort during queue pressure/teardown.
                     pass
 
-    def _avatar_cache_stats(self) -> Any:
+    def _avatar_cache_stats(self) -> CacheStats:
         """向 CacheRegistry 报告内存路径索引规模。"""
-        from app.services.cache_registry import CacheStats
-
         with self._lock:
             entries = len(self._memory)
-        # 路径索引近似占用：每条 256 字节元数据。
+            bytes_used = sum(
+                128 + len(uuid) * 2 + len(str(path)) * 2
+                for uuid, path in self._memory.items()
+            )
+            hits = self._cache_hits
+            misses = self._cache_misses
+            evictions = self._cache_evictions
         return CacheStats(
-            name="player.avatar",
+            name=_MEMORY_CACHE_NAME,
             entries=entries,
-            bytes_used=entries * 256,
-            max_entries=128,
-            max_bytes=8 * 1024 * 1024,
-            hits=0,
-            misses=0,
-            evictions=0,
+            bytes_used=bytes_used,
+            max_entries=_MAX_MEMORY,
+            max_bytes=_MEMORY_CACHE_BUDGET_BYTES,
+            hits=hits,
+            misses=misses,
+            evictions=evictions,
         )
 
     def _clear_memory_paths(self) -> None:
@@ -302,11 +327,13 @@ class PlayerAvatarService:
             registration.close()
 
     def _fetch_worker(self, norm: str) -> None:
-        """Background worker: fetch/cache avatar and invoke waiters."""
+        """后台获取并缓存头像，再通知仍然有效的等待者。"""
+        if self._closed:
+            return
         path: Optional[Path] = None
         try:
             path = self.get_cached_path(norm)
-            if path is None:
+            if path is None and not self._closed:
                 path = self._fetch_and_cache(norm)
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             logger.debug(
@@ -325,13 +352,12 @@ class PlayerAvatarService:
             path = None
         with self._lock:
             callbacks = self._inflight.pop(norm, [])
+            if self._closed:
+                return
             if path is None:
                 self._failed.add(norm)
             else:
-                self._memory[norm] = path
-                self._memory.move_to_end(norm)
-                while len(self._memory) > _MAX_MEMORY:
-                    self._memory.popitem(last=False)
+                self._remember_path_locked(norm, path)
         result = str(path) if path is not None else None
         for callback in callbacks:
             try:

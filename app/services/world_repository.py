@@ -6,7 +6,7 @@ Explorer、统计、对比等读路径应通过本仓库获取不可变索引和
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -38,6 +38,63 @@ class WorldSessionPorts:
     transaction_callback: Optional[TransactionCallback] = None
 
 
+@dataclass(frozen=True)
+class WorldReadContext:
+    """A lightweight, immutable handle for one validated world.
+
+    Constructing this context only validates the world and reads shell metadata.
+    Full directory indexing remains lazy until :meth:`get_index` or
+    :meth:`open_session` is called.
+
+    Attributes:
+        world_path: Normalized world root.
+        shell: Metadata suitable for the first UI paint.
+    """
+
+    world_path: Path
+    shell: WorldShellMetadata
+    _index_loader: Callable[[bool], WorldIndexSnapshot] = field(
+        repr=False,
+        compare=False,
+    )
+    _session_loader: Callable[
+        [Optional[LogCallback], bool],
+        WorldSession,
+    ] = field(repr=False, compare=False)
+
+    def get_index(
+        self,
+        *,
+        force_refresh: bool = False,
+    ) -> WorldIndexSnapshot:
+        """Load or reuse the full immutable index for this world.
+
+        Args:
+            force_refresh: Whether to bypass the cached snapshot.
+
+        Returns:
+            The current full world index.
+        """
+        return self._index_loader(force_refresh)
+
+    def open_session(
+        self,
+        *,
+        log: Optional[LogCallback] = None,
+        force_refresh: bool = False,
+    ) -> WorldSession:
+        """Open a session after lazily obtaining the shared index.
+
+        Args:
+            log: Optional session log callback.
+            force_refresh: Whether to rebuild the index first.
+
+        Returns:
+            A world session backed by the application read model.
+        """
+        return self._session_loader(log, force_refresh)
+
+
 class WorldRepository:
     """共享世界读模型：索引缓存 + 会话工厂。"""
 
@@ -64,6 +121,38 @@ class WorldRepository:
     ) -> WorldIndexSnapshot:
         """返回世界只读索引快照。"""
         return self._indexes.get(world_path, force_refresh=force_refresh)
+
+    def open(self, world_path: Path | str) -> WorldReadContext:
+        """Validate a world and return a lightweight read context.
+
+        This method intentionally does not build the full directory index or
+        parse ``level.dat``. Callers can publish :attr:`WorldReadContext.shell`
+        immediately, then load the full index on the shared runtime.
+
+        Args:
+            world_path: World root containing ``level.dat``.
+
+        Returns:
+            A lazy, immutable read context for the normalized world.
+
+        Raises:
+            FileNotFoundError: The path is not a valid world.
+        """
+        shell = self.get_shell_metadata(world_path)
+        world = shell.world_path
+        return WorldReadContext(
+            world_path=world,
+            shell=shell,
+            _index_loader=lambda force_refresh: self.get_index(
+                world,
+                force_refresh=force_refresh,
+            ),
+            _session_loader=lambda log, force_refresh: self.open_session(
+                world,
+                log=log,
+                force_refresh=force_refresh,
+            ),
+        )
 
     def get_shell_metadata(
         self,
@@ -128,6 +217,7 @@ class WorldRepository:
 
 
 __all__ = [
+    "WorldReadContext",
     "WorldRepository",
     "WorldSessionPorts",
     "WorldShellMetadata",

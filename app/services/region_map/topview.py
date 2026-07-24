@@ -82,6 +82,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._tile_ready_callback: Optional[Any] = None
         self._topview_cache_hits = 0
         self._topview_cache_misses = 0
+        self._topview_cache_evictions = 0
         self._stale_callback_discards = 0
 
     def _init_topview_workers(self) -> None:
@@ -109,11 +110,11 @@ class RegionMapTopviewMixin(RegionMapHost):
                 name=f"map.topview.{id(self)}",
                 entries=len(self._topview_tiles),
                 bytes_used=self._topview_memory_bytes,
-                max_entries=self.TOPVIEW_QUEUE_LIMIT,
+                max_entries=self.TOPVIEW_CACHE_ENTRY_LIMIT,
                 max_bytes=self.TOPVIEW_MEMORY_LIMIT,
                 hits=self._topview_cache_hits,
                 misses=self._topview_cache_misses,
-                evictions=0,
+                evictions=self._topview_cache_evictions,
             )
 
     def get_stale_callback_discards(self) -> int:
@@ -1164,7 +1165,10 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._topview_revision_counter += 1
         self._topview_tile_revisions[coord] = self._topview_revision_counter
         while (
-            self._topview_memory_bytes > self.TOPVIEW_MEMORY_LIMIT
+            (
+                len(self._topview_tiles) > self.TOPVIEW_CACHE_ENTRY_LIMIT
+                or self._topview_memory_bytes > self.TOPVIEW_MEMORY_LIMIT
+            )
             and self._topview_tiles
         ):
             old_coord, old_png = self._topview_tiles.popitem(last=False)
@@ -1174,3 +1178,4 @@ class RegionMapTopviewMixin(RegionMapHost):
             self._topview_tile_revisions.pop(old_coord, None)
             self._topview_tile_sources.pop(old_coord, None)
             self._topview_source_checked_at.pop(old_coord, None)
+            self._topview_cache_evictions += 1

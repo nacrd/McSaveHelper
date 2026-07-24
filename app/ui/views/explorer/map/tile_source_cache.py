@@ -79,7 +79,7 @@ class TileSourceCache:
         source = base64.b64encode(raw).decode("ascii")
         with self._lock:
             if self._closed or generation != self._generation:
-                return source
+                return None
             current = self._sources.get(coord)
             if current is not None:
                 if current[0] > version:

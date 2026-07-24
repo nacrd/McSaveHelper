@@ -145,6 +145,7 @@ def check_no_private_execution_runtime_fallback() -> CheckResult:
         "execution_runtime or ExecutionRuntime",
         "ExecutionRuntime() if execution_runtime is None",
         "or BackupService(",
+        "or CacheRegistry(",
     )
     for path in _iter_py_files(APP_ROOT / "services"):
         rel = path.relative_to(PROJECT_ROOT).as_posix()
@@ -507,6 +508,15 @@ def _mca_sample_metrics(
             errors.append(f"{size}: cache hit p95 missing")
         if not isinstance(hit_count, int) or hit_count < 1:
             errors.append(f"{size}: cache hit sample missing")
+        world_session = item.get("world_session")
+        if not isinstance(world_session, dict):
+            errors.append(f"{size}: world session missing")
+            continue
+        shell_p95 = world_session.get("shell_open_p95_ms")
+        if not isinstance(shell_p95, (int, float)):
+            errors.append(f"{size}: shell open p95 missing")
+        elif float(shell_p95) >= 500.0:
+            errors.append(f"{size}: shell open p95 >= 500ms")
     return sample_sizes, errors
 
 

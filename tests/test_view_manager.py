@@ -63,9 +63,16 @@ class DisposableActionView(ActionView):
         self.dispose_calls += 1
 
 
-def _manager(create_view, selected=lambda: "test"):
+def _manager(
+    create_view,
+    selected=lambda: "test",
+    get_top_actions=None,
+):
     updates = []
     logs = []
+    action_provider = get_top_actions or (
+        lambda _view_id, view: view.get_top_actions()
+    )
     manager = ViewManager(ViewManagerDependencies(
         create_view=create_view,
         get_current_save_path=lambda: "C:/world",
@@ -76,6 +83,7 @@ def _manager(create_view, selected=lambda: "test"):
         update_page=lambda: updates.append("update"),
         log=lambda message, level: logs.append((message, level)),
         translate=lambda key, default: default,
+        get_top_actions=action_provider,
     ))
     content = ft.Container()
     manager.attach_host(ViewHost(content))
@@ -119,9 +127,22 @@ def test_view_manager_projects_view_actions_and_save_context() -> None:
     assert isinstance(view._page_header.content, ft.Row)
     assert view._page_header.content.wrap is False
     assert view.compact_modes[-1] is False
-
     manager.notify_current_view_save_selected("D:/other")
     assert view.selected_paths[-1] == "D:/other"
+
+
+def test_view_manager_prefers_registered_action_factory() -> None:
+    view = DisposableActionView(fail_top_actions=True)
+    manager, content, _updates, logs = _manager(
+        lambda _view_id: view,
+        get_top_actions=lambda _view_id, _view: [],
+    )
+
+    manager.switch_view("test")
+
+    assert content.content is view
+    assert view._page_header.action_row.visible is False
+    assert logs == []
 
 
 def test_narrow_toolbar_moves_extra_commands_into_full_label_menu() -> None:

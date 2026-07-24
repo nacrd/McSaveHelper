@@ -1,4 +1,4 @@
-"""Register the process-level MCA surface cache with the application budget."""
+"""把进程级 MCA 地表缓存纳入应用统一预算。"""
 from __future__ import annotations
 
 import threading
@@ -13,8 +13,12 @@ from core.mca.surface import (
     CHUNK_DECODE_CACHE_MAX_BYTES,
     CHUNK_DECODE_CACHE_MAX_ENTRIES,
     chunk_decode_cache_bytes,
+    chunk_decode_cache_evictions,
+    chunk_decode_cache_hits,
+    chunk_decode_cache_misses,
     chunk_decode_cache_size,
     clear_chunk_decode_cache,
+    invalidate_chunk_decode_cache_for_world,
 )
 
 
@@ -26,19 +30,20 @@ _owners = 0
 def register_mca_chunk_cache(
     cache_registry: CacheRegistry,
 ) -> CacheRegistration:
-    """Register the shared MCA decode cache exactly once for the application.
+    """为一个应用注册一次共享 MCA 解码缓存。
 
     Args:
-        cache_registry: Application-owned aggregate cache budget.
+        cache_registry: 由应用持有的聚合缓存预算。
 
     Returns:
-        Registration owned by ``cache_registry`` for its full lifetime.
+        生命周期由 ``cache_registry`` 持有的注册凭据。
     """
     global _owners
     with _OWNERS_LOCK:
         _owners += 1
+    registration: CacheRegistration | None = None
     try:
-        return cache_registry.register_external(
+        registration = cache_registry.register_external(
             MCA_CHUNK_CACHE_NAME,
             CachePolicy(
                 CHUNK_DECODE_CACHE_MAX_ENTRIES,
@@ -48,14 +53,26 @@ def register_mca_chunk_cache(
             clear_chunk_decode_cache,
             on_close=_release_mca_chunk_cache,
         )
+        cache_registry.register_world_invalidator(
+            MCA_CHUNK_CACHE_NAME,
+            _invalidate_mca_world,
+        )
+        return registration
     except (RuntimeError, ValueError):
-        with _OWNERS_LOCK:
-            _owners -= 1
+        if registration is not None:
+            registration.close()
+        else:
+            _release_mca_chunk_cache()
         raise
 
 
+def _invalidate_mca_world(world_path: str) -> None:
+    """仅删除来源于已替换世界的 MCA 解码缓存。"""
+    invalidate_chunk_decode_cache_for_world(world_path)
+
+
 def _release_mca_chunk_cache() -> None:
-    """Clear process state only after the last application registry closes."""
+    """仅在最后一个应用注册表关闭后清理进程状态。"""
     global _owners
     should_clear = False
     with _OWNERS_LOCK:
@@ -67,16 +84,16 @@ def _release_mca_chunk_cache() -> None:
 
 
 def _chunk_decode_cache_stats() -> CacheStats:
-    """Return current usage using the cache implementation's real limits."""
+    """按缓存实现的真实上限返回当前使用量。"""
     return CacheStats(
         name=MCA_CHUNK_CACHE_NAME,
         entries=chunk_decode_cache_size(),
         bytes_used=chunk_decode_cache_bytes(),
         max_entries=CHUNK_DECODE_CACHE_MAX_ENTRIES,
         max_bytes=CHUNK_DECODE_CACHE_MAX_BYTES,
-        hits=0,
-        misses=0,
-        evictions=0,
+        hits=chunk_decode_cache_hits(),
+        misses=chunk_decode_cache_misses(),
+        evictions=chunk_decode_cache_evictions(),
     )
 
 

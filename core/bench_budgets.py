@@ -19,6 +19,7 @@ class PathBudget:
     world_index_warm_ms: float
     topview_tile_ms: float
     session_open_ms: float
+    shell_open_ms: float = 500.0
     topview_cache_hit_ms: float = 30.0
     backup_ms: float = 5000.0
 
@@ -101,6 +102,11 @@ def evaluate_sample_against_budget(
             "topview.cache_hit_p95_ms",
             topview_data.get("cache_hit_p95_ms"),
             budget.topview_cache_hit_ms,
+        ),
+        (
+            "session.shell_open_p95_ms",
+            session_data.get("shell_open_p95_ms"),
+            budget.shell_open_ms,
         ),
         (
             "session.open_p95_ms",

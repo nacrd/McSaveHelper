@@ -153,16 +153,11 @@ class RegionMapMetaMixin(RegionMapHost):
     @staticmethod
     def _completed_empty_meta_handle() -> OperationHandle[Dict[str, Any]]:
         """为饱和时的可重试元数据请求创建空完成结果。"""
-        from concurrent.futures import Future
-
-        future: Future[Dict[str, Any]] = Future()
-        future.set_result({})
-        return OperationHandle(
+        return OperationHandle.completed(
+            {},
             operation="load_region_meta",
             lane=ExecutionLane.CPU,
             priority=TaskPriority.INTERACTIVE,
-            _future=future,
-            _token=CancellationToken(),
         )
 
     async def _await_region_meta_task(

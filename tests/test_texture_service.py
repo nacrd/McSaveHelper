@@ -7,12 +7,15 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Iterator
 
+import pytest
+
 from core.texture import client_jar
 from core.texture.block_guess import (
     guess_is_block,
     resolve_texture_resource_key,
 )
 from core.texture.client_jar import ClientJarInfo
+from app.services.cache_registry import CacheRegistry
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.texture_service import TextureService
 
@@ -34,6 +37,30 @@ class _Response:
     def iter_content(self, chunk_size: int) -> Iterator[bytes]:
         del chunk_size
         return iter(self._chunks)
+
+
+def test_texture_constructor_releases_first_region_when_budget_is_insufficient() -> None:
+    runtime = ExecutionRuntime()
+    registry = CacheRegistry(budget_bytes=1024 * 1024)
+    try:
+        with pytest.raises(ValueError, match="超过应用总上限"):
+            TextureService(runtime, registry)
+        assert registry.stats().regions == ()
+    finally:
+        runtime.shutdown(wait=False)
+        registry.close()
+
+
+def test_texture_constructor_releases_regions_when_runtime_is_closed() -> None:
+    runtime = ExecutionRuntime()
+    registry = CacheRegistry(budget_bytes=64 * 1024 * 1024)
+    runtime.shutdown(wait=False)
+
+    with pytest.raises(RuntimeError, match="运行时已经关闭"):
+        TextureService(runtime, registry)
+
+    assert registry.stats().regions == ()
+    registry.close()
 
 
 def _zip_bytes() -> bytes:
@@ -98,7 +125,7 @@ def test_import_textures_from_jars_bulk_extracts_pngs(
         archive.writestr("assets/examplemod/textures/item/widget.png", png)
         archive.writestr("assets/minecraft/lang/zh_cn.json", "{}")
 
-    service = TextureService(ExecutionRuntime())
+    service = TextureService(ExecutionRuntime(), CacheRegistry())
     monkeypatch.setattr(service, "_cache_dir", cache_dir)
     # Avoid network / local MC discovery side effects.
     monkeypatch.setattr(service, "find_minecraft_jar", lambda: None)
@@ -196,7 +223,7 @@ def test_find_local_jar_uses_release_time_not_version_string(
 
 
 def test_texture_cache_rejects_item_id_path_traversal(tmp_path: Path) -> None:
-    service = TextureService(ExecutionRuntime())
+    service = TextureService(ExecutionRuntime(), CacheRegistry())
     service._cache_dir = tmp_path / "cache"
     service._cache_dir.mkdir()
     outside = tmp_path / "review_probe.png"
@@ -209,7 +236,7 @@ def test_client_jar_download_is_single_flight(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
-    service = TextureService(ExecutionRuntime())
+    service = TextureService(ExecutionRuntime(), CacheRegistry())
     service._jar_cache_dir = tmp_path
     target = tmp_path / "client.jar"
     entered = threading.Event()
@@ -256,7 +283,7 @@ def test_async_texture_load_uses_injected_runtime(
     monkeypatch: Any,
 ) -> None:
     runtime = ExecutionRuntime()
-    service = TextureService(runtime)
+    service = TextureService(runtime, CacheRegistry())
     loaded = threading.Event()
     worker_names: list[str] = []
     monkeypatch.setattr(

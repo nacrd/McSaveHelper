@@ -102,7 +102,7 @@ class WorldIndexRegistry:
         self._evictions = 0
         self._cache_registration: Optional[CacheRegistration] = None
         if cache_registry is not None:
-            self._cache_registration = cache_registry.register_external(
+            registration = cache_registry.register_external(
                 self.CACHE_NAME,
                 CachePolicy(
                     max_entries,
@@ -111,10 +111,15 @@ class WorldIndexRegistry:
                 self._cache_stats,
                 self.clear,
             )
-            cache_registry.register_world_invalidator(
-                self.CACHE_NAME,
-                self._invalidate_normalized_key,
-            )
+            try:
+                cache_registry.register_world_invalidator(
+                    self.CACHE_NAME,
+                    self._invalidate_normalized_key,
+                )
+            except (RuntimeError, ValueError):
+                registration.close()
+                raise
+            self._cache_registration = registration
 
     def get(
         self,

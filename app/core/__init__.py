@@ -11,7 +11,7 @@ from .window_manager import (
 )
 from .dialog_manager import DialogManager, DialogManagerDependencies
 from .view_manager import ViewHost, ViewManager, ViewManagerDependencies
-from .view_catalog import LazyViewFactory, ViewCatalog
+from .view_catalog import LazyViewFactory, TopActionsFactory, ViewCatalog
 from .progress_manager import ProgressManager
 from .gui_optimizer import GUIOptimizer, GUIOptimizerDependencies
 from .save_context_manager import SaveContextManager
@@ -26,6 +26,7 @@ __all__ = [
     "ViewHost",
     "ViewManagerDependencies",
     "LazyViewFactory",
+    "TopActionsFactory",
     "ViewCatalog",
     "ProgressManager",
     "GUIOptimizer",

@@ -3,7 +3,7 @@
 Speed strategy:
 1. Cap unique chunk decodes for overview resolutions (stride).
 2. Process-level LRU of compact surface samples (reuse across LOD upgrades).
-3. Parallel zlib/NBT decode for cache misses.
+3. Optional injected parallel zlib/NBT decode for cache misses.
 4. Nearest-neighbor expand to the requested tile size.
 """
 from __future__ import annotations
@@ -11,11 +11,15 @@ from __future__ import annotations
 import os
 import threading
 from collections import OrderedDict
-from concurrent.futures import as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
 
-from core.parallel import bounded_executor, clamp_workers
+from core.parallel import (
+    ParallelCancelledError,
+    ParallelRunner,
+    SerialParallelRunner,
+    clamp_workers,
+)
 from core.mca.block_palette import (
     get_world_surface_chunk_blocks,
     is_air_name,
@@ -99,6 +103,9 @@ CHUNK_DECODE_CACHE_MAX_BYTES = 128 * 1024 * 1024
 _CHUNK_LRU_MAX = CHUNK_DECODE_CACHE_MAX_ENTRIES
 _CHUNK_LRU_MAX_BYTES = CHUNK_DECODE_CACHE_MAX_BYTES
 _CHUNK_LRU_BYTES = 0
+_CHUNK_LRU_HITS = 0
+_CHUNK_LRU_MISSES = 0
+_CHUNK_LRU_EVICTIONS = 0
 
 
 def _estimate_surface_samples_bytes(samples: SurfaceSamples) -> int:
@@ -136,10 +143,13 @@ def _path_signature(path: Path) -> Tuple[str, int, int]:
 
 
 def _lru_get(key: ChunkCacheKey) -> Tuple[bool, SurfaceSamples]:
+    global _CHUNK_LRU_HITS, _CHUNK_LRU_MISSES
     with _CHUNK_LRU_LOCK:
         if key not in _CHUNK_LRU:
+            _CHUNK_LRU_MISSES += 1
             return False, {}
         _CHUNK_LRU.move_to_end(key)
+        _CHUNK_LRU_HITS += 1
         return True, _CHUNK_LRU[key]
 
 
@@ -154,14 +164,14 @@ def _lru_merge(
     expected_epoch: int,
 ) -> SurfaceSamples:
     """Atomically merge samples unless the cache was cleared meanwhile."""
-    global _CHUNK_LRU_BYTES
+    global _CHUNK_LRU_BYTES, _CHUNK_LRU_EVICTIONS
     with _CHUNK_LRU_LOCK:
         if expected_epoch != _CHUNK_LRU_EPOCH:
             return dict(sampled)
-        existing = _CHUNK_LRU.get(key, {})
-        if existing:
+        existing = _CHUNK_LRU.get(key)
+        if existing is not None:
             _CHUNK_LRU_BYTES -= _estimate_surface_samples_bytes(existing)
-        merged = dict(existing)
+        merged = dict(existing) if existing is not None else {}
         merged.update(sampled)
         _CHUNK_LRU[key] = merged
         _CHUNK_LRU_BYTES += _estimate_surface_samples_bytes(merged)
@@ -172,6 +182,7 @@ def _lru_merge(
         ):
             _old_key, old_samples = _CHUNK_LRU.popitem(last=False)
             _CHUNK_LRU_BYTES -= _estimate_surface_samples_bytes(old_samples)
+            _CHUNK_LRU_EVICTIONS += 1
         return merged
 
 
@@ -439,6 +450,7 @@ def _load_chunk_views(
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> Dict[Tuple[int, int], Optional[Any]]:
     views: Dict[Tuple[int, int], Optional[Any]] = {}
     jobs_by_chunk = _jobs_by_chunk(jobs)
@@ -473,6 +485,7 @@ def _load_chunk_views(
         decode_workers=decode_workers,
         failed_chunks=failed_chunks,
         external_signatures=external_signatures,
+        parallel_runner=parallel_runner,
     )
     return views
 
@@ -490,33 +503,13 @@ def _decode_chunk_view_misses(
     decode_workers: Optional[int],
     failed_chunks: Optional[Set[Tuple[int, int]]],
     external_signatures: Dict[Tuple[int, int], str],
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> None:
     requested_workers = (
         _DECODE_WORKERS if decode_workers is None else max(1, int(decode_workers))
     )
     workers = min(_DECODE_WORKERS, requested_workers)
-    # RegionMapService already parallelizes complete tiles.  A worker there
-    # requests one decoder to avoid nested pools; standalone callers retain
-    # the small decoder pool for throughput.
-    if (
-        cancel_check is not None
-        or len(misses) < 12
-        or min(workers, len(misses)) <= 1
-    ):
-        _decode_misses_sequential(
-            region,
-            misses,
-            path_key,
-            mtime_ns,
-            file_size,
-            views,
-            cache_epoch,
-            cancel_check=cancel_check,
-            failed_chunks=failed_chunks,
-            external_signatures=external_signatures,
-        )
-        return
-    _decode_misses_parallel(
+    _decode_misses_with_runner(
         region,
         misses,
         path_key,
@@ -525,8 +518,10 @@ def _decode_chunk_view_misses(
         views,
         cache_epoch,
         workers=workers,
+        cancel_check=cancel_check,
         failed_chunks=failed_chunks,
         external_signatures=external_signatures,
+        parallel_runner=parallel_runner,
     )
 
 
@@ -562,7 +557,7 @@ def _collect_chunk_cache_misses(
     views: Dict[Tuple[int, int], Optional[Any]],
 ) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
     misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
-    for chunk_x, chunk_z in needed:
+    for chunk_x, chunk_z in sorted(needed):
         external_signature = external_signatures.get((chunk_x, chunk_z), "")
         hit, view = _lru_get(
             (
@@ -597,7 +592,7 @@ def _collect_chunk_cache_misses(
     return misses
 
 
-def _decode_misses_sequential(
+def _decode_misses_with_runner(
     region: RegionFile,
     misses: List[Tuple[int, int, List[Tuple[int, int]]]],
     path_key: str,
@@ -606,26 +601,46 @@ def _decode_misses_sequential(
     views: Dict[Tuple[int, int], Optional[Any]],
     cache_epoch: int,
     *,
+    workers: int,
     cancel_check: Optional[Callable[[], bool]] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> None:
     external_signatures = external_signatures or {}
-    for chunk_x, chunk_z, samples in misses:
-        if cancel_check is not None and cancel_check():
-            return
-        try:
-            key, sampled = _decode_one(region, chunk_x, chunk_z, samples)
-        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+    workers = clamp_workers(workers, item_count=len(misses))
+    runner = parallel_runner if parallel_runner is not None else SerialParallelRunner()
+
+    def decode(
+        miss: Tuple[int, int, List[Tuple[int, int]]],
+    ) -> Tuple[Tuple[int, int], SurfaceSamples]:
+        chunk_x, chunk_z, samples = miss
+        return _decode_one(region, chunk_x, chunk_z, samples)
+
+    try:
+        outcomes = runner.map(
+            "mca.surface.decode-chunks",
+            misses,
+            decode,
+            max_workers=workers,
+            cancel_check=cancel_check,
+        )
+    except ParallelCancelledError:
+        return
+
+    if len(outcomes) != len(misses):
+        raise RuntimeError(
+            "MCA 解码并行端口返回数量不一致: "
+            f"expected={len(misses)}, actual={len(outcomes)}"
+        )
+    for miss, outcome in zip(misses, outcomes):
+        if isinstance(outcome, BaseException):
+            if not isinstance(outcome, Exception):
+                raise outcome
             if failed_chunks is not None:
-                failed_chunks.add((chunk_x, chunk_z))
+                failed_chunks.add((miss[0], miss[1]))
             continue
-        except Exception:
-            if failed_chunks is not None:
-                failed_chunks.add((chunk_x, chunk_z))
-            continue
-        if cancel_check is not None and cancel_check():
-            return
+        key, sampled = outcome
         _merge_sampled_view(
             key,
             sampled,
@@ -636,53 +651,6 @@ def _decode_misses_sequential(
             cache_epoch,
             external_signatures.get(key, ""),
         )
-
-
-def _decode_misses_parallel(
-    region: RegionFile,
-    misses: List[Tuple[int, int, List[Tuple[int, int]]]],
-    path_key: str,
-    mtime_ns: int,
-    file_size: int,
-    views: Dict[Tuple[int, int], Optional[Any]],
-    cache_epoch: int,
-    *,
-    workers: int,
-    failed_chunks: Optional[Set[Tuple[int, int]]] = None,
-    external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
-) -> None:
-    external_signatures = external_signatures or {}
-    workers = clamp_workers(workers, item_count=len(misses))
-    with bounded_executor(
-        max_workers=workers,
-        item_count=len(misses),
-    ) as pool:
-        future_coords = {
-            pool.submit(_decode_one, region, chunk_x, chunk_z, samples):
-            (chunk_x, chunk_z)
-            for chunk_x, chunk_z, samples in misses
-        }
-        for future in as_completed(future_coords):
-            try:
-                key, sampled = future.result()
-            except (OSError, ValueError, TypeError, RuntimeError, KeyError):
-                if failed_chunks is not None:
-                    failed_chunks.add(future_coords[future])
-                continue
-            except Exception:
-                if failed_chunks is not None:
-                    failed_chunks.add(future_coords[future])
-                continue
-            _merge_sampled_view(
-                key,
-                sampled,
-                path_key,
-                mtime_ns,
-                file_size,
-                views,
-                cache_epoch,
-                external_signatures.get(key, ""),
-            )
 
 
 def _merge_sampled_view(
@@ -837,8 +805,14 @@ def sample_region_surface_samples(
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> Optional[List[List[SurfaceValue]]]:
-    """Return visible block, height and water depth for each map pixel."""
+    """Return visible block, height and water depth for each map pixel.
+
+    The decoder is serial by default because map tile callers commonly run
+    inside an application CPU task.  Callers that own a separate capacity
+    budget may inject a ``ParallelRunner`` explicitly.
+    """
     tile_size = max(8, min(512, int(tile_size)))
     region_path = Path(region_file)
     try:
@@ -869,6 +843,7 @@ def sample_region_surface_samples(
             decode_workers=decode_workers,
             failed_chunks=failed_chunks,
             external_signatures=external_signatures,
+            parallel_runner=parallel_runner,
         )
         if cancel_check is not None and cancel_check():
             return None
@@ -989,6 +964,7 @@ def sample_region_surface_colors(
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> Optional[List[List[Color]]]:
     """Return material colors with Xaero/JourneyMap-style terrain relief."""
     samples = sample_region_surface_samples(
@@ -997,6 +973,7 @@ def sample_region_surface_colors(
         cancel_check=cancel_check,
         decode_workers=decode_workers,
         failed_chunks=failed_chunks,
+        parallel_runner=parallel_runner,
     )
     if samples is None:
         return None
@@ -1079,10 +1056,47 @@ def _colorize_surface_row(
 def clear_chunk_decode_cache() -> None:
     """Drop process-level decoded chunk cache (tests / memory pressure)."""
     global _CHUNK_LRU_BYTES, _CHUNK_LRU_EPOCH
+    global _CHUNK_LRU_HITS, _CHUNK_LRU_MISSES, _CHUNK_LRU_EVICTIONS
     with _CHUNK_LRU_LOCK:
         _CHUNK_LRU.clear()
         _CHUNK_LRU_BYTES = 0
         _CHUNK_LRU_EPOCH += 1
+        _CHUNK_LRU_HITS = 0
+        _CHUNK_LRU_MISSES = 0
+        _CHUNK_LRU_EVICTIONS = 0
+
+
+def invalidate_chunk_decode_cache_for_world(world_path: PathLike) -> int:
+    """删除来源路径属于指定世界的区块解码缓存。
+
+    解码缓存属于进程级，而世界事务会在同一路径发布新目录。这里只删除匹配键，
+    既保留其他已打开世界的热数据，也推进世代以阻止旧世界的在途结果重新写回。
+
+    Args:
+        world_path: 已规范化或原始的世界根路径。
+
+    Returns:
+        删除的缓存条目数。
+    """
+    global _CHUNK_LRU_BYTES, _CHUNK_LRU_EPOCH
+    root = os.path.normcase(os.path.abspath(os.fspath(world_path)))
+    removed = 0
+    with _CHUNK_LRU_LOCK:
+        for key in tuple(_CHUNK_LRU):
+            source = os.path.normcase(os.path.abspath(key[0]))
+            try:
+                belongs_to_world = os.path.commonpath((source, root)) == root
+            except ValueError:
+                belongs_to_world = False
+            if not belongs_to_world:
+                continue
+            samples = _CHUNK_LRU.pop(key)
+            _CHUNK_LRU_BYTES -= _estimate_surface_samples_bytes(samples)
+            removed += 1
+        # 即使没有已缓存条目，也可能有旧世界解码仍在运行；推进世代可阻止它在
+        # 事务发布后重新写回。
+        _CHUNK_LRU_EPOCH += 1
+    return removed
 
 
 def chunk_decode_cache_size() -> int:
@@ -1095,3 +1109,21 @@ def chunk_decode_cache_bytes() -> int:
     """返回紧凑地表采样 LRU 的估算字节数。"""
     with _CHUNK_LRU_LOCK:
         return _CHUNK_LRU_BYTES
+
+
+def chunk_decode_cache_hits() -> int:
+    """返回上次清理后的缓存命中数。"""
+    with _CHUNK_LRU_LOCK:
+        return _CHUNK_LRU_HITS
+
+
+def chunk_decode_cache_misses() -> int:
+    """返回上次清理后的缓存未命中数。"""
+    with _CHUNK_LRU_LOCK:
+        return _CHUNK_LRU_MISSES
+
+
+def chunk_decode_cache_evictions() -> int:
+    """返回上次清理后因预算触发的淘汰数。"""
+    with _CHUNK_LRU_LOCK:
+        return _CHUNK_LRU_EVICTIONS

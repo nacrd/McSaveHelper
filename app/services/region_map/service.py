@@ -34,6 +34,7 @@ class RegionMapService(
     """
 
     TOPVIEW_QUEUE_LIMIT = 128
+    TOPVIEW_CACHE_ENTRY_LIMIT = 1024
     TOPVIEW_MEMORY_LIMIT = 32 * 1024 * 1024
     TOPVIEW_FAILURE_LIMIT = 2
 
@@ -76,7 +77,10 @@ class RegionMapService(
         if cache_registry is not None:
             self._cache_registration = cache_registry.register_external(
                 f"map.topview.{id(self)}",
-                CachePolicy(self.TOPVIEW_QUEUE_LIMIT, self.TOPVIEW_MEMORY_LIMIT),
+                CachePolicy(
+                    self.TOPVIEW_CACHE_ENTRY_LIMIT,
+                    self.TOPVIEW_MEMORY_LIMIT,
+                ),
                 self._topview_cache_stats,
                 self._clear_topview_memory_cache,
             )

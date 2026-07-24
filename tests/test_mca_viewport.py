@@ -1,4 +1,6 @@
 """Behavioral tests for the pure MCA map viewport."""
+import pytest
+
 from core.mca.viewport import (
     MAX_SCALE,
     MIN_SCALE,
@@ -224,6 +226,27 @@ def test_map_view_dispose_unregisters_tile_source_cache() -> None:
     assert registry.stats().regions == ()
     service.close()
     runtime.shutdown()
+
+
+def test_map_view_constructor_failure_releases_tile_source_registration(
+    monkeypatch,
+) -> None:
+    runtime = ExecutionRuntime()
+    registry = CacheRegistry(budget_bytes=32 * 1024 * 1024)
+    service = RegionMapService(runtime)
+
+    def fail_interaction_state(_view) -> None:
+        raise RuntimeError("interaction setup failed")
+
+    monkeypatch.setattr(McaMapView, "_init_interaction_state", fail_interaction_state)
+    try:
+        with pytest.raises(RuntimeError, match="interaction setup failed"):
+            McaMapView(map_service=service, cache_registry=registry)
+        assert registry.stats().regions == ()
+    finally:
+        service.close()
+        runtime.shutdown()
+        registry.close()
 
 
 def test_map_view_remount_rebuilds_after_detached_resize() -> None:

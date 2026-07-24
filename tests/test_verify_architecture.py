@@ -83,6 +83,7 @@ def test_mca_benchmark_consumes_budget_gate_and_cache_hit_metric(monkeypatch) ->
                     "cache_hit_p95_ms": 1.0,
                     "cache_hit_count": 3,
                 },
+                "world_session": {"shell_open_p95_ms": 1.0},
             }
             for size in ("small", "medium", "large")
         ],

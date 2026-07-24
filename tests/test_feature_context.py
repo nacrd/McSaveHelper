@@ -49,6 +49,7 @@ def test_feature_context_delegates_host_ports() -> None:
         item=object(),
         texture=object(),
         execution_runtime=object(),
+        ui_delivery=object(),
         current_save_path="C:/tmp/world",
         save_context_manager=object(),
         view_manager=object(),
@@ -74,6 +75,7 @@ def test_feature_context_delegates_host_ports() -> None:
     assert ctx.pick_directory() == "dir"
     assert ctx.create_region_map_service() == "map"
     assert ctx.current_save_path == "C:/tmp/world"
+    assert ctx.ui_delivery is host.ui_delivery
     assert ctx.migration_commands is commands
     ctx.show_progress("task")
     assert "show" in calls

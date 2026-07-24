@@ -2,12 +2,11 @@
 
 移除存档中所有模组相关的方块和实体，让模组存档能够“无损”降级回原版服务端运行。
 """
-from concurrent.futures import as_completed
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import core.nbt as nbtlib
-from .parallel import bounded_executor, clamp_workers
+from .parallel import ParallelRunner, SerialParallelRunner, clamp_workers
 from .scanner import scan_all_entity_regions, scan_all_regions
 from .types import LogCallback
 
@@ -60,13 +59,18 @@ def purge_mod_blocks_and_entities(
     world_path: Path,
     log: LogCallback,
     max_workers: Optional[int] = None,
+    *,
+    parallel_runner: Optional[ParallelRunner] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> bool:
     """从世界存档中移除所有模组相关的方块和实体
 
     Args:
         world_path: 世界存档路径
         log: 日志回调函数
-        max_workers: 可选区域级并发上限；批量世界任务应传 1。
+        max_workers: 可选区域级并发上限。
+        parallel_runner: 应用层提供的并行端口；默认在当前线程串行执行。
+        cancel_check: 可选取消探针，在区域边界检查。
     """
     log("开始纯净扫描：移除模组方块和实体", "PURE")
     region_files = scan_all_regions(world_path) + scan_all_entity_regions(world_path)
@@ -80,29 +84,37 @@ def purge_mod_blocks_and_entities(
     total_entities_removed = 0
     errors = 0
 
-    # region 级并发（各处理独立文件，写回安全）；上限由 core.parallel 统一钳制。
+    # 每个区域是独立写入单元；并行策略由调用方端口统一持有。
     workers = clamp_workers(max_workers, item_count=total_regions)
     done = 0
-    with bounded_executor(
+    runner = parallel_runner if parallel_runner is not None else SerialParallelRunner()
+    results = runner.map(
+        "migration.purge-regions",
+        region_files,
+        _process_one_region,
         max_workers=workers,
-        item_count=total_regions,
-    ) as executor:
-        futures = [
-            executor.submit(_process_one_region, rf) for rf in region_files
-        ]
-        for future in as_completed(futures):
-            done += 1
-            name, chunks, br, er, err = future.result()
-            total_chunks += chunks
-            total_blocks_replaced += br
-            total_entities_removed += er
-            if err:
-                errors += 1
-                log(f"处理区域文件失败 {name}: {err}", "ERROR")
-            else:
-                log(f"处理区域文件 ({done}/{total_regions}): {name}", "INFO")
-                if br > 0 or er > 0:
-                    log(f"  修改: 方块 {br}, 实体 {er}", "INFO")
+        cancel_check=cancel_check,
+    )
+    if len(results) != total_regions:
+        raise RuntimeError(
+            "纯净扫描并行端口返回数量不一致: "
+            f"expected={total_regions}, actual={len(results)}"
+        )
+    for result in results:
+        if isinstance(result, BaseException):
+            raise result
+        done += 1
+        name, chunks, br, er, err = result
+        total_chunks += chunks
+        total_blocks_replaced += br
+        total_entities_removed += er
+        if err:
+            errors += 1
+            log(f"处理区域文件失败 {name}: {err}", "ERROR")
+        else:
+            log(f"处理区域文件 ({done}/{total_regions}): {name}", "INFO")
+            if br > 0 or er > 0:
+                log(f"  修改: 方块 {br}, 实体 {er}", "INFO")
 
     if errors:
         log(f"纯净扫描未完整完成: {errors} 个区域文件失败", "ERROR")

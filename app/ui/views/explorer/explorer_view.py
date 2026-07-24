@@ -1,6 +1,6 @@
 """Explorer View - 存档浏览器主视图"""
 import flet as ft
-from typing import TYPE_CHECKING, Any, Optional, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Optional, Dict, Tuple
 from pathlib import Path
 
 from app.ui.theme import THEME
@@ -35,11 +35,13 @@ from app.ui.views.explorer.explorer_helpers import (
 from app.controllers.map_controller import MapController
 from app.controllers.region_delete_controller import RegionDeleteController
 from app.services.execution_runtime import (
-    CancellationToken,
     OperationCancelledError,
+    OperationContext,
     TaskPriority,
 )
 from app.services.map_marker_service import MapMarkerService
+from app.services.ui_delivery import UiDeliverySpec
+from app.services.world_repository import WorldReadContext
 
 
 class ExplorerView(
@@ -371,6 +373,9 @@ class ExplorerView(
                     token,
                 ),
                 priority=TaskPriority.VISIBLE,
+                feature="explorer",
+                world_id=str(path),
+                generation=generation,
             )
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
@@ -379,37 +384,82 @@ class ExplorerView(
         self,
         path: str,
         generation: int,
-        token: CancellationToken,
+        context: OperationContext,
     ) -> None:
         """Load shell metadata first, then full session (progressive publish)."""
         try:
-            token.raise_if_cancelled()
+            context.report_progress(0, 3, "open_world")
+            context.raise_if_cancelled()
             world = Path(path)
+            repository = self.app.services.world_repository
+            read_context: Optional[WorldReadContext] = None
             try:
-                shell = self.app.services.world_repository.get_shell_metadata(
-                    world,
-                )
-                token.raise_if_cancelled()
-                self.app.page.run_task(
-                    self._apply_shell_metadata,
-                    shell,
-                    generation,
+                read_context = repository.open(world)
+                context.raise_if_cancelled()
+                self._post_world_ui(
+                    context,
+                    "shell",
+                    lambda: self._apply_shell_metadata(
+                        read_context.shell,
+                        generation,
+                    ),
                 )
             except (OSError, ValueError, FileNotFoundError, TypeError):
                 # Shell metadata is best-effort; full load still proceeds.
                 pass
-            token.raise_if_cancelled()
-            session = self._create_world_session(world, self.app.log)
-            token.raise_if_cancelled()
-            self.app.page.run_task(self._apply_loaded_world, session, generation)
+            context.report_progress(1, 3, "shell_ready")
+            context.raise_if_cancelled()
+            session = self._create_world_session(
+                world,
+                self.app.log,
+                read_context=read_context,
+            )
+            context.report_progress(2, 3, "session_ready")
+            context.raise_if_cancelled()
+            self._post_world_ui(
+                context,
+                "result",
+                lambda: self._apply_loaded_world(session, generation),
+            )
+            context.report_progress(3, 3, "delivered")
         except OperationCancelledError:
             return
         except Exception as exc:
-            if token.is_cancelled:
+            if context.is_cancelled:
                 return
-            self.app.page.run_task(self._show_world_load_error, exc, generation)
+            self._post_world_ui(
+                context,
+                "error",
+                lambda error=exc: self._show_world_load_error(
+                    error,
+                    generation,
+                ),
+            )
 
-    async def _apply_shell_metadata(
+    def _post_world_ui(
+        self,
+        context: OperationContext,
+        event: str,
+        callback: Callable[[], None],
+    ) -> None:
+        """将世界加载投影交给统一 UI 通道并附带 generation 守卫。"""
+        self.app.ui_delivery.post(
+            UiDeliverySpec(
+                task_id=context.task_id,
+                operation=context.operation,
+                feature=context.feature,
+                world_id=context.world_id,
+                generation=context.generation,
+                event=event,
+                metadata=context.metadata,
+            ),
+            callback,
+            is_current=lambda: self._is_world_load_current(
+                context.generation
+            ),
+        )
+
+    def _apply_shell_metadata(
         self,
         shell: Any,
         generation: int,
@@ -430,8 +480,12 @@ class ExplorerView(
         self,
         path: Path,
         log: Any = None,
+        *,
+        read_context: Optional[WorldReadContext] = None,
     ) -> WorldSession:
         """Compose a session with application-scoped write safety ports."""
+        if read_context is not None:
+            return read_context.open_session(log=log or self.app.log)
         open_session = getattr(self.app, "open_world_session", None)
         if callable(open_session):
             session = open_session(path, log=log or self.app.log)
@@ -444,7 +498,7 @@ class ExplorerView(
             log=log or self.app.log,
         )
 
-    async def _apply_loaded_world(
+    def _apply_loaded_world(
         self,
         session: WorldSession,
         generation: int,
@@ -456,7 +510,7 @@ class ExplorerView(
         except Exception as exc:
             self.app.handle_exception(exc, title="更新存档界面失败")
 
-    async def _show_world_load_error(
+    def _show_world_load_error(
         self,
         error: Exception,
         generation: int,

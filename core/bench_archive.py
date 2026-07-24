@@ -16,12 +16,15 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
         index = sample.get("world_index") or {}
         topview = sample.get("topview") or {}
         session = sample.get("world_session") or {}
+        backup = sample.get("backup") or {}
         if not isinstance(index, dict):
             index = {}
         if not isinstance(topview, dict):
             topview = {}
         if not isinstance(session, dict):
             session = {}
+        if not isinstance(backup, dict):
+            backup = {}
         rows.append(
             {
                 "size": str(sample.get("size", "")),
@@ -35,9 +38,16 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "tile_p95_ms",
                     topview.get("tile_median_ms"),
                 ),
-                "session_p95_ms": session.get(
+                "topview_cache_p95_ms": topview.get("cache_hit_p95_ms"),
+                "shell_p95_ms": session.get("shell_open_p95_ms"),
+                "cold_session_p95_ms": session.get("cold_open_p95_ms"),
+                "warm_session_p95_ms": session.get(
                     "open_with_index_p95_ms",
                     session.get("open_with_index_median_ms"),
+                ),
+                "backup_p95_ms": backup.get(
+                    "backup_p95_ms",
+                    backup.get("backup_ms"),
                 ),
             }
         )
@@ -68,18 +78,25 @@ def render_markdown_report(
     lines.extend(
         [
             "",
-            "| size | index cold ms | index warm p95 | topview p95 | session p95 |",
-            "|---|---:|---:|---:|---:|",
+            "| size | index cold | index warm p95 | shell p95 | "
+            "cold session p95 | warm session p95 | tile p95 | "
+            "cache p95 | backup p95 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         lines.append(
-            "| {size} | {cold} | {warm} | {tile} | {session} |".format(
+            "| {size} | {cold} | {warm} | {shell} | {cold_session} | "
+            "{warm_session} | {tile} | {cache} | {backup} |".format(
                 size=row.get("size") or row.get("label") or "?",
                 cold=_cell(row.get("index_cold_ms")),
                 warm=_cell(row.get("index_warm_p95_ms")),
+                shell=_cell(row.get("shell_p95_ms")),
+                cold_session=_cell(row.get("cold_session_p95_ms")),
+                warm_session=_cell(row.get("warm_session_p95_ms")),
                 tile=_cell(row.get("topview_p95_ms")),
-                session=_cell(row.get("session_p95_ms")),
+                cache=_cell(row.get("topview_cache_p95_ms")),
+                backup=_cell(row.get("backup_p95_ms")),
             )
         )
     violations = report.get("budget_violations") or []

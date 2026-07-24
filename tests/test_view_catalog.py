@@ -2,7 +2,11 @@ import pytest
 import flet as ft
 
 from app.core.view_catalog import ViewCatalog
-from app.ui.feature_registry import DEFAULT_FEATURE_REGISTRY, FeatureDescriptor, FeatureRegistry
+from app.ui.feature_registry import (
+    DEFAULT_FEATURE_REGISTRY,
+    FeatureDescriptor,
+    FeatureRegistry,
+)
 from app.ui.view_catalog import create_default_view_catalog
 
 
@@ -24,6 +28,24 @@ def test_catalog_rejects_duplicate_and_unknown_views() -> None:
         catalog.register("test", lambda app: app)
     with pytest.raises(KeyError, match="未注册的视图"):
         catalog.create("missing", object())
+
+
+def test_catalog_uses_registered_top_actions_factory() -> None:
+    catalog = ViewCatalog()
+    view = object()
+    catalog.register(
+        "test",
+        lambda _context: view,
+        top_actions_factory=lambda current_view: (
+            "registered" if current_view is view else "wrong",
+        ),
+    )
+
+    created = catalog.create("test", object())
+
+    assert catalog.get_top_actions("test", created) == ("registered",)
+    with pytest.raises(KeyError, match="未注册的视图"):
+        catalog.get_top_actions("missing", created)
 
 
 def test_default_catalog_contains_all_sidebar_views() -> None:
@@ -68,6 +90,47 @@ def test_feature_registry_keeps_sidebar_and_view_catalog_in_lockstep() -> None:
     assert catalog.view_ids == ("first", "second")
 
 
+def test_feature_descriptor_explicit_factories_are_authoritative() -> None:
+    context = object()
+    view = object()
+    feature = FeatureDescriptor(
+        "factory",
+        "sidebar.factory",
+        "Factory",
+        ft.Icons.BUILD,
+        view_factory=lambda received: view if received is context else None,
+        top_actions_factory=lambda current_view: (
+            "action" if current_view is view else "wrong",
+        ),
+    )
+    registry = FeatureRegistry((feature,))
+
+    catalog = registry.create_view_catalog()
+    created = catalog.create("factory", context)
+
+    assert created is view
+    assert catalog.get_top_actions("factory", created) == ("action",)
+
+
+def test_feature_descriptor_accepts_factory_position_arguments() -> None:
+    context = object()
+    view = object()
+    feature = FeatureDescriptor(
+        "positional",
+        "sidebar.positional",
+        "Positional",
+        ft.Icons.BUILD,
+        lambda received: view if received is context else None,
+        lambda current_view: ("action",) if current_view is view else (),
+    )
+
+    catalog = FeatureRegistry((feature,)).create_view_catalog()
+
+    created = catalog.create("positional", context)
+    assert created is view
+    assert catalog.get_top_actions("positional", created) == ("action",)
+
+
 def test_default_feature_registry_matches_default_view_catalog() -> None:
     assert tuple(
         feature.view_id for feature in DEFAULT_FEATURE_REGISTRY.features
@@ -82,4 +145,9 @@ def test_default_features_declare_capabilities_without_changing_defaults() -> No
     )
     assert create_default_view_catalog().view_ids == tuple(
         feature.view_id for feature in DEFAULT_FEATURE_REGISTRY.features
+    )
+    assert all(
+        feature.view_factory is not None
+        and feature.top_actions_factory is not None
+        for feature in DEFAULT_FEATURE_REGISTRY.features
     )

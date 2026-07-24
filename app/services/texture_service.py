@@ -77,34 +77,39 @@ class TextureService:
     def __init__(
         self,
         execution_runtime: ExecutionRuntime,
-        cache_registry: Optional[CacheRegistry] = None,
+        cache_registry: CacheRegistry,
     ) -> None:
         """初始化缓存目录与内存表。
 
         Args:
             execution_runtime: 应用组合根持有的共享后台运行时（必填）。
-            cache_registry: 可选应用缓存注册表；缺省时仅为本服务创建临时预算。
+            cache_registry: 应用组合根持有的共享缓存注册表（必填）。
         """
         self._cache_dir = Path.home() / ".mc_save_helper" / "textures"
         self._cache_dir.mkdir(parents=True, exist_ok=True)
         self._jar_cache_dir = Path.home() / ".mc_save_helper" / "jars"
         self._jar_cache_dir.mkdir(parents=True, exist_ok=True)
-        self._cache_registry = cache_registry or CacheRegistry(
-            _PATH_CACHE_BUDGET_BYTES + _BASE64_CACHE_BUDGET_BYTES
+        self._cache_registry = cache_registry
+        memory_cache: CacheRegion[str, Path] = self._cache_registry.create_region(
+            "textures.paths",
+            CachePolicy(_MAX_MEMORY_CACHE, _PATH_CACHE_BUDGET_BYTES),
         )
-        self._owns_cache_registry = cache_registry is None
-        self._memory_cache: CacheRegion[str, Path] = (
-            self._cache_registry.create_region(
-                "textures.paths",
-                CachePolicy(_MAX_MEMORY_CACHE, _PATH_CACHE_BUDGET_BYTES),
-            )
-        )
-        self._base64_cache: CacheRegion[str, str] = (
-            self._cache_registry.create_region(
+        try:
+            base64_cache: CacheRegion[str, str] = self._cache_registry.create_region(
                 "textures.base64",
                 CachePolicy(_MAX_MEMORY_CACHE, _BASE64_CACHE_BUDGET_BYTES),
             )
-        )
+        except Exception:
+            memory_cache.close()
+            raise
+        try:
+            task_scope = execution_runtime.create_scope("texture_service")
+        except Exception:
+            base64_cache.close()
+            memory_cache.close()
+            raise
+        self._memory_cache = memory_cache
+        self._base64_cache = base64_cache
         self._minecraft_jar: Optional[Path] = None
         # Extra jars (resource packs / mods) searched after the client jar.
         self._extra_jars: List[Path] = []
@@ -115,9 +120,7 @@ class TextureService:
         self._jar_lock = threading.Lock()
         self._tried_paths: Dict[str, str] = {}
         self._execution_runtime = execution_runtime
-        self._task_scope = self._execution_runtime.create_scope(
-            "texture_service"
-        )
+        self._task_scope = task_scope
         self._closed = False
 
     def get_texture_path(self, item_id: str) -> Optional[Path]:
@@ -235,8 +238,6 @@ class TextureService:
         self._task_scope.close()
         self._memory_cache.close()
         self._base64_cache.close()
-        if self._owns_cache_registry:
-            self._cache_registry.close()
 
     def import_textures_from_jars(
         self,

@@ -59,6 +59,7 @@ class WindowManagerDependencies:
         get_sidebar_mode: 获取用户设置的侧栏模式。
         stop_gui_optimizer: 关闭时停止 GUI 优化后台任务。
         dispose_views: 关闭时释放视图资源。
+        close_ui_delivery: 关闭时拒绝新的 UI 投递。
         dispose_file_dialogs: 关闭时销毁 Tk 文件对话框工作线程。
         close_texture_service: 关闭应用级纹理任务与内存缓存。
         shutdown_execution_runtime: 关闭应用级后台任务运行时；False 表示有任务未退出。
@@ -72,6 +73,7 @@ class WindowManagerDependencies:
     get_sidebar_mode: Callable[[], str]
     stop_gui_optimizer: Callable[[], None]
     dispose_views: Callable[[], None]
+    close_ui_delivery: Callable[[], None] = lambda: None
     dispose_file_dialogs: Callable[[], None] = lambda: None
     close_texture_service: Callable[[], None] = lambda: None
     shutdown_execution_runtime: Callable[[], Optional[bool]] = lambda: None
@@ -491,6 +493,7 @@ class WindowManager:
         self._shutdown_started = True
 
         self._set_closing_flag()
+        self._close_ui_delivery()
         self._stop_gui_optimizer()
         self._dispose_views()
         self._dispose_file_dialogs()
@@ -529,6 +532,14 @@ class WindowManager:
         try:
             self._deps.dispose_file_dialogs()
         except Exception:
+            pass
+
+    def _close_ui_delivery(self) -> None:
+        """拒绝关闭阶段新的 UI 结果投递。"""
+        try:
+            self._deps.close_ui_delivery()
+        except Exception:
+            # Teardown must continue even when the scheduler is already gone.
             pass
 
     def _close_texture_service(self) -> None:

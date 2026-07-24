@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -218,6 +219,33 @@ def test_topview_cache_hit_miss_and_stale_discard_are_measurable() -> None:
         runtime.shutdown(wait=False)
 
 
+def test_topview_cache_enforces_registered_entry_budget() -> None:
+    runtime = ExecutionRuntime()
+    service = RegionMapService(runtime)
+    service.TOPVIEW_CACHE_ENTRY_LIMIT = 2
+    try:
+        with service._data_lock:
+            for coord in ((0, 0), (1, 0), (2, 0)):
+                service._store_topview_tile_locked(
+                    coord,
+                    b"png",
+                    32,
+                    True,
+                    1,
+                    3,
+                    "source",
+                )
+
+        stats = service._topview_cache_stats()
+        assert tuple(service._topview_tiles) == ((1, 0), (2, 0))
+        assert stats.entries == 2
+        assert stats.max_entries == 2
+        assert stats.evictions == 1
+    finally:
+        service.close()
+        runtime.shutdown(wait=False)
+
+
 def test_topview_tile_invalidates_when_region_source_changes(tmp_path) -> None:
     runtime = ExecutionRuntime()
     service = RegionMapService(runtime)
@@ -421,6 +449,27 @@ def test_process_mca_cache_is_owned_by_application_registry(monkeypatch) -> None
         second.close()
         registry.close()
         runtime.shutdown(wait=False)
+
+
+def test_process_mca_cache_registers_world_scoped_invalidation(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    invalidated = []
+    monkeypatch.setattr(
+        mca_cache_adapter,
+        "invalidate_chunk_decode_cache_for_world",
+        lambda world: invalidated.append(world),
+    )
+    registry = CacheRegistry()
+    mca_cache_adapter.register_mca_chunk_cache(registry)
+    world = tmp_path / "world"
+
+    try:
+        assert registry.invalidate_world(world) == 1
+        assert [Path(value) for value in invalidated] == [world.resolve()]
+    finally:
+        registry.close()
 
 
 def test_process_mca_cache_clears_after_last_registry_owner(monkeypatch) -> None:

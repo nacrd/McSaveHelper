@@ -24,7 +24,15 @@ from app.ui.notifications import NotificationManager
 from app.ui.accessibility import validate_theme_accessibility
 from app.ui.utils import run_on_ui
 from core.logger import logger
+from core.observability import OperationRecord
 from core.performance import PerformanceMetrics, set_metrics_sink
+
+
+def _default_operation_metrics_sink(
+    metrics: PerformanceMetrics,
+) -> OperationRecord:
+    """为未装配应用容器的测试/兼容入口提供协议适配。"""
+    return metrics.to_operation_record(feature="business")
 
 
 class ShortcutManagerPort(Protocol):
@@ -143,6 +151,9 @@ class GUIOptimizerDependencies:
     page: ft.Page
     get_ui_setting: Callable[[str, Any], Any]
     save_config: Callable[[], None]
+    operation_metrics_sink: Callable[
+        [PerformanceMetrics], OperationRecord
+    ] = _default_operation_metrics_sink
     shortcut_manager: ShortcutManagerPort = cast(
         ShortcutManagerPort,
         shortcut_manager,
@@ -180,6 +191,7 @@ class GUIOptimizer:
         self._performance_monitor = dependencies.performance_monitor
         self._resource_monitor = dependencies.resource_monitor
         self._health_monitor = dependencies.health_monitor
+        self._operation_metrics_sink = dependencies.operation_metrics_sink
         self.notification_manager: Optional[NotificationManager] = None
         self._heartbeat_stop = threading.Event()
         self._hang_heartbeat_stop = threading.Event()
@@ -254,9 +266,9 @@ class GUIOptimizer:
 
     def _record_business_metric(self, metrics: PerformanceMetrics) -> None:
         """Adapt core business metrics via the unified OperationRecord protocol."""
+        record = self._operation_metrics_sink(metrics)
         if not self._performance_monitor.enabled:
             return
-        record = metrics.to_operation_record(feature="business")
         record_operation = getattr(
             self._performance_monitor,
             "record_operation",

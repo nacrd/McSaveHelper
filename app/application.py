@@ -33,6 +33,7 @@ from app.controllers.migration_controller import (
 )
 
 from app.ui.theme import get_theme_manager
+from app.ui.ui_delivery import create_ui_delivery
 from app.ui.view_catalog import create_default_view_catalog
 from app.ui.feature_context import FeatureContext
 from app.ui.utils import run_on_ui
@@ -80,8 +81,8 @@ class Application(
         """
         self.page: ft.Page = page
         self.services = services or create_app_services()
+        self.ui_delivery = create_ui_delivery(self.page, self.services.operation_metrics.record)
         self._init_auto_language_import_state()
-
         # 全局异常兜底
         page.on_error = self._on_page_error
 
@@ -163,6 +164,7 @@ class Application(
             ),
             stop_gui_optimizer=lambda: self.gui_optimizer.stop(),
             dispose_views=self._dispose_views_and_migration,
+            close_ui_delivery=self.ui_delivery.close,
             dispose_file_dialogs=self._file_dialogs.close,
             close_texture_service=self.texture.close,
             shutdown_execution_runtime=lambda: self.execution_runtime.shutdown(
@@ -201,7 +203,7 @@ class Application(
             ),
             update_page=self.page.update,
             log=self.log,
-            translate=self._t,
+            translate=self._t, get_top_actions=view_catalog.get_top_actions,
         ))
 
         # 进度管理器
@@ -215,6 +217,9 @@ class Application(
                 default,
             ),
             save_config=self.config.save,
+            operation_metrics_sink=(
+                self.services.operation_metrics.record_metrics
+            ),
         ))
 
         # 当前存档状态和用例协调器

@@ -177,6 +177,7 @@ class TestSaveNbtResourceManagement:
             from app.services.backup_service import BackupService
             from app.services.world_transaction import WorldTransactionService
             from app.services.world_write_coordinator import WorldWriteCoordinator
+            from core.parallel import SerialParallelRunner
 
             coordinator = WorldWriteCoordinator()
             backup = BackupService(coordinator)
@@ -184,6 +185,7 @@ class TestSaveNbtResourceManagement:
                 ConfigService(Path(tmpdir) / "config"),
                 backup,
                 WorldTransactionService(coordinator, backup),
+                SerialParallelRunner(),
             )
             logs = []
 

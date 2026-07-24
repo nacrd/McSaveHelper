@@ -37,6 +37,7 @@ class ViewManagerDependencies:
     update_page: Callable[[], None]
     log: LogCallback
     translate: Callable[[str, str], str]
+    get_top_actions: Callable[[str, ft.Control], Iterable[ViewAction]]
 
 
 class ViewManager:
@@ -79,7 +80,7 @@ class ViewManager:
 
             current_view = self.views[view_id]
             host.content.content = current_view
-            self._update_top_actions(current_view)
+            self._update_top_actions(view_id, current_view)
             self._notify_view_layout(current_view)
             self._notify_save_selected(current_view)
             self._deps.update_page()
@@ -108,13 +109,14 @@ class ViewManager:
             raise TypeError(f"视图工厂未返回 Flet Control: {view_id}")
         return view
 
-    def _update_top_actions(self, current_view: ft.Control) -> None:
+    def _update_top_actions(
+        self,
+        view_id: str,
+        current_view: ft.Control,
+    ) -> None:
         self._require_host()
-        provider = getattr(current_view, "get_top_actions", None)
-        self._current_actions = (
-            list(cast(Iterable[ViewAction], provider()))
-            if callable(provider)
-            else []
+        self._current_actions = list(
+            self._deps.get_top_actions(view_id, current_view)
         )
         self._rebuild_top_actions()
 
@@ -123,8 +125,9 @@ class ViewManager:
         if self._host is None:
             return
         current_view = self._host.content.content
-        if isinstance(current_view, ft.Control):
-            self._update_top_actions(current_view)
+        view_id = self._deps.get_selected_view_id()
+        if isinstance(current_view, ft.Control) and view_id is not None:
+            self._update_top_actions(view_id, current_view)
             self._deps.update_page()
 
     def set_top_actions_enabled(self, enabled: bool) -> None:

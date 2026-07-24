@@ -11,6 +11,7 @@ from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.region_map import RegionMapService
+from app.services.ui_delivery import UiDeliveryPort
 
 
 class FeatureHost(Protocol):
@@ -145,6 +146,11 @@ class FeatureHost(Protocol):
         ...
 
     @property
+    def ui_delivery(self) -> UiDeliveryPort:
+        """Framework-neutral UI result delivery port."""
+        ...
+
+    @property
     def save_context_manager(self) -> Any:
         """Save context manager."""
         ...
@@ -172,6 +178,10 @@ class FeatureContext:
     @property
     def execution_runtime(self) -> ExecutionRuntime:
         return self.host.execution_runtime
+
+    @property
+    def ui_delivery(self) -> UiDeliveryPort:
+        return self.host.ui_delivery
 
     @property
     def config(self) -> Any:

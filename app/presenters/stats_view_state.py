@@ -53,7 +53,6 @@ def build_stats_view_state(
     stats: WorldStatistics,
     *,
     player_sort_key: str,
-    service: WorldStatsService | None = None,
     size_formatter: Callable[[int], str] | None = None,
     top_limit: int = 10,
 ) -> StatsViewState:
@@ -62,12 +61,10 @@ def build_stats_view_state(
     Args:
         stats: 分析服务返回的统计结果。
         player_sort_key: 玩家排序键。
-        service: 可选统计服务（仅用于尺寸分布）；缺省临时实例。
         size_formatter: 可选 ``bytes -> str``；默认简单 ``N B``。
         top_limit: 排行截断条数。
     """
     format_size = size_formatter or (lambda n: f"{int(n)} B")
-    stats_service = service or WorldStatsService()
     chunk_slots = stats.loaded_chunks + stats.empty_chunks
     loaded_ratio = (
         stats.loaded_chunks / chunk_slots * 100 if chunk_slots else 0.0
@@ -90,7 +87,7 @@ def build_stats_view_state(
     entity_items = (
         stats.entity_stats.top_entities if stats.entity_stats else []
     )
-    size_dist = stats_service.get_region_size_distribution(stats)
+    size_dist = WorldStatsService.get_region_size_distribution(stats)
     players = WorldStatsService.sort_player_stats(
         list(stats.player_stats),
         player_sort_key,

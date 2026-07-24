@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import threading
 from pathlib import Path
 
 
@@ -184,6 +185,7 @@ def test_app_services_require_injected_execution_runtime() -> None:
         "or ExecutionRuntime()",
         "execution_runtime or ExecutionRuntime",
         "ExecutionRuntime() if execution_runtime is None",
+        "or CacheRegistry(",
     )
     offenders: list[str] = []
     for path in services_root.rglob("*.py"):
@@ -247,7 +249,13 @@ def test_composition_root_injects_shared_runtime_into_services() -> None:
                 "architecture_runtime_probe",
                 lambda token: token.is_cancelled,
             )
+            published = threading.Event()
+            handle.add_done_callback(lambda completed: published.set())
             assert handle.result(timeout=2) is False
+            assert published.wait(2)
+            record = services.operation_metrics.snapshot(limit=1)[0]
+            assert record.operation_id == handle.task_id
+            assert record.metadata["operation"] == "architecture_runtime_probe"
         finally:
             map_service.close()
     finally:
@@ -266,7 +274,14 @@ def test_app_services_forbid_private_threadpool_and_write_fallbacks() -> None:
         rel = path.relative_to(PROJECT_ROOT).as_posix()
         if "ThreadPoolExecutor" in source or "threading.Thread(" in source:
             offenders.append(f"{rel}:pool")
-        if "or BackupService(" in source or "or ExecutionRuntime()" in source:
+        if any(
+            token in source
+            for token in (
+                "or BackupService(",
+                "or ExecutionRuntime()",
+                "or CacheRegistry(",
+            )
+        ):
             offenders.append(f"{rel}:fallback")
     assert offenders == []
 
@@ -361,7 +376,8 @@ def test_explorer_progressive_shell_metadata_and_tile_adapter() -> None:
     explorer = (
         PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
     ).read_text(encoding="utf-8")
-    assert "get_shell_metadata" in explorer
+    assert "repository.open(world)" in explorer
+    assert "read_context.shell" in explorer
     assert "_apply_shell_metadata" in explorer
     adapter = (
         PROJECT_ROOT

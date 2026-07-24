@@ -124,3 +124,22 @@ def test_close_removes_world_invalidators() -> None:
 
     assert registry.invalidate_world("/tmp/world") == 0
     assert calls == []
+
+
+def test_region_close_removes_its_world_invalidator() -> None:
+    registry = CacheRegistry()
+    calls: list[str] = []
+    region = registry.create_region("world.tiles", CachePolicy(1, 1))
+    registry.register_world_invalidator("world.tiles", calls.append)
+
+    region.close()
+
+    assert registry.invalidate_world("/tmp/world") == 0
+    assert calls == []
+
+
+def test_world_invalidator_requires_registered_cache() -> None:
+    registry = CacheRegistry()
+
+    with pytest.raises(ValueError, match="没有对应缓存分区"):
+        registry.register_world_invalidator("missing", lambda _world: None)

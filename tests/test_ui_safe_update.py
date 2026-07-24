@@ -1,11 +1,13 @@
 """Tests for UI safe_update helpers."""
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from app.ui.utils import (
     is_control_update_error,
     safe_update,
+    schedule_on_ui,
     set_app_closing,
 )
 
@@ -40,3 +42,24 @@ def test_safe_update_skips_when_closing_and_swallows_unmounted() -> None:
         return None
 
     assert safe_update(SimpleNamespace(update=ok)) is True  # type: ignore[arg-type]
+
+
+def test_schedule_on_ui_reports_acceptance_and_runs_callback() -> None:
+    observed: list[str] = []
+
+    def run_task(factory) -> None:
+        asyncio.run(factory())
+
+    page = SimpleNamespace(run_task=run_task)
+
+    assert schedule_on_ui(
+        page,  # type: ignore[arg-type]
+        lambda: observed.append("delivered"),
+    ) is True
+    assert observed == ["delivered"]
+
+    set_app_closing(True)
+    try:
+        assert schedule_on_ui(page, lambda: None) is False  # type: ignore[arg-type]
+    finally:
+        set_app_closing(False)

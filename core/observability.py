@@ -25,7 +25,7 @@ class OperationRecord:
     """一次后台或业务操作的统一指标快照。
 
     Attributes:
-        operation_id: 稳定操作标识（可与功能内 generation 组合）。
+        operation_id: 单次操作唯一标识；稳定操作名放在 metadata。
         feature: 功能域，如 map / migration / stats。
         world_id: 可选世界路径或短哈希；无世界上下文时为空。
         queue_wait_ms: 进入队列到开始执行的等待毫秒。

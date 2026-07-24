@@ -97,6 +97,39 @@ def run_on_ui(
             return
 
 
+def schedule_on_ui(
+    page: ft.Page | None,
+    callback: Callable[[], None],
+) -> bool:
+    """把无参数回调投递到 Flet UI 循环并返回是否已接受。
+
+    该函数只负责调度，不捕获回调本身的异常；需要统一终态观测的调用方
+    应通过 ``UiDeliveryChannel`` 包装回调。
+
+    Args:
+        page: 目标 Flet 页面。
+        callback: 只应执行轻量 UI 投影的同步回调。
+
+    Returns:
+        页面可用且调度成功时返回 ``True``。
+    """
+    if _app_closing or page is None:
+        return False
+    if not callable(callback):
+        raise TypeError("UI 调度回调必须可调用")
+
+    async def _runner() -> None:
+        callback()
+
+    try:
+        page.run_task(_runner)
+    except Exception as exc:
+        if is_control_update_error(exc):
+            return False
+        return False
+    return True
+
+
 def deliver_to_ui(
     page: Optional[ft.Page],
     func: Callable[..., Any],

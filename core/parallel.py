@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from typing import Callable, Iterable, Iterator, Optional, TypeVar
+from typing import Callable, Iterable, Iterator, Optional, Protocol, Sequence, TypeVar
 
 ResultT = TypeVar("ResultT")
 ItemT = TypeVar("ItemT")
@@ -16,6 +16,75 @@ ItemT = TypeVar("ItemT")
 # 进程内算法池硬上限，防止 core 自行创造线程风暴。
 ABSOLUTE_MAX_WORKERS = 8
 CORE_THREAD_PREFIX = "MCSaveCore"
+
+
+class ParallelCancelledError(RuntimeError):
+    """并行端口在安全检查点观察到取消请求。"""
+
+
+class ParallelRunner(Protocol):
+    """由应用层实现的有界并行映射端口。"""
+
+    def map(
+        self,
+        operation: str,
+        items: Sequence[ItemT],
+        worker: Callable[[ItemT], ResultT],
+        *,
+        max_workers: Optional[int] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        on_item_done: Optional[
+            Callable[[int, ResultT | BaseException], None]
+        ] = None,
+    ) -> list[ResultT | BaseException]:
+        """处理条目并返回与输入顺序一致的结果。"""
+        ...
+
+
+class SerialParallelRunner:
+    """core 默认串行实现，不自行拥有线程或执行器。"""
+
+    def map(
+        self,
+        operation: str,
+        items: Sequence[ItemT],
+        worker: Callable[[ItemT], ResultT],
+        *,
+        max_workers: Optional[int] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        on_item_done: Optional[
+            Callable[[int, ResultT | BaseException], None]
+        ] = None,
+    ) -> list[ResultT | BaseException]:
+        """在当前线程处理条目，并保持统一错误聚合语义。
+
+        Args:
+            operation: 稳定操作名，用于取消错误。
+            items: 输入条目。
+            worker: 单条目处理函数。
+            max_workers: 兼容并行实现的提示；串行实现忽略。
+            cancel_check: 可选取消探针。
+            on_item_done: 每项结束后的轻量回调。
+
+        Returns:
+            与输入等长的值或异常列表。
+
+        Raises:
+            ParallelCancelledError: 处理下一项前观察到取消。
+        """
+        del max_workers
+        results: list[ResultT | BaseException] = []
+        for index, item in enumerate(items):
+            if cancel_check is not None and cancel_check():
+                raise ParallelCancelledError(f"并行操作已取消: {operation}")
+            try:
+                value: ResultT | BaseException = worker(item)
+            except Exception as exc:
+                value = exc
+            results.append(value)
+            if on_item_done is not None:
+                on_item_done(index, value)
+        return results
 
 
 def clamp_workers(
@@ -145,6 +214,9 @@ def submit_all(
 __all__ = [
     "ABSOLUTE_MAX_WORKERS",
     "CORE_THREAD_PREFIX",
+    "ParallelCancelledError",
+    "ParallelRunner",
+    "SerialParallelRunner",
     "bounded_executor",
     "clamp_workers",
     "map_unordered",

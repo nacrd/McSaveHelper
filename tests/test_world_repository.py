@@ -6,7 +6,11 @@ from pathlib import Path
 from app.bootstrap.services import _default_world_repository
 from app.services.backup_service import BackupService
 from app.services.world_index_service import WorldIndexRegistry, WorldIndexRegistryClosedError
-from app.services.world_repository import WorldRepository, WorldSessionPorts
+from app.services.world_repository import (
+    WorldReadContext,
+    WorldRepository,
+    WorldSessionPorts,
+)
 from app.services.world_transaction import WorldTransactionService
 from app.services.world_write_coordinator import WorldWriteCoordinator
 from core.nbt import Compound, File, Int
@@ -55,6 +59,30 @@ def test_repository_open_session_uses_index_snapshot(tmp_path: Path, monkeypatch
     assert calls["scan"] == 0
     assert len(session.get_player_uuids()) == 1
     registry.close()
+
+
+def test_repository_open_returns_lazy_read_context(tmp_path: Path) -> None:
+    world = _world(tmp_path)
+    registry = WorldIndexRegistry()
+    repository = WorldRepository(registry)
+    try:
+        context = repository.open(world)
+
+        assert isinstance(context, WorldReadContext)
+        assert context.world_path == world.resolve()
+        assert context.shell.display_name == world.name
+        assert registry.stats().builds == 0
+
+        snapshot = context.get_index()
+        assert snapshot.world_path == world.resolve()
+        assert registry.stats().builds == 1
+
+        session = context.open_session()
+        assert session.world_path == world.resolve()
+        assert registry.stats().builds == 1
+        assert registry.stats().hits == 1
+    finally:
+        repository.close()
 
 
 def test_session_spawn_reuses_current_repository_snapshot(tmp_path: Path) -> None:

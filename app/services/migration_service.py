@@ -23,6 +23,7 @@ from core.batch_processor import (
     scan_worlds_directory,
 )
 from core.i18n import t
+from core.parallel import ParallelRunner
 from core.types import LogCallback, ProgressCallback
 
 
@@ -116,6 +117,7 @@ class MigrationService:
         config: ConfigService,
         backup_service: BackupService,
         world_transactions: WorldTransactionService,
+        parallel_runner: ParallelRunner,
     ) -> None:
         """注入配置与备份能力；批量处理器按需创建。
 
@@ -123,10 +125,12 @@ class MigrationService:
             config: 应用配置（目标版本、清理策略等）。
             backup_service: 应用共享备份服务。
             world_transactions: 应用共享世界发布事务。
+            parallel_runner: 应用共享运行时提供的并行端口。
         """
         self._config: ConfigService = config
         self._backup_service = backup_service
         self._world_transactions = world_transactions
+        self._parallel_runner = parallel_runner
         self._batch_processor: Optional[BatchProcessor] = None
         self._batch_worlds: List[Path] = []
         self._scan_result: str = ""
@@ -340,6 +344,7 @@ class MigrationService:
                 options,
                 cancel_check or (lambda: False),
             ),
+            runner=self._parallel_runner,
         )
 
     def _make_batch_task_handler(
@@ -610,6 +615,14 @@ class MigrationService:
         from core.fast_mode import run_fast
         from core.full_mode import run_full
 
+        # A single migration runs on the runtime I/O lane and may use the
+        # shared CPU lane for region work.  Batch migrations already occupy
+        # that runtime with one task per world, so their inner region work
+        # deliberately stays serial to avoid nested admission/deadlocks.
+        parallel_runner = (
+            self._parallel_runner if region_workers is None else None
+        )
+
         if options.mode == "fast":
             run_fast(
                 src_path,
@@ -622,6 +635,7 @@ class MigrationService:
                 log_cb,
                 region_workers,
                 cancel_check,
+                parallel_runner,
             )
             return
         custom_mappings = (
@@ -642,6 +656,7 @@ class MigrationService:
             custom_mappings,
             region_workers,
             cancel_check,
+            parallel_runner,
         )
 
     @staticmethod

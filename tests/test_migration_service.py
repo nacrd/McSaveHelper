@@ -1,15 +1,18 @@
-from pathlib import Path
 import os
 import threading
+from pathlib import Path
 
 import pytest
 
 from app.services.backup_service import BackupService
 from app.services.config_service import ConfigService
+from app.services.execution_runtime import ExecutionRuntime, LaneLimits
 from app.services.migration_service import MigrationOptions, MigrationService
+from app.services.parallel_runner import RuntimeParallelRunner
 from app.services.world_transaction import WorldTransactionService
 from app.services.world_write_coordinator import WorldWriteCoordinator
 from core.batch_processor import BatchCancelledError
+from core.parallel import ParallelRunner, SerialParallelRunner
 
 
 def test_migration_options_parses_manual_names() -> None:
@@ -28,12 +31,20 @@ def test_migration_options_parses_manual_names() -> None:
     assert options.manual_names == ("Alice", "Bob", "Carol")
 
 
-def _service(tmp_path: Path) -> tuple[MigrationService, BackupService]:
+def _service(
+    tmp_path: Path,
+    runner: ParallelRunner | None = None,
+) -> tuple[MigrationService, BackupService]:
     coordinator = WorldWriteCoordinator()
     backup = BackupService(coordinator)
     transaction = WorldTransactionService(coordinator, backup)
     config = ConfigService(tmp_path / "config")
-    return MigrationService(config, backup, transaction), backup
+    return MigrationService(
+        config,
+        backup,
+        transaction,
+        runner or SerialParallelRunner(),
+    ), backup
 
 
 def test_single_migration_builds_in_staging_and_backs_up_existing_target(
@@ -231,7 +242,11 @@ def test_batch_migration_is_concurrent_transactional_and_task_keyed(
         target = destination / name
         target.mkdir(parents=True)
         (target / "level.dat").write_bytes(f"old-{name}".encode())
-    service, backup = _service(tmp_path)
+    runtime = ExecutionRuntime(
+        io_limits=LaneLimits(1, 2),
+        cpu_limits=LaneLimits(2, 2),
+    )
+    service, backup = _service(tmp_path, RuntimeParallelRunner(runtime))
     service._batch_worlds = [first, second]
     barrier = threading.Barrier(2)
 
@@ -246,11 +261,14 @@ def test_batch_migration_is_concurrent_transactional_and_task_keyed(
 
     monkeypatch.setattr("core.fast_mode.run_fast", fake_run_fast)
 
-    results = service.run_batch(
-        str(destination), "fast", True, False, False,
-        "java", "", "", 2,
-        lambda message, level: None, lambda value: None,
-    )
+    try:
+        results = service.run_batch(
+            str(destination), "fast", True, False, False,
+            "java", "", "", 2,
+            lambda message, level: None, lambda value: None,
+        )
+    finally:
+        runtime.shutdown(wait=True)
 
     assert set(results) == {"task-1", "task-2"}
     assert all(result["success"] for result in results.values())

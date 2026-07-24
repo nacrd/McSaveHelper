@@ -142,15 +142,10 @@ class PlayerTabMixin(ExplorerMixinHost):
     def _player_avatar_service(self) -> PlayerAvatarService:
         service = getattr(self, "_player_avatar_service_instance", None)
         if service is None:
-            cache_registry = getattr(
-                self.app.services,
-                "cache_registry",
-                None,
-            )
             service = PlayerAvatarService(
                 self.app.execution_runtime,
                 enabled=True,
-                cache_registry=cache_registry,
+                cache_registry=self.app.services.cache_registry,
             )
             self._player_avatar_service_instance = service
         return service

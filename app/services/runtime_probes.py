@@ -3,45 +3,42 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import CancelledError
 
 from app.services.execution_runtime import (
     CancellationToken,
     ExecutionLane,
     ExecutionRuntime,
+    OperationCancelledError,
     TaskPriority,
 )
+from app.services.operation_progress import OperationState
 
 
 def probe_cancel_latency_ms(
     runtime: ExecutionRuntime,
     *,
     lane: ExecutionLane = ExecutionLane.CPU,
-    poll_interval_s: float = 0.001,
 ) -> float:
-    """在受控场景测量「请求取消 → 工作函数观察到取消」的毫秒数。
+    """测量「请求取消 → UI 可读状态更新」的毫秒数。
 
     Args:
         runtime: 共享或测试用运行时。
         lane: 提交通道。
-        poll_interval_s: 工作循环轮询间隔。
-
     Returns:
         取消延迟毫秒。
 
     Raises:
-        TimeoutError: 工作未能在合理时间内启动或观察到取消。
+        TimeoutError: 工作未能在合理时间内启动。
+        AssertionError: 取消请求未同步更新任务状态。
     """
     started = threading.Event()
-    observed = threading.Event()
+    release = threading.Event()
 
     def work(token: CancellationToken) -> bool:
         started.set()
-        deadline = time.perf_counter() + 5.0
-        while time.perf_counter() < deadline:
-            if token.is_cancelled:
-                observed.set()
-                return True
-            time.sleep(poll_interval_s)
+        release.wait(5.0)
+        token.raise_if_cancelled()
         return False
 
     handle = runtime.submit(
@@ -55,14 +52,16 @@ def probe_cancel_latency_ms(
         raise TimeoutError("取消探针工作未能启动")
     t0 = time.perf_counter()
     handle.cancel()
-    if not observed.wait(2.0):
-        raise TimeoutError("取消探针未在时限内观察到取消标记")
+    state = handle.progress().state
+    latency_ms = (time.perf_counter() - t0) * 1000.0
+    if state is not OperationState.CANCEL_REQUESTED:
+        raise AssertionError(f"取消状态未同步发布: {state.value}")
+    release.set()
     try:
         handle.result(timeout=1.0)
-    except Exception:
-        # 取消路径可能以 CancelledError 结束，探针只关心观察延迟。
+    except (CancelledError, OperationCancelledError):
         pass
-    return (time.perf_counter() - t0) * 1000.0
+    return latency_ms
 
 
 def cancel_within_budget(

@@ -2,20 +2,26 @@
 from __future__ import annotations
 
 import threading
+import time
+from collections.abc import Iterator, Mapping
 from concurrent.futures import CancelledError
 
 import pytest
 
 from app.services.execution_runtime import (
+    DEFAULT_MAX_RUNTIME_WORKERS,
     ExecutionLane,
     ExecutionRuntime,
     LaneLimits,
     OperationCancelledError,
+    OperationContext,
     OperationRecordSink,
     RuntimeClosedError,
+    TaskSpec,
     TaskPriority,
     TaskQueueFullError,
 )
+from app.services.operation_progress import OperationState
 from core.observability import OperationOutcome, OperationRecord
 
 
@@ -57,6 +63,32 @@ def test_submit_returns_result_and_releases_capacity() -> None:
         assert snapshot.queue_wait_samples >= 2
         assert snapshot.queue_wait_last_ms >= 0.0
         assert snapshot.queue_wait_max_ms >= 0.0
+    finally:
+        runtime.shutdown(wait=True)
+
+
+def test_submit_releases_capacity_when_metadata_copy_fails() -> None:
+    class BrokenMetadata(Mapping[str, object]):
+        def __getitem__(self, key: str) -> object:
+            raise KeyError(key)
+
+        def __iter__(self) -> Iterator[str]:
+            raise ValueError("broken metadata")
+
+        def __len__(self) -> int:
+            return 1
+
+    runtime = _single_lane_runtime(queue_capacity=0)
+    try:
+        with pytest.raises(ValueError, match="broken metadata"):
+            runtime.submit(
+                "invalid-metadata",
+                lambda context: None,
+                metadata=BrokenMetadata(),
+            )
+
+        handle = runtime.submit("after-invalid-metadata", lambda context: 7)
+        assert handle.result(timeout=1) == 7
     finally:
         runtime.shutdown(wait=True)
 
@@ -110,9 +142,10 @@ def test_operation_sink_records_success_and_preserves_snapshot() -> None:
 
     assert len(records) == 1
     record = records[0]
-    assert record.operation_id == "render_tile"
+    assert record.operation_id == handle.task_id
     assert record.feature == "runtime"
     assert record.outcome is OperationOutcome.OK
+    assert record.metadata["operation"] == "render_tile"
     assert record.metadata["lane"] == "cpu"
     assert record.metadata["priority"] == "visible"
     assert record.queue_wait_ms >= 0.0
@@ -143,9 +176,11 @@ def test_operation_sink_records_error_without_changing_exception() -> None:
         runtime.shutdown(wait=True)
 
     assert len(records) == 1
-    assert records[0].operation_id == "broken"
+    assert records[0].operation_id == handle.task_id
     assert records[0].outcome is OperationOutcome.ERROR
     assert records[0].metadata["lane"] == "io"
+    assert records[0].metadata["error_type"] == "ValueError"
+    assert records[0].metadata["error"] == "boom"
 
 
 def test_operation_sink_records_cooperative_cancellation() -> None:
@@ -174,6 +209,164 @@ def test_operation_sink_records_cooperative_cancellation() -> None:
     assert len(records) == 1
     assert records[0].outcome is OperationOutcome.CANCELLED
     assert records[0].run_ms >= 0.0
+
+
+def test_same_operation_submissions_receive_unique_task_ids() -> None:
+    runtime = _single_lane_runtime(queue_capacity=0)
+    try:
+        first = runtime.submit("duplicate", lambda context: 1)
+        assert first.result(timeout=1) == 1
+        second = runtime.submit("duplicate", lambda context: 2)
+        assert second.result(timeout=1) == 2
+    finally:
+        runtime.shutdown(wait=True)
+
+    assert first.task_id != second.task_id
+    assert first.operation == second.operation == "duplicate"
+
+
+def test_task_spec_context_and_record_preserve_operation_dimensions() -> None:
+    records: list[OperationRecord] = []
+    published = threading.Event()
+    runtime = _single_lane_runtime(
+        operation_sink=_record_collector(records, published),
+    )
+    observed: list[OperationContext] = []
+    spec = TaskSpec(
+        operation="load_world",
+        lane=ExecutionLane.IO,
+        priority=TaskPriority.VISIBLE,
+        feature="explorer",
+        world_id="world-a",
+        generation=7,
+        metadata={"phase": "shell"},
+    )
+
+    def work(context: OperationContext) -> str:
+        observed.append(context)
+        context.report_progress(1, 2, "metadata")
+        return "done"
+
+    try:
+        handle = runtime.submit_spec(spec, work)
+        assert handle.result(timeout=1) == "done"
+        assert published.wait(1)
+    finally:
+        runtime.shutdown(wait=True)
+
+    assert observed == [handle.context()]
+    assert handle.feature == "explorer"
+    assert handle.world_id == "world-a"
+    assert handle.generation == 7
+    assert handle.metadata == {"phase": "shell"}
+    assert handle.progress().state is OperationState.SUCCEEDED
+    assert handle.progress().fraction == 1.0
+    assert records[0].operation_id == handle.task_id
+    assert records[0].feature == "explorer"
+    assert records[0].world_id == "world-a"
+    assert records[0].metadata["operation"] == "load_world"
+    assert records[0].metadata["generation"] == 7
+    assert records[0].metadata["phase"] == "shell"
+
+
+def test_terminal_progress_listener_can_read_result_reentrantly() -> None:
+    runtime = _single_lane_runtime(queue_capacity=0)
+    release = threading.Event()
+    listener_returned = threading.Event()
+    handle_holder = []
+
+    def work(context: OperationContext) -> int:
+        del context
+        release.wait(1)
+        return 7
+
+    def observe(snapshot) -> None:
+        if not snapshot.is_terminal:
+            return
+        assert handle_holder[0].result(timeout=0.5) == 7
+        listener_returned.set()
+
+    handle = runtime.submit("terminal-reentrant-result", work)
+    handle_holder.append(handle)
+    handle.subscribe_progress(observe)
+    try:
+        release.set()
+        assert listener_returned.wait(0.1)
+        assert handle.result(timeout=1) == 7
+    finally:
+        release.set()
+        runtime.shutdown(wait=True, timeout=1)
+
+
+def test_cancel_updates_progress_before_worker_acknowledges_request() -> None:
+    runtime = _single_lane_runtime()
+    started = threading.Event()
+    release = threading.Event()
+
+    def work(context: OperationContext) -> None:
+        started.set()
+        release.wait(1)
+        context.raise_if_cancelled()
+
+    handle = runtime.submit("cancel-progress", work)
+    try:
+        assert started.wait(1)
+        started_at = time.perf_counter()
+        assert handle.cancel() is True
+        snapshot = handle.progress()
+        latency_ms = (time.perf_counter() - started_at) * 1000.0
+        assert snapshot.state is OperationState.CANCEL_REQUESTED
+        assert latency_ms < 100.0
+
+        release.set()
+        with pytest.raises(OperationCancelledError):
+            handle.result(timeout=1)
+        assert handle.progress().state is OperationState.CANCELLED
+    finally:
+        release.set()
+        runtime.shutdown(wait=True)
+
+
+def test_handle_exposes_original_error_and_error_progress() -> None:
+    runtime = _single_lane_runtime()
+    failure = ValueError("invalid chunk")
+
+    def fail(context: OperationContext) -> None:
+        del context
+        raise failure
+
+    try:
+        handle = runtime.submit("decode", fail)
+        with pytest.raises(ValueError, match="invalid chunk"):
+            handle.result(timeout=1)
+    finally:
+        runtime.shutdown(wait=True)
+
+    assert handle.error is failure
+    assert handle.progress().state is OperationState.ERROR
+    assert handle.progress().error == "ValueError: invalid chunk"
+
+
+def test_context_stale_result_keeps_distinct_terminal_outcome() -> None:
+    records: list[OperationRecord] = []
+    published = threading.Event()
+    runtime = _single_lane_runtime(
+        operation_sink=_record_collector(records, published),
+    )
+
+    def finish_stale(context: OperationContext) -> str:
+        context.mark_stale()
+        return "obsolete"
+
+    try:
+        handle = runtime.submit("load", finish_stale, generation=3)
+        assert handle.result(timeout=1) == "obsolete"
+        assert published.wait(1)
+    finally:
+        runtime.shutdown(wait=True)
+
+    assert handle.progress().state is OperationState.STALE
+    assert records[0].outcome is OperationOutcome.STALE
 
 
 def test_lane_capacity_rejects_excess_without_blocking() -> None:
@@ -301,6 +494,25 @@ def test_snapshot_exposes_task_and_worker_budgets() -> None:
     finally:
         release.set()
         handle.result(timeout=1)
+        runtime.shutdown(wait=True)
+
+
+def test_runtime_rejects_lane_workers_over_total_hard_limit() -> None:
+    with pytest.raises(ValueError, match="工作线程总数超过硬上限"):
+        ExecutionRuntime(
+            io_limits=LaneLimits(max_workers=3, queue_capacity=0),
+            cpu_limits=LaneLimits(max_workers=2, queue_capacity=0),
+            total_worker_limit=4,
+        )
+
+
+def test_snapshot_reports_total_worker_budget() -> None:
+    runtime = _single_lane_runtime()
+    try:
+        snapshot = runtime.snapshot()
+        assert snapshot.worker_limit_total == DEFAULT_MAX_RUNTIME_WORKERS
+        assert snapshot.worker_count_total == 0
+    finally:
         runtime.shutdown(wait=True)
 
 

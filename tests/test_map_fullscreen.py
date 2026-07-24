@@ -3,11 +3,39 @@ from types import SimpleNamespace
 from typing import cast
 
 import flet as ft
+import pytest
 
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.fullscreen import MapFullscreenController
 from app.ui.views.explorer.map.mca_map_view import McaMapView
+
+
+class _DelayedCall:
+    def __init__(self, callback):
+        self.callback = callback
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+
+    def fire(self):
+        self.callback()
+
+
+class _DelayedScheduler:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, _delay, callback):
+        call = _DelayedCall(callback)
+        self.calls.append(call)
+        return call
+
+
+class _FailingScheduler:
+    def __call__(self, _delay, _callback):
+        raise RuntimeError("scheduler failed")
 
 
 def _controller(side_visible=True):
@@ -96,3 +124,81 @@ def test_window_size_uses_page_and_native_window_bounds() -> None:
     ))
 
     assert MapFullscreenController.window_size(page) == (1280, 720)
+
+
+def test_fullscreen_dispose_invalidates_pending_restore_callback() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    map_view = McaMapView(map_service=service)
+    host = ft.Container(content=map_view)
+    side = ft.Container()
+    page = cast(
+        ft.Page,
+        SimpleNamespace(
+            width=1280,
+            height=720,
+            window=SimpleNamespace(width=1280, height=720),
+            overlay=[],
+            update=lambda: None,
+        ),
+    )
+    scheduler = _DelayedScheduler()
+    controller = MapFullscreenController(
+        page=page,
+        map_view=map_view,
+        inline_host=host,
+        side_panel=side,
+        set_toggle_state=lambda _active: None,
+        refresh=lambda: None,
+        zoom_in=lambda: None,
+        zoom_out=lambda: None,
+        reset=lambda: None,
+        schedule_delayed=scheduler,
+    )
+
+    controller.enter()
+    controller.exit()
+    restore = scheduler.calls[-1]
+    controller.dispose()
+    restore.fire()
+
+    assert controller.active is False
+    assert host.content is map_view
+    assert page.overlay == []
+    service.close()
+
+
+def test_fullscreen_recovers_when_transition_scheduler_raises() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    map_view = McaMapView(map_service=service)
+    host = ft.Container(content=map_view)
+    side = ft.Container()
+    page = cast(
+        ft.Page,
+        SimpleNamespace(
+            width=1280,
+            height=720,
+            window=SimpleNamespace(width=1280, height=720),
+            overlay=[],
+            update=lambda: None,
+        ),
+    )
+    controller = MapFullscreenController(
+        page=page,
+        map_view=map_view,
+        inline_host=host,
+        side_panel=side,
+        set_toggle_state=lambda _active: None,
+        refresh=lambda: None,
+        zoom_in=lambda: None,
+        zoom_out=lambda: None,
+        reset=lambda: None,
+        schedule_delayed=_FailingScheduler(),
+    )
+
+    with pytest.raises(RuntimeError, match="scheduler failed"):
+        controller.enter()
+
+    assert controller.active is False
+    assert host.content is map_view
+    assert page.overlay == []
+    service.close()

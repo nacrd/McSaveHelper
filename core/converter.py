@@ -17,6 +17,7 @@ from typing import Any, Dict, List as TList, Optional, Tuple
 import core.nbt as nbtlib
 from core.nbt import Compound, File, List, String
 
+from .parallel import ParallelRunner, SerialParallelRunner, clamp_workers
 from .utils import replace_directory_tree
 
 
@@ -446,36 +447,39 @@ def _convert_region_files(
     result: ConversionResult,
     tracker: Any,
     log_warning: Any,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> None:
-    from concurrent.futures import as_completed
-
-    from .parallel import bounded_executor, clamp_workers
     from .scanner import scan_all_regions
 
     mca_files = scan_all_regions(work_path)
     workers = clamp_workers(None, item_count=max(1, len(mca_files)))
-    with bounded_executor(
+    runner = parallel_runner if parallel_runner is not None else SerialParallelRunner()
+    outcomes = runner.map(
+        "converter.region-files",
+        mca_files,
+        lambda path: _convert_one_region(
+            path,
+            target_platform,
+            target_version,
+        ),
         max_workers=workers,
-        item_count=len(mca_files),
-    ) as executor:
-        futures = [
-            executor.submit(
-                _convert_one_region,
-                path,
-                target_platform,
-                target_version,
-            )
-            for path in mca_files
-        ]
-        for future in as_completed(futures):
-            converted, error = future.result()
-            if error:
-                result.errors.append(error)
-                log_warning(error, module="Converter")
-                tracker.increment_errors(1)
-            elif converted:
-                tracker.increment_files(1)
-                result.converted_files += 1
+    )
+    if len(outcomes) != len(mca_files):
+        raise RuntimeError(
+            "区域转换并行端口返回数量不一致: "
+            f"expected={len(mca_files)}, actual={len(outcomes)}"
+        )
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+        converted, error = outcome
+        if error:
+            result.errors.append(error)
+            log_warning(error, module="Converter")
+            tracker.increment_errors(1)
+        elif converted:
+            tracker.increment_files(1)
+            result.converted_files += 1
 
 
 def convert_world(
@@ -483,6 +487,8 @@ def convert_world(
     dst_path: Path,
     target_platform: str = "java",
     target_version: Optional[int] = None,
+    *,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> ConversionResult:
     """转换整个世界存档（高级接口）。
 
@@ -523,6 +529,7 @@ def convert_world(
             result,
             tracker,
             _logger.warning,
+            parallel_runner,
         )
 
     return result
@@ -549,6 +556,7 @@ def _convert_regions_if_needed(
     result: ConversionResult,
     tracker: Any,
     warn: Any,
+    parallel_runner: Optional[ParallelRunner] = None,
 ) -> None:
     if target_platform == "java" and target_version is None:
         return
@@ -560,6 +568,7 @@ def _convert_regions_if_needed(
             result,
             tracker,
             warn,
+            parallel_runner,
         )
     except ImportError:
         message = "区域文件转换模块不可用，跳过区域文件转换"

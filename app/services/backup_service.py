@@ -9,6 +9,7 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -30,6 +31,7 @@ _MANIFEST_FILE = "manifest.json"
 _SNAPSHOT_DIR = "world"
 _REPOSITORY_DIR = ".mcsavehelper_backups"
 _SESSION_LOCK_FILE = "session.lock"
+_PUBLISH_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.4)
 
 
 class BackupError(RuntimeError):
@@ -97,6 +99,10 @@ class BackupService:
         """
         self._cancel_event = threading.Event()
         self._coordinator = coordinator
+        # Windows can transiently reject concurrent directory renames that
+        # target the same repository parent.  Keep only the tiny publication
+        # window serialized; snapshot copying remains concurrent per world.
+        self._publication_lock = threading.Lock()
 
     def cancel(self) -> None:
         """Request cancellation at the next copy checkpoint."""
@@ -196,10 +202,30 @@ class BackupService:
         self._progress(progress_callback, 0.96, "正在验证备份...")
         self._validate_snapshot(snapshot)
         self._check_cancelled(cancel_check)
-        os.replace(temp_dir, final_dir)
+        self._publish_backup_directory(temp_dir, final_dir)
         self._progress(progress_callback, 1.0, "备份创建完成")
         logger.info(f"已创建存档备份: {final_dir}", module="Backup")
         return record
+
+    def _publish_backup_directory(
+        self,
+        temp_dir: Path,
+        final_dir: Path,
+    ) -> None:
+        """在短发布锁内完成备份目录的原子落盘。"""
+        with self._publication_lock:
+            if final_dir.exists():
+                raise BackupError(f"备份标识已存在，拒绝覆盖: {final_dir.name}")
+            for attempt, delay in enumerate(_PUBLISH_RETRY_DELAYS):
+                try:
+                    os.replace(temp_dir, final_dir)
+                    return
+                except PermissionError:
+                    if final_dir.exists() or attempt == len(_PUBLISH_RETRY_DELAYS) - 1:
+                        raise
+                    # Windows scanners may briefly retain a directory handle;
+                    # retry only this I/O boundary, never business coordination.
+                    time.sleep(delay)
 
     def list_backups(self, world_path: Path | str) -> list[BackupRecord]:
         """List managed backups, including damaged entries with an error state."""

@@ -24,8 +24,16 @@ def _sample_report() -> dict:
                     "cold_ms": 10.0,
                     "warm_p95_ms": 2.0,
                 },
-                "topview": {"tile_p95_ms": 20.0},
-                "world_session": {"open_with_index_p95_ms": 1.0},
+                "topview": {
+                    "tile_p95_ms": 20.0,
+                    "cache_hit_p95_ms": 0.5,
+                },
+                "world_session": {
+                    "shell_open_p95_ms": 0.8,
+                    "cold_open_p95_ms": 12.0,
+                    "open_with_index_p95_ms": 1.0,
+                },
+                "backup": {"backup_p95_ms": 5.0},
             }
         ],
     }
@@ -36,8 +44,12 @@ def test_extract_and_render_markdown() -> None:
     rows = extract_p95_rows(report)
     assert rows[0]["size"] == "small"
     assert rows[0]["topview_p95_ms"] == 20.0
+    assert rows[0]["shell_p95_ms"] == 0.8
+    assert rows[0]["backup_p95_ms"] == 5.0
     md = render_markdown_report(report, machine_notes="ci-runner")
     assert "index warm p95" in md
+    assert "cold session p95" in md
+    assert "backup p95" in md
     assert "20.000" in md
     assert "ci-runner" in md
 

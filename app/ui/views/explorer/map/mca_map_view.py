@@ -33,6 +33,7 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise ImportError("flet.canvas is not available in this Flet version") from exc
 
+from app.ui.delayed_scheduler import UiDelayedScheduler
 from app.ui.utils import (
     ScheduledTask,
     run_on_ui,
@@ -146,9 +147,16 @@ class McaMapView(ft.Container):
         )
         self._on_selection_changed = on_selection_changed
         self._on_marker_selected = on_marker_selected
-        self._init_viewport_state(cache_registry)
-        self._init_interaction_state()
-        self._init_layers_and_content(width, height)
+        try:
+            self._init_viewport_state(cache_registry)
+            self._init_interaction_state()
+            self._init_layers_and_content(width, height)
+        except Exception:
+            # 可选 Flet/canvas 边界可能在预算登记后失败，必须归还视图缓存预算。
+            tile_sources = getattr(self, "_tile_sources", None)
+            if tile_sources is not None:
+                tile_sources.close()
+            raise
 
     def _init_viewport_state(
         self,
@@ -200,6 +208,9 @@ class McaMapView(ft.Container):
         self._rebuild_state_lock = threading.Lock()
         self._rebuild_enqueued = False
         self._rebuild_dirty = False
+        self._delay_scheduler = UiDelayedScheduler(
+            lambda: cast(Optional[ft.Page], self.page),
+        )
 
         # Pointer used for level auto-switch while zooming.
         self._zoom_pivot_x = 0.0
@@ -212,10 +223,12 @@ class McaMapView(ft.Container):
             on_frame=self._on_camera_frame,
             on_complete=self._on_camera_complete,
             is_alive=lambda: self._mounted,
+            schedule=self._delay_scheduler,
         )
         self._rebuild_scheduler = RebuildScheduler(
             self._request_rebuild,
             is_active=lambda: self._mounted,
+            schedule_delayed=self._delay_scheduler,
             min_interval=1.0 / 30.0,
         )
 

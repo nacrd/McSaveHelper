@@ -152,6 +152,7 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
         get_sidebar_mode=lambda: "auto",
         stop_gui_optimizer=lambda: disposed.append("optimizer"),
         dispose_views=lambda: disposed.append("views"),
+        close_ui_delivery=lambda: disposed.append("ui_delivery"),
         dispose_file_dialogs=lambda: disposed.append("file_dialogs"),
         close_texture_service=lambda: disposed.append("texture"),
         shutdown_execution_runtime=lambda: disposed.append("runtime"),
@@ -166,12 +167,15 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
 
     assert "optimizer" in disposed
     assert "views" in disposed
+    assert "ui_delivery" in disposed
     assert "file_dialogs" in disposed
     assert "texture" in disposed
     assert "runtime" in disposed
     assert "world_indexes" in disposed
     assert "cache_registry" in disposed
+    assert disposed.index("ui_delivery") < disposed.index("views")
     assert disposed.index("views") < disposed.index("runtime")
+    assert disposed.index("ui_delivery") < disposed.index("runtime")
     assert disposed.index("runtime") < disposed.index("texture")
     assert disposed.index("runtime") < disposed.index("world_indexes")
     assert disposed.index("runtime") < disposed.index("cache_registry")

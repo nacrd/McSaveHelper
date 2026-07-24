@@ -10,7 +10,6 @@ import flet as ft
 from app.services.world_compare_service import (
     CompareItem,
     WorldCompareResult,
-    get_world_compare_service,
 )
 from app.services.execution_runtime import (
     CancellationToken,
@@ -45,10 +44,7 @@ class CompareView(ft.Column):
         self.expand = True
         self.app = app
         self._task_scope = app.execution_runtime.create_scope("compare_view")
-        self._service = get_world_compare_service(
-            log=app.log,
-            index_provider=app.services.world_repository.get_index,
-        )
+        self._service = app.services.world_compare
         self._comparing = False
         self._compare_generation = 0
         self._build()

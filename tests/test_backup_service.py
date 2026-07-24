@@ -149,6 +149,35 @@ def test_create_ignores_progress_observer_failure(tmp_path: Path) -> None:
     assert (created.backup_path / "world" / "level.dat").read_bytes() == b"level-v1"
 
 
+def test_create_retries_transient_directory_publish_denial(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    world = _world(tmp_path)
+    service = BackupService(WorldWriteCoordinator())
+    from app.services import backup_service as backup_module
+
+    real_replace = os.replace
+    attempts = 0
+    delays: list[float] = []
+
+    def transient_replace(source: Path, destination: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise PermissionError("directory handle is temporarily retained")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(backup_module.os, "replace", transient_replace)
+    monkeypatch.setattr(backup_module.time, "sleep", delays.append)
+
+    created = service.create_backup(world)
+
+    assert attempts == 3
+    assert delays == [0.01, 0.02]
+    assert (created.backup_path / "world" / "level.dat").read_bytes() == b"level-v1"
+
+
 def test_create_cancelled_at_final_checkpoint_is_not_published(
     tmp_path: Path,
 ) -> None:

@@ -38,9 +38,9 @@ def main() -> int:
         "--sizes",
         nargs="+",
         choices=[item.value for item in SampleSize],
-        default=["small"],
+        default=[item.value for item in SampleSize],
     )
-    parser.add_argument("--loops", type=int, default=1)
+    parser.add_argument("--loops", type=int, default=3)
     parser.add_argument(
         "--output-dir",
         default=str(ROOT / "docs" / "bench"),

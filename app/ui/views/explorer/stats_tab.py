@@ -649,11 +649,9 @@ class StatsTabMixin(ExplorerMixinHost):
             )
 
     def _ensure_world_stats_service(self) -> WorldStatsService:
-        """返回本视图会话持有的统计服务；不在 UI 分支静默新建第二份。"""
-        service = getattr(self, "_stats_service_cache", None)
-        if service is None:
-            service = WorldStatsService(log=self.app.log)
-            self._stats_service_cache = service
+        """返回组合根装配的统计服务。"""
+        service = self.app.services.world_stats
+        self._stats_service_cache = service
         return service
 
     def _start_stats_analysis(self, world_path: Path) -> None:
@@ -853,7 +851,6 @@ class StatsTabMixin(ExplorerMixinHost):
                     "_player_sort_key",
                     PLAYER_SORT_PLAY_TIME,
                 ),
-                service=service,
                 size_formatter=format_size,
             )
             self._last_stats_view_state = view_state
@@ -935,7 +932,6 @@ class StatsTabMixin(ExplorerMixinHost):
                 "_player_sort_key",
                 PLAYER_SORT_PLAY_TIME,
             ),
-            service=service,
             size_formatter=format_size,
         )
         self._set_ranked_stats_from_view_state(view_state)

@@ -66,6 +66,13 @@ from core.mca.map_tiles import (
 from core.mca.region_file import RegionFile
 from core.mca.region_selection import format_region_selection
 from core.mca.surface import (
+    chunk_decode_cache_bytes,
+    chunk_decode_cache_evictions,
+    chunk_decode_cache_hits,
+    chunk_decode_cache_misses,
+    chunk_decode_cache_size,
+    clear_chunk_decode_cache,
+    invalidate_chunk_decode_cache_for_world,
     sample_region_surface_colors,
     sample_region_surface_samples,
 )
@@ -147,6 +154,13 @@ __all__ = [
     "format_region_selection",
     "sample_region_surface_colors",
     "sample_region_surface_samples",
+    "clear_chunk_decode_cache",
+    "invalidate_chunk_decode_cache_for_world",
+    "chunk_decode_cache_bytes",
+    "chunk_decode_cache_evictions",
+    "chunk_decode_cache_hits",
+    "chunk_decode_cache_misses",
+    "chunk_decode_cache_size",
     "render_region_topview",
     "plan_visible_requests",
     "prioritize_regions",

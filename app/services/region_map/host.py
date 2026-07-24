@@ -13,6 +13,7 @@ class RegionMapHost:
     """声明 RegionMapService 提供给 scan/meta/topview mixin 的共享状态。"""
 
     TOPVIEW_QUEUE_LIMIT: int
+    TOPVIEW_CACHE_ENTRY_LIMIT: int
     TOPVIEW_MEMORY_LIMIT: int
     TOPVIEW_FAILURE_LIMIT: int
 

@@ -14,6 +14,7 @@ from app.services.world_stats_service import (
     DimensionSizeStats,
     PlayerPlaytimeStats,
 )
+from core.world_index import WorldIndexBuilder
 
 
 def test_analyze_chunk_counts_palette_and_entity_types() -> None:
@@ -275,6 +276,49 @@ def test_collect_player_playtimes_reads_legacy_and_modern_paths(tmp_path) -> Non
     by_name = {player.uuid: player.name for player in renamed}
     assert by_name[modern_uuid.replace("-", "").lower()] == "Herobrine"
     assert by_name[legacy_uuid.replace("-", "").lower()] == "Alex"
+
+
+def test_collect_player_playtimes_uses_shared_index_without_rescanning(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    player_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    stats_dir = tmp_path / "stats"
+    player_dir = tmp_path / "playerdata"
+    stats_dir.mkdir()
+    player_dir.mkdir()
+    (tmp_path / "level.dat").write_bytes(b"level")
+    (player_dir / f"{player_uuid}.dat").write_bytes(b"player")
+    (stats_dir / f"{player_uuid}.json").write_text(
+        json.dumps({
+            "stats": {
+                "minecraft:custom": {
+                    "minecraft:play_time": 2400,
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    (tmp_path / "usercache.json").write_text(
+        json.dumps([{"uuid": player_uuid, "name": "IndexedPlayer"}]),
+        encoding="utf-8",
+    )
+    snapshot = WorldIndexBuilder().build(tmp_path)
+
+    def fail_scan(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("共享索引路径不应重新扫描目录")
+
+    monkeypatch.setattr(world_stats_module, "find_stats_dirs", fail_scan)
+    monkeypatch.setattr(world_stats_module, "WorldScanner", fail_scan)
+
+    players = WorldStatsService().collect_player_playtimes(
+        tmp_path,
+        index_snapshot=snapshot,
+    )
+
+    assert len(players) == 1
+    assert players[0].name == "IndexedPlayer"
+    assert players[0].play_time_ticks == 2400
 
 
 def test_with_player_names_fills_missing_display_names() -> None:

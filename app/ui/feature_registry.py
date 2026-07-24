@@ -2,15 +2,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional, cast
 
 import flet as ft
 
-from app.core.view_catalog import ViewCatalog, ViewFactory
+from app.core.view_catalog import (
+    LazyViewFactory,
+    TopActionsFactory,
+    ViewCatalog,
+    ViewFactory,
+)
 from app.ui.icons import IconSet
+from app.ui.view_actions import ViewAction
 
 
 Translate = Callable[..., str]
+
+
+def _view_top_actions(view: object) -> Iterable[ViewAction]:
+    """Adapt the public view-action protocol to a registered factory."""
+    provider = getattr(view, "get_top_actions", None)
+    if not callable(provider):
+        return ()
+    return cast(Iterable[ViewAction], provider())
 
 
 @dataclass(frozen=True)
@@ -21,9 +35,47 @@ class FeatureDescriptor:
     translation_key: str
     default_label: str
     icon: ft.IconData
-    module: str
-    class_name: str
+    module: str | ViewFactory = ""
+    class_name: str | TopActionsFactory = ""
     required_capabilities: frozenset[str] = frozenset()
+    view_factory: Optional[ViewFactory] = None
+    top_actions_factory: Optional[TopActionsFactory] = None
+
+    def __post_init__(self) -> None:
+        """Materialize explicit factories while keeping lazy view imports."""
+        if self.view_factory is None and callable(self.module):
+            object.__setattr__(
+                self,
+                "view_factory",
+                cast(ViewFactory, self.module),
+            )
+            if self.top_actions_factory is None and callable(self.class_name):
+                object.__setattr__(
+                    self,
+                    "top_actions_factory",
+                    cast(TopActionsFactory, self.class_name),
+                )
+            object.__setattr__(self, "module", "")
+            object.__setattr__(self, "class_name", "")
+        if self.view_factory is None:
+            module = self.module
+            class_name = self.class_name
+            if (
+                not isinstance(module, str)
+                or not module
+                or not isinstance(class_name, str)
+                or not class_name
+            ):
+                raise ValueError(
+                    "view_factory or module/class_name must be provided"
+                )
+            object.__setattr__(
+                self,
+                "view_factory",
+                LazyViewFactory(module, class_name),
+            )
+        if self.top_actions_factory is None:
+            object.__setattr__(self, "top_actions_factory", _view_top_actions)
 
     def sidebar_definition(self, translate: Translate) -> dict[str, object]:
         """构造已翻译的侧边栏条目。"""
@@ -39,7 +91,15 @@ class FeatureDescriptor:
 
     def register(self, catalog: ViewCatalog) -> None:
         """在目录中注册功能的惰性视图工厂。"""
-        catalog.register_lazy(self.view_id, self.module, self.class_name)
+        view_factory = self.view_factory
+        top_actions_factory = self.top_actions_factory
+        if view_factory is None or top_actions_factory is None:
+            raise RuntimeError("feature factories are not initialized")
+        catalog.register(
+            self.view_id,
+            view_factory,
+            top_actions_factory=top_actions_factory,
+        )
 
 
 class FeatureRegistry:
@@ -99,7 +159,11 @@ class FeatureRegistry:
         catalog = ViewCatalog()
         for feature in self.available_features(available_capabilities):
             if feature.view_id == "settings" and settings_factory is not None:
-                catalog.register(feature.view_id, settings_factory)
+                catalog.register(
+                    feature.view_id,
+                    settings_factory,
+                    top_actions_factory=feature.top_actions_factory,
+                )
             else:
                 feature.register(catalog)
         return catalog

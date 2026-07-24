@@ -42,6 +42,25 @@ def test_map_items_preserves_order_and_aggregates_errors() -> None:
         runtime.shutdown(wait=True)
 
 
+def test_map_items_preserves_none_worker_results() -> None:
+    runtime = ExecutionRuntime(
+        io_limits=LaneLimits(1, 1),
+        cpu_limits=LaneLimits(1, 1),
+    )
+    try:
+        results = map_items(
+            runtime,
+            "none-results",
+            [1, 2],
+            lambda token, item: None,
+            lane=ExecutionLane.CPU,
+        )
+
+        assert results == [None, None]
+    finally:
+        runtime.shutdown(wait=True)
+
+
 def test_map_items_stops_on_cancel_check() -> None:
     runtime = ExecutionRuntime(
         io_limits=LaneLimits(1, 1),
@@ -72,4 +91,53 @@ def test_map_items_stops_on_cancel_check() -> None:
             )
         assert started.is_set()
     finally:
+        runtime.shutdown(wait=True)
+
+
+def test_map_items_drains_running_tasks_before_returning_on_cancel() -> None:
+    runtime = ExecutionRuntime(
+        io_limits=LaneLimits(1, 1),
+        cpu_limits=LaneLimits(1, 1),
+    )
+    cancel = threading.Event()
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    errors: list[BaseException] = []
+
+    def worker(token, item: int) -> int:
+        del item
+        started.set()
+        release.wait(1)
+        token.raise_if_cancelled()
+        return 1
+
+    def run_map() -> None:
+        try:
+            map_items(
+                runtime,
+                "drain-cancel",
+                [1, 2],
+                worker,
+                lane=ExecutionLane.CPU,
+                cancel_check=cancel.is_set,
+                max_in_flight=2,
+            )
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    thread = threading.Thread(target=run_map)
+    thread.start()
+    try:
+        assert started.wait(1)
+        cancel.set()
+        assert not finished.wait(0.1)
+        release.set()
+        assert finished.wait(1)
+        assert errors and isinstance(errors[0], OperationCancelledError)
+    finally:
+        release.set()
+        thread.join(timeout=1)
         runtime.shutdown(wait=True)

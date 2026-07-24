@@ -303,6 +303,8 @@ class CacheRegistry:
             raise ValueError("世界失效器名称不能为空")
         with self._lock:
             self._ensure_open_locked()
+            if normalized not in self._regions and normalized not in self._external:
+                raise ValueError(f"世界失效器没有对应缓存分区: {normalized}")
             self._world_invalidators[normalized] = invalidate
 
     def invalidate_world(self, world_path: Path | str) -> int:
@@ -385,6 +387,8 @@ class CacheRegistry:
     def _remove_region(self, name: str) -> None:
         with self._lock:
             self._regions.pop(name, None)
+            # 分区可能先于所有者关闭；同步移除回调，避免世界通知继续调用已关闭缓存。
+            self._world_invalidators.pop(name, None)
 
     def _ensure_budget_locked(self, requested_bytes: int) -> None:
         allocated = sum(

@@ -203,6 +203,7 @@ class WorldStatsService:
             stats.player_stats = self.collect_player_playtimes(
                 world_path,
                 name_map=name_map,
+                index_snapshot=index_snapshot,
             )
             self._report_progress(progress_callback, 0.12, "scanning")
 
@@ -377,31 +378,60 @@ class WorldStatsService:
         *,
         sort_by: str = PLAYER_SORT_PLAY_TIME,
         name_map: Optional[Dict[str, Optional[str]]] = None,
+        index_snapshot: Optional[WorldIndexSnapshot] = None,
     ) -> List[PlayerPlaytimeStats]:
         """读取玩家 stats JSON，汇总游玩时间与关键自定义计数。
 
         玩家显示名优先使用传入的 ``name_map``（通常来自
         :meth:`WorldSession.get_player_names`），否则复用
-        :class:`PlayerManager` + :class:`WorldScanner` 的 usercache 解析。
+        共享索引中的玩家与 usercache 快照。没有索引时才回退目录扫描。
+
+        Args:
+            world_path: 世界根目录。
+            sort_by: 排序字段。
+            name_map: 可选 UUID 到显示名映射。
+            index_snapshot: 可选共享世界索引；提供后不再枚举 stats、
+                playerdata 或 usercache 路径。
+
+        Returns:
+            排序后的玩家统计快照。
         """
-        names = self._resolve_player_names(world_path, name_map)
+        names = self._resolve_player_names(
+            world_path,
+            name_map,
+            index_snapshot=index_snapshot,
+        )
         by_uuid: Dict[str, PlayerPlaytimeStats] = {}
-        for stats_dir in find_stats_dirs(world_path):
-            if not stats_dir.is_dir():
+        for stats_path in self._iter_stats_paths(world_path, index_snapshot):
+            uuid = PlayerManager.normalize_uuid(stats_path.stem)
+            if not uuid or uuid in by_uuid:
                 continue
-            for stats_path in sorted(stats_dir.glob("*.json")):
-                uuid = PlayerManager.normalize_uuid(stats_path.stem)
-                if not uuid or uuid in by_uuid:
-                    continue
-                player = self._parse_player_stats_file(
-                    stats_path,
-                    uuid=uuid,
-                    name=names.get(uuid),
-                )
-                if player is None:
-                    continue
-                by_uuid[uuid] = player
+            player = self._parse_player_stats_file(
+                stats_path,
+                uuid=uuid,
+                name=names.get(uuid),
+            )
+            if player is None:
+                continue
+            by_uuid[uuid] = player
         return self.sort_player_stats(list(by_uuid.values()), sort_by)
+
+    @staticmethod
+    def _iter_stats_paths(
+        world_path: Path,
+        index_snapshot: Optional[WorldIndexSnapshot],
+    ) -> tuple[Path, ...]:
+        """返回稳定、去重的 stats 文件列表，优先使用共享索引。"""
+        if index_snapshot is not None:
+            return tuple(sorted(index_snapshot.stats_files, key=str))
+        paths = {
+            stats_path
+            for stats_dir in find_stats_dirs(world_path)
+            if stats_dir.is_dir()
+            for stats_path in stats_dir.glob("*.json")
+            if stats_path.is_file()
+        }
+        return tuple(sorted(paths, key=str))
 
     def with_player_names(
         self,
@@ -622,8 +652,8 @@ class WorldStatsService:
             "INFO",
         )
 
-    def get_region_size_distribution(
-            self, stats: WorldStatistics) -> Dict[str, int]:
+    @staticmethod
+    def get_region_size_distribution(stats: WorldStatistics) -> Dict[str, int]:
         """获取区域文件大小分布"""
         distribution = {
             "< 1KB": 0,
@@ -700,22 +730,20 @@ class WorldStatsService:
         self,
         world_path: Path,
         name_map: Optional[Dict[str, Optional[str]]] = None,
+        *,
+        index_snapshot: Optional[WorldIndexSnapshot] = None,
     ) -> Dict[str, str]:
-        """Resolve UUID -> name via PlayerManager, optionally seeded by session."""
+        """通过共享索引解析 UUID 到名称，缺少索引时兼容旧扫描路径。"""
         manager = PlayerManager(log_callback=self.log)
         uuids: set[str] = set()
-        try:
-            scanner = WorldScanner(world_path, log_callback=self.log)
-            # Public scan helpers (playerdata + usercache only).
-            player_files = scanner.scan_player_files()
-            usercache = scanner.scan_usercache(set(player_files.keys()))
+        if index_snapshot is not None:
+            player_files = index_snapshot.player_file_map()
+            usercache = index_snapshot.usercache_map()
             manager.initialize_names(player_files, usercache)
-            uuids.update(player_files.keys())
-            uuids.update(usercache.keys())
-        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
-            self.log(f"加载玩家名称失败: {exc}", "WARNING")
-        except Exception as exc:
-            self.log(f"加载玩家名称失败: {exc}", "WARNING")
+            uuids.update(player_files)
+            uuids.update(usercache)
+        else:
+            self._load_scanned_player_names(world_path, manager, uuids)
         if name_map:
             manager.seed_names(name_map)
             uuids.update(
@@ -728,6 +756,26 @@ class WorldStatsService:
             if name:
                 resolved[uuid] = name
         return resolved
+
+    def _load_scanned_player_names(
+        self,
+        world_path: Path,
+        manager: PlayerManager,
+        uuids: set[str],
+    ) -> None:
+        """兼容无索引调用方：扫描玩家文件与 usercache 名称。"""
+        try:
+            scanner = WorldScanner(world_path, log_callback=self.log)
+            player_files = scanner.scan_player_files()
+            usercache = scanner.scan_usercache(set(player_files))
+            manager.initialize_names(player_files, usercache)
+            uuids.update(player_files)
+            uuids.update(usercache)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            self.log(f"加载玩家名称失败: {exc}", "WARNING")
+        except Exception as exc:
+            # 第三方/损坏 NBT 边界只影响名称，统计主流程继续。
+            self.log(f"加载玩家名称失败: {exc}", "WARNING")
 
     def _parse_player_stats_file(
         self,

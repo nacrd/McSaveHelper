@@ -34,6 +34,7 @@ from app.services.execution_runtime import (  # noqa: E402
     LaneLimits,
 )
 from app.services.world_index_service import WorldIndexRegistry  # noqa: E402
+from app.services.world_repository import WorldRepository  # noqa: E402
 from app.services.world_write_coordinator import WorldWriteCoordinator  # noqa: E402
 from core.bench_budgets import (  # noqa: E402
     DEFAULT_BUDGETS,
@@ -125,23 +126,40 @@ def _bench_world_index(world: Path, loops: int) -> dict[str, Any]:
 
 def _bench_world_session(world: Path, loops: int) -> dict[str, Any]:
     registry = WorldIndexRegistry(builder=WorldIndexBuilder())
+    repository = WorldRepository(registry)
     try:
-        snapshot = registry.get(world)
-        samples: list[float] = []
+        shell_samples: list[float] = []
+        cold_open_samples: list[float] = []
+        read_context = None
+        for _ in range(max(1, loops)):
+            shell_ms, read_context = _timed(lambda: repository.open(world))
+            shell_samples.append(shell_ms)
+            repository.invalidate(world)
+            cold_open_ms, session = _timed(read_context.open_session)
+            cold_open_samples.append(cold_open_ms)
+            del session
+        if read_context is None:
+            raise RuntimeError("世界读取上下文基准没有生成结果")
+        snapshot = read_context.get_index()
+        warm_samples: list[float] = []
         for _ in range(max(1, loops)):
             open_ms, session = _timed(
                 lambda: WorldSession(world, index_snapshot=snapshot)
             )
-            samples.append(open_ms)
+            warm_samples.append(open_ms)
             del session
         return {
-            "open_with_index_median_ms": round(_median(samples), 3),
-            "open_with_index_p95_ms": round(p95(samples), 3),
+            "shell_open_median_ms": round(_median(shell_samples), 3),
+            "shell_open_p95_ms": round(p95(shell_samples), 3),
+            "cold_open_median_ms": round(_median(cold_open_samples), 3),
+            "cold_open_p95_ms": round(p95(cold_open_samples), 3),
+            "open_with_index_median_ms": round(_median(warm_samples), 3),
+            "open_with_index_p95_ms": round(p95(warm_samples), 3),
             "player_count": len(snapshot.player_files),
             "region_count": len(snapshot.region_files),
         }
     finally:
-        registry.close()
+        repository.close()
 
 
 def _bench_topview(world: Path, loops: int) -> dict[str, Any]:
