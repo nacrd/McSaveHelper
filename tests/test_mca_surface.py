@@ -35,6 +35,51 @@ def test_nested_chunk_decode_pool_keeps_a_small_cpu_budget() -> None:
     assert _CHUNK_LRU_MAX == 4096
 
 
+def test_progressive_chunk_batches_publish_before_final_and_honor_cancel(
+    monkeypatch: Any,
+) -> None:
+    clear_chunk_decode_cache()
+    decode_calls: list[tuple[int, int]] = []
+    callbacks: list[tuple[int, int, int]] = []
+    cancelled = False
+
+    def decode(_region, chunk_x, chunk_z, samples):
+        decode_calls.append((chunk_x, chunk_z))
+        return (
+            (chunk_x, chunk_z),
+            {position: "minecraft:stone" for position in samples},
+        )
+
+    def publish(views, refined, processed, total):
+        nonlocal cancelled
+        callbacks.append((len(refined), processed, total))
+        assert len(views) == len(refined)
+        cancelled = True
+
+    monkeypatch.setattr(surface_module, "_decode_one", decode)
+    misses = [(index, 0, [(0, 0)]) for index in range(5)]
+    views: surface_module.ChunkViews = {}
+
+    surface_module._decode_misses_with_runner(
+        cast(Any, object()),
+        misses,
+        "progressive-test.mca",
+        1,
+        10,
+        views,
+        _lru_epoch(),
+        workers=1,
+        cancel_check=lambda: cancelled,
+        progress_callback=publish,
+        progress_batch_chunks=2,
+    )
+
+    assert callbacks == [(2, 2, 5)]
+    assert decode_calls == [(0, 0), (1, 0)]
+    assert set(views) == {(0, 0), (1, 0)}
+    clear_chunk_decode_cache()
+
+
 def test_chunk_decode_cache_reports_real_hit_and_miss_counts() -> None:
     clear_chunk_decode_cache()
     key = ("region", 1, 2, 0, 0, "")

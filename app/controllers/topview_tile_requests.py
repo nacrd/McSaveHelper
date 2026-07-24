@@ -130,8 +130,13 @@ class TopviewTileRequestCoordinator:
         Returns:
             若存在推迟请求则为 True，调用方应再次 ``request_visible``。
         """
+        state = self._service.get_topview_tile_state(coord)
         with self._state_lock:
-            self._requested_sizes.pop(coord, None)
+            if state.is_pending:
+                if coord in self._requested_sizes:
+                    self._requested_sizes[coord] = state.requested_size
+            else:
+                self._requested_sizes.pop(coord, None)
             return self._has_deferred_requests
 
     def visible_tile_size(self, scale: float) -> int:

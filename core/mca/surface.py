@@ -83,6 +83,19 @@ SurfaceValue = Union[
     SurfaceSampleBiome,
     SurfaceSampleOverlay,
 ]
+SurfaceProgressCallback = Callable[
+    [List[List[SurfaceValue]], Set[Tuple[int, int]], int, int],
+    None,
+]
+SurfaceColorProgressCallback = Callable[
+    [List[List[Color]], Set[Tuple[int, int]], int, int],
+    None,
+]
+ChunkViews = Dict[Tuple[int, int], Optional[Any]]
+ChunkProgressCallback = Callable[
+    [ChunkViews, Set[Tuple[int, int]], int, int],
+    None,
+]
 _NormalizedSurface = Tuple[
     Optional[str],
     Optional[int],
@@ -453,8 +466,10 @@ def _load_chunk_views(
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
-) -> Dict[Tuple[int, int], Optional[Any]]:
-    views: Dict[Tuple[int, int], Optional[Any]] = {}
+    progress_callback: Optional[ChunkProgressCallback] = None,
+    progress_batch_chunks: int = 256,
+) -> ChunkViews:
+    views: ChunkViews = {}
     jobs_by_chunk = _jobs_by_chunk(jobs)
     requested_edge = _requested_edge(jobs)
     # Preview LODs decode only displayed points. Intermediate 64/128px tiles
@@ -488,6 +503,8 @@ def _load_chunk_views(
         failed_chunks=failed_chunks,
         external_signatures=external_signatures,
         parallel_runner=parallel_runner,
+        progress_callback=progress_callback,
+        progress_batch_chunks=progress_batch_chunks,
     )
     return views
 
@@ -499,13 +516,15 @@ def _decode_chunk_view_misses(
     path_key: str,
     mtime_ns: int,
     file_size: int,
-    views: Dict[Tuple[int, int], Optional[Any]],
+    views: ChunkViews,
     cache_epoch: int,
     cancel_check: Optional[Callable[[], bool]],
     decode_workers: Optional[int],
     failed_chunks: Optional[Set[Tuple[int, int]]],
     external_signatures: Dict[Tuple[int, int], str],
     parallel_runner: Optional[ParallelRunner] = None,
+    progress_callback: Optional[ChunkProgressCallback] = None,
+    progress_batch_chunks: int = 256,
 ) -> None:
     requested_workers = (
         _DECODE_WORKERS if decode_workers is None else max(1, int(decode_workers))
@@ -524,6 +543,8 @@ def _decode_chunk_view_misses(
         failed_chunks=failed_chunks,
         external_signatures=external_signatures,
         parallel_runner=parallel_runner,
+        progress_callback=progress_callback,
+        progress_batch_chunks=progress_batch_chunks,
     )
 
 
@@ -556,7 +577,7 @@ def _collect_chunk_cache_misses(
     jobs_by_chunk: Dict[Tuple[int, int], List[Tuple[int, int]]],
     preload_detail_positions: bool,
     requested_edge: int,
-    views: Dict[Tuple[int, int], Optional[Any]],
+    views: ChunkViews,
 ) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
     misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
     for chunk_x, chunk_z in sorted(needed):
@@ -589,6 +610,35 @@ def _collect_chunk_cache_misses(
     return misses
 
 
+def _run_chunk_decode_batch(
+    runner: ParallelRunner,
+    region: RegionFile,
+    batch: List[Tuple[int, int, List[Tuple[int, int]]]],
+    *,
+    workers: int,
+    cancel_check: Optional[Callable[[], bool]],
+) -> Optional[
+    List[Tuple[Tuple[int, int], SurfaceSamples] | BaseException]
+]:
+    """Decode one bounded batch through the injected parallelism port."""
+    def decode(
+        miss: Tuple[int, int, List[Tuple[int, int]]],
+    ) -> Tuple[Tuple[int, int], SurfaceSamples]:
+        chunk_x, chunk_z, samples = miss
+        return _decode_one(region, chunk_x, chunk_z, samples)
+
+    try:
+        return runner.map(
+            "mca.surface.decode-chunks",
+            batch,
+            decode,
+            max_workers=workers,
+            cancel_check=cancel_check,
+        )
+    except ParallelCancelledError:
+        return None
+
+
 def _decode_misses_with_runner(
     region: RegionFile,
     misses: List[Tuple[int, int, List[Tuple[int, int]]]],
@@ -603,51 +653,61 @@ def _decode_misses_with_runner(
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
+    progress_callback: Optional[ChunkProgressCallback] = None,
+    progress_batch_chunks: int = 256,
 ) -> None:
     external_signatures = external_signatures or {}
     workers = clamp_workers(workers, item_count=len(misses))
     runner = parallel_runner if parallel_runner is not None else SerialParallelRunner()
 
-    def decode(
-        miss: Tuple[int, int, List[Tuple[int, int]]],
-    ) -> Tuple[Tuple[int, int], SurfaceSamples]:
-        chunk_x, chunk_z, samples = miss
-        return _decode_one(region, chunk_x, chunk_z, samples)
-
-    try:
-        outcomes = runner.map(
-            "mca.surface.decode-chunks",
-            misses,
-            decode,
-            max_workers=workers,
+    batch_size = len(misses) or 1
+    if progress_callback is not None:
+        batch_size = max(1, int(progress_batch_chunks))
+    refined_chunks = set(views)
+    processed = len(views)
+    total = processed + len(misses)
+    for offset in range(0, len(misses), batch_size):
+        batch = misses[offset:offset + batch_size]
+        outcomes = _run_chunk_decode_batch(
+            runner,
+            region,
+            batch,
+            workers=workers,
             cancel_check=cancel_check,
         )
-    except ParallelCancelledError:
-        return
-
-    if len(outcomes) != len(misses):
-        raise RuntimeError(
-            "MCA 解码并行端口返回数量不一致: "
-            f"expected={len(misses)}, actual={len(outcomes)}"
-        )
-    for miss, outcome in zip(misses, outcomes):
-        if isinstance(outcome, BaseException):
-            if not isinstance(outcome, Exception):
-                raise outcome
-            if failed_chunks is not None:
-                failed_chunks.add((miss[0], miss[1]))
-            continue
-        key, sampled = outcome
-        _merge_sampled_view(
-            key,
-            sampled,
-            path_key,
-            mtime_ns,
-            file_size,
-            views,
-            cache_epoch,
-            external_signatures.get(key, ""),
-        )
+        if outcomes is None:
+            return
+        if len(outcomes) != len(batch):
+            raise RuntimeError(
+                "MCA 解码并行端口返回数量不一致: "
+                f"expected={len(batch)}, actual={len(outcomes)}"
+            )
+        for miss, outcome in zip(batch, outcomes):
+            if isinstance(outcome, BaseException):
+                if not isinstance(outcome, Exception):
+                    raise outcome
+                if failed_chunks is not None:
+                    failed_chunks.add((miss[0], miss[1]))
+                continue
+            key, sampled = outcome
+            _merge_sampled_view(
+                key,
+                sampled,
+                path_key,
+                mtime_ns,
+                file_size,
+                views,
+                cache_epoch,
+                external_signatures.get(key, ""),
+            )
+            refined_chunks.add(key)
+        processed += len(batch)
+        if (
+            progress_callback is not None
+            and processed < total
+            and not (cancel_check is not None and cancel_check())
+        ):
+            progress_callback(views, set(refined_chunks), processed, total)
 
 
 def _merge_sampled_view(
@@ -795,6 +855,45 @@ def _downsample_surface_values(
     return target
 
 
+def _resize_surface_values(
+    coarse: Sequence[Sequence[SurfaceValue]],
+    sampling_edge: int,
+    tile_size: int,
+) -> List[List[SurfaceValue]]:
+    """Resize one sampled grid using the production LOD rules."""
+    if sampling_edge > tile_size:
+        return _downsample_surface_values(coarse, tile_size)
+    return _resize_nearest(coarse, tile_size)
+
+
+def _build_surface_progress_callback(
+    callback: Optional[SurfaceProgressCallback],
+    *,
+    sampling_edge: int,
+    tile_size: int,
+    jobs: List[SampleJob],
+) -> Optional[ChunkProgressCallback]:
+    """Adapt decoded chunk batches to target-sized surface sample grids."""
+    if callback is None:
+        return None
+
+    def publish(
+        views: ChunkViews,
+        refined_chunks: Set[Tuple[int, int]],
+        processed: int,
+        total: int,
+    ) -> None:
+        coarse = _sample_coarse_grid(sampling_edge, jobs, views)
+        callback(
+            _resize_surface_values(coarse, sampling_edge, tile_size),
+            refined_chunks,
+            processed,
+            total,
+        )
+
+    return publish
+
+
 def sample_region_surface_samples(
     region_file: PathLike,
     tile_size: int = 64,
@@ -803,12 +902,27 @@ def sample_region_surface_samples(
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
+    progress_callback: Optional[SurfaceProgressCallback] = None,
+    progress_batch_chunks: int = 256,
 ) -> Optional[List[List[SurfaceValue]]]:
     """Return visible block, height and water depth for each map pixel.
 
     The decoder is serial by default because map tile callers commonly run
     inside an application CPU task.  Callers that own a separate capacity
     budget may inject a ``ParallelRunner`` explicitly.
+
+    Args:
+        region_file: Source MCA path.
+        tile_size: Requested sample edge length.
+        cancel_check: Cooperative cancellation probe.
+        decode_workers: Worker hint for the injected runner.
+        failed_chunks: Optional sink for chunks that could not be decoded.
+        parallel_runner: Explicit bounded parallelism port.
+        progress_callback: Receives non-final partial sample grids and coverage.
+        progress_batch_chunks: Cache misses handled between progress callbacks.
+
+    Returns:
+        Final surface sample grid, or ``None`` when cancelled or unreadable.
     """
     tile_size = max(8, min(512, int(tile_size)))
     region_path = Path(region_file)
@@ -829,6 +943,7 @@ def sample_region_surface_samples(
             needed,
             cancel_check=cancel_check,
         )
+
         chunk_views = _load_chunk_views(
             rf,
             needed,
@@ -841,13 +956,18 @@ def sample_region_surface_samples(
             failed_chunks=failed_chunks,
             external_signatures=external_signatures,
             parallel_runner=parallel_runner,
+            progress_callback=_build_surface_progress_callback(
+                progress_callback,
+                sampling_edge=sampling_edge,
+                tile_size=tile_size,
+                jobs=jobs,
+            ),
+            progress_batch_chunks=progress_batch_chunks,
         )
         if cancel_check is not None and cancel_check():
             return None
         coarse = _sample_coarse_grid(sampling_edge, jobs, chunk_views)
-        if sampling_edge > tile_size:
-            return _downsample_surface_values(coarse, tile_size)
-        return _resize_nearest(coarse, tile_size)
+        return _resize_surface_values(coarse, sampling_edge, tile_size)
     finally:
         rf.close()
 
@@ -962,8 +1082,26 @@ def sample_region_surface_colors(
     decode_workers: Optional[int] = None,
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
+    progress_callback: Optional[SurfaceColorProgressCallback] = None,
+    progress_batch_chunks: int = 256,
 ) -> Optional[List[List[Color]]]:
-    """Return material colors with Xaero/JourneyMap-style terrain relief."""
+    """Return material colors with optional non-final progress grids.
+
+    Args:
+        region_file: Source MCA path.
+        tile_size: Requested output edge length.
+        color_for_block: Optional block material color resolver.
+        color_for_surface: Optional biome-aware material resolver.
+        cancel_check: Cooperative cancellation probe.
+        decode_workers: Worker hint for the injected runner.
+        failed_chunks: Optional sink for chunks that could not be decoded.
+        parallel_runner: Explicit bounded parallelism port.
+        progress_callback: Receives colored non-final grids and coverage.
+        progress_batch_chunks: Cache misses handled between progress callbacks.
+
+    Returns:
+        Final color grid, or ``None`` when cancelled or unreadable.
+    """
     samples = sample_region_surface_samples(
         region_file,
         tile_size=tile_size,
@@ -971,10 +1109,61 @@ def sample_region_surface_colors(
         decode_workers=decode_workers,
         failed_chunks=failed_chunks,
         parallel_runner=parallel_runner,
+        progress_callback=_build_color_progress_callback(
+            progress_callback,
+            color_for_block=color_for_block,
+            color_for_surface=color_for_surface,
+            cancel_check=cancel_check,
+        ),
+        progress_batch_chunks=progress_batch_chunks,
     )
     if samples is None:
         return None
+    return _colorize_surface_grid(
+        samples,
+        color_for_block=color_for_block,
+        color_for_surface=color_for_surface,
+        cancel_check=cancel_check,
+    )
 
+
+def _build_color_progress_callback(
+    callback: Optional[SurfaceColorProgressCallback],
+    *,
+    color_for_block: Optional[ColorFunc],
+    color_for_surface: Optional[SurfaceColorFunc],
+    cancel_check: Optional[Callable[[], bool]],
+) -> Optional[SurfaceProgressCallback]:
+    """Adapt sample progress to biome-aware color grids."""
+    if callback is None:
+        return None
+
+    def publish(
+        partial: List[List[SurfaceValue]],
+        refined_chunks: Set[Tuple[int, int]],
+        processed: int,
+        total: int,
+    ) -> None:
+        colors = _colorize_surface_grid(
+            partial,
+            color_for_block=color_for_block,
+            color_for_surface=color_for_surface,
+            cancel_check=cancel_check,
+        )
+        if colors is not None:
+            callback(colors, refined_chunks, processed, total)
+
+    return publish
+
+
+def _colorize_surface_grid(
+    samples: List[List[SurfaceValue]],
+    *,
+    color_for_block: Optional[ColorFunc],
+    color_for_surface: Optional[SurfaceColorFunc],
+    cancel_check: Optional[Callable[[], bool]] = None,
+) -> Optional[List[List[Color]]]:
+    """Apply material and relief colors to one complete or partial grid."""
     colors: List[List[Color]] = []
     edge = _coarse_edge(len(samples))
     sample_spacing = max(1.0, 512.0 / max(1, edge))

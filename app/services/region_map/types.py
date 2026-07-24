@@ -44,6 +44,8 @@ class TopviewTileState:
         available_size: Edge length of the currently published PNG.
         requested_size: Highest queued or running edge length.
         failed_size: Largest source-incomplete size under retry suppression.
+        processed_chunks: Number of chunks handled by the active request.
+        total_chunks: Total chunks in the active progressive request.
         integrity: Completeness of the published source data.
     """
 
@@ -52,6 +54,8 @@ class TopviewTileState:
     available_size: int = 0
     requested_size: int = 0
     failed_size: int = 0
+    processed_chunks: int = 0
+    total_chunks: int = 0
     integrity: TopviewTileIntegrity = TopviewTileIntegrity.UNKNOWN
 
     @property
@@ -76,6 +80,13 @@ class TopviewTileState:
     def is_progressive_upgrade(self) -> bool:
         """Return whether a coarse tile remains usable during a finer request."""
         return self.phase is TopviewTilePhase.UPGRADING
+
+    @property
+    def progress(self) -> float:
+        """Return active chunk progress in the inclusive range 0..1."""
+        if self.total_chunks <= 0:
+            return 0.0
+        return min(1.0, max(0.0, self.processed_chunks / self.total_chunks))
 
     def is_usable(self, min_size: int = 0) -> bool:
         """Return whether the available tile satisfies an LOD request.

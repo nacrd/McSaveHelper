@@ -21,6 +21,7 @@ from core.mca.surface import (
     CHUNK_DECODE_CACHE_MAX_BYTES,
     CHUNK_DECODE_CACHE_MAX_ENTRIES,
 )
+from core.mca.topview_renderer import TopviewProgressFrame
 
 
 def test_region_map_services_do_not_share_mutable_state() -> None:
@@ -123,6 +124,144 @@ def test_topview_tile_state_tracks_loading_failure_and_generation_reset() -> Non
     reset = service.get_topview_tile_state(coord)
     assert reset.phase is TopviewTilePhase.EMPTY
     assert reset.generation > generation
+    service.close()
+
+
+def test_topview_progress_publish_keeps_coarse_lod_until_final_result() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    coord = (6, 7)
+    generation = service.get_topview_generation()
+    callbacks = []
+    service.set_tile_ready_callback(callbacks.append)
+    with service._data_lock:
+        service._store_topview_tile_locked(
+            coord,
+            b"coarse",
+            32,
+            True,
+            0,
+            0,
+            "source",
+        )
+        service._topview_pending[coord] = generation
+        service._topview_pending_sizes[coord] = 256
+    initial_revision = service.get_topview_tile_revision(coord)
+
+    context = region_map_topview._TopviewProgressContext(
+        coord=coord,
+        path="r.6.7.mca",
+        tile_size=256,
+        generation=generation,
+        cancel_event=service._topview_cancel_event,
+        source_mtime_ns=0,
+        source_file_size=0,
+    )
+    service._publish_topview_progress(
+        context,
+        TopviewProgressFrame(b"partial", 256, 1024),
+    )
+
+    partial = service.get_topview_tile_state(coord)
+    assert service.get_topview_tile(coord) == b"partial"
+    assert partial.phase is TopviewTilePhase.UPGRADING
+    assert partial.available_size == 32
+    assert partial.requested_size == 256
+    assert partial.processed_chunks == 256
+    assert partial.total_chunks == 1024
+    assert partial.progress == 0.25
+    assert partial.revision > initial_revision
+    assert callbacks == [coord]
+
+    cancelled = threading.Event()
+    cancelled.set()
+    cancelled_context = region_map_topview._TopviewProgressContext(
+        coord=coord,
+        path="r.6.7.mca",
+        tile_size=256,
+        generation=generation,
+        cancel_event=cancelled,
+        source_mtime_ns=0,
+        source_file_size=0,
+    )
+    service._publish_topview_progress(
+        cancelled_context,
+        TopviewProgressFrame(b"late", 512, 1024),
+    )
+    assert service.get_topview_tile(coord) == b"partial"
+
+    service._topview_active = 1
+    callback, upgrade = service._publish_topview_result_locked(
+        coord=coord,
+        tile_size=256,
+        generation=generation,
+        cancel_event=service._topview_cancel_event,
+        png=b"final",
+        render_complete=True,
+        source_mtime_ns=0,
+        source_file_size=0,
+        source_signature="source",
+    )
+    final = service.get_topview_tile_state(coord)
+    assert callback is not None
+    assert upgrade is None
+    assert final.phase is TopviewTilePhase.READY
+    assert final.available_size == 256
+    assert final.processed_chunks == 0
+    assert final.total_chunks == 0
+    assert service.get_topview_tile(coord) == b"final"
+    service.close()
+
+
+def test_topview_worker_publishes_partial_before_promoting_final_lod(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    region_path = tmp_path / "r.1.2.mca"
+    region_path.write_bytes(b"placeholder")
+    service = RegionMapService(ExecutionRuntime())
+    coord = (1, 2)
+    generation = service.get_topview_generation()
+    callbacks = []
+    service.set_tile_ready_callback(callbacks.append)
+    with service._data_lock:
+        service._region_paths[coord] = str(region_path)
+        service._store_topview_tile_locked(
+            coord,
+            b"coarse",
+            32,
+            True,
+            region_path.stat().st_mtime_ns,
+            region_path.stat().st_size,
+            "source",
+        )
+        service._topview_pending[coord] = generation
+        service._topview_pending_sizes[coord] = 256
+        service._topview_active = 1
+
+    def render(_path, **kwargs):
+        assert kwargs["progress_base_png"] == b"coarse"
+        kwargs["progress_callback"](
+            TopviewProgressFrame(b"partial", 256, 1024)
+        )
+        kwargs["status_out"].append(True)
+        return b"final"
+
+    monkeypatch.setattr(region_map_topview, "render_region_topview", render)
+
+    service._render_topview_worker(
+        coord,
+        str(region_path),
+        256,
+        generation,
+        service._topview_cancel_event,
+    )
+
+    state = service.get_topview_tile_state(coord)
+    assert callbacks == [coord, coord]
+    assert service.get_topview_tile(coord) == b"final"
+    assert state.phase is TopviewTilePhase.READY
+    assert state.available_size == 256
+    assert state.progress == 0.0
     service.close()
 
 

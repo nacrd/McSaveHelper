@@ -39,6 +39,52 @@ def test_partial_mod_tile_is_returned_but_not_persisted(
     assert stored == []
 
 
+def test_progressive_png_keeps_coarse_pixels_until_chunks_are_refined(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    red = (180, 20, 20)
+    blue = (20, 40, 200)
+    base = topview_renderer._encode_png([[red] * 32 for _ in range(32)], 32)
+    assert base is not None
+    progress: list[topview_renderer.TopviewProgressFrame] = []
+
+    def progressive_grid(_path, tile_size, **kwargs):
+        grid = [[blue] * tile_size for _ in range(tile_size)]
+        kwargs["progress_callback"](grid, {(0, 0)}, 256, 1024)
+        kwargs["status_out"].append(True)
+        return grid
+
+    monkeypatch.setattr(topview_renderer, "_sample_surface_grid", progressive_grid)
+
+    final = topview_renderer.render_region_topview(
+        region_path,
+        tile_size=256,
+        use_disk_cache=False,
+        progress_base_png=base,
+        progress_callback=progress.append,
+    )
+
+    assert final is not None
+    assert len(progress) == 1
+    assert progress[0].processed_chunks == 256
+    assert progress[0].total_chunks == 1024
+    assert progress[0].progress == 0.25
+    with topview_renderer.Image.open(
+        topview_renderer.io.BytesIO(progress[0].png)
+    ) as partial_image:
+        assert partial_image.getpixel((0, 0)) == blue
+        assert partial_image.getpixel((7, 7)) == blue
+        assert partial_image.getpixel((8, 8)) == red
+        assert partial_image.getpixel((200, 200)) == red
+    with topview_renderer.Image.open(
+        topview_renderer.io.BytesIO(final)
+    ) as final_image:
+        assert final_image.getpixel((200, 200)) == blue
+
+
 @pytest.mark.parametrize(
     "block_name",
     (

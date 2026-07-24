@@ -65,6 +65,9 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "topview_visible_upgrade_p95_ms": topview.get(
                     "visible_upgrade_p95_ms"
                 ),
+                "topview_first_progress_p95_ms": topview.get(
+                    "visible_first_progress_p95_ms"
+                ),
                 "topview_progressive_upgrade_p95_ms": topview.get(
                     "progressive_upgrade_p95_ms"
                 ),
@@ -154,15 +157,17 @@ def render_markdown_report(
             "",
             "| size | MCA open p95 | MCA read p95 | level NBT p95 | "
             "player NBT p95 | tile cold p95 | tile process-warm p95 | "
-            "tile disk-cache p95 | progressive upgrade p95 | visible upgrade p95 | "
+            "tile disk-cache p95 | progressive upgrade p95 | first partial p95 | "
+            "visible upgrade p95 | "
             "visible process-warm p95 | backup p95 |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         lines.append(
             "| {size} | {mca_open} | {mca_read} | {level_nbt} | "
             "{player_nbt} | {tile} | {process_warm} | {cache} | {progressive} | "
+            "{first_partial} | "
             "{visible_upgrade} | {visible_warm} | {backup} |".format(
                 size=row.get("size") or row.get("label") or "?",
                 mca_open=_cell(row.get("mca_open_p95_ms")),
@@ -174,6 +179,9 @@ def render_markdown_report(
                 cache=_cell(row.get("topview_cache_p95_ms")),
                 progressive=_cell(
                     row.get("topview_progressive_upgrade_p95_ms")
+                ),
+                first_partial=_cell(
+                    row.get("topview_first_progress_p95_ms")
                 ),
                 visible_upgrade=_cell(
                     row.get("topview_visible_upgrade_p95_ms")

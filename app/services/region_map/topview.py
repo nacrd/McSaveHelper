@@ -24,7 +24,11 @@ from app.services.region_map.types import (
 )
 from core.mca.errors import McaError
 from core.mca.region_file import RegionFile
-from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
+from core.mca.topview_renderer import (
+    LEAF_TILE_SIZE,
+    TopviewProgressFrame,
+    render_region_topview,
+)
 
 
 TopviewCoord = Tuple[int, int]
@@ -44,6 +48,19 @@ class _TopviewSourceCheck:
     failure_state: Optional[TopviewFailureState]
 
 
+@dataclass(frozen=True)
+class _TopviewProgressContext:
+    """Identity required to reject stale intermediate render frames."""
+
+    coord: TopviewCoord
+    path: str
+    tile_size: int
+    generation: int
+    cancel_event: threading.Event
+    source_mtime_ns: int
+    source_file_size: int
+
+
 class RegionMapTopviewMixin(RegionMapHost):
     """Mixin host contract is fulfilled by RegionMapService."""
 
@@ -60,6 +77,9 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._topview_pending: Dict[Tuple[int, int], int] = {}
         self._topview_pending_sizes: Dict[Tuple[int, int], int] = {}
         self._topview_upgrade_sizes: Dict[Tuple[int, int], int] = {}
+        self._topview_progress_chunks: Dict[
+            Tuple[int, int], Tuple[int, int]
+        ] = {}
         self._topview_tile_size: int = 32
         self._topview_enabled: bool = True
         # Track rendered tile size so we can upgrade 64→128 later if needed.
@@ -137,6 +157,7 @@ class RegionMapTopviewMixin(RegionMapHost):
             self._topview_tile_sources.clear()
             self._topview_source_checked_at.clear()
             self._topview_source_pending.clear()
+            self._topview_progress_chunks.clear()
             self._data_revision += 1
 
     def set_tile_ready_callback(self, callback: Optional[Any]) -> None:
@@ -217,10 +238,16 @@ class RegionMapTopviewMixin(RegionMapHost):
             else 0
         )
         requested_size = 0
+        processed_chunks = 0
+        total_chunks = 0
         if self._topview_pending.get(coord) == generation:
             requested_size = max(
                 int(self._topview_pending_sizes.get(coord, 0) or 0),
                 int(self._topview_upgrade_sizes.get(coord, 0) or 0),
+            )
+            processed_chunks, total_chunks = self._topview_progress_chunks.get(
+                coord,
+                (0, 0),
             )
         integrity = TopviewTileIntegrity.UNKNOWN
         if has_tile:
@@ -235,6 +262,8 @@ class RegionMapTopviewMixin(RegionMapHost):
             available_size=available_size,
             requested_size=requested_size,
             failed_size=int(self._topview_failed_sizes.get(coord, 0) or 0),
+            processed_chunks=processed_chunks,
+            total_chunks=total_chunks,
             integrity=integrity,
         )
 
@@ -338,6 +367,7 @@ class RegionMapTopviewMixin(RegionMapHost):
             return False
         pending_size = int(self._topview_pending_sizes.get(coord, 0) or 0)
         if size > pending_size:
+            self._topview_progress_chunks.pop(coord, None)
             for index, queued_job in enumerate(self._topview_queue):
                 if queued_job[0] != coord:
                     continue
@@ -624,6 +654,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._topview_tile_revisions.pop(coord, None)
         self._topview_tile_sources.pop(coord, None)
         self._topview_source_checked_at.pop(coord, None)
+        self._topview_progress_chunks.pop(coord, None)
         self._data_revision += 1
 
     def _make_topview_queue_room_locked(
@@ -640,6 +671,8 @@ class RegionMapTopviewMixin(RegionMapHost):
         if self._topview_pending.get(dropped_coord) == generation:
             self._topview_pending.pop(dropped_coord, None)
             self._topview_pending_sizes.pop(dropped_coord, None)
+            self._topview_upgrade_sizes.pop(dropped_coord, None)
+            self._topview_progress_chunks.pop(dropped_coord, None)
         return queued - 1
 
     def request_topview_tiles(
@@ -732,6 +765,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         queued = available
         self._topview_pending[coord] = generation
         self._topview_pending_sizes[coord] = size
+        self._topview_progress_chunks.pop(coord, None)
         job = (
             coord,
             path,
@@ -762,6 +796,8 @@ class RegionMapTopviewMixin(RegionMapHost):
                     if self._topview_pending.get(job[0]) == job[3]:
                         self._topview_pending.pop(job[0], None)
                         self._topview_pending_sizes.pop(job[0], None)
+                        self._topview_upgrade_sizes.pop(job[0], None)
+                        self._topview_progress_chunks.pop(job[0], None)
                     continue
                 self._topview_active += 1
                 jobs.append(job)
@@ -861,6 +897,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                     self._topview_pending.pop(coord, None)
                     self._topview_pending_sizes.pop(coord, None)
                     self._topview_upgrade_sizes.pop(coord, None)
+                    self._topview_progress_chunks.pop(coord, None)
 
     def _clear_topview_failure_locked(self, coord: Tuple[int, int]) -> None:
         self._topview_failed_sizes.pop(coord, None)
@@ -937,10 +974,31 @@ class RegionMapTopviewMixin(RegionMapHost):
                 path,
                 source_mtime_ns,
             )
+            progress_base = self._topview_progress_base(
+                coord,
+                tile_size,
+                generation,
+                cancel_event,
+            )
+            progress_context = _TopviewProgressContext(
+                coord=coord,
+                path=path,
+                tile_size=tile_size,
+                generation=generation,
+                cancel_event=cancel_event,
+                source_mtime_ns=source_mtime_ns,
+                source_file_size=source_file_size,
+            )
             png, render_complete = self._render_topview_png(
                 path,
                 tile_size,
                 cancel_event,
+                progress_base_png=progress_base,
+                progress_callback=(
+                    self._make_topview_progress_callback(progress_context)
+                    if progress_base is not None
+                    else None
+                ),
             )
         except (OSError, ValueError, TypeError, RuntimeError):
             png = None
@@ -985,11 +1043,35 @@ class RegionMapTopviewMixin(RegionMapHost):
         except OSError:
             return 0, 0
 
+    def _topview_progress_base(
+        self,
+        coord: Tuple[int, int],
+        tile_size: int,
+        generation: int,
+        cancel_event: threading.Event,
+    ) -> Optional[bytes]:
+        """Return a readable coarse PNG for a current finer request."""
+        with self._data_lock:
+            if (
+                generation != self._topview_generation
+                or cancel_event.is_set()
+                or self._closed
+                or self._topview_pending.get(coord) != generation
+            ):
+                return None
+            state = self._topview_tile_state_locked(coord)
+            if not state.is_usable() or state.available_size >= tile_size:
+                return None
+            return self._topview_tiles.get(coord)
+
     @staticmethod
     def _render_topview_png(
         path: str,
         tile_size: int,
         cancel_event: threading.Event,
+        *,
+        progress_base_png: Optional[bytes] = None,
+        progress_callback: Optional[Callable[[TopviewProgressFrame], None]] = None,
     ) -> tuple[Optional[bytes], bool]:
         render_status: list[bool] = []
         png = render_region_topview(
@@ -1000,9 +1082,60 @@ class RegionMapTopviewMixin(RegionMapHost):
             # pool would multiply concurrency and can starve sibling tiles.
             decode_workers=1,
             status_out=render_status,
+            progress_base_png=progress_base_png,
+            progress_callback=progress_callback,
         )
         render_complete = render_status[-1] if render_status else True
         return png, render_complete
+
+    def _make_topview_progress_callback(
+        self,
+        context: _TopviewProgressContext,
+    ) -> Callable[[TopviewProgressFrame], None]:
+        """Bind one worker identity to the renderer's frame callback."""
+        return lambda frame: self._publish_topview_progress(context, frame)
+
+    def _publish_topview_progress(
+        self,
+        context: _TopviewProgressContext,
+        frame: TopviewProgressFrame,
+    ) -> None:
+        """Publish a complete intermediate PNG without promoting its LOD."""
+        if context.cancel_event.is_set():
+            return
+        if context.source_mtime_ns > 0:
+            current_stamp = self._read_topview_source_stat(context.path, 0)
+            expected_stamp = (
+                context.source_mtime_ns,
+                context.source_file_size,
+            )
+            if current_stamp != expected_stamp:
+                return
+        callback = None
+        with self._data_lock:
+            current = (
+                context.generation == self._topview_generation
+                and self._topview_pending.get(context.coord) == context.generation
+                and not context.cancel_event.is_set()
+                and not self._closed
+            )
+            if not current:
+                return
+            state = self._topview_tile_state_locked(context.coord)
+            if (
+                not state.is_progressive_upgrade
+                or state.requested_size < context.tile_size
+            ):
+                return
+            self._replace_topview_png_locked(context.coord, frame.png)
+            self._topview_progress_chunks[context.coord] = (
+                max(0, int(frame.processed_chunks)),
+                max(0, int(frame.total_chunks)),
+            )
+            self._trim_topview_cache_locked()
+            if context.coord in self._topview_tiles:
+                callback = self._tile_ready_callback
+        self._notify_topview_ready(callback, context.coord)
 
     def _finalize_topview_job(
         self,
@@ -1140,6 +1273,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                 self._topview_pending.pop(coord, None)
                 self._topview_pending_sizes.pop(coord, None)
                 upgrade_size = self._topview_upgrade_sizes.pop(coord, None)
+                self._topview_progress_chunks.pop(coord, None)
             self._topview_active = max(0, self._topview_active - 1)
             current = (
                 generation == self._topview_generation
@@ -1189,11 +1323,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                 source_file_size,
                 source_signature,
             )
-        previous = self._topview_tiles.pop(coord, None)
-        if previous is not None:
-            self._topview_memory_bytes -= len(previous)
-        self._topview_tiles[coord] = png
-        self._topview_memory_bytes += len(png)
+        self._replace_topview_png_locked(coord, png)
         self._topview_tile_sizes[coord] = int(tile_size)
         self._topview_tile_complete[coord] = render_complete
         self._topview_tile_sources[coord] = (
@@ -1202,8 +1332,24 @@ class RegionMapTopviewMixin(RegionMapHost):
             source_signature,
         )
         self._topview_source_checked_at.pop(coord, None)
+        self._trim_topview_cache_locked()
+
+    def _replace_topview_png_locked(
+        self,
+        coord: Tuple[int, int],
+        png: bytes,
+    ) -> None:
+        """Replace PNG bytes and revision while preserving published LOD."""
+        previous = self._topview_tiles.pop(coord, None)
+        if previous is not None:
+            self._topview_memory_bytes -= len(previous)
+        self._topview_tiles[coord] = png
+        self._topview_memory_bytes += len(png)
         self._topview_revision_counter += 1
         self._topview_tile_revisions[coord] = self._topview_revision_counter
+
+    def _trim_topview_cache_locked(self) -> None:
+        """Apply session entry and byte limits while the data lock is held."""
         while (
             (
                 len(self._topview_tiles) > self.TOPVIEW_CACHE_ENTRY_LIMIT
@@ -1218,4 +1364,5 @@ class RegionMapTopviewMixin(RegionMapHost):
             self._topview_tile_revisions.pop(old_coord, None)
             self._topview_tile_sources.pop(old_coord, None)
             self._topview_source_checked_at.pop(old_coord, None)
+            self._topview_progress_chunks.pop(old_coord, None)
             self._topview_cache_evictions += 1

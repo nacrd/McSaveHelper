@@ -82,6 +82,12 @@ def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> N
     assert sample["topview"]["progressive_upgrade_tile_size"] == 32
     assert sample["topview"]["progressive_upgrade_p95_ms"] >= 0.0
     assert sample["topview"]["visible_upgrade_p95_ms"] >= 0.0
+    assert sample["topview"]["visible_first_progress_p95_ms"] >= 0.0
+    assert sample["topview"]["visible_progress_batch_chunks"] == 256
+    assert (
+        sample["topview"]["visible_progress_publish_count_min"]
+        <= sample["topview"]["visible_progress_publish_count_max"]
+    )
     assert sample["topview"]["visible_cache_entries"] >= 1
     assert after == before
 

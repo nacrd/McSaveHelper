@@ -22,6 +22,7 @@ from core.mca import (
 )
 from core.mca.topview_renderer import (
     PREVIEW_TILE_SIZE,
+    TopviewProgressFrame,
     ULTRA_TILE_SIZE,
     render_region_topview,
 )
@@ -281,12 +282,19 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
     progressive_size = 32
     visible_size = ULTRA_TILE_SIZE
 
-    def render(tile_size: int) -> Optional[bytes]:
+    def render(
+        tile_size: int,
+        *,
+        progress_base_png: Optional[bytes] = None,
+        progress_callback: Optional[Callable[[TopviewProgressFrame], None]] = None,
+    ) -> Optional[bytes]:
         return render_region_topview(
             target,
             tile_size=tile_size,
             use_disk_cache=False,
             decode_workers=1,
+            progress_base_png=progress_base_png,
+            progress_callback=progress_callback,
         )
 
     clear_chunk_decode_cache()
@@ -308,6 +316,8 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
 
     progressive_upgrade_samples: list[float] = []
     visible_upgrade_samples: list[float] = []
+    visible_first_progress_samples: list[float] = []
+    visible_progress_publish_counts: list[int] = []
     visible_png: Optional[bytes] = None
     clear_chunk_decode_cache()
     render(preview_size)
@@ -316,10 +326,32 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
     for _ in range(loops):
         clear_chunk_decode_cache()
         render(preview_size)
-        progressive_ms, _ = _timed(lambda: render(progressive_size))
+        progressive_ms, progressive_png = _timed(
+            lambda: render(progressive_size)
+        )
         progressive_upgrade_samples.append(progressive_ms)
-        upgrade_ms, visible_png = _timed(lambda: render(visible_size))
+        if progressive_png is None:
+            raise RuntimeError(f"真实世界渐进基底渲染失败: {target}")
+        progress_times: list[float] = []
+        upgrade_started = time.perf_counter()
+
+        def on_progress(_frame: TopviewProgressFrame) -> None:
+            progress_times.append(
+                (time.perf_counter() - upgrade_started) * 1000.0
+            )
+
+        upgrade_ms, visible_png = _timed(
+            lambda: render(
+                visible_size,
+                progress_base_png=progressive_png,
+                progress_callback=on_progress,
+            )
+        )
         visible_upgrade_samples.append(upgrade_ms)
+        visible_first_progress_samples.append(
+            progress_times[0] if progress_times else upgrade_ms
+        )
+        visible_progress_publish_counts.append(len(progress_times))
     visible_warm_samples: list[float] = []
     for _ in range(loops):
         warm_ms, visible_png = _timed(lambda: render(visible_size))
@@ -354,6 +386,23 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
             3,
         ),
         "visible_upgrade_p95_ms": round(p95(visible_upgrade_samples), 3),
+        "visible_first_progress_median_ms": round(
+            _median(visible_first_progress_samples),
+            3,
+        ),
+        "visible_first_progress_p95_ms": round(
+            p95(visible_first_progress_samples),
+            3,
+        ),
+        "visible_progress_publish_count_min": min(
+            visible_progress_publish_counts,
+            default=0,
+        ),
+        "visible_progress_publish_count_max": max(
+            visible_progress_publish_counts,
+            default=0,
+        ),
+        "visible_progress_batch_chunks": 256,
         "visible_process_warm_median_ms": round(
             _median(visible_warm_samples),
             3,

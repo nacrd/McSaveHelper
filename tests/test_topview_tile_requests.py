@@ -100,6 +100,26 @@ def test_visible_requests_progress_from_preview_to_ordinary_lod() -> None:
     assert 512 not in {call.tile_size for call in service.calls}
 
 
+def test_intermediate_tile_callback_keeps_visible_request_ledger() -> None:
+    service = _TileService()
+    coordinator = TopviewTileRequestCoordinator(service)
+    coord = (0, 0)
+
+    coordinator.request_visible(
+        [coord],
+        visible_regions=[coord],
+        scale=1.0,
+        center=coord,
+    )
+
+    coordinator.on_tile_ready(coord)
+    assert coordinator.requested_sizes == {coord: 16}
+
+    service.finish(coord, 16)
+    coordinator.on_tile_ready(coord)
+    assert coordinator.requested_sizes == {}
+
+
 def test_leaf_lod_upgrades_only_selected_or_center_region() -> None:
     service = _TileService()
     coordinator = TopviewTileRequestCoordinator(service)

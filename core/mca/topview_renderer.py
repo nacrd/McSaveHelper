@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from core.mca.texture_palette import average_block_texture
 
@@ -107,6 +108,35 @@ BLOCK_COLORS: Dict[str, Tuple[int, int, int]] = {
 }
 Color = Tuple[int, int, int]
 ColorGrid = List[List[Color]]
+
+
+@dataclass(frozen=True)
+class TopviewProgressFrame:
+    """One complete intermediate PNG from a progressive region render.
+
+    Args:
+        png: Full target-sized PNG with coarse pixels filling unfinished chunks.
+        processed_chunks: Number of source chunks handled so far.
+        total_chunks: Total chunks in this render.
+    """
+
+    png: bytes
+    processed_chunks: int
+    total_chunks: int
+
+    @property
+    def progress(self) -> float:
+        """Return chunk progress in the inclusive range 0..1."""
+        if self.total_chunks <= 0:
+            return 0.0
+        return min(1.0, max(0.0, self.processed_chunks / self.total_chunks))
+
+
+TopviewProgressCallback = Callable[[TopviewProgressFrame], None]
+ColorProgressCallback = Callable[
+    [ColorGrid, Set[Tuple[int, int]], int, int],
+    None,
+]
 
 _MATERIAL_RULES: Tuple[Tuple[Tuple[str, ...], Color], ...] = (
     (("leaves",), (0, 100, 0)),
@@ -550,6 +580,8 @@ def _sample_surface_grid(
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
     status_out: Optional[List[bool]] = None,
+    progress_callback: Optional[ColorProgressCallback] = None,
+    progress_batch_chunks: int = 256,
 ) -> Optional[ColorGrid]:
     try:
         from core.mca.surface import sample_region_surface_colors
@@ -574,6 +606,8 @@ def _sample_surface_grid(
             cancel_check=cancel_check,
             decode_workers=decode_workers,
             failed_chunks=failed_chunks,
+            progress_callback=progress_callback,
+            progress_batch_chunks=progress_batch_chunks,
         )
         if status_out is not None:
             status_out.append(grid is not None and not failed_chunks)
@@ -607,6 +641,51 @@ def _encode_png(grid: ColorGrid, tile_size: int) -> Optional[bytes]:
         image.close()
 
 
+def _progress_chunk_bounds(chunk: int, tile_size: int) -> Tuple[int, int]:
+    """Return the target pixel interval covered by one region-local chunk."""
+    return (
+        chunk * tile_size // 32,
+        (chunk + 1) * tile_size // 32,
+    )
+
+
+def _compose_progress_png(
+    base_png: bytes,
+    grid: ColorGrid,
+    tile_size: int,
+    refined_chunks: Set[Tuple[int, int]],
+) -> Optional[bytes]:
+    """Overlay refined chunks on an upscaled, fully readable coarse tile."""
+    image = None
+    try:
+        with Image.open(io.BytesIO(base_png)) as source:
+            image = source.convert("RGB")
+        if image.size != (tile_size, tile_size):
+            resized = image.resize(
+                (tile_size, tile_size),
+                Image.Resampling.NEAREST,
+            )
+            image.close()
+            image = resized
+        pixels = image.load()
+        if pixels is None:
+            return None
+        for chunk_x, chunk_z in sorted(refined_chunks):
+            x_start, x_end = _progress_chunk_bounds(chunk_x, tile_size)
+            z_start, z_end = _progress_chunk_bounds(chunk_z, tile_size)
+            for pz in range(z_start, z_end):
+                for px in range(x_start, x_end):
+                    pixels[px, pz] = grid[pz][px]
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=False, compress_level=1)
+        return buffer.getvalue()
+    except (OSError, ValueError, TypeError, IndexError, AttributeError):
+        return None
+    finally:
+        if image is not None:
+            image.close()
+
+
 def _store_cached_tile(
     region_path: Path,
     tile_size: int,
@@ -638,6 +717,37 @@ def _load_cached_topview(
     return cached
 
 
+def _build_png_progress_callback(
+    base_png: Optional[bytes],
+    callback: Optional[TopviewProgressCallback],
+    tile_size: int,
+) -> Optional[ColorProgressCallback]:
+    """Adapt colored chunk coverage to complete intermediate PNG frames."""
+    if base_png is None or callback is None:
+        return None
+
+    def publish(
+        partial_grid: ColorGrid,
+        refined_chunks: Set[Tuple[int, int]],
+        processed: int,
+        total: int,
+    ) -> None:
+        partial_png = _compose_progress_png(
+            base_png,
+            partial_grid,
+            tile_size,
+            refined_chunks,
+        )
+        if partial_png is not None:
+            callback(TopviewProgressFrame(
+                png=partial_png,
+                processed_chunks=processed,
+                total_chunks=total,
+            ))
+
+    return publish
+
+
 def _render_topview_png(
     region_path: Path,
     tile_size: int,
@@ -645,6 +755,9 @@ def _render_topview_png(
     cancel_check: Optional[Callable[[], bool]],
     decode_workers: Optional[int],
     status_out: List[bool],
+    progress_base_png: Optional[bytes],
+    progress_callback: Optional[TopviewProgressCallback],
+    progress_batch_chunks: int,
 ) -> Optional[bytes]:
     grid = _sample_surface_grid(
         region_path,
@@ -652,6 +765,12 @@ def _render_topview_png(
         cancel_check=cancel_check,
         decode_workers=decode_workers,
         status_out=status_out,
+        progress_callback=_build_png_progress_callback(
+            progress_base_png,
+            progress_callback,
+            tile_size,
+        ),
+        progress_batch_chunks=progress_batch_chunks,
     )
     if grid is None or (cancel_check is not None and cancel_check()):
         return None
@@ -671,8 +790,26 @@ def render_region_topview(
     cancel_check: Optional[Callable[[], bool]] = None,
     decode_workers: Optional[int] = None,
     status_out: Optional[List[bool]] = None,
+    progress_base_png: Optional[bytes] = None,
+    progress_callback: Optional[TopviewProgressCallback] = None,
+    progress_batch_chunks: int = 256,
 ) -> Optional[bytes]:
-    """Render one MCA region to PNG bytes (RGB) via core.mca."""
+    """Render one MCA region to PNG bytes with optional progressive updates.
+
+    Args:
+        region_file: Source MCA path.
+        tile_size: Target edge length, clamped to 8..512.
+        use_disk_cache: Whether complete PNGs may use the disk cache.
+        cancel_check: Cooperative cancellation probe.
+        decode_workers: Worker hint for an injected decode runner.
+        status_out: Optional sink receiving source completeness.
+        progress_base_png: Coarse complete PNG used to fill unfinished chunks.
+        progress_callback: Receives non-final, complete intermediate frames.
+        progress_batch_chunks: Source chunks handled between frames.
+
+    Returns:
+        Final PNG bytes, or ``None`` on cancellation or render failure.
+    """
     if not PIL_AVAILABLE:
         return None
 
@@ -705,4 +842,7 @@ def render_region_topview(
         cancel_check,
         decode_workers,
         render_status,
+        progress_base_png,
+        progress_callback,
+        progress_batch_chunks,
     )

@@ -46,6 +46,7 @@ class RegionMapHost:
     _topview_pending: Dict[Tuple[int, int], int]
     _topview_pending_sizes: Dict[Tuple[int, int], int]
     _topview_upgrade_sizes: Dict[Tuple[int, int], int]
+    _topview_progress_chunks: Dict[Tuple[int, int], Tuple[int, int]]
     _topview_tile_size: int
     _topview_enabled: bool
     _topview_tile_sizes: Dict[Tuple[int, int], int]

@@ -82,6 +82,7 @@ from core.mca.topview_renderer import (
     HIRES_TILE_SIZE,
     LEAF_TILE_SIZE,
     PREVIEW_TILE_SIZE,
+    TopviewProgressFrame,
     ULTRA_TILE_SIZE,
     render_region_topview,
 )
@@ -134,6 +135,7 @@ __all__ = [
     "LevelChange",
     "LEAF_TILE_SIZE",
     "PREVIEW_TILE_SIZE",
+    "TopviewProgressFrame",
     "UnsupportedCompression",
     "ULTRA_TILE_SIZE",
     "SelectionNotification",
