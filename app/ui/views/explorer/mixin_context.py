@@ -5,12 +5,8 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 import flet as ft
 
-from app.models.nbt_edit import (
-    ChunkNbtTarget,
-    NbtEditFormat,
-    NbtStageStore,
-    NbtTarget,
-)
+from app.models.nbt_edit import NbtStageStore
+from app.presenters.nbt_view_state import NbtViewState
 from app.services.execution_runtime import OperationScope
 from app.services.region_map import RegionMapService
 from app.controllers.map_controller import MapController
@@ -34,10 +30,7 @@ class ExplorerMixinHost:
     current_uuid: Optional[str]
 
     _current_player_data: Optional[Any]
-    _current_nbt_target: Optional[NbtTarget]
-    _current_nbt_label: str
-    _current_edit_format: NbtEditFormat
-    _current_chunk_target: Optional[ChunkNbtTarget]
+    _nbt_view_state: NbtViewState
     _current_dimension: str
     _dimension_region_dirs: Dict[str, str]
     _selected_region_coord: Optional[Tuple[int, int]]

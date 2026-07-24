@@ -19,6 +19,11 @@ from app.services.asset_import import (
 from app.services.execution_runtime import (
     CancellationToken,
 )
+from app.presenters.mappings_view_state import (
+    MappingsViewState,
+    dispose_mappings_state,
+    set_item_busy,
+)
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
@@ -64,12 +69,11 @@ class MappingsView(ft.Column):
             ),
         )
         self._item_mutation_lock = Lock()
-        self._item_busy = False
+        self._state = MappingsViewState()
         self._uuid_saver = _DebouncedLatestSave(
             self._operations,
             lambda: self.app.config.save(),
         )
-        self._disposed = False
         self._build()
 
     @property
@@ -376,14 +380,14 @@ class MappingsView(ft.Column):
         )
 
     def _on_item_search(self) -> None:
-        if self._item_busy or self._disposed:
+        if not self._state.can_edit_items:
             return
         self._render_item_table(self._item_search_field.value or "")
         safe_update(self._item_table_container)
 
     def _add_item_mapping(self, e: ft.ControlEvent) -> None:
         del e
-        if self._item_busy or self._disposed:
+        if not self._state.can_edit_items:
             return
         item_id = (self._item_id_field.value or "").strip()
         display_name = (self._item_name_field.value or "").strip()
@@ -401,7 +405,7 @@ class MappingsView(ft.Column):
         self.update()
 
     def _delete_item_mapping(self, item_id: str) -> None:
-        if self._item_busy or self._disposed:
+        if not self._state.can_edit_items:
             return
         removed = self._item_service.delete_item_mapping(item_id)
         self._item_mapping_status.value = (
@@ -421,7 +425,7 @@ class MappingsView(ft.Column):
     def _import_assets(self, e: Optional[ft.ControlEvent] = None) -> None:
         """选择资源来源并在共享 I/O 通道导入语言与贴图。"""
         del e
-        if self._item_busy or self._disposed:
+        if not self._state.can_edit_items:
             return
         failure_title = self._t("mappings.error.import_assets", "导入语言/贴图失败")
         try:
@@ -506,7 +510,7 @@ class MappingsView(ft.Column):
 
     def _import_json(self, e: ft.ControlEvent) -> None:
         del e
-        if self._item_busy or self._disposed:
+        if not self._state.can_edit_items:
             return
         failure_title = self._t("mappings.error.import_json", "导入 JSON 映射失败")
         try:
@@ -544,7 +548,7 @@ class MappingsView(ft.Column):
 
     def _export_json(self, e: ft.ControlEvent) -> None:
         del e
-        if self._item_busy or self._disposed:
+        if not self._state.can_edit_items:
             return
         failure_title = self._t("mappings.error.export_json", "导出映射失败")
         try:
@@ -598,16 +602,16 @@ class MappingsView(ft.Column):
 
     def _set_item_busy(self, busy: bool) -> None:
         """切换物品映射控件的后台操作状态。"""
-        self._item_busy = busy
+        self._state = set_item_busy(self._state, busy)
 
     def refresh_mappings(self) -> None:
         """从应用配置重新加载 UUID 映射表并刷新表格。"""
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self._table.set_mappings(self.app.config.custom_uuid_mappings)
 
     def _on_uuid_import(self) -> Optional[str]:
-        if self._disposed:
+        if self._state.is_disposed:
             return None
         path = self.app.pick_file(
             title="导入映射文件",
@@ -633,7 +637,7 @@ class MappingsView(ft.Column):
         return None
 
     def _on_uuid_export(self, mappings: Dict[str, str]) -> Optional[str]:
-        if not mappings or self._disposed:
+        if not mappings or self._state.is_disposed:
             return None
         path = self.app.save_file(
             title="导出映射文件",
@@ -672,7 +676,7 @@ class MappingsView(ft.Column):
 
     def _queue_uuid_mappings(self, mappings: Dict[str, str]) -> None:
         """立即更新内存，并合并连续输入为一次后台配置保存。"""
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self.app.config.custom_uuid_mappings = dict(mappings)
         failure_title = self._t("mappings.error.uuid_save", "保存 UUID 映射失败")
@@ -683,8 +687,8 @@ class MappingsView(ft.Column):
 
     def dispose(self) -> None:
         """取消后台操作并使已经排队的 UI 回调失效；可重复调用。"""
-        if self._disposed:
+        if self._state.is_disposed:
             return
-        self._disposed = True
+        self._state = dispose_mappings_state(self._state)
         self._operations.close()
         self._uuid_saver.flush()

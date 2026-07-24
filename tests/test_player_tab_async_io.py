@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 
+from app.presenters.nbt_view_state import NbtViewState
 from app.services.asset_import import AssetImportCounts
 from app.services.execution_runtime import (
     CancellationToken,
@@ -74,11 +75,12 @@ def test_player_nbt_projection_reuses_background_payload() -> None:
             ),
         ),
     )
+    tab._nbt_view_state = NbtViewState()
     payload = object()
 
     tab._apply_player_nbt_target("player", payload)
 
-    assert tab._current_nbt_target == "player"
+    assert tab._nbt_view_state.target == "player"
 
 
 def test_usercache_worker_checks_cancellation_before_io(tmp_path: Path) -> None:
@@ -130,6 +132,7 @@ def test_new_player_load_cancels_superseded_handle() -> None:
     handles = iter((first_handle, next_handle))
     submitted: list[str] = []
     tab = PlayerTabMixin()
+    tab._nbt_view_state = NbtViewState()
     tab.world_session = cast(Any, object())
     tab._player_service_instance = cast(Any, object())
     tab._task_scope = cast(

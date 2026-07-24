@@ -2,7 +2,7 @@
 
 负责性能监控、键盘快捷键、卡死检测、通知管理和可访问性验证的初始化和管理。
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import threading
 from typing import Any, Callable, Optional, Protocol, cast
 import flet as ft
@@ -144,6 +144,22 @@ class HealthMonitorPort(Protocol):
         ...
 
 
+class HangDetectorPort(Protocol):
+    """卡死检测与 UI 心跳端口。"""
+
+    def enable(self) -> None:
+        """启动检测线程。"""
+        ...
+
+    def disable(self) -> None:
+        """停止检测线程并等待退出。"""
+        ...
+
+    def ui_heartbeat(self) -> None:
+        """记录 UI 线程心跳。"""
+        ...
+
+
 @dataclass(frozen=True)
 class GUIOptimizerDependencies:
     """GUIOptimizer 所需的页面、配置与可替换监控端口。"""
@@ -170,6 +186,7 @@ class GUIOptimizerDependencies:
         HealthMonitorPort,
         health_monitor,
     )
+    hang_detector: HangDetectorPort = field(default_factory=get_hang_detector)
 
 
 class GUIOptimizer:
@@ -191,6 +208,7 @@ class GUIOptimizer:
         self._performance_monitor = dependencies.performance_monitor
         self._resource_monitor = dependencies.resource_monitor
         self._health_monitor = dependencies.health_monitor
+        self._hang_detector = dependencies.hang_detector
         self._operation_metrics_sink = dependencies.operation_metrics_sink
         self.notification_manager: Optional[NotificationManager] = None
         self._heartbeat_stop = threading.Event()
@@ -206,8 +224,7 @@ class GUIOptimizer:
             set_metrics_sink(self._record_business_metric)
 
             # 2. 启用卡死检测器（静默启用）
-            hang_detector = get_hang_detector()
-            hang_detector.enable()
+            self._hang_detector.enable()
             self._start_hang_detector_heartbeat()
 
             # 3. 根据配置启用性能监控（可选）
@@ -456,9 +473,8 @@ class GUIOptimizer:
         self._hang_heartbeat_stop.clear()
 
         def _hang_beat_loop() -> None:
-            hang_detector = get_hang_detector()
             while not self._hang_heartbeat_stop.is_set():
-                run_on_ui(self.page, hang_detector.ui_heartbeat)
+                run_on_ui(self.page, self._hang_detector.ui_heartbeat)
                 self._hang_heartbeat_stop.wait(2.0)
 
         self._hang_heartbeat_thread = threading.Thread(
@@ -479,4 +495,5 @@ class GUIOptimizer:
         """停止GUI优化功能"""
         self.configure_performance_monitor(False)
         self._stop_hang_detector_heartbeat()
+        self._hang_detector.disable()
         set_metrics_sink(None)

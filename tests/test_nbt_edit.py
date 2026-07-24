@@ -15,6 +15,7 @@ from app.models.nbt_edit import (
     NbtEditFormat,
     NbtStageStore,
 )
+from app.presenters.nbt_view_state import NbtViewState
 from app.services.block_data_service import BlockDataService
 from app.services.execution_runtime import (
     ExecutionRuntime,
@@ -603,10 +604,7 @@ class NbtTabHarness(NbtTabMixin):
         self.world_session = None
         self.current_uuid = None
         self._current_dimension = "overworld"
-        self._current_nbt_target = None
-        self._current_nbt_label = "未加载 NBT"
-        self._current_edit_format: NbtEditFormat = "nbt"
-        self._current_chunk_target = None
+        self._nbt_view_state = NbtViewState()
         self._nbt_stage_store = NbtStageStore()
         self._tab_nbt = ft.Container()
         self._task_scope = runtime.create_scope("nbt_tab_test")

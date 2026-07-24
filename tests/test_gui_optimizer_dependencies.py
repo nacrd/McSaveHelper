@@ -115,3 +115,36 @@ def test_gui_optimizer_records_business_metric_in_shared_store() -> None:
     assert stored == [metrics]
     assert len(presented) == 1
     assert presented[0].metadata == {}
+
+
+def test_gui_optimizer_stop_closes_hang_detector(monkeypatch) -> None:
+    calls: list[object] = []
+    hang_detector = SimpleNamespace(
+        enable=lambda: calls.append("hang_enable"),
+        disable=lambda: calls.append("hang_disable"),
+        ui_heartbeat=lambda: None,
+    )
+    optimizer = GUIOptimizer(GUIOptimizerDependencies(
+        page=cast(ft.Page, SimpleNamespace()),
+        get_ui_setting=lambda key, default: default,
+        save_config=lambda: None,
+        hang_detector=cast(Any, hang_detector),
+    ))
+    monkeypatch.setattr(
+        optimizer,
+        "configure_performance_monitor",
+        lambda enabled: calls.append(("performance", enabled)),
+    )
+    monkeypatch.setattr(
+        optimizer,
+        "_stop_hang_detector_heartbeat",
+        lambda: calls.append("heartbeat_stop"),
+    )
+
+    optimizer.stop()
+
+    assert calls == [
+        ("performance", False),
+        "heartbeat_stop",
+        "hang_disable",
+    ]

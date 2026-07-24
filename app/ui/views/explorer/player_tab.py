@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import flet as ft
 
+from app.presenters.nbt_view_state import clear_chunk_target, set_nbt_target
 from app.services.asset_import import (
     AssetImportCounts,
     pick_asset_sources,
@@ -1055,7 +1056,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         if session is None:
             return
         self.current_uuid = uuid
-        self._current_chunk_target = None
+        self._nbt_view_state = clear_chunk_target(self._nbt_view_state)
         service = self._player_service()
         try:
             self._player_tab_operations().submit_player_load(
@@ -1209,12 +1210,18 @@ class PlayerTabMixin(ExplorerMixinHost):
         """将后台已读取的玩家 NBT 投影到 NBT 标签，避免 UI 重复读盘。"""
         if not self.world_session:
             return
-        self._current_nbt_target = uuid
-        self._current_nbt_label = (
+        label = (
             f"{self._t('player.nbt_label', '玩家 NBT')}: {uuid}"
         )
+        self._nbt_view_state = set_nbt_target(
+            self._nbt_view_state,
+            uuid,
+            label,
+            "nbt",
+            None,
+        )
         if hasattr(self, "_nbt_target_label"):
-            self._nbt_target_label.value = self._current_nbt_label
+            self._nbt_target_label.value = self._nbt_view_state.label
             safe_update(self._nbt_target_label)
         if hasattr(self, "_nbt_tree"):
             self._nbt_tree.load_nbt(nbt)

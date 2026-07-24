@@ -6,11 +6,9 @@ from pathlib import Path
 from app.ui.theme import THEME
 from app.ui.theme import TEXT_CAPTION_SIZE, TEXT_SECONDARY_SIZE
 from app.models.nbt_edit import (
-    ChunkNbtTarget,
-    NbtEditFormat,
     NbtStageStore,
-    NbtTarget,
 )
+from app.presenters.nbt_view_state import NbtViewState, clear_nbt_target
 from app.ui.icons import IconSet
 from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_bar
 from app.ui.view_actions import ViewAction
@@ -66,10 +64,7 @@ class ExplorerView(
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
         self._current_player_data: Optional[Any] = None
-        self._current_nbt_target: Optional[NbtTarget] = None
-        self._current_nbt_label = "未加载 NBT"
-        self._current_edit_format: NbtEditFormat = "nbt"
-        self._current_chunk_target: Optional[ChunkNbtTarget] = None
+        self._nbt_view_state = NbtViewState()
         self._nbt_stage_store = NbtStageStore()
         self._map_service = self.app.create_region_map_service()
         self._task_scope = self.app.execution_runtime.create_scope(
@@ -561,9 +556,7 @@ class ExplorerView(
         self.world_session = session
         self._world_label.value = f"当前存档: {session.world_path.name}"
         self._world_label.color = THEME.text_muted
-        self._current_nbt_target = None
-        self._current_chunk_target = None
-        self._current_nbt_label = "未加载 NBT"
+        self._nbt_view_state = clear_nbt_target(self._nbt_view_state)
         self._nbt_stage_store.clear()
         self._update_nbt_target_options()
         self._update_nbt_stage_status()

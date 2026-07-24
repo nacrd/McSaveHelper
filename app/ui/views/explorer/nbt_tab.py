@@ -10,6 +10,12 @@ from app.models.nbt_edit import (
     NbtPathPart,
     NbtTarget,
 )
+from app.presenters.nbt_view_state import (
+    set_nbt_target,
+    set_nbt_view,
+    toggle_left_panel,
+    toggle_right_panel,
+)
 from app.ui.views.explorer.nbt import (
     NbtDataLoader,
     NbtStageManager,
@@ -33,8 +39,6 @@ class NbtTabMixin(ExplorerMixinHost):
 
     def _build_nbt_tab(self) -> None:
         """构建 NBT 页签 UI - 三栏布局"""
-        self._nbt_left_collapsed = False
-        self._nbt_right_collapsed = False
         chrome = self._create_nbt_chrome()
         self._bind_nbt_chrome(chrome)
         self._wire_nbt_coordinators()
@@ -44,7 +48,7 @@ class NbtTabMixin(ExplorerMixinHost):
     def _create_nbt_chrome(self) -> Any:
         """Build static chrome controls for the NBT tab."""
         return build_nbt_tab_chrome(
-            current_label=self._current_nbt_label,
+            current_label=self._nbt_view_state.label,
             callbacks=NbtTabCallbacks(
                 load_target=self._load_selected_nbt_target,
                 load_player=self._load_current_player_nbt,
@@ -142,9 +146,9 @@ class NbtTabMixin(ExplorerMixinHost):
             store=self._nbt_stage_store,
             status_control=self._nbt_stage_status,
             list_control=self._nbt_stage_list,
-            get_current_target=lambda: self._current_nbt_target,
-            get_current_label=lambda: self._current_nbt_label,
-            get_current_format=lambda: self._current_edit_format,
+            get_current_target=lambda: self._nbt_view_state.target,
+            get_current_label=lambda: self._nbt_view_state.label,
+            get_current_format=lambda: self._nbt_view_state.edit_format,
             reload_current_target=self._reload_current_nbt_target,
             warn=self.app.warn_dialog,
             info=self.app.info_dialog,
@@ -166,7 +170,7 @@ class NbtTabMixin(ExplorerMixinHost):
             block_y_field=self._block_y_field,
             block_result=self._block_query_result,
             block_name_field=self._block_replace_name_field,
-            get_chunk_target=lambda: self._current_chunk_target,
+            get_chunk_target=lambda: self._nbt_view_state.chunk_target,
             set_view_state=self._set_nbt_view_state,
             stage_change=self._stage_manager.stage_change,
             warn=self.app.warn_dialog,
@@ -181,8 +185,8 @@ class NbtTabMixin(ExplorerMixinHost):
         return NbtDataLoader(
             get_world_session=lambda: self.world_session,
             get_current_uuid=lambda: self.current_uuid,
-            get_current_target=lambda: self._current_nbt_target,
-            get_current_label=lambda: self._current_nbt_label,
+            get_current_target=lambda: self._nbt_view_state.target,
+            get_current_label=lambda: self._nbt_view_state.label,
             get_dimension=lambda: self._current_dimension,
             set_target_state=self._set_nbt_target_state,
             load_player_data=self._load_player_data,
@@ -303,8 +307,11 @@ class NbtTabMixin(ExplorerMixinHost):
         label: str,
         edit_format: NbtEditFormat,
     ) -> None:
-        self._current_nbt_label = label
-        self._current_edit_format = edit_format
+        self._nbt_view_state = set_nbt_view(
+            self._nbt_view_state,
+            label,
+            edit_format,
+        )
 
     def _set_nbt_target_state(
         self,
@@ -313,23 +320,26 @@ class NbtTabMixin(ExplorerMixinHost):
         edit_format: NbtEditFormat,
         chunk_target: Optional[ChunkNbtTarget],
     ) -> None:
-        self._current_nbt_target = target
-        self._current_nbt_label = label
-        self._current_edit_format = edit_format
-        self._current_chunk_target = chunk_target
+        self._nbt_view_state = set_nbt_target(
+            self._nbt_view_state,
+            target,
+            label,
+            edit_format,
+            chunk_target,
+        )
 
     # ========== 折叠功能（预留） ==========
 
     def _toggle_left_panel(self, e: Any = None) -> None:
         """切换左侧面板显示/隐藏"""
-        self._nbt_left_collapsed = not self._nbt_left_collapsed
-        self._nbt_left_panel.visible = not self._nbt_left_collapsed
+        self._nbt_view_state = toggle_left_panel(self._nbt_view_state)
+        self._nbt_left_panel.visible = not self._nbt_view_state.is_left_collapsed
         self._nbt_left_panel.update()
 
     def _toggle_right_panel(self, e: Any = None) -> None:
         """切换右侧面板显示/隐藏"""
-        self._nbt_right_collapsed = not self._nbt_right_collapsed
-        self._nbt_right_panel.visible = not self._nbt_right_collapsed
+        self._nbt_view_state = toggle_right_panel(self._nbt_view_state)
+        self._nbt_right_panel.visible = not self._nbt_view_state.is_right_collapsed
         self._nbt_right_panel.update()
 
     # ========== 以下是委托方法（与之前相同） ==========

@@ -8,6 +8,7 @@ from app.ui.performance.resource import (
     PerformanceMonitorPort,
     ResourceUsageMonitor,
 )
+from app.ui.hang_detector import HangDetector
 from core.performance import PerfTracker
 
 
@@ -101,3 +102,47 @@ def test_resource_sample_is_sent_to_injected_monitors() -> None:
         ("cpu_usage", 25.0, "%"),
     ]
     assert checked == [((25.0, 64.0), {})]
+
+
+def test_resource_monitor_stop_interrupts_long_sample_wait() -> None:
+    sampled = threading.Event()
+    performance = cast(PerformanceMonitorPort, SimpleNamespace(
+        record=lambda *args, **kwargs: sampled.set(),
+        summary=lambda: {},
+        get_memory_usage=lambda: 0.0,
+        get_cpu_percent=lambda: 0.0,
+    ))
+    health = cast(HealthMonitorPort, SimpleNamespace(
+        check=lambda *args, **kwargs: None,
+    ))
+    monitor = ResourceUsageMonitor(
+        sample_interval=60,
+        performance_monitor=performance,
+        health_monitor=health,
+    )
+    monitor._process = SimpleNamespace(
+        memory_info=lambda: SimpleNamespace(rss=1024),
+        cpu_percent=lambda: 0.0,
+    )
+
+    monitor.start()
+    thread = monitor._thread
+    assert sampled.wait(timeout=2)
+    monitor.stop()
+
+    assert thread is not None
+    assert thread.is_alive() is False
+    assert monitor._thread is None
+
+
+def test_hang_detector_disable_interrupts_detection_wait() -> None:
+    detector = HangDetector()
+
+    detector.enable()
+    thread = detector._thread
+    detector.disable()
+    detector.disable()
+
+    assert thread is not None
+    assert thread.is_alive() is False
+    assert detector._thread is None
