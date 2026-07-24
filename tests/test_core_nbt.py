@@ -85,18 +85,20 @@ def test_arrays_roundtrip_signed() -> None:
     assert [int(x) for x in parsed["bytes"]] == [1, 2, -1]
 
 
-def test_array_parser_preserves_signed_width_boundaries() -> None:
+@pytest.mark.parametrize("byteorder", ("big", "little"))
+def test_array_parser_preserves_signed_width_boundaries(byteorder: str) -> None:
     root = File(
         {
             "bytes": ByteArray([-128, 127]),
             "ints": IntArray([-(1 << 31), (1 << 31) - 1]),
             "longs": LongArray([-(1 << 63), (1 << 63) - 1]),
-        }
+        },
+        byteorder=byteorder,
     )
     raw = io.BytesIO()
-    root.write(raw)
+    root.write(raw, byteorder=byteorder)
 
-    parsed = File.parse(io.BytesIO(raw.getvalue()))
+    parsed = File.parse(io.BytesIO(raw.getvalue()), byteorder=byteorder)
 
     assert [int(value) for value in parsed["bytes"]] == [-128, 127]
     assert [int(value) for value in parsed["ints"]] == [-(1 << 31), (1 << 31) - 1]

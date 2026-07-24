@@ -6,8 +6,10 @@
 """
 from __future__ import annotations
 
+from array import array as NativeArray
 from struct import Struct
 from struct import error as StructError
+from sys import byteorder as native_byteorder
 from typing import (
     Any,
     BinaryIO,
@@ -81,6 +83,7 @@ INT = get_format(Struct, "i")
 LONG = get_format(Struct, "q")
 FLOAT = get_format(Struct, "f")
 DOUBLE = get_format(Struct, "d")
+SIGNED_ARRAY_TYPECODES = {1: "b", 4: "i", 8: "q"}
 
 
 class EndInstantiation(TypeError):
@@ -389,9 +392,16 @@ class Array(Base, MutableSequence[int]):
                 f"got {len(raw)}"
             )
         fmt = cls.item_fmt[byteorder]
-        items = [int(values[0]) for values in fmt.iter_unpack(raw)]
+        native_values = NativeArray(SIGNED_ARRAY_TYPECODES[item_size])
+        if native_values.itemsize == item_size:
+            native_values.frombytes(raw)
+            if item_size > 1 and byteorder != native_byteorder:
+                native_values.byteswap()
+            items = native_values.tolist()
+        else:
+            items = [int(values[0]) for values in fmt.iter_unpack(raw)]
         parsed = cls()
-        # Struct formats already return signed values in the tag's exact width.
+        # Both decoding paths return signed values in the tag's exact width.
         # Avoid applying the constructor's mask normalization to every item again.
         parsed._items = items
         return parsed
