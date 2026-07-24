@@ -51,6 +51,13 @@ def main() -> int:
     )
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument(
+        "--progress-batch-chunks",
+        type=int,
+        choices=(64, 128, 256, 512),
+        default=128,
+        help="Real-world chunks handled between intermediate topview PNGs",
+    )
+    parser.add_argument(
         "--output-dir",
         default=str(ROOT / "docs" / "bench"),
     )
@@ -91,6 +98,7 @@ def main() -> int:
             args.world,
             sample_size=args.sample_size,
             loops=max(1, args.loops),
+            progress_batch_chunks=args.progress_batch_chunks,
         )
     else:
         if args.sample_size is not None:

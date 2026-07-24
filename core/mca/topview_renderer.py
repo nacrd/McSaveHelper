@@ -12,6 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
+from core.mca.surface import DEFAULT_PROGRESS_BATCH_CHUNKS
 from core.mca.texture_palette import average_block_texture
 
 try:
@@ -581,7 +582,7 @@ def _sample_surface_grid(
     decode_workers: Optional[int] = None,
     status_out: Optional[List[bool]] = None,
     progress_callback: Optional[ColorProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> Optional[ColorGrid]:
     try:
         from core.mca.surface import sample_region_surface_colors
@@ -792,7 +793,7 @@ def render_region_topview(
     status_out: Optional[List[bool]] = None,
     progress_base_png: Optional[bytes] = None,
     progress_callback: Optional[TopviewProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> Optional[bytes]:
     """Render one MCA region to PNG bytes with optional progressive updates.
 

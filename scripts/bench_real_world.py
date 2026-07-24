@@ -276,7 +276,11 @@ def _bench_cache_hit(
             tile_cache._CACHE_DIR = previous_cache_dir
 
 
-def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
+def _bench_topview(
+    target: Path,
+    loops: int,
+    progress_batch_chunks: int,
+) -> dict[str, Any]:
     """Measure the UI's preview and subsequent ordinary visible LOD."""
     preview_size = PREVIEW_TILE_SIZE
     progressive_size = 32
@@ -295,6 +299,7 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
             decode_workers=1,
             progress_base_png=progress_base_png,
             progress_callback=progress_callback,
+            progress_batch_chunks=progress_batch_chunks,
         )
 
     clear_chunk_decode_cache()
@@ -402,7 +407,7 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
             visible_progress_publish_counts,
             default=0,
         ),
-        "visible_progress_batch_chunks": 256,
+        "visible_progress_batch_chunks": progress_batch_chunks,
         "visible_process_warm_median_ms": round(
             _median(visible_warm_samples),
             3,
@@ -427,6 +432,7 @@ def run_real_world_benchmark(
     *,
     sample_size: SampleSize | str,
     loops: int = 3,
+    progress_batch_chunks: int = 128,
 ) -> dict[str, Any]:
     """Run a read-only benchmark against one supplied real Java world.
 
@@ -434,6 +440,7 @@ def run_real_world_benchmark(
         world_path: World root containing ``level.dat`` and overworld regions.
         sample_size: Caller-assigned real-world sample class.
         loops: Timed samples after one untimed warmup.
+        progress_batch_chunks: Chunk count handled between intermediate PNGs.
     Returns:
         JSON-compatible benchmark report with read-only verification.
     Raises:
@@ -449,6 +456,7 @@ def run_real_world_benchmark(
     if not before:
         raise RuntimeError(f"真实世界没有可读文件: {world}")
     effective_loops = max(1, int(loops))
+    effective_batch_chunks = max(1, int(progress_batch_chunks))
     regions = _region_files(world)
     target = _representative_region(world)
     sample: dict[str, Any] = {
@@ -466,7 +474,11 @@ def run_real_world_benchmark(
         "nbt": _bench_nbt(world, effective_loops),
         "world_index": _bench_world_index(world, effective_loops),
         "world_session": _bench_world_session(world, effective_loops),
-        "topview": _bench_topview(target, effective_loops),
+        "topview": _bench_topview(
+            target,
+            effective_loops,
+            effective_batch_chunks,
+        ),
         "backup": {
             "skipped": True,
             "reason": "真实世界模式严格只读",

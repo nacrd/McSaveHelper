@@ -37,6 +37,7 @@ SampleJob = Tuple[int, int, int, int, int, int]
 DEFAULT_EMPTY = (45, 60, 50)
 DEFAULT_WATERISH = (64, 164, 223)
 DEFAULT_UNKNOWN = (100, 100, 100)
+DEFAULT_PROGRESS_BATCH_CHUNKS = 128
 _OVERLAY_ALPHA_BY_NAME = {
     "lily_pad": 0.72,
     "kelp": 0.72,
@@ -467,7 +468,7 @@ def _load_chunk_views(
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
     progress_callback: Optional[ChunkProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> ChunkViews:
     views: ChunkViews = {}
     jobs_by_chunk = _jobs_by_chunk(jobs)
@@ -524,7 +525,7 @@ def _decode_chunk_view_misses(
     external_signatures: Dict[Tuple[int, int], str],
     parallel_runner: Optional[ParallelRunner] = None,
     progress_callback: Optional[ChunkProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> None:
     requested_workers = (
         _DECODE_WORKERS if decode_workers is None else max(1, int(decode_workers))
@@ -654,7 +655,7 @@ def _decode_misses_with_runner(
     external_signatures: Optional[Dict[Tuple[int, int], str]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
     progress_callback: Optional[ChunkProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> None:
     external_signatures = external_signatures or {}
     workers = clamp_workers(workers, item_count=len(misses))
@@ -903,7 +904,7 @@ def sample_region_surface_samples(
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
     progress_callback: Optional[SurfaceProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> Optional[List[List[SurfaceValue]]]:
     """Return visible block, height and water depth for each map pixel.
 
@@ -1083,7 +1084,7 @@ def sample_region_surface_colors(
     failed_chunks: Optional[Set[Tuple[int, int]]] = None,
     parallel_runner: Optional[ParallelRunner] = None,
     progress_callback: Optional[SurfaceColorProgressCallback] = None,
-    progress_batch_chunks: int = 256,
+    progress_batch_chunks: int = DEFAULT_PROGRESS_BATCH_CHUNKS,
 ) -> Optional[List[List[Color]]]:
     """Return material colors with optional non-final progress grids.
 
