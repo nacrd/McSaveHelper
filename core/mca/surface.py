@@ -124,7 +124,10 @@ def _estimate_surface_samples_bytes(samples: SurfaceSamples) -> int:
 def _coarse_edge(tile_size: int) -> int:
     """How many samples along a region edge before upscaling."""
     if tile_size <= 16:
-        return 8   # 64 chunks
+        # The 16px tile is a transient UI preview before the visible LOD
+        # upgrade. Sampling 4x4 representative chunks keeps its cold path
+        # interactive without reducing the quality of persistent LODs.
+        return 4
     # Focused LODs retain their requested spatial resolution.  A 512px leaf
     # tile samples every block, matching the native region resolution used by
     # JourneyMap and the finest Xaero world-map texture level.

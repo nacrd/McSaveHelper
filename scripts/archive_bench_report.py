@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run synthetic bench (optional) and archive p95 tables.
+"""Run synthetic or read-only real-world bench and archive p95 tables.
 
 Examples
 --------
   python scripts/archive_bench_report.py
   python scripts/archive_bench_report.py --sizes small --loops 1
+  python scripts/archive_bench_report.py --world example_saves/world --loops 3
   python scripts/archive_bench_report.py --from-json path/to/report.json
 """
 from __future__ import annotations
@@ -23,12 +24,19 @@ from core.bench_archive import write_bench_archive  # noqa: E402
 from core.bench_samples import REFERENCE_MACHINE, SampleSize  # noqa: E402
 
 
-def _default_machine_notes() -> str:
+def _default_machine_notes(report: dict[str, object]) -> str:
+    reference = report.get("reference_machine")
+    profile = (
+        reference.get("profile")
+        if isinstance(reference, dict)
+        else REFERENCE_MACHINE.get("profile")
+    )
     return (
         f"os={platform.system()} {platform.release()}; "
         f"python={platform.python_version()}; "
         f"machine={platform.machine()}; "
-        f"profile={REFERENCE_MACHINE.get('profile')}"
+        f"processor={platform.processor()}; "
+        f"profile={profile}"
     )
 
 
@@ -46,7 +54,9 @@ def main() -> int:
         default=str(ROOT / "docs" / "bench"),
     )
     parser.add_argument("--basename", default="synthetic_baseline")
-    parser.add_argument("--from-json", default="")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--from-json", default="")
+    source.add_argument("--world", default="")
     parser.add_argument(
         "--machine-notes",
         default="",
@@ -61,6 +71,15 @@ def main() -> int:
 
     if args.from_json:
         report = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
+    elif args.world:
+        if args.check_budgets:
+            parser.error("--check-budgets 仅适用于固定合成样本")
+        from scripts.bench_real_world import run_real_world_benchmark
+
+        report = run_real_world_benchmark(
+            args.world,
+            loops=max(1, args.loops),
+        )
     else:
         from scripts.bench_mca import evaluate_report_budgets, run_benchmark
 
@@ -73,7 +92,7 @@ def main() -> int:
             print("budget violations:", *violations, sep="\n- ")
             return 2
 
-    notes = args.machine_notes or _default_machine_notes()
+    notes = args.machine_notes or _default_machine_notes(report)
     paths = write_bench_archive(
         report,
         args.output_dir,

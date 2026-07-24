@@ -13,10 +13,17 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
     for sample in report.get("samples", []) or []:
         if not isinstance(sample, dict):
             continue
+        mca = sample.get("mca") or {}
+        nbt = sample.get("nbt") or {}
         index = sample.get("world_index") or {}
         topview = sample.get("topview") or {}
         session = sample.get("world_session") or {}
         backup = sample.get("backup") or {}
+        source = sample.get("source") or {}
+        if not isinstance(mca, dict):
+            mca = {}
+        if not isinstance(nbt, dict):
+            nbt = {}
         if not isinstance(index, dict):
             index = {}
         if not isinstance(topview, dict):
@@ -25,11 +32,22 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
             session = {}
         if not isinstance(backup, dict):
             backup = {}
+        if not isinstance(source, dict):
+            source = {}
+        level_nbt = nbt.get("level") or {}
+        player_nbt = nbt.get("player") or {}
+        if not isinstance(level_nbt, dict):
+            level_nbt = {}
+        if not isinstance(player_nbt, dict):
+            player_nbt = {}
         rows.append(
             {
                 "size": str(sample.get("size", "")),
                 "label": str(sample.get("label", "")),
-                "index_cold_ms": index.get("cold_ms"),
+                "index_cold_p95_ms": index.get(
+                    "cold_p95_ms",
+                    index.get("cold_ms"),
+                ),
                 "index_warm_p95_ms": index.get(
                     "warm_p95_ms",
                     index.get("warm_median_ms"),
@@ -39,6 +57,11 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                     topview.get("tile_median_ms"),
                 ),
                 "topview_cache_p95_ms": topview.get("cache_hit_p95_ms"),
+                "topview_process_warm_p95_ms": topview.get(
+                    "memory_warm_p95_ms"
+                ),
+                "topview_tile_size": topview.get("tile_size"),
+                "topview_path": topview.get("path_semantics"),
                 "shell_p95_ms": session.get("shell_open_p95_ms"),
                 "cold_session_p95_ms": session.get("cold_open_p95_ms"),
                 "warm_session_p95_ms": session.get(
@@ -49,6 +72,15 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "backup_p95_ms",
                     backup.get("backup_ms"),
                 ),
+                "mca_open_p95_ms": mca.get("open_p95_ms"),
+                "mca_read_p95_ms": mca.get("read_batch_p95_ms"),
+                "level_nbt_p95_ms": level_nbt.get("p95_ms"),
+                "player_nbt_p95_ms": player_nbt.get("p95_ms"),
+                "scale_hint": sample.get("scale_hint"),
+                "source_file_count": source.get("file_count"),
+                "source_size_bytes": source.get("size_bytes"),
+                "source_region_count": source.get("region_count"),
+                "read_only_verified": sample.get("read_only_verified"),
             }
         )
     return rows
@@ -70,7 +102,7 @@ def render_markdown_report(
         "",
         f"- generated_utc: {datetime.now(timezone.utc).isoformat()}",
         f"- profile: {ref.get('profile', 'unknown')}",
-        f"- budgets_ok: {report.get('budgets_ok', 'n/a')}",
+        f"- budgets_ok: {_plain_cell(report.get('budgets_ok'))}",
         f"- loops: {report.get('loops', 'n/a')}",
     ]
     if machine_notes:
@@ -78,27 +110,78 @@ def render_markdown_report(
     lines.extend(
         [
             "",
-            "| size | index cold | index warm p95 | shell p95 | "
-            "cold session p95 | warm session p95 | tile p95 | "
-            "cache p95 | backup p95 |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "## Index and session",
+            "",
+            "| size | index cold p95 | index warm p95 | shell p95 | "
+            "cold session p95 | warm session p95 |",
+            "|---|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         lines.append(
             "| {size} | {cold} | {warm} | {shell} | {cold_session} | "
-            "{warm_session} | {tile} | {cache} | {backup} |".format(
+            "{warm_session} |".format(
                 size=row.get("size") or row.get("label") or "?",
-                cold=_cell(row.get("index_cold_ms")),
+                cold=_cell(row.get("index_cold_p95_ms")),
                 warm=_cell(row.get("index_warm_p95_ms")),
                 shell=_cell(row.get("shell_p95_ms")),
                 cold_session=_cell(row.get("cold_session_p95_ms")),
                 warm_session=_cell(row.get("warm_session_p95_ms")),
+            )
+        )
+    lines.extend(
+        [
+            "",
+            "## Format and rendering",
+            "",
+            "| size | MCA open p95 | MCA read p95 | level NBT p95 | "
+            "player NBT p95 | tile cold p95 | tile process-warm p95 | "
+            "tile disk-cache p95 | backup p95 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for row in rows:
+        lines.append(
+            "| {size} | {mca_open} | {mca_read} | {level_nbt} | "
+            "{player_nbt} | {tile} | {process_warm} | {cache} | {backup} |".format(
+                size=row.get("size") or row.get("label") or "?",
+                mca_open=_cell(row.get("mca_open_p95_ms")),
+                mca_read=_cell(row.get("mca_read_p95_ms")),
+                level_nbt=_cell(row.get("level_nbt_p95_ms")),
+                player_nbt=_cell(row.get("player_nbt_p95_ms")),
                 tile=_cell(row.get("topview_p95_ms")),
+                process_warm=_cell(row.get("topview_process_warm_p95_ms")),
                 cache=_cell(row.get("topview_cache_p95_ms")),
                 backup=_cell(row.get("backup_p95_ms")),
             )
         )
+    if any(row.get("source_file_count") is not None for row in rows):
+        lines.extend(
+            [
+                "",
+                "## Real sample metadata",
+                "",
+                "| size | scale hint | files | bytes | regions | read-only verified | "
+                "tile size | tile path |",
+                "|---|---|---:|---:|---:|---|---:|---|",
+            ]
+        )
+        for row in rows:
+            if row.get("source_file_count") is None:
+                continue
+            lines.append(
+                "| {size} | {scale} | {files} | {bytes_} | {regions} | "
+                "{read_only} | {tile_size} | {tile_path} |".format(
+                    size=row.get("size") or row.get("label") or "?",
+                    scale=_plain_cell(row.get("scale_hint")),
+                    files=_plain_cell(row.get("source_file_count")),
+                    bytes_=_plain_cell(row.get("source_size_bytes")),
+                    regions=_plain_cell(row.get("source_region_count")),
+                    read_only=_plain_cell(row.get("read_only_verified")),
+                    tile_size=_plain_cell(row.get("topview_tile_size")),
+                    tile_path=_plain_cell(row.get("topview_path")),
+                )
+            )
     violations = report.get("budget_violations") or []
     if violations:
         lines.extend(["", "## Budget violations", ""])
@@ -143,6 +226,10 @@ def _cell(value: object) -> str:
         return f"{float(str(value)):.3f}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _plain_cell(value: object) -> str:
+    return "n/a" if value is None else str(value)
 
 
 __all__ = [

@@ -181,13 +181,16 @@ def test_topview_chunk_decode_keeps_biome_and_transparent_stratum(
     )
 
 
-def test_topview_sampling_keeps_original_sampling_quality() -> None:
-    assert _coarse_edge(16) == 8
+def test_topview_preview_limits_cold_chunk_decodes() -> None:
+    assert _coarse_edge(16) == 4
     assert _coarse_edge(32) == 32
     assert _coarse_edge(64) == 64
     assert _coarse_edge(128) == 128
     assert _coarse_edge(256) == 256
     assert _coarse_edge(512) == 512
+
+    preview_jobs = _build_sample_jobs(_coarse_edge(16))
+    assert len(_needed_chunks(cast(Any, _FullRegion()), preview_jobs)) == 16
 
 
 class _Region:

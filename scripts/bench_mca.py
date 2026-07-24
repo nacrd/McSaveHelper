@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Benchmark MCA, world index, session open, topview, and backup paths.
 
-Uses fixed synthetic sample worlds (small/medium/large) so results are
-repeatable without real Minecraft saves.
+The default mode uses fixed synthetic worlds. ``--world`` enables a strictly
+read-only benchmark for a supplied real Java world and never runs backup or
+other write paths.
 
 Examples
 --------
   python scripts/bench_mca.py
   python scripts/bench_mca.py --sizes small medium --json
   python scripts/bench_mca.py --sizes large --loops 1
+  python scripts/bench_mca.py --world example_saves/world --loops 3 --json
 """
 from __future__ import annotations
 
@@ -368,16 +370,20 @@ def _print_human(report: dict[str, Any]) -> None:
             f"bytes={topview['tile_bytes']} rendered={topview['rendered']} "
             f"cache-hit-p95={topview['cache_hit_p95_ms']}ms"
         )
+        if backup.get("skipped"):
+            print(f"  backup=skipped ({backup.get('reason', 'n/a')})")
+        else:
+            print(
+                f"  backup={backup['backup_ms']}ms files={backup['file_count']} "
+                f"bytes={backup['size_bytes']} p95={backup['backup_p95_ms']}ms"
+            )
+    runtime = report.get("runtime")
+    if isinstance(runtime, dict):
         print(
-            f"  backup={backup['backup_ms']}ms files={backup['file_count']} "
-            f"bytes={backup['size_bytes']} p95={backup['backup_p95_ms']}ms"
+            f"runtime workers={runtime['worker_count_by_lane']} "
+            f"stale={runtime['stale_callbacks']} "
+            f"cache_bytes={runtime['cache_bytes_used']}"
         )
-    runtime = report["runtime"]
-    print(
-        f"runtime workers={runtime['worker_count_by_lane']} "
-        f"stale={runtime['stale_callbacks']} "
-        f"cache_bytes={runtime['cache_bytes_used']}"
-    )
     print(
         f"budgets ok={report['budgets_ok']} "
         f"violations={len(report['budget_violations'])}"
@@ -406,12 +412,14 @@ def evaluate_report_budgets(report: dict[str, Any]) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Bench MCA and world paths")
-    parser.add_argument(
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
         "--sizes",
         nargs="+",
         choices=[item.value for item in SampleSize],
-        default=[item.value for item in SampleSize],
+        default=None,
     )
+    source.add_argument("--world", default="")
     parser.add_argument("--loops", type=int, default=3)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
@@ -420,8 +428,16 @@ def main() -> int:
         help="Fail with exit 2 when synthetic p95 budgets are exceeded",
     )
     args = parser.parse_args()
-    sizes = [SampleSize(item) for item in args.sizes]
-    report = run_benchmark(sizes=sizes, loops=max(1, args.loops))
+    if args.world:
+        if args.check_budgets:
+            parser.error("--check-budgets 仅适用于固定合成样本")
+        from scripts.bench_real_world import run_real_world_benchmark
+
+        report = run_real_world_benchmark(args.world, loops=max(1, args.loops))
+    else:
+        selected = args.sizes or [item.value for item in SampleSize]
+        sizes = [SampleSize(item) for item in selected]
+        report = run_benchmark(sizes=sizes, loops=max(1, args.loops))
     budget_violations = report["budget_violations"]
     if args.json:
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))

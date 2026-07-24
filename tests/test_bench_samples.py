@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any, cast
 
 from core.bench_samples import SAMPLE_SPECS, SampleSize, create_sample_world
+from core.mca.topview_renderer import PREVIEW_TILE_SIZE
 from scripts.bench_mca import run_benchmark
+from scripts.bench_real_world import run_real_world_benchmark
 
 
 def test_sample_world_sizes_are_fixed(tmp_path: Path) -> None:
@@ -39,3 +41,31 @@ def test_mca_benchmark_reports_core_metrics() -> None:
     assert "cpu" in runtime["worker_count_by_lane"] or "CPU" in {
         str(key).lower() for key in runtime["worker_count_by_lane"]
     }
+
+
+def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> None:
+    world = create_sample_world(tmp_path, SampleSize.SMALL, name="real")
+    before = {
+        path.relative_to(world): (path.stat().st_size, path.stat().st_mtime_ns)
+        for path in world.rglob("*")
+        if path.is_file()
+    }
+
+    report = run_real_world_benchmark(world, loops=1)
+
+    sample = cast(list[dict[str, Any]], report["samples"])[0]
+    after = {
+        path.relative_to(world): (path.stat().st_size, path.stat().st_mtime_ns)
+        for path in world.rglob("*")
+        if path.is_file()
+    }
+    assert sample["read_only_verified"] is True
+    assert sample["backup"]["skipped"] is True
+    assert sample["nbt"]["level"]["p95_ms"] >= 0.0
+    assert sample["world_index"]["cold_p95_ms"] >= 0.0
+    assert sample["topview"]["memory_warm_p95_ms"] >= 0.0
+    assert sample["topview"]["tile_size"] == PREVIEW_TILE_SIZE
+    assert sample["topview"]["path_semantics"] == (
+        "ui_initial_preview_largest_overworld_region"
+    )
+    assert after == before
