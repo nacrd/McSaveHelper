@@ -15,7 +15,11 @@ from app.presenters.stats_view_state import (
 from app.ui.theme import THEME
 from app.ui.components.cards import card
 from app.ui.utils import run_on_ui
-from app.services.execution_runtime import ExecutionLane, TaskPriority
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    TaskPriority,
+)
 from app.ui.views.explorer.utils import safe_update, format_size
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.services.world_stats_service import (
@@ -34,6 +38,7 @@ from app.services.world_stats_service import (
     DimensionSizeStats,
     PlayerPlaytimeStats,
     WorldStatistics,
+    WorldStatsCancelledError,
     WorldStatsService,
 )
 
@@ -672,19 +677,20 @@ class StatsTabMixin(ExplorerMixinHost):
         task_name = self._t("stats.progress_task", "统计存档")
         name_map = self._stats_name_map()
 
-        def run() -> None:
+        def run(token: CancellationToken) -> None:
             self._run_stats_analysis(
                 world_path=world_path,
                 service=service,
                 generation=generation,
                 task_name=task_name,
                 name_map=name_map,
+                cancel_check=lambda: token.is_cancelled,
             )
 
         try:
             self._task_scope.submit(
                 "analyze_world_stats",
-                lambda token: run(),
+                run,
                 lane=ExecutionLane.CPU,
                 priority=TaskPriority.INTERACTIVE,
             )
@@ -716,6 +722,7 @@ class StatsTabMixin(ExplorerMixinHost):
         generation: int,
         task_name: str,
         name_map: dict[str, str | None],
+        cancel_check: Callable[[], bool],
     ) -> None:
         session = self.world_session
         try:
@@ -732,6 +739,7 @@ class StatsTabMixin(ExplorerMixinHost):
                 ),
                 name_map=name_map,
                 index_snapshot=self.app.world_repository.get_index(world_path),
+                cancel_check=cancel_check,
             )
             stats = self._late_bind_player_names(service, session, stats)
             self.app.page.run_task(
@@ -740,6 +748,8 @@ class StatsTabMixin(ExplorerMixinHost):
                 service,
                 generation,
             )
+        except WorldStatsCancelledError:
+            return
         except Exception as ex:
             self.app.page.run_task(
                 self._handle_stats_error,

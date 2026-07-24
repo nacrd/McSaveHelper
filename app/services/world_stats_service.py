@@ -140,6 +140,11 @@ class _RegionChunkStats:
 
 # value in [0.0, 1.0], human-readable stage message
 StatsProgressCallback = Callable[[float, str], None]
+StatsCancelCheck = Callable[[], bool]
+
+
+class WorldStatsCancelledError(RuntimeError):
+    """Raised when a statistics scan observes cooperative cancellation."""
 
 
 class WorldStatsService:
@@ -177,6 +182,7 @@ class WorldStatsService:
         progress_callback: Optional[StatsProgressCallback] = None,
         name_map: Optional[Dict[str, Optional[str]]] = None,
         index_snapshot: Optional[WorldIndexSnapshot] = None,
+        cancel_check: Optional[StatsCancelCheck] = None,
     ) -> WorldStatistics:
         """分析存档并返回完整统计。
 
@@ -185,6 +191,7 @@ class WorldStatsService:
             progress_callback: 可选进度回调 ``(0..1, stage)``。
             name_map: 可选 UUID→玩家名映射，优先于 usercache。
             index_snapshot: 可选共享世界目录索引。
+            cancel_check: 可选协作取消检查；在阶段和区域边界调用。
 
         Returns:
             WorldStatistics: 维度、玩家与区域汇总结果。
@@ -193,18 +200,21 @@ class WorldStatsService:
         tracker = get_tracker()
 
         with tracker.track("存档统计分析", {"world": world_path.name}):
+            self._raise_if_cancelled(cancel_check)
             stats = WorldStatistics()
             self._report_progress(progress_callback, 0.02, "dimensions")
             stats.dimension_stats = self.collect_dimension_sizes(
                 world_path,
                 index_snapshot=index_snapshot,
             )
+            self._raise_if_cancelled(cancel_check)
             self._report_progress(progress_callback, 0.08, "players")
             stats.player_stats = self.collect_player_playtimes(
                 world_path,
                 name_map=name_map,
                 index_snapshot=index_snapshot,
             )
+            self._raise_if_cancelled(cancel_check)
             self._report_progress(progress_callback, 0.12, "scanning")
 
             region_files = (
@@ -220,7 +230,9 @@ class WorldStatsService:
                 stats,
                 progress_callback,
                 tracker,
+                cancel_check,
             )
+            self._raise_if_cancelled(cancel_check)
             self._report_progress(
                 progress_callback,
                 self._FINALIZE_VALUE,
@@ -239,6 +251,7 @@ class WorldStatsService:
         stats: WorldStatistics,
         progress_callback: Optional[StatsProgressCallback],
         tracker: Any,
+        cancel_check: Optional[StatsCancelCheck],
     ) -> Tuple[Counter[str], Counter[str]]:
         """Scan every region file and merge block/entity counters."""
         block_counter: Counter[str] = Counter()
@@ -258,6 +271,7 @@ class WorldStatsService:
             f"regions:0:{total_regions}",
         )
         for idx, region_path in enumerate(region_files):
+            self._raise_if_cancelled(cancel_check)
             self._analyze_one_region(
                 world_path,
                 region_path,
@@ -266,6 +280,7 @@ class WorldStatsService:
                 entity_counter,
                 tracker,
             )
+            self._raise_if_cancelled(cancel_check)
             done = idx + 1
             fraction = done / total_regions
             value = self._REGION_START + self._REGION_SPAN * fraction
@@ -275,6 +290,13 @@ class WorldStatsService:
                 f"regions:{done}:{total_regions}",
             )
         return block_counter, entity_counter
+
+    @staticmethod
+    def _raise_if_cancelled(
+        cancel_check: Optional[StatsCancelCheck],
+    ) -> None:
+        if cancel_check is not None and cancel_check():
+            raise WorldStatsCancelledError("存档统计已取消")
 
     def _analyze_one_region(
         self,

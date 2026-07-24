@@ -1,8 +1,9 @@
+import json
 from types import SimpleNamespace
 from typing import Any
-import json
 
 import core.mca
+import pytest
 from app.services import world_stats_service as world_stats_module
 from app.services.world_stats_service import (
     PLAYER_SORT_DEATHS,
@@ -10,6 +11,7 @@ from app.services.world_stats_service import (
     PLAYER_SORT_MOB_KILLS,
     PLAYER_SORT_NAME,
     PLAYER_SORT_PLAY_TIME,
+    WorldStatsCancelledError,
     WorldStatsService,
     DimensionSizeStats,
     PlayerPlaytimeStats,
@@ -559,3 +561,33 @@ def test_analyze_world_progress_handles_empty_regions(
     assert "finalizing" in stages
     assert stages[-1] == "done"
     assert events[-1][0] == 1.0
+
+
+def test_analyze_world_stops_between_region_files(
+    tmp_path,
+    monkeypatch: Any,
+) -> None:
+    region_paths = [
+        tmp_path / "region" / "r.0.0.mca",
+        tmp_path / "region" / "r.0.1.mca",
+    ]
+    analyzed = []
+    service = WorldStatsService()
+    monkeypatch.setattr(
+        world_stats_module,
+        "scan_all_regions",
+        lambda _world: region_paths,
+    )
+    monkeypatch.setattr(
+        service,
+        "_analyze_one_region",
+        lambda *args: analyzed.append(args[1]),
+    )
+
+    with pytest.raises(WorldStatsCancelledError, match="统计已取消"):
+        service.analyze_world(
+            tmp_path,
+            cancel_check=lambda: bool(analyzed),
+        )
+
+    assert analyzed == [region_paths[0]]
