@@ -383,6 +383,18 @@ def test_feature_context_does_not_expose_application_service_container() -> None
     assert "def services(" not in source
 
 
+def test_feature_views_declare_minimal_ui_ports() -> None:
+    """High-traffic UI components must not type against the whole context."""
+    export_dialog = (
+        PROJECT_ROOT / "app/ui/views/explorer/map/export_dialog.py"
+    ).read_text(encoding="utf-8")
+    server_properties = (
+        PROJECT_ROOT / "app/ui/views/server_properties.py"
+    ).read_text(encoding="utf-8")
+    assert 'def __init__(self, app: "MapExportHost")' in export_dialog
+    assert 'def __init__(self, app: "ServerPropertiesHost")' in server_properties
+
+
 def test_feature_registry_drives_catalog_and_application_budget() -> None:
     """Stage 5: registry catalog + FeatureContext views + thin application."""
     view_catalog = (

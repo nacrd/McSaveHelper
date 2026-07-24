@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import CancelledError
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Dict
+from typing import Callable, Dict, Protocol
 
 import flet as ft
 
@@ -23,14 +23,27 @@ from app.services.server_properties_service import (
 from app.ui.components.buttons import btn_ghost, btn_success
 from app.ui.components.cards import card, section_title
 from app.ui.components.fields import dropdown, text_field
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.components.layout import page_header
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+
+class ServerPropertiesHost(
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required to edit a server.properties file."""
 
 
 class ServerPropertiesView(ft.Column):
@@ -39,11 +52,11 @@ class ServerPropertiesView(ft.Column):
     支持选择服务器根目录、读取默认/现有配置项并写回文件。
     """
 
-    def __init__(self, app: "FeatureContext") -> None:
+    def __init__(self, app: "ServerPropertiesHost") -> None:
         """初始化视图并构建表单控件。
 
         Args:
-            app: 应用组合根，用于日志、翻译与文件选择。
+            app: server.properties 页面所需的 UI 与运行时端口。
         """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True

@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Tuple
+from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 
 import flet as ft
 
@@ -17,12 +17,29 @@ from app.services.map_export_service import (
 from app.services.execution_runtime import ExecutionLane, TaskPriority
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.fields import dropdown, text_field
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
 from core.mca.map_models import MapUnit
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+
+class MapExportHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """UI and runtime ports required by the map export dialog."""
 
 
 @dataclass(frozen=True)
@@ -37,11 +54,11 @@ class MapExportSession:
 class MapExportDialog:
     """Modal export UI that reuses the map's current world/dimension/selection."""
 
-    def __init__(self, app: "FeatureContext") -> None:
+    def __init__(self, app: "MapExportHost") -> None:
         """绑定应用壳并尝试初始化导出服务。
 
         Args:
-            app: 应用组合根（对话框、翻译、文件选择）。
+            app: 地图导出所需的 UI 与运行时端口。
         """
         self.app = app
         self._task_scope = app.execution_runtime.create_scope(

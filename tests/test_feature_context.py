@@ -5,7 +5,17 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from app.ui.feature_context import FeatureContext, FeatureHost, MigrationCommands
+from app.ui.feature_context import (
+    FeatureContext,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureHost,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+    MigrationCommands,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -97,3 +107,16 @@ def test_feature_context_delegates_host_ports() -> None:
     assert not hasattr(ctx, "set_dest")
     assert not hasattr(ctx, "set_batch_dir")
     assert not hasattr(ctx, "services")
+
+    translation: FeatureTranslationPort = ctx
+    dialogs: FeatureDialogPort = ctx
+    file_dialogs: FeatureFileDialogPort = ctx
+    progress: FeatureProgressPort = ctx
+    runtime: FeatureRuntimePort = ctx
+    page: FeaturePagePort = ctx
+    assert translation.translate("k", "v") == "v"
+    assert dialogs is ctx
+    assert file_dialogs.pick_directory() == "dir"
+    assert progress is ctx
+    assert runtime.execution_runtime is host.execution_runtime
+    assert page.page is host.page

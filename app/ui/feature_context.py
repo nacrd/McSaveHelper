@@ -30,10 +30,17 @@ if TYPE_CHECKING:
     from core.omni.world_session import WorldSession
 
 
-class FeatureHost(Protocol):
-    """Minimal host protocol required by FeatureContext."""
+class FeaturePagePort(Protocol):
+    """UI page used by controls that must present or refresh content."""
 
-    page: ft.Page
+    @property
+    def page(self) -> ft.Page:
+        """Return the page used to present the feature."""
+        ...
+
+
+class FeatureTranslationPort(Protocol):
+    """Translation and lightweight application logging port."""
 
     def translate(self, key: str, default: str = "", **kwargs: Any) -> str:
         """Translate UI text."""
@@ -43,10 +50,9 @@ class FeatureHost(Protocol):
         """Write application log."""
         ...
 
-    @property
-    def migration_commands(self) -> "MigrationCommands":
-        """Return the narrow command port for migration UI actions."""
-        ...
+
+class FeatureDialogPort(Protocol):
+    """Modal notification and exception presentation port."""
 
     def info_dialog(self, title: str, message: str) -> None:
         """Show info dialog."""
@@ -75,6 +81,19 @@ class FeatureHost(Protocol):
     ) -> None:
         """Handle exception for UI."""
         ...
+
+
+class FeatureMigrationPort(Protocol):
+    """Migration command port exposed to the migration view."""
+
+    @property
+    def migration_commands(self) -> "MigrationCommands":
+        """Return the narrow command port for migration UI actions."""
+        ...
+
+
+class FeatureFileDialogPort(Protocol):
+    """Native file and directory chooser port."""
 
     def pick_directory(self) -> Optional[str]:
         """Pick directory."""
@@ -105,6 +124,10 @@ class FeatureHost(Protocol):
         """Save file dialog."""
         ...
 
+
+class FeatureProgressPort(Protocol):
+    """Shared progress presentation port."""
+
     def show_progress(self, task_name: str = "") -> None:
         """Show progress."""
         ...
@@ -117,13 +140,45 @@ class FeatureHost(Protocol):
         """Update named progress."""
         ...
 
+
+class FeatureMapPort(Protocol):
+    """Factory for feature-scoped map services."""
+
     def create_region_map_service(self) -> RegionMapService:
         """Create map service."""
         ...
 
+
+class FeatureUuidMappingPort(Protocol):
+    """Persistence port for custom UUID mappings."""
+
     def update_uuid_mappings(self, mappings: dict[str, str]) -> None:
         """Persist UUID mappings."""
         ...
+
+
+class FeatureRuntimePort(Protocol):
+    """Background execution runtime owned by the application."""
+
+    @property
+    def execution_runtime(self) -> ExecutionRuntime:
+        """Return the shared execution runtime."""
+        ...
+
+
+class FeatureHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureProgressPort,
+    FeatureMapPort,
+    FeatureUuidMappingPort,
+    FeatureRuntimePort,
+    FeatureMigrationPort,
+    Protocol,
+):
+    """Composition host that combines reusable UI and service ports."""
 
     @property
     def current_save_path(self) -> Optional[str]:
@@ -153,11 +208,6 @@ class FeatureHost(Protocol):
     @property
     def texture(self) -> TextureService:
         """Texture service."""
-        ...
-
-    @property
-    def execution_runtime(self) -> ExecutionRuntime:
-        """Execution runtime."""
         ...
 
     @property
@@ -388,4 +438,17 @@ class MigrationCommands:
     close: Callable[[], None]
 
 
-__all__ = ["FeatureContext", "FeatureHost", "MigrationCommands"]
+__all__ = [
+    "FeatureContext",
+    "FeatureDialogPort",
+    "FeatureFileDialogPort",
+    "FeatureHost",
+    "FeatureMapPort",
+    "FeatureMigrationPort",
+    "FeaturePagePort",
+    "FeatureProgressPort",
+    "FeatureRuntimePort",
+    "FeatureTranslationPort",
+    "FeatureUuidMappingPort",
+    "MigrationCommands",
+]
