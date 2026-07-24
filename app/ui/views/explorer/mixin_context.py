@@ -8,6 +8,7 @@ import flet as ft
 from app.models.nbt_edit import NbtStageStore
 from app.presenters.nbt_view_state import NbtViewState
 from app.presenters.quick_backup_state import QuickBackupState
+from app.presenters.stats_view_state import StatsAnalysisState
 from app.services.execution_runtime import OperationScope
 from app.services.region_map import RegionMapService
 from app.controllers.map_controller import MapController
@@ -125,6 +126,7 @@ class ExplorerMixinHost:
     _task_scope: OperationScope
     _world_load_generation: int
     _quick_backup_state: QuickBackupState
+    _stats_analysis_state: StatsAnalysisState
     _marker_busy: bool
 
     _nbt_stage_store: NbtStageStore

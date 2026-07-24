@@ -1,10 +1,17 @@
 """Stats tab mixin for ExplorerView."""
 from pathlib import Path
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import flet as ft
 import flet.canvas as cv
 
+from app.presenters.stats_view_state import (
+    StatsAnalysisState,
+    begin_stats_analysis,
+    finish_stats_analysis,
+    invalidate_stats_analysis,
+    owns_stats_analysis,
+)
 from app.ui.theme import THEME
 from app.ui.components.cards import card
 from app.ui.utils import run_on_ui
@@ -59,8 +66,7 @@ class StatsTabMixin(ExplorerMixinHost):
 
     def _init_stats_state(self) -> None:
         """Create shared stats controls and analysis state."""
-        self._stats_generation = 0
-        self._stats_busy = False
+        self._stats_analysis_state = StatsAnalysisState()
         self._player_stats_cache: List[PlayerPlaytimeStats] = []
         self._stats_service_cache: Optional[WorldStatsService] = None
         self._player_sort_key = PLAYER_SORT_PLAY_TIME
@@ -625,7 +631,7 @@ class StatsTabMixin(ExplorerMixinHost):
                     ),
                 )
                 return
-            if getattr(self, "_stats_busy", False):
+            if self._get_stats_analysis_state().is_running:
                 return
             if not hasattr(self, "_stats_status"):
                 self._build_stats_tab()
@@ -656,9 +662,13 @@ class StatsTabMixin(ExplorerMixinHost):
 
     def _start_stats_analysis(self, world_path: Path) -> None:
         service = self._ensure_world_stats_service()
-        self._stats_generation = getattr(self, "_stats_generation", 0) + 1
-        generation = self._stats_generation
-        self._stats_busy = True
+        state = begin_stats_analysis(
+            self._get_stats_analysis_state(),
+            world_path,
+            self._world_load_generation,
+        )
+        self._stats_analysis_state = state
+        generation = state.generation
         task_name = self._t("stats.progress_task", "统计存档")
         name_map = self._stats_name_map()
 
@@ -671,12 +681,20 @@ class StatsTabMixin(ExplorerMixinHost):
                 name_map=name_map,
             )
 
-        self._task_scope.submit(
-            "analyze_world_stats",
-            lambda token: run(),
-            lane=ExecutionLane.CPU,
-            priority=TaskPriority.INTERACTIVE,
-        )
+        try:
+            self._task_scope.submit(
+                "analyze_world_stats",
+                lambda token: run(),
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.INTERACTIVE,
+            )
+        except Exception:
+            self._stats_analysis_state = finish_stats_analysis(
+                self._get_stats_analysis_state(),
+                generation,
+            )
+            self._set_stats_progress_visible(False)
+            raise
 
     def _stats_name_map(self) -> dict[str, str | None]:
         """Prefer the already-loaded WorldSession name map."""
@@ -701,8 +719,8 @@ class StatsTabMixin(ExplorerMixinHost):
     ) -> None:
         session = self.world_session
         try:
-            run_on_ui(
-                self.app.page,
+            self._post_stats_ui(
+                generation,
                 self.app.show_progress,
                 self._t("stats.analyzing", "正在分析存档..."),
             )
@@ -729,8 +747,7 @@ class StatsTabMixin(ExplorerMixinHost):
                 generation,
             )
         finally:
-            run_on_ui(self.app.page, self.app.hide_progress)
-            run_on_ui(self.app.page, self._finish_stats_busy, generation)
+            run_on_ui(self.app.page, self._finish_stats_analysis, generation)
 
     def _make_stats_progress_callback(
         self,
@@ -738,17 +755,17 @@ class StatsTabMixin(ExplorerMixinHost):
         task_name: str,
     ) -> Any:
         def progress(value: float, stage: str) -> None:
-            if generation != getattr(self, "_stats_generation", 0):
+            if not self._is_stats_analysis_current(generation):
                 return
             message = self._format_stats_stage(stage)
-            run_on_ui(
-                self.app.page,
+            self._post_stats_ui(
+                generation,
                 self.app.update_progress_with_task,
                 message or task_name,
                 value,
             )
-            run_on_ui(
-                self.app.page,
+            self._post_stats_ui(
+                generation,
                 self._apply_stats_progress,
                 value,
                 message,
@@ -776,10 +793,57 @@ class StatsTabMixin(ExplorerMixinHost):
             pass
         return stats
 
-    def _finish_stats_busy(self, generation: int) -> None:
-        if generation != getattr(self, "_stats_generation", 0):
+    def _finish_stats_analysis(self, generation: int) -> None:
+        state = self._get_stats_analysis_state()
+        next_state = finish_stats_analysis(
+            state,
+            generation,
+        )
+        if next_state is state:
             return
-        self._stats_busy = False
+        self._stats_analysis_state = next_state
+        self.app.hide_progress()
+
+    def _post_stats_ui(
+        self,
+        generation: int,
+        callback: Callable[..., object],
+        *args: object,
+    ) -> None:
+        """Dispatch statistics UI work with pre/post identity checks."""
+        if not self._is_stats_analysis_current(generation):
+            return
+
+        def guarded() -> None:
+            if self._is_stats_analysis_current(generation):
+                callback(*args)
+
+        run_on_ui(self.app.page, guarded)
+
+    def _get_stats_analysis_state(self) -> StatsAnalysisState:
+        """Return initialized state for full views and isolated mixin tests."""
+        return getattr(self, "_stats_analysis_state", StatsAnalysisState())
+
+    def _is_stats_analysis_current(self, generation: int) -> bool:
+        """Return whether a statistics callback still owns this world."""
+        state = self._get_stats_analysis_state()
+        session = self.world_session
+        return (
+            not getattr(self, "_disposed", False)
+            and session is not None
+            and owns_stats_analysis(
+                state,
+                generation,
+                session.world_path,
+                self._world_load_generation,
+            )
+        )
+
+    def _invalidate_stats_analysis_state(self) -> None:
+        """Drop pending statistics callbacks after host identity changes."""
+        self._stats_analysis_state = invalidate_stats_analysis(
+            self._get_stats_analysis_state()
+        )
 
     def _set_stats_progress_visible(self, visible: bool) -> None:
         if not hasattr(self, "_stats_progress_bar"):
@@ -838,7 +902,7 @@ class StatsTabMixin(ExplorerMixinHost):
         service: WorldStatsService,
         generation: int,
     ) -> None:
-        if generation != getattr(self, "_stats_generation", 0):
+        if not self._is_stats_analysis_current(generation):
             return
         try:
             from app.presenters.stats_view_state import build_stats_view_state
@@ -958,7 +1022,7 @@ class StatsTabMixin(ExplorerMixinHost):
     ) -> None:
         if (
             generation is not None
-            and generation != getattr(self, "_stats_generation", 0)
+            and not self._is_stats_analysis_current(generation)
         ):
             return
         self._set_stats_progress_visible(False)

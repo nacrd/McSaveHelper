@@ -1,6 +1,7 @@
 """Immutable ViewState presenters for map/player/stats."""
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 from app.presenters.map_viewport_state import (
@@ -8,7 +9,14 @@ from app.presenters.map_viewport_state import (
     snapshot_map_view_state,
 )
 from app.presenters.player_list_state import build_player_list_state
-from app.presenters.stats_view_state import build_stats_view_state
+from app.presenters.stats_view_state import (
+    StatsAnalysisState,
+    begin_stats_analysis,
+    build_stats_view_state,
+    finish_stats_analysis,
+    invalidate_stats_analysis,
+    owns_stats_analysis,
+)
 from app.services.world_stats_service import (
     PLAYER_SORT_NAME,
     WorldStatistics,
@@ -78,3 +86,24 @@ def test_stats_view_state_from_empty_statistics() -> None:
     assert view.total_regions == 0
     assert view.players == ()
     assert any(line.startswith("regions=") for line in view.summary_lines)
+
+
+def test_stats_analysis_state_invalidates_world_identity() -> None:
+    world_path = Path("world")
+    running = begin_stats_analysis(StatsAnalysisState(), world_path, 4)
+
+    assert running.is_running
+    assert owns_stats_analysis(running, running.generation, world_path, 4)
+    assert finish_stats_analysis(running, running.generation - 1) is running
+
+    finished = finish_stats_analysis(running, running.generation)
+    assert not finished.is_running
+    assert owns_stats_analysis(finished, finished.generation, world_path, 4)
+
+    invalidated = invalidate_stats_analysis(finished)
+    assert not owns_stats_analysis(
+        invalidated,
+        finished.generation,
+        world_path,
+        4,
+    )

@@ -1,7 +1,8 @@
 """不可变统计页 ViewState 与纯投影。"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Callable, Sequence
 
 from app.services.world_stats_service import (
@@ -35,6 +36,59 @@ class StatsViewState:
     total_regions: int
     total_blocks: int
     total_entities: int
+
+
+@dataclass(frozen=True)
+class StatsAnalysisState:
+    """Ownership snapshot for one Explorer statistics analysis."""
+
+    generation: int = 0
+    host_generation: int = -1
+    world_path: Path | None = None
+    is_running: bool = False
+
+
+def begin_stats_analysis(
+    state: StatsAnalysisState,
+    world_path: Path,
+    host_generation: int,
+) -> StatsAnalysisState:
+    """Start a new statistics generation for one world identity."""
+    return StatsAnalysisState(
+        generation=state.generation + 1,
+        host_generation=host_generation,
+        world_path=world_path,
+        is_running=True,
+    )
+
+
+def finish_stats_analysis(
+    state: StatsAnalysisState,
+    generation: int,
+) -> StatsAnalysisState:
+    """Release matching analysis ownership and ignore stale completions."""
+    if generation != state.generation or not state.is_running:
+        return state
+    return replace(state, is_running=False)
+
+
+def invalidate_stats_analysis(state: StatsAnalysisState) -> StatsAnalysisState:
+    """Invalidate pending results after a world or lifecycle change."""
+    return StatsAnalysisState(generation=state.generation + 1)
+
+
+def owns_stats_analysis(
+    state: StatsAnalysisState,
+    generation: int,
+    world_path: Path,
+    host_generation: int,
+) -> bool:
+    """Return whether a callback still belongs to the latest analysis."""
+    return (
+        generation == state.generation
+        and host_generation == state.host_generation
+        and world_path == state.world_path
+    )
 
 
 def _rank_items(
@@ -112,6 +166,11 @@ def build_stats_view_state(
 
 __all__ = [
     "RankItem",
+    "StatsAnalysisState",
     "StatsViewState",
+    "begin_stats_analysis",
     "build_stats_view_state",
+    "finish_stats_analysis",
+    "invalidate_stats_analysis",
+    "owns_stats_analysis",
 ]
