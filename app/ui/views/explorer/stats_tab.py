@@ -650,7 +650,7 @@ class StatsTabMixin(ExplorerMixinHost):
 
     def _ensure_world_stats_service(self) -> WorldStatsService:
         """返回组合根装配的统计服务。"""
-        service = self.app.services.world_stats
+        service = self.app.world_stats
         self._stats_service_cache = service
         return service
 
@@ -713,7 +713,7 @@ class StatsTabMixin(ExplorerMixinHost):
                     task_name,
                 ),
                 name_map=name_map,
-                index_snapshot=self.app.services.world_repository.get_index(world_path),
+                index_snapshot=self.app.world_repository.get_index(world_path),
             )
             stats = self._late_bind_player_names(service, session, stats)
             self.app.page.run_task(

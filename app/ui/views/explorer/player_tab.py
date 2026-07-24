@@ -145,7 +145,7 @@ class PlayerTabMixin(ExplorerMixinHost):
             service = PlayerAvatarService(
                 self.app.execution_runtime,
                 enabled=True,
-                cache_registry=self.app.services.cache_registry,
+                cache_registry=self.app.cache_registry,
             )
             self._player_avatar_service_instance = service
         return service

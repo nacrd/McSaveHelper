@@ -75,7 +75,7 @@ class RegionTabMixin(ExplorerMixinHost):
                 on_marker_selected=self._on_map_marker_selected,
                 width=900,
                 height=560,
-                cache_registry=self.app.services.cache_registry,
+                cache_registry=self.app.cache_registry,
             )
             return self._map_view
         except Exception:

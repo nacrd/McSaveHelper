@@ -12,7 +12,7 @@ from app.services.world_write_coordinator import WorldWriteCoordinator
 def _app(service: BackupService) -> Any:
     runtime = ExecutionRuntime()
     return SimpleNamespace(
-        services=SimpleNamespace(backup=service),
+        backup=service,
         translate=lambda key, default: default,
         execution_runtime=runtime,
     )

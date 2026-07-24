@@ -22,13 +22,11 @@ def _app(**values: object) -> Any:
     defaults: dict[str, object] = {
         "log": lambda message, level="INFO": None,
         "translate": lambda key, default: default,
-        "services": SimpleNamespace(
-            backup=BackupService(WorldWriteCoordinator()),
-            world_indexes=WorldIndexRegistry(),
-            world_repository=world_repository,
-            world_compare=WorldCompareService(
-                index_provider=world_repository.get_index,
-            ),
+        "backup": BackupService(WorldWriteCoordinator()),
+        "world_indexes": WorldIndexRegistry(),
+        "world_repository": world_repository,
+        "world_compare": WorldCompareService(
+            index_provider=world_repository.get_index,
         ),
         "execution_runtime": ExecutionRuntime(),
     }

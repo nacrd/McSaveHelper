@@ -57,7 +57,7 @@ class WorldInfoTabMixin(ExplorerMixinHost):
                             value,
                         )
 
-                    record = self.app.services.backup.create_backup(
+                    record = self.app.backup.create_backup(
                         world_path,
                         label="Explorer 快速备份",
                         progress_callback=progress,

@@ -9,6 +9,20 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _is_view_service_container_access(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Attribute) or node.attr != "services":
+        return False
+    owner = node.value
+    if isinstance(owner, ast.Name):
+        return owner.id == "app"
+    return (
+        isinstance(owner, ast.Attribute)
+        and owner.attr == "app"
+        and isinstance(owner.value, ast.Name)
+        and owner.value.id == "self"
+    )
+
+
 def test_core_does_not_import_application_layer() -> None:
     violations = []
     for source_path in (PROJECT_ROOT / "core").rglob("*.py"):
@@ -345,6 +359,28 @@ def test_feature_context_omits_migration_only_shortcuts() -> None:
     ).read_text(encoding="utf-8")
     assert "self.app.migration_commands.start" in migrator
     assert "choose_destination" in migrator
+
+
+def test_feature_views_do_not_reach_into_application_service_container() -> None:
+    """Feature views consume explicit context ports, never AppServices."""
+    views_root = PROJECT_ROOT / "app" / "ui" / "views"
+    offenders: list[str] = []
+    for path in views_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(_is_view_service_container_access(node) for node in ast.walk(tree)):
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert offenders == []
+
+
+def test_feature_context_does_not_expose_application_service_container() -> None:
+    """The view context must keep the composition-root container private."""
+    source = (
+        PROJECT_ROOT / "app/ui/feature_context.py"
+    ).read_text(encoding="utf-8")
+
+    assert "AppServices" not in source
+    assert "def services(" not in source
 
 
 def test_feature_registry_drives_catalog_and_application_budget() -> None:

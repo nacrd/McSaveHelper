@@ -19,6 +19,16 @@ from app.presenters.runtime_observability import (
     format_cache_registry_report,
     format_runtime_snapshot,
 )
+from app.presenters.settings_view_state import (
+    SettingsFeedbackPhase,
+    SettingsViewState,
+    begin_reset,
+    complete_reset,
+    dispose_settings_state,
+    mark_save_failed,
+    mark_save_pending,
+    mark_save_succeeded,
+)
 from app.services.cache_registry import CacheRegistryStats
 from app.services.execution_runtime import (
     ExecutionRuntime,
@@ -77,8 +87,7 @@ class SettingsView(ft.Column):
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
         self._deps = dependencies
-        self._disposed = False
-        self._operation_busy = False
+        self._state = SettingsViewState()
         self._io_controller = SettingsIOController(
             SettingsIOControllerDependencies(
                 execution_runtime=dependencies.execution_runtime,
@@ -103,15 +112,16 @@ class SettingsView(ft.Column):
 
     def _build(self) -> None:
         self.controls.clear()
+        status_text, status_icon, status_color = self._feedback_projection()
         self._save_status_icon = ft.Icon(
-            IconSet.INFO,
+            status_icon,
             size=16,
-            color=THEME.text_muted,
+            color=status_color,
         )
         self._save_status_text = ft.Text(
-            self._t("settings.save_status.auto", "更改会自动保存"),
+            status_text,
             size=12,
-            color=THEME.text_muted,
+            color=status_color,
         )
         save_status = ft.Row(
             [self._save_status_icon, self._save_status_text],
@@ -124,6 +134,7 @@ class SettingsView(ft.Column):
             icon=IconSet.SETTINGS,
             status=save_status,
         )
+        self.disabled = self._state.operation_busy
         self._sections: list[ft.Control] = []
         self._build_general_card()
         self._build_ui_card()
@@ -494,7 +505,7 @@ class SettingsView(ft.Column):
         )
 
     def _refresh_cache_stats(self, *, show_error: bool = False) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self._set_cache_busy(True)
         self._io_controller.refresh_cache(
@@ -503,7 +514,7 @@ class SettingsView(ft.Column):
         )
 
     def _apply_cache_snapshot(self, snapshot: SettingsCacheSnapshot) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self._set_cache_busy(False)
         self._cache_summary.value = format_cache_registry_report(
@@ -525,7 +536,7 @@ class SettingsView(ft.Column):
         safe_update(self._cache_path_label)
 
     def _apply_cache_error(self, error: Exception, show_error: bool) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self._set_cache_busy(False)
         self._cache_summary.value = self._t(
@@ -541,7 +552,7 @@ class SettingsView(ft.Column):
             )
 
     def _clear_map_cache(self) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self._set_cache_busy(True)
         self._io_controller.clear_cache(
@@ -550,7 +561,7 @@ class SettingsView(ft.Column):
         )
 
     def _apply_cache_clear_success(self, outcome: CacheClearOutcome) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
         self._apply_cache_snapshot(outcome.snapshot)
         metrics = outcome.metrics
@@ -729,18 +740,15 @@ class SettingsView(ft.Column):
 
     def _persist(self) -> bool:
         """提交最新设置快照，并在防抖窗口内合并连续输入。"""
-        if self._disposed or self._operation_busy:
+        if not self._state.can_start_operation:
             return False
         try:
             settings = self._collect_settings()
         except Exception as error:
             self._apply_save_error(error)
             return False
-        self._set_save_status(
-            self._t("settings.save_status.pending", "等待保存"),
-            IconSet.INFO,
-            THEME.warning,
-        )
+        self._state = mark_save_pending(self._state)
+        self._render_feedback_state()
         self._io_controller.schedule_save(
             settings,
             self._apply_save_success,
@@ -749,39 +757,63 @@ class SettingsView(ft.Column):
         return True
 
     def _apply_save_success(self) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
-        self._set_save_status(
-            self._t("settings.save_status.saved", "已保存"),
-            IconSet.SUCCESS,
-            THEME.success,
-        )
+        self._state = mark_save_succeeded(self._state)
+        self._render_feedback_state()
 
     def _apply_save_error(self, error: Exception) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
-        self._set_save_status(
-            self._t("settings.save_status.failed", "保存失败"),
-            IconSet.ERROR,
-            THEME.error,
-        )
+        self._state = mark_save_failed(self._state)
+        self._render_feedback_state()
         self._deps.error_dialog(
             self._t("dialogs.error", "错误"),
             str(error),
         )
 
-    def _set_save_status(
-        self,
-        text: str,
-        icon: ft.IconData,
-        color: str,
-    ) -> None:
-        """Update the persistent settings feedback in one place."""
+    def _render_feedback_state(self) -> None:
+        """Project the immutable feedback state onto mounted controls."""
+        text, icon, color = self._feedback_projection()
         self._save_status_text.value = text
         self._save_status_text.color = color
         self._save_status_icon.icon = icon
         self._save_status_icon.color = color
+        self.disabled = self._state.operation_busy
         safe_update(self._page_header.status_host)
+        safe_update(self)
+
+    def _feedback_projection(self) -> tuple[str, ft.IconData, str]:
+        phase = self._state.feedback
+        if phase is SettingsFeedbackPhase.PENDING:
+            return (
+                self._t("settings.save_status.pending", "等待保存"),
+                IconSet.INFO,
+                THEME.warning,
+            )
+        if phase is SettingsFeedbackPhase.SAVED:
+            return (
+                self._t("settings.save_status.saved", "已保存"),
+                IconSet.SUCCESS,
+                THEME.success,
+            )
+        if phase is SettingsFeedbackPhase.FAILED:
+            return (
+                self._t("settings.save_status.failed", "保存失败"),
+                IconSet.ERROR,
+                THEME.error,
+            )
+        if phase is SettingsFeedbackPhase.RESETTING:
+            return (
+                self._t("settings.save_status.resetting", "正在重置"),
+                IconSet.INFO,
+                THEME.warning,
+            )
+        return (
+            self._t("settings.save_status.auto", "更改会自动保存"),
+            IconSet.INFO,
+            THEME.text_muted,
+        )
 
     def _on_version_detection_change(self, value: bool) -> None:
         del value
@@ -880,31 +912,22 @@ class SettingsView(ft.Column):
         self._persist()
 
     def _reset(self) -> None:
-        if self._disposed or self._operation_busy:
+        if not self._state.can_start_operation:
             return
-        self._set_operation_busy(True)
-        self._set_save_status(
-            self._t("settings.save_status.resetting", "正在重置"),
-            IconSet.INFO,
-            THEME.warning,
-        )
+        self._state = begin_reset(self._state)
+        self._render_feedback_state()
         self._io_controller.reset(
             self._apply_reset_success,
             self._apply_reset_error,
         )
 
     def _apply_reset_success(self, settings: ApplicationSettings) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
-        self._operation_busy = False
-        self.disabled = False
+        self._state = complete_reset(self._state)
         self._apply_settings_effects(settings)
         self._build()
-        self._set_save_status(
-            self._t("settings.save_status.saved", "已保存"),
-            IconSet.SUCCESS,
-            THEME.success,
-        )
+        self._render_feedback_state()
         safe_update(self)
         self._refresh_cache_stats()
         self._deps.info_dialog(
@@ -913,9 +936,8 @@ class SettingsView(ft.Column):
         )
 
     def _apply_reset_error(self, error: Exception) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
-        self._set_operation_busy(False)
         self._apply_save_error(error)
 
     def _apply_settings_effects(self, settings: ApplicationSettings) -> None:
@@ -928,13 +950,8 @@ class SettingsView(ft.Column):
             float(settings.performance_print_interval),
         )
 
-    def _set_operation_busy(self, busy: bool) -> None:
-        self._operation_busy = busy
-        self.disabled = busy
-        safe_update(self)
-
     def _dispatch_result(self, callback: Callable[[], None]) -> None:
-        if self._disposed:
+        if self._state.is_disposed:
             return
         try:
             page = self.page
@@ -951,8 +968,7 @@ class SettingsView(ft.Column):
 
     def dispose(self) -> None:
         """取消后台操作并使迟到结果失效；可重复调用。"""
-        if self._disposed:
+        if self._state.is_disposed:
             return
-        self._disposed = True
-        self._operation_busy = False
+        self._state = dispose_settings_state(self._state)
         self._io_controller.close()

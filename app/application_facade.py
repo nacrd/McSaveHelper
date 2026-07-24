@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 import flet as ft
 
@@ -12,29 +12,44 @@ from app.adapters.file_dialogs import FileType
 from app.ui.theme import THEME
 
 if TYPE_CHECKING:
+    from app.bootstrap.services import AppServices
+    from app.controllers.migration_controller import MigrationController
+    from app.core.dialog_manager import DialogManager
+    from app.core.gui_optimizer import GUIOptimizer
+    from app.core.progress_manager import ProgressManager
+    from app.core.save_context_manager import SaveContextManager
+    from app.core.view_manager import ViewManager
+    from app.services.backup_service import BackupService
+    from app.services.cache_registry import CacheRegistry
     from app.services.config_service import ConfigService
     from app.services.execution_runtime import ExecutionRuntime
     from app.services.i18n_service import I18nService
     from app.services.item_service import ItemService
     from app.services.migration_service import MigrationService
     from app.services.region_map import RegionMapService
+    from app.services.save_repair_service import SaveRepairService
     from app.services.texture_service import TextureService
     from app.services.ui_delivery import UiDeliveryPort
     from app.services.uuid_service import UUIDService
-    from app.ui.feature_context import MigrationCommands
+    from app.services.world_compare_service import WorldCompareService
+    from app.services.world_repository import WorldRepository
+    from app.services.world_stats_service import WorldStatsService
+    from app.services.world_transaction import WorldTransactionService
+    from app.ui.feature_context import FeatureContext, MigrationCommands
+    from core.omni.world_session import WorldSession
 
 
 class ApplicationFacadeMixin:
     """View-facing convenience ports kept on the composition root."""
 
-    page: Any
-    services: Any
-    dialog_manager: Any
-    progress_manager: Any
-    view_manager: Any
-    gui_optimizer: Any
-    migration_controller: Any
-    save_context_manager: Any
+    page: ft.Page
+    services: "AppServices"
+    dialog_manager: "DialogManager"
+    progress_manager: "ProgressManager"
+    view_manager: "ViewManager"
+    gui_optimizer: "GUIOptimizer"
+    migration_controller: "MigrationController"
+    save_context_manager: "SaveContextManager"
     floating_log_panel: Any
     ui_delivery: "UiDeliveryPort"
     _sidebar: Any
@@ -129,21 +144,21 @@ class ApplicationFacadeMixin:
         self.dialog_manager.handle_exception(exception, title, log, show_dialog)
 
     def pick_directory(self) -> Optional[str]:
-        return cast(Optional[str], self.dialog_manager.pick_directory())
+        return self.dialog_manager.pick_directory()
 
     def pick_file(
         self,
         title: str = "",
         file_types: Optional[List[FileType]] = None,
     ) -> Optional[str]:
-        return cast(Optional[str], self.dialog_manager.pick_file(title, file_types))
+        return self.dialog_manager.pick_file(title, file_types)
 
     def pick_files(
         self,
         title: str = "",
         file_types: Optional[List[FileType]] = None,
     ) -> Optional[List[str]]:
-        return cast(Optional[List[str]], self.dialog_manager.pick_files(title, file_types))
+        return self.dialog_manager.pick_files(title, file_types)
 
     def save_file(
         self,
@@ -151,10 +166,7 @@ class ApplicationFacadeMixin:
         default_ext: str = ".txt",
         file_types: Optional[List[FileType]] = None,
     ) -> Optional[str]:
-        return cast(
-            Optional[str],
-            self.dialog_manager.save_file(title, default_ext, file_types),
-        )
+        return self.dialog_manager.save_file(title, default_ext, file_types)
 
     def set_start_button_enabled(self, enabled: bool) -> None:
         view = self.view_manager.get_view("migrator")
@@ -232,31 +244,59 @@ class ApplicationFacadeMixin:
 
     @property
     def config(self) -> "ConfigService":
-        return cast("ConfigService", self.services.config)
+        return self.services.config
 
     @property
     def i18n(self) -> "I18nService":
-        return cast("I18nService", self.services.i18n)
+        return self.services.i18n
 
     @property
     def migration(self) -> "MigrationService":
-        return cast("MigrationService", self.services.migration)
+        return self.services.migration
 
     @property
     def uuid(self) -> "UUIDService":
-        return cast("UUIDService", self.services.uuid)
+        return self.services.uuid
 
     @property
     def item(self) -> "ItemService":
-        return cast("ItemService", self.services.item)
+        return self.services.item
 
     @property
     def texture(self) -> "TextureService":
-        return cast("TextureService", self.services.texture)
+        return self.services.texture
 
     @property
     def execution_runtime(self) -> "ExecutionRuntime":
-        return cast("ExecutionRuntime", self.services.execution_runtime)
+        return self.services.execution_runtime
+
+    @property
+    def backup(self) -> "BackupService":
+        return self.services.backup
+
+    @property
+    def save_repair(self) -> "SaveRepairService":
+        return self.services.save_repair
+
+    @property
+    def world_compare(self) -> "WorldCompareService":
+        return self.services.world_compare
+
+    @property
+    def world_transactions(self) -> "WorldTransactionService":
+        return self.services.world_transactions
+
+    @property
+    def world_repository(self) -> "WorldRepository":
+        return self.services.world_repository
+
+    @property
+    def world_stats(self) -> "WorldStatsService":
+        return self.services.world_stats
+
+    @property
+    def cache_registry(self) -> "CacheRegistry":
+        return self.services.cache_registry
 
     def create_region_map_service(self) -> "RegionMapService":
         from app.services.region_map import RegionMapService
@@ -272,19 +312,19 @@ class ApplicationFacadeMixin:
 
     @property
     def current_save_path(self) -> Optional[str]:
-        return cast(Optional[str], self.save_context_manager.get_current_save_path())
+        return self.save_context_manager.get_current_save_path()
 
     def open_world_session(
         self,
         world_path: Path | str,
         *,
         log: Optional[Callable[[str, str], None]] = None,
-    ) -> Any:
+    ) -> "WorldSession":
         """Open a world session through the shared repository ports."""
         return self.feature_context.open_world_session(world_path, log=log)
 
     @property
-    def feature_context(self) -> Any:
+    def feature_context(self) -> "FeatureContext":
         from app.ui.feature_context import FeatureContext
 
         return FeatureContext(self)

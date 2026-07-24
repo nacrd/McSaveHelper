@@ -35,7 +35,7 @@ def test_explorer_quick_backup_uses_managed_backup_service(
     setattr(host, "_disposed", False)
     host.app = cast(Any, SimpleNamespace(
         page=None,
-        services=SimpleNamespace(backup=BackupService()),
+        backup=BackupService(),
         show_progress=lambda message: None,
         update_progress_with_task=lambda message, value: None,
         info_dialog=lambda title, message: None,
@@ -87,7 +87,7 @@ def test_explorer_quick_backup_drops_ui_after_world_switch(
     setattr(host, "_disposed", False)
     host.app = cast(Any, SimpleNamespace(
         page=object(),
-        services=SimpleNamespace(backup=BackupService()),
+        backup=BackupService(),
         show_progress=lambda message: events.append(("show", message)),
         update_progress_with_task=lambda message, value: events.append(
             ("progress", message, value)

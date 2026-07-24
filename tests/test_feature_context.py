@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
-from app.ui.feature_context import FeatureContext, MigrationCommands
+from app.ui.feature_context import FeatureContext, FeatureHost, MigrationCommands
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +42,6 @@ def test_feature_context_delegates_host_ports() -> None:
 
     host = SimpleNamespace(
         page=object(),
-        services=SimpleNamespace(),
         migration_commands=commands,
         config=object(),
         migration=object(),
@@ -50,6 +50,13 @@ def test_feature_context_delegates_host_ports() -> None:
         texture=object(),
         execution_runtime=object(),
         ui_delivery=object(),
+        backup=object(),
+        save_repair=object(),
+        world_compare=object(),
+        world_transactions=object(),
+        world_repository=object(),
+        world_stats=object(),
+        cache_registry=object(),
         current_save_path="C:/tmp/world",
         save_context_manager=object(),
         view_manager=object(),
@@ -70,15 +77,23 @@ def test_feature_context_delegates_host_ports() -> None:
         update_uuid_mappings=lambda mappings: calls.append("uuid"),
     )
 
-    ctx = FeatureContext(host)  # type: ignore[arg-type]
+    ctx = FeatureContext(cast(FeatureHost, host))
     assert ctx.translate("k", "v") == "v"
     assert ctx.pick_directory() == "dir"
     assert ctx.create_region_map_service() == "map"
     assert ctx.current_save_path == "C:/tmp/world"
     assert ctx.ui_delivery is host.ui_delivery
+    assert ctx.backup is host.backup
+    assert ctx.save_repair is host.save_repair
+    assert ctx.world_compare is host.world_compare
+    assert ctx.world_transactions is host.world_transactions
+    assert ctx.world_repository is host.world_repository
+    assert ctx.world_stats is host.world_stats
+    assert ctx.cache_registry is host.cache_registry
     assert ctx.migration_commands is commands
     ctx.show_progress("task")
     assert "show" in calls
     assert not hasattr(ctx, "start")
     assert not hasattr(ctx, "set_dest")
     assert not hasattr(ctx, "set_batch_dir")
+    assert not hasattr(ctx, "services")

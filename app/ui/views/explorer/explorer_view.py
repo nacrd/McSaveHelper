@@ -79,7 +79,7 @@ class ExplorerView(
         self._disposed = False
         self._region_delete_controller = RegionDeleteController(
             self._task_scope,
-            self.app.services.world_transactions,
+            self.app.world_transactions,
         )
         self._map_controller = MapController(
             MapMarkerService(),
@@ -391,7 +391,7 @@ class ExplorerView(
             context.report_progress(0, 3, "open_world")
             context.raise_if_cancelled()
             world = Path(path)
-            repository = self.app.services.world_repository
+            repository = self.app.world_repository
             read_context: Optional[WorldReadContext] = None
             try:
                 read_context = repository.open(world)
@@ -486,17 +486,7 @@ class ExplorerView(
         """Compose a session with application-scoped write safety ports."""
         if read_context is not None:
             return read_context.open_session(log=log or self.app.log)
-        open_session = getattr(self.app, "open_world_session", None)
-        if callable(open_session):
-            session = open_session(path, log=log or self.app.log)
-            if not isinstance(session, WorldSession):
-                raise TypeError("open_world_session must return WorldSession")
-            return session
-        repository = self.app.services.world_repository
-        return repository.open_session(
-            path,
-            log=log or self.app.log,
-        )
+        return self.app.open_world_session(path, log=log or self.app.log)
 
     def _apply_loaded_world(
         self,

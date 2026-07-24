@@ -52,10 +52,8 @@ def test_cancelled_world_worker_does_not_open_or_post_result() -> None:
             ui_delivery=SimpleNamespace(
                 post=lambda *args, **kwargs: posted.append((args, kwargs)),
             ),
-            services=SimpleNamespace(
-                world_repository=SimpleNamespace(
-                    get_shell_metadata=lambda _world: posted.append("shell"),
-                ),
+            world_repository=SimpleNamespace(
+                get_shell_metadata=lambda _world: posted.append("shell"),
             ),
             log=lambda *_args: None,
         ),
@@ -88,7 +86,7 @@ def test_world_worker_publishes_shell_then_opens_same_read_context() -> None:
                     (spec, callback, kwargs)
                 ),
             ),
-            services=SimpleNamespace(world_repository=repository),
+            world_repository=repository,
             log=lambda *_args: None,
         ),
     )
@@ -113,7 +111,7 @@ def test_world_worker_binds_error_before_delayed_ui_delivery() -> None:
             ui_delivery=SimpleNamespace(
                 post=lambda _spec, callback, **_kwargs: queued.append(callback),
             ),
-            services=SimpleNamespace(world_repository=repository),
+            world_repository=repository,
             log=lambda *_args: None,
         ),
     )

@@ -3,22 +3,37 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 
 import flet as ft
 
 from app.adapters.file_dialogs import FileType
-from app.bootstrap.services import AppServices
-from app.services.execution_runtime import ExecutionRuntime
-from app.services.region_map import RegionMapService
-from app.services.ui_delivery import UiDeliveryPort
+
+if TYPE_CHECKING:
+    from app.core.save_context_manager import SaveContextManager
+    from app.core.view_manager import ViewManager
+    from app.services.backup_service import BackupService
+    from app.services.cache_registry import CacheRegistry
+    from app.services.config_service import ConfigService
+    from app.services.execution_runtime import ExecutionRuntime
+    from app.services.item_service import ItemService
+    from app.services.migration_service import MigrationService
+    from app.services.region_map import RegionMapService
+    from app.services.save_repair_service import SaveRepairService
+    from app.services.texture_service import TextureService
+    from app.services.ui_delivery import UiDeliveryPort
+    from app.services.uuid_service import UUIDService
+    from app.services.world_compare_service import WorldCompareService
+    from app.services.world_repository import WorldRepository
+    from app.services.world_stats_service import WorldStatsService
+    from app.services.world_transaction import WorldTransactionService
+    from core.omni.world_session import WorldSession
 
 
 class FeatureHost(Protocol):
     """Minimal host protocol required by FeatureContext."""
 
     page: ft.Page
-    services: AppServices
 
     def translate(self, key: str, default: str = "", **kwargs: Any) -> str:
         """Translate UI text."""
@@ -116,27 +131,27 @@ class FeatureHost(Protocol):
         ...
 
     @property
-    def config(self) -> Any:
+    def config(self) -> ConfigService:
         """Config service."""
         ...
 
     @property
-    def migration(self) -> Any:
+    def migration(self) -> MigrationService:
         """Migration service."""
         ...
 
     @property
-    def uuid(self) -> Any:
+    def uuid(self) -> UUIDService:
         """UUID service."""
         ...
 
     @property
-    def item(self) -> Any:
+    def item(self) -> ItemService:
         """Item service."""
         ...
 
     @property
-    def texture(self) -> Any:
+    def texture(self) -> TextureService:
         """Texture service."""
         ...
 
@@ -151,12 +166,47 @@ class FeatureHost(Protocol):
         ...
 
     @property
-    def save_context_manager(self) -> Any:
+    def backup(self) -> BackupService:
+        """Managed backup service."""
+        ...
+
+    @property
+    def save_repair(self) -> SaveRepairService:
+        """World repair service."""
+        ...
+
+    @property
+    def world_compare(self) -> WorldCompareService:
+        """World comparison service."""
+        ...
+
+    @property
+    def world_transactions(self) -> WorldTransactionService:
+        """Shared world transaction service."""
+        ...
+
+    @property
+    def world_repository(self) -> WorldRepository:
+        """Shared world read repository."""
+        ...
+
+    @property
+    def world_stats(self) -> WorldStatsService:
+        """World statistics service."""
+        ...
+
+    @property
+    def cache_registry(self) -> CacheRegistry:
+        """Application cache registry."""
+        ...
+
+    @property
+    def save_context_manager(self) -> SaveContextManager:
         """Save context manager."""
         ...
 
     @property
-    def view_manager(self) -> Any:
+    def view_manager(self) -> ViewManager:
         """View manager."""
         ...
 
@@ -172,10 +222,6 @@ class FeatureContext:
         return self.host.page
 
     @property
-    def services(self) -> AppServices:
-        return self.host.services
-
-    @property
     def execution_runtime(self) -> ExecutionRuntime:
         return self.host.execution_runtime
 
@@ -184,35 +230,63 @@ class FeatureContext:
         return self.host.ui_delivery
 
     @property
-    def config(self) -> Any:
+    def config(self) -> ConfigService:
         return self.host.config
 
     @property
-    def migration(self) -> Any:
+    def migration(self) -> MigrationService:
         return self.host.migration
 
     @property
-    def uuid(self) -> Any:
+    def uuid(self) -> UUIDService:
         return self.host.uuid
 
     @property
-    def item(self) -> Any:
+    def item(self) -> ItemService:
         return self.host.item
 
     @property
-    def texture(self) -> Any:
+    def texture(self) -> TextureService:
         return self.host.texture
+
+    @property
+    def backup(self) -> BackupService:
+        return self.host.backup
+
+    @property
+    def save_repair(self) -> SaveRepairService:
+        return self.host.save_repair
+
+    @property
+    def world_compare(self) -> WorldCompareService:
+        return self.host.world_compare
+
+    @property
+    def world_transactions(self) -> WorldTransactionService:
+        return self.host.world_transactions
+
+    @property
+    def world_repository(self) -> WorldRepository:
+        return self.host.world_repository
+
+    @property
+    def world_stats(self) -> WorldStatsService:
+        return self.host.world_stats
+
+    @property
+    def cache_registry(self) -> CacheRegistry:
+        return self.host.cache_registry
 
     @property
     def current_save_path(self) -> Optional[str]:
         return self.host.current_save_path
 
     @property
-    def save_context_manager(self) -> Any:
+    def save_context_manager(self) -> SaveContextManager:
         return self.host.save_context_manager
 
     @property
-    def view_manager(self) -> Any:
+    def view_manager(self) -> ViewManager:
         return self.host.view_manager
 
     @property
@@ -295,9 +369,9 @@ class FeatureContext:
         world_path: Path | str,
         *,
         log: Optional[Callable[[str, str], None]] = None,
-    ) -> Any:
+    ) -> WorldSession:
         """Open a world session with shared repository write ports."""
-        return self.services.world_repository.open_session(
+        return self.world_repository.open_session(
             world_path,
             log=log or self.log,
         )

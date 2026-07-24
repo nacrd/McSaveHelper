@@ -51,11 +51,11 @@ class BackupCenterView(ft.Column):
 
         Args:
             app: 应用组合根。
-            service: 可选备份服务；缺省使用 ``app.services.backup``。
+            service: 可选备份服务；缺省使用上下文的备份端口。
         """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO, expand=True)
         self.app = app
-        self.service = service or app.services.backup
+        self.service = service or app.backup
         self._task_scope = app.execution_runtime.create_scope("backup_center_view")
         self._busy = False
         self._refresh_generation = 0

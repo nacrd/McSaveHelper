@@ -42,11 +42,11 @@ class SaveRepairView(ft.Column):
 
         Args:
             app: 应用组合根。
-            service: 可选修复服务；缺省使用 ``app.services.save_repair``。
+            service: 可选修复服务；缺省使用上下文的修复端口。
         """
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)
         self.app = app
-        self.service = service or app.services.save_repair
+        self.service = service or app.save_repair
         self._task_scope = app.execution_runtime.create_scope(
             "save_repair_view"
         )
