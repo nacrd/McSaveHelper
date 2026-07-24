@@ -224,7 +224,10 @@ class PlayerTabOperations:
             lambda _result: on_success(output_path),
             on_error,
             lane=ExecutionLane.IO,
-            guard=lambda: self._get_world_session() is session,
+            guard=lambda: (
+                self._get_world_session() is session
+                and self._get_current_uuid() == uuid
+            ),
         )
 
     def submit_usercache_import(

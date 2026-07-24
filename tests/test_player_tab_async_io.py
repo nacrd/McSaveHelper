@@ -233,3 +233,34 @@ def test_operations_close_drops_queued_ui_callback() -> None:
     asyncio.run(page.tasks.pop()())
 
     assert callbacks == []
+
+
+def test_player_export_drops_callback_after_switching_player() -> None:
+    handle = _FakeHandle(1, complete=True)
+    page = _QueuedPage()
+    session = object()
+    current_uuid = ["old-player"]
+    callbacks: list[Path] = []
+    operations = PlayerTabOperations(
+        cast(
+            Any,
+            SimpleNamespace(submit=lambda *_args, **_kwargs: handle),
+        ),
+        get_page=lambda: cast(Any, page),
+        get_world_session=lambda: cast(Any, session),
+        get_current_uuid=lambda: current_uuid[0],
+    )
+
+    operations.submit_player_export(
+        cast(Any, object()),
+        cast(Any, session),
+        "old-player",
+        Path("old-player.txt"),
+        lambda _key, default="", **_kwargs: default,
+        callbacks.append,
+        lambda error: pytest.fail(str(error)),
+    )
+    current_uuid[0] = "new-player"
+    asyncio.run(page.tasks.pop()())
+
+    assert callbacks == []
