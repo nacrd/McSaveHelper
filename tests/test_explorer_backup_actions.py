@@ -12,6 +12,15 @@ class _ImmediateScope:
         work(CancellationToken())
 
 
+class _DeferredScope:
+    def __init__(self) -> None:
+        self.work = []
+
+    def submit(self, operation, work, **kwargs) -> None:
+        del operation, kwargs
+        self.work.append(work)
+
+
 def test_explorer_quick_backup_uses_managed_backup_service(
     tmp_path: Path,
 ) -> None:
@@ -123,3 +132,26 @@ def test_explorer_restore_action_opens_backup_center(tmp_path: Path) -> None:
     host._restore_backup()
 
     assert switched == ["backup_center"]
+
+
+def test_explorer_quick_backup_rejects_reentry(tmp_path: Path) -> None:
+    warnings = []
+    scope = _DeferredScope()
+    host = WorldInfoTabMixin()
+    host._task_scope = cast(OperationScope, scope)
+    host.world_session = cast(
+        Any,
+        SimpleNamespace(world_path=tmp_path / "world"),
+    )
+    host._world_load_generation = 1
+    setattr(host, "_disposed", False)
+    host.app = cast(Any, SimpleNamespace(
+        warn_dialog=lambda title, message: warnings.append((title, message)),
+        handle_exception=lambda error, title: None,
+    ))
+
+    host._create_backup()
+    host._create_backup()
+
+    assert len(scope.work) == 1
+    assert warnings == [("提示", "快速备份正在进行中，请稍候")]

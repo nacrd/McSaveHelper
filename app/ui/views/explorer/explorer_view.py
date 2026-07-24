@@ -354,6 +354,7 @@ class ExplorerView(
             safe_update(self._world_label)
             self._world_load_generation += 1
             generation = self._world_load_generation
+            self._invalidate_quick_backup_state()
             self._set_map_marker_busy(False)
             self.app.hide_progress()
 
@@ -534,6 +535,7 @@ class ExplorerView(
             return
         self._disposed = True
         self._world_load_generation += 1
+        self._invalidate_quick_backup_state()
         self._map_controller.close()
         data_loader = getattr(self, "_data_loader", None)
         if data_loader is not None:
