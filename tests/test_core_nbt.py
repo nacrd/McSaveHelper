@@ -85,6 +85,27 @@ def test_arrays_roundtrip_signed() -> None:
     assert [int(x) for x in parsed["bytes"]] == [1, 2, -1]
 
 
+def test_array_parser_preserves_signed_width_boundaries() -> None:
+    root = File(
+        {
+            "bytes": ByteArray([-128, 127]),
+            "ints": IntArray([-(1 << 31), (1 << 31) - 1]),
+            "longs": LongArray([-(1 << 63), (1 << 63) - 1]),
+        }
+    )
+    raw = io.BytesIO()
+    root.write(raw)
+
+    parsed = File.parse(io.BytesIO(raw.getvalue()))
+
+    assert [int(value) for value in parsed["bytes"]] == [-128, 127]
+    assert [int(value) for value in parsed["ints"]] == [-(1 << 31), (1 << 31) - 1]
+    assert [int(value) for value in parsed["longs"]] == [
+        -(1 << 63),
+        (1 << 63) - 1,
+    ]
+
+
 def test_little_endian_roundtrip() -> None:
     root = File({"x": Int(1)}, byteorder="little")
     buf = io.BytesIO()

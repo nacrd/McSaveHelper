@@ -389,11 +389,12 @@ class Array(Base, MutableSequence[int]):
                 f"got {len(raw)}"
             )
         fmt = cls.item_fmt[byteorder]
-        items = [
-            int(fmt.unpack_from(raw, offset)[0])
-            for offset in range(0, count * item_size, item_size)
-        ]
-        return cls(items)
+        items = [int(values[0]) for values in fmt.iter_unpack(raw)]
+        parsed = cls()
+        # Struct formats already return signed values in the tag's exact width.
+        # Avoid applying the constructor's mask normalization to every item again.
+        parsed._items = items
+        return parsed
 
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:
         assert self.item_fmt is not None
