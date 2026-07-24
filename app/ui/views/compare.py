@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import CancelledError
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import Optional, Protocol
 
 import flet as ft
 
@@ -15,7 +15,7 @@ from app.presenters.compare_view_state import (
     initial_compare_state,
     invalidate_compare,
 )
-from app.services.world_compare_service import WorldCompareResult
+from app.services.world_compare_service import WorldCompareResult, WorldCompareService
 from app.services.execution_runtime import (
     CancellationToken,
     ExecutionLane,
@@ -26,24 +26,44 @@ from app.services.execution_runtime import (
 from app.ui.components.buttons import btn_ghost
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field, current_save_field
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeaturePagePort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.components.layout import page_header
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+
+class CompareHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the compare view."""
+
+    @property
+    def world_compare(self) -> "WorldCompareService":
+        """Return the world comparison service."""
+        ...
 
 
 class CompareView(ft.Column):
     """双世界差异对比页：level.dat、玩家与区域文件。"""
 
-    def __init__(self, app: "FeatureContext") -> None:
+    def __init__(self, app: "CompareHost") -> None:
         """绑定应用与对比服务。
 
         Args:
-            app: 应用组合根。
+            app: 对比页面所需的 UI、运行时和对比服务端口。
         """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO)
         self.expand = True

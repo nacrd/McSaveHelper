@@ -391,8 +391,12 @@ def test_feature_views_declare_minimal_ui_ports() -> None:
     server_properties = (
         PROJECT_ROOT / "app/ui/views/server_properties.py"
     ).read_text(encoding="utf-8")
+    compare = (PROJECT_ROOT / "app/ui/views/compare.py").read_text(
+        encoding="utf-8"
+    )
     assert 'def __init__(self, app: "MapExportHost")' in export_dialog
     assert 'def __init__(self, app: "ServerPropertiesHost")' in server_properties
+    assert 'def __init__(self, app: "CompareHost")' in compare
 
 
 def test_feature_registry_drives_catalog_and_application_budget() -> None:
