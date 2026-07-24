@@ -18,6 +18,10 @@ from app.services.execution_runtime import (
     TaskPriority,
 )
 from app.services.region_map.host import RegionMapHost
+from app.services.region_map.types import (
+    TopviewTileIntegrity,
+    TopviewTileState,
+)
 from core.mca.errors import McaError
 from core.mca.region_file import RegionFile
 from core.mca.topview_renderer import LEAF_TILE_SIZE, render_region_topview
@@ -178,17 +182,61 @@ class RegionMapTopviewMixin(RegionMapHost):
         """
         self._schedule_topview_source_checks([coord])
         with self._data_lock:
-            if coord not in self._topview_tiles:
-                return False
-            self._topview_tiles.move_to_end(coord)
-            if not self._topview_tile_complete.get(coord, True):
-                cached_size = int(self._topview_tile_sizes.get(coord, 0) or 0)
-                failed_size = int(self._topview_failed_sizes.get(coord, 0) or 0)
-                if failed_size < cached_size:
-                    return False
-            if min_size <= 0:
+            state = self._topview_tile_state_locked(coord)
+            if state.is_usable(min_size):
+                self._topview_tiles.move_to_end(coord)
                 return True
-            return int(self._topview_tile_sizes.get(coord, 0) or 0) >= min_size
+            return False
+
+    def get_topview_tile_state(
+        self,
+        coord: Tuple[int, int],
+    ) -> TopviewTileState:
+        """Return one consistent progressive state snapshot for a tile.
+
+        Args:
+            coord: Region coordinate.
+
+        Returns:
+            Frozen state for the current topview generation.
+        """
+        self._schedule_topview_source_checks([coord])
+        with self._data_lock:
+            return self._topview_tile_state_locked(coord)
+
+    def _topview_tile_state_locked(
+        self,
+        coord: Tuple[int, int],
+    ) -> TopviewTileState:
+        """Build a tile state while ``_data_lock`` is held."""
+        generation = self._topview_generation
+        has_tile = coord in self._topview_tiles
+        available_size = (
+            int(self._topview_tile_sizes.get(coord, 0) or 0)
+            if has_tile
+            else 0
+        )
+        requested_size = 0
+        if self._topview_pending.get(coord) == generation:
+            requested_size = max(
+                int(self._topview_pending_sizes.get(coord, 0) or 0),
+                int(self._topview_upgrade_sizes.get(coord, 0) or 0),
+            )
+        integrity = TopviewTileIntegrity.UNKNOWN
+        if has_tile:
+            integrity = (
+                TopviewTileIntegrity.COMPLETE
+                if self._topview_tile_complete.get(coord, True)
+                else TopviewTileIntegrity.INCOMPLETE
+            )
+        return TopviewTileState(
+            generation=generation,
+            revision=int(self._topview_tile_revisions.get(coord, 0) or 0),
+            available_size=available_size,
+            requested_size=requested_size,
+            failed_size=int(self._topview_failed_sizes.get(coord, 0) or 0),
+            integrity=integrity,
+        )
 
     def get_topview_tile_size(self, coord: Tuple[int, int]) -> int:
         """返回已缓存瓦片边长。
@@ -199,9 +247,7 @@ class RegionMapTopviewMixin(RegionMapHost):
         Returns:
             像素边长；无缓存为 0。
         """
-        self._schedule_topview_source_checks([coord])
-        with self._data_lock:
-            return int(self._topview_tile_sizes.get(coord, 0) or 0)
+        return self.get_topview_tile_state(coord).available_size
 
     def get_topview_tile_revision(self, coord: Tuple[int, int]) -> int:
         """返回单瓦片修订号（缓存更新时递增）。
@@ -232,14 +278,8 @@ class RegionMapTopviewMixin(RegionMapHost):
         Returns:
             当前 generation 是否仍 pending/upgrade。
         """
-        required = max(0, int(min_size))
-        with self._data_lock:
-            generation = self._topview_generation
-            if self._topview_pending.get(coord) != generation:
-                return False
-            pending_size = int(self._topview_pending_sizes.get(coord, 0) or 0)
-            upgrade_size = int(self._topview_upgrade_sizes.get(coord, 0) or 0)
-            return max(pending_size, upgrade_size) >= required
+        state = self.get_topview_tile_state(coord)
+        return state.is_pending and state.requested_size >= max(0, int(min_size))
 
     def get_topview_snapshot(
         self,

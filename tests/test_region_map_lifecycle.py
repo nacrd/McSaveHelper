@@ -13,6 +13,10 @@ from app.services.execution_runtime import (
     LaneLimits,
 )
 from app.services.region_map import RegionMapService
+from app.services.region_map.types import (
+    TopviewTileIntegrity,
+    TopviewTilePhase,
+)
 from core.mca.surface import (
     CHUNK_DECODE_CACHE_MAX_BYTES,
     CHUNK_DECODE_CACHE_MAX_ENTRIES,
@@ -47,6 +51,78 @@ def test_topview_outer_pool_is_bounded_for_nested_decode_work() -> None:
 
     assert 1 <= service._topview_max_workers <= 2
 
+    service.close()
+
+
+def test_topview_tile_state_separates_progress_from_source_integrity() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    coord = (2, 3)
+    generation = service.get_topview_generation()
+    with service._data_lock:
+        service._topview_tiles[coord] = b"preview"
+        service._topview_tile_sizes[coord] = 32
+        service._topview_tile_complete[coord] = True
+        service._topview_tile_revisions[coord] = 7
+        service._topview_pending[coord] = generation
+        service._topview_pending_sizes[coord] = 32
+        service._topview_upgrade_sizes[coord] = 256
+
+    upgrading = service.get_topview_tile_state(coord)
+
+    assert upgrading.phase is TopviewTilePhase.UPGRADING
+    assert upgrading.is_progressive_upgrade is True
+    assert upgrading.available_size == 32
+    assert upgrading.requested_size == 256
+    assert upgrading.revision == 7
+    assert upgrading.integrity is TopviewTileIntegrity.COMPLETE
+    assert upgrading.is_usable(32) is True
+
+    with service._data_lock:
+        service._topview_pending.pop(coord)
+        service._topview_pending_sizes.pop(coord)
+        service._topview_upgrade_sizes.pop(coord)
+        service._topview_tile_complete[coord] = False
+
+    incomplete = service.get_topview_tile_state(coord)
+
+    assert incomplete.phase is TopviewTilePhase.READY
+    assert incomplete.is_progressive_upgrade is False
+    assert incomplete.integrity is TopviewTileIntegrity.INCOMPLETE
+    assert incomplete.is_usable() is False
+
+    with service._data_lock:
+        service._topview_failed_sizes[coord] = 32
+
+    suppressed = service.get_topview_tile_state(coord)
+    assert suppressed.integrity is TopviewTileIntegrity.INCOMPLETE
+    assert suppressed.is_usable(32) is True
+    service.close()
+
+
+def test_topview_tile_state_tracks_loading_failure_and_generation_reset() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    coord = (4, 5)
+    generation = service.get_topview_generation()
+    with service._data_lock:
+        service._topview_pending[coord] = generation
+        service._topview_pending_sizes[coord] = 16
+
+    loading = service.get_topview_tile_state(coord)
+    assert loading.phase is TopviewTilePhase.LOADING
+    assert loading.is_pending is True
+
+    with service._data_lock:
+        service._topview_pending.pop(coord)
+        service._topview_pending_sizes.pop(coord)
+        service._topview_failed_sizes[coord] = 16
+
+    failed = service.get_topview_tile_state(coord)
+    assert failed.phase is TopviewTilePhase.FAILED
+
+    service.clear_data()
+    reset = service.get_topview_tile_state(coord)
+    assert reset.phase is TopviewTilePhase.EMPTY
+    assert reset.generation > generation
     service.close()
 
 

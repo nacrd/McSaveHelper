@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional
 
 
@@ -15,4 +16,89 @@ class ScanProgress:
     error: Optional[str] = None
 
 
-__all__ = ["ScanProgress"]
+class TopviewTilePhase(str, Enum):
+    """Lifecycle phase for one topview tile request."""
+
+    EMPTY = "empty"
+    LOADING = "loading"
+    READY = "ready"
+    UPGRADING = "upgrading"
+    FAILED = "failed"
+
+
+class TopviewTileIntegrity(str, Enum):
+    """Whether the available PNG covers every requested source chunk."""
+
+    UNKNOWN = "unknown"
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+
+
+@dataclass(frozen=True)
+class TopviewTileState:
+    """Consistent service snapshot for one progressive topview tile.
+
+    Args:
+        generation: Owning map generation.
+        revision: Monotonic PNG revision in that service instance.
+        available_size: Edge length of the currently published PNG.
+        requested_size: Highest queued or running edge length.
+        failed_size: Largest source-incomplete size under retry suppression.
+        integrity: Completeness of the published source data.
+    """
+
+    generation: int
+    revision: int = 0
+    available_size: int = 0
+    requested_size: int = 0
+    failed_size: int = 0
+    integrity: TopviewTileIntegrity = TopviewTileIntegrity.UNKNOWN
+
+    @property
+    def phase(self) -> TopviewTilePhase:
+        """Return the lifecycle phase without conflating source integrity."""
+        if self.available_size > 0:
+            if self.requested_size > self.available_size:
+                return TopviewTilePhase.UPGRADING
+            return TopviewTilePhase.READY
+        if self.requested_size > 0:
+            return TopviewTilePhase.LOADING
+        if self.failed_size > 0:
+            return TopviewTilePhase.FAILED
+        return TopviewTilePhase.EMPTY
+
+    @property
+    def is_pending(self) -> bool:
+        """Return whether the current generation owns queued or running work."""
+        return self.requested_size > 0
+
+    @property
+    def is_progressive_upgrade(self) -> bool:
+        """Return whether a coarse tile remains usable during a finer request."""
+        return self.phase is TopviewTilePhase.UPGRADING
+
+    def is_usable(self, min_size: int = 0) -> bool:
+        """Return whether the available tile satisfies an LOD request.
+
+        Args:
+            min_size: Required edge length; zero accepts any available LOD.
+
+        Returns:
+            Whether the tile is large enough and not awaiting a damage retry.
+        """
+        if self.available_size <= 0:
+            return False
+        if (
+            self.integrity is TopviewTileIntegrity.INCOMPLETE
+            and self.failed_size < self.available_size
+        ):
+            return False
+        return self.available_size >= max(0, int(min_size))
+
+
+__all__ = [
+    "ScanProgress",
+    "TopviewTileIntegrity",
+    "TopviewTilePhase",
+    "TopviewTileState",
+]

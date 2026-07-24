@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Set, Tuple
 
 from app.controllers.topview_tile_requests import TopviewTileRequestCoordinator
+from app.services.region_map.types import TopviewTileState
 
 
 RegionCoord = Tuple[int, int]
@@ -22,19 +23,12 @@ class _TileService:
         self.pending_sizes: dict[RegionCoord, int] = {}
         self.calls: list[_RequestCall] = []
 
-    def has_topview_tile(self, coord: RegionCoord, min_size: int = 0) -> bool:
-        return self.cached_sizes.get(coord, 0) >= min_size
-
-    def get_topview_tile_size(self, coord: RegionCoord) -> int:
-        return self.cached_sizes.get(coord, 0)
-
-    def is_topview_tile_pending(
-        self,
-        coord: RegionCoord,
-        *,
-        min_size: int = 0,
-    ) -> bool:
-        return self.pending_sizes.get(coord, 0) >= min_size
+    def get_topview_tile_state(self, coord: RegionCoord) -> TopviewTileState:
+        return TopviewTileState(
+            generation=1,
+            available_size=self.cached_sizes.get(coord, 0),
+            requested_size=self.pending_sizes.get(coord, 0),
+        )
 
     def request_topview_tiles(
         self,
