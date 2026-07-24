@@ -1,5 +1,5 @@
 """Item component parsing and inventory UI service injection tests."""
-from typing import Any, Dict, cast
+from typing import Any, Callable, Dict, Optional, cast
 
 from app.services.item.parser import parse_item
 from app.services.item_service import ItemService
@@ -23,6 +23,65 @@ def test_item_components_keep_injected_services() -> None:
     assert inventory._texture_service is texture_service
     assert equipment._item_service is item_service
     assert equipment._texture_service is texture_service
+
+
+class _DeferredTextureService:
+    def __init__(self) -> None:
+        self.callbacks: list[Callable[[str, Optional[str]], None]] = []
+
+    def load_textures_async(
+        self,
+        item_ids: list[str],
+        on_loaded: Callable[[str, Optional[str]], None],
+    ) -> None:
+        del item_ids
+        self.callbacks.append(on_loaded)
+
+
+def test_item_components_drop_texture_callbacks_after_dispose(
+    monkeypatch: Any,
+) -> None:
+    applied = []
+    textures = _DeferredTextureService()
+    texture_service = cast(TextureService, textures)
+    monkeypatch.setattr(
+        "app.ui.views.explorer.inventory_grid.run_on_ui",
+        lambda page, callback: callback(),
+    )
+    monkeypatch.setattr(
+        "app.ui.views.explorer.equipment_preview.run_on_ui",
+        lambda page, callback: callback(),
+    )
+    monkeypatch.setattr(
+        "app.ui.views.explorer.inventory_grid.apply_texture_to_slot",
+        lambda slot, uri: applied.append((slot, uri)),
+    )
+    monkeypatch.setattr(
+        "app.ui.views.explorer.equipment_preview.apply_texture_to_slot",
+        lambda slot, uri: applied.append((slot, uri)),
+    )
+    inventory = InventoryGrid(ItemService(), texture_service)
+    equipment = EquipmentPreview(ItemService(), texture_service)
+    inventory.set_inventory([
+        {"id": "minecraft:stone", "count": 1, "slot": 0},
+    ])
+    equipment.set_equipment([
+        {"id": "minecraft:diamond_helmet", "count": 1, "slot": 103},
+    ])
+
+    inventory.dispose()
+    equipment.dispose()
+    inventory_generation = inventory._texture_generation
+    equipment_generation = equipment._texture_generation
+    inventory.dispose()
+    equipment.dispose()
+    for callback in textures.callbacks:
+        callback("minecraft:stone", "stone.png")
+        callback("minecraft:diamond_helmet", "helmet.png")
+
+    assert inventory._texture_generation == inventory_generation
+    assert equipment._texture_generation == equipment_generation
+    assert applied == []
 
 
 def test_parse_item_legacy_tag() -> None:

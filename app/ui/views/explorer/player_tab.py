@@ -1751,6 +1751,15 @@ class PlayerTabMixin(ExplorerMixinHost):
             operations.close()
         for name in ("_player_avatar_generation", "_player_list_avatar_gen"):
             setattr(self, name, int(getattr(self, name, 0) or 0) + 1)
+        for name in (
+            "_equipment",
+            "_inventory",
+            "_ender_inventory",
+            "_container_preview_grid",
+        ):
+            component = getattr(self, name, None)
+            if component is not None:
+                component.dispose()
         avatar_service = getattr(
             self,
             "_player_avatar_service_instance",

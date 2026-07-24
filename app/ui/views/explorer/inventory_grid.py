@@ -61,6 +61,7 @@ class InventoryGrid(ft.Column):
         self._item_service = item_service
         self._texture_service = texture_service
         self._texture_generation = 0
+        self._disposed = False
         self._slot_item_ids: Dict[int, str] = {}
         self._slot_items: Dict[int, Dict[str, Any]] = {}
         self._t = t_cb or (lambda key, default="", **_kw: default or key)
@@ -188,6 +189,8 @@ class InventoryGrid(ft.Column):
             inventory: 含 ``slot`` 字段的物品字典列表。
             selected_slot: 主背包可选高亮 slot（快捷栏选择）。
         """
+        if self._disposed:
+            return
         self._texture_generation += 1
         self._selected_slot = selected_slot
         self._slot_items = {}
@@ -272,7 +275,7 @@ class InventoryGrid(ft.Column):
                 return
 
             def apply_loaded() -> None:
-                if generation != self._texture_generation:
+                if self._disposed or generation != self._texture_generation:
                     return
                 for slot_idx, iid in slot_item_map.items():
                     if (
@@ -297,3 +300,12 @@ class InventoryGrid(ft.Column):
     def clear(self) -> None:
         """清空所有格子（等价于空物品栏）。"""
         self.set_inventory([])
+
+    def dispose(self) -> None:
+        """Invalidate pending texture callbacks; safe to call repeatedly."""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._texture_generation += 1
+        self._slot_item_ids.clear()
+        self._slot_items.clear()

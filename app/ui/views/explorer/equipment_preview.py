@@ -59,6 +59,7 @@ class EquipmentPreview(ft.Column):
         self._item_service = item_service
         self._texture_service = texture_service
         self._texture_generation = 0
+        self._disposed = False
         self._slot_item_ids: Dict[int, str] = {}
         self._t = t_cb or (lambda key, default="", **_kw: default or key)
 
@@ -139,6 +140,8 @@ class EquipmentPreview(ft.Column):
         Args:
             inventory: 含 ``slot`` 字段的物品字典列表。
         """
+        if self._disposed:
+            return
         self._texture_generation += 1
         for nbt_slot in self._slot_order:
             if nbt_slot in self._slot_controls:
@@ -181,7 +184,7 @@ class EquipmentPreview(ft.Column):
                 return
 
             def apply_loaded() -> None:
-                if generation != self._texture_generation:
+                if self._disposed or generation != self._texture_generation:
                     return
                 for slot_idx, iid in slot_item_map.items():
                     if (
@@ -245,3 +248,11 @@ class EquipmentPreview(ft.Column):
     def clear(self) -> None:
         """清空全部装备槽。"""
         self.set_equipment([])
+
+    def dispose(self) -> None:
+        """Invalidate pending texture callbacks; safe to call repeatedly."""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._texture_generation += 1
+        self._slot_item_ids.clear()
