@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, List
+from typing import Any, Callable, List, Protocol
 
 import flet as ft
 
@@ -28,12 +28,23 @@ from app.ui.components.fields import (
     text_field,
 )
 from app.ui.components.layout import page_header
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+)
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+
+class EntityBlockSearchHost(
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the entity and block search view."""
 
 
 def _icon_heading(icon: ft.IconData, text: str) -> ft.Row:
@@ -63,11 +74,15 @@ class EntityBlockSearchView(ft.Column):
         "end": "末地",
     }
 
-    def __init__(self, app: "FeatureContext", compact: bool = False) -> None:
+    def __init__(
+        self,
+        app: "EntityBlockSearchHost",
+        compact: bool = False,
+    ) -> None:
         """初始化实体/方块/容器搜索视图。
 
         Args:
-            app: 应用组合根。
+            app: 搜索页面所需的对话框、文件选择和运行时端口。
             compact: 是否使用紧凑布局（嵌入浏览器子页时）。
         """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)

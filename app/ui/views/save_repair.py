@@ -3,7 +3,7 @@
 支持存档检测（只读诊断）和存档修复（修改文件）。
 """
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Protocol
 
 import flet as ft
 
@@ -21,13 +21,31 @@ from app.services.save_repair_service import (
     RepairReport,
     SaveRepairService,
 )
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+)
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 from app.ui.views.save_repair_chrome import build_save_repair_chrome
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+
+class SaveRepairHost(
+    FeaturePagePort,
+    FeatureDialogPort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the save repair view."""
+
+    @property
+    def save_repair(self) -> SaveRepairService:
+        """Return the shared save repair service."""
+        ...
 
 
 class SaveRepairView(ft.Column):
@@ -35,13 +53,13 @@ class SaveRepairView(ft.Column):
 
     def __init__(
         self,
-        app: "FeatureContext",
+        app: "SaveRepairHost",
         service: SaveRepairService | None = None,
     ) -> None:
         """初始化存档修复视图。
 
         Args:
-            app: 应用组合根。
+            app: 修复页面所需的 UI、运行时和修复服务端口。
             service: 可选修复服务；缺省使用上下文的修复端口。
         """
         super().__init__(spacing=20, scroll=ft.ScrollMode.AUTO)

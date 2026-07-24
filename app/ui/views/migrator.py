@@ -4,7 +4,7 @@ from __future__ import annotations
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import flet as ft
 
@@ -15,6 +15,12 @@ from app.services.execution_runtime import (
     TaskPriority,
 )
 from app.ui.components.layout import page_header
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureMigrationPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
@@ -35,7 +41,34 @@ from app.ui.views.migrator_options import (
 )
 
 if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+    from app.services.config_service import ConfigService
+    from app.services.migration_service import MigrationService
+    from app.services.uuid_service import UUIDService
+
+
+class MigratorHost(
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureRuntimePort,
+    FeatureMigrationPort,
+    Protocol,
+):
+    """Ports required by the migration view."""
+
+    @property
+    def config(self) -> ConfigService:
+        """Return migration configuration."""
+        ...
+
+    @property
+    def migration(self) -> MigrationService:
+        """Return the migration service."""
+        ...
+
+    @property
+    def uuid(self) -> UUIDService:
+        """Return the UUID lookup service."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -58,15 +91,15 @@ class _UuidQueryResult:
 class MigratorView(ft.Column):
     """存档转换视图 — 左右两栏布局（优化版）"""
 
-    def __init__(self, app: "FeatureContext") -> None:
+    def __init__(self, app: "MigratorHost") -> None:
         """初始化存档转换视图。
 
         Args:
-            app: 应用组合根，提供迁移服务与 UI 回调。
+            app: 迁移页面所需的命令、服务和 UI 端口。
         """
         super().__init__(spacing=24, scroll=ft.ScrollMode.AUTO)
         self.expand = True
-        self.app: "FeatureContext" = app
+        self.app = app
         self._task_scope = app.execution_runtime.create_scope("migrator_view")
         self._scan_generation = 0
         self._query_generation = 0

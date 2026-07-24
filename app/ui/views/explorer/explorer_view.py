@@ -1,6 +1,6 @@
 """Explorer View - 存档浏览器主视图"""
 import flet as ft
-from typing import TYPE_CHECKING, Any, Callable, Optional, Dict, Tuple
+from typing import Any, Callable, Optional, Dict, Tuple
 from pathlib import Path
 
 from app.ui.theme import THEME
@@ -13,9 +13,6 @@ from app.ui.icons import IconSet
 from app.ui.components.layout import TabSpec, page_header, panel, segmented_tab_bar
 from app.ui.view_actions import ViewAction
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
-
 from core.omni.world_session import WorldSession
 from app.ui.views.explorer.utils import safe_update
 from app.ui.utils import run_on_ui
@@ -24,6 +21,7 @@ from app.ui.views.explorer.player_tab import PlayerTabMixin
 from app.ui.views.explorer.region_tab import RegionTabMixin
 from app.ui.views.explorer.stats_tab import StatsTabMixin
 from app.ui.views.explorer.nbt_tab import NbtTabMixin
+from app.ui.views.explorer.mixin_context import ExplorerHost
 from app.ui.views.entity_block_search import EntityBlockSearchView
 from app.ui.views.explorer.explorer_helpers import (
     tag_display_value,
@@ -51,15 +49,15 @@ class ExplorerView(
         ft.Column):
     """存档浏览器视图"""
 
-    def __init__(self, app: "FeatureContext") -> None:
+    def __init__(self, app: "ExplorerHost") -> None:
         """初始化存档浏览器主视图及其子 Tab 状态。
 
         Args:
-            app: 应用组合根，提供地图/玩家等服务工厂。
+            app: Explorer 各 Tab 所需的显式 UI 与服务端口。
         """
         super().__init__(spacing=0)
         self.expand = True
-        self.app: "FeatureContext" = app
+        self.app = app
         self.world_session: Optional[WorldSession] = None
         self.current_uuid: Optional[str] = None
         self.player_uuid_map: Dict[str, str] = {}
@@ -481,7 +479,10 @@ class ExplorerView(
         """Compose a session with application-scoped write safety ports."""
         if read_context is not None:
             return read_context.open_session(log=log or self.app.log)
-        return self.app.open_world_session(path, log=log or self.app.log)
+        return self.app.world_repository.open_session(
+            path,
+            log=log or self.app.log,
+        )
 
     def _apply_loaded_world(
         self,

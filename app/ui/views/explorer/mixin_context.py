@@ -1,7 +1,7 @@
 """Shared host contract for Explorer tab mixins."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Protocol, Tuple
 
 import flet as ft
 
@@ -11,10 +11,96 @@ from app.services.execution_runtime import OperationScope
 from app.services.region_map import RegionMapService
 from app.controllers.map_controller import MapController
 from app.controllers.region_delete_controller import RegionDeleteController
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureMapPort,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from core.omni.world_session import WorldSession
 
 if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+    from app.core.save_context_manager import SaveContextManager
+    from app.core.view_manager import ViewManager
+    from app.services.backup_service import BackupService
+    from app.services.cache_registry import CacheRegistry
+    from app.services.item_service import ItemService
+    from app.services.texture_service import TextureService
+    from app.services.ui_delivery import UiDeliveryPort
+    from app.services.world_repository import WorldRepository
+    from app.services.world_stats_service import WorldStatsService
+    from app.services.world_transaction import WorldTransactionService
+
+
+class ExplorerHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    FeatureMapPort,
+    Protocol,
+):
+    """Explicit UI and service ports consumed across Explorer tabs."""
+
+    @property
+    def current_save_path(self) -> Optional[str]:
+        """Return the selected world path, if any."""
+        ...
+
+    @property
+    def save_context_manager(self) -> SaveContextManager:
+        """Return the application save-context coordinator."""
+        ...
+
+    @property
+    def view_manager(self) -> ViewManager:
+        """Return the shell view coordinator."""
+        ...
+
+    @property
+    def backup(self) -> BackupService:
+        """Return the managed backup service."""
+        ...
+
+    @property
+    def world_transactions(self) -> WorldTransactionService:
+        """Return the shared world transaction service."""
+        ...
+
+    @property
+    def world_repository(self) -> WorldRepository:
+        """Return the shared world read repository."""
+        ...
+
+    @property
+    def world_stats(self) -> WorldStatsService:
+        """Return the world statistics service."""
+        ...
+
+    @property
+    def ui_delivery(self) -> UiDeliveryPort:
+        """Return the guarded UI delivery port."""
+        ...
+
+    @property
+    def cache_registry(self) -> CacheRegistry:
+        """Return the shared cache registry."""
+        ...
+
+    @property
+    def item(self) -> ItemService:
+        """Return the item metadata service."""
+        ...
+
+    @property
+    def texture(self) -> TextureService:
+        """Return the texture service."""
+        ...
 
 
 class ExplorerMixinHost:
@@ -25,7 +111,7 @@ class ExplorerMixinHost:
     inheritance composition.
     """
 
-    app: "FeatureContext"
+    app: ExplorerHost
     world_session: Optional[WorldSession]
     current_uuid: Optional[str]
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
-from typing import TYPE_CHECKING, Dict, Optional, TypeVar
+from typing import TYPE_CHECKING, Dict, Optional, Protocol, TypeVar
 
 import flet as ft
 
@@ -29,6 +29,13 @@ from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
 from app.ui.components.layout import page_header
 from app.ui.components.uuid_table import UUIDMappingTable
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeaturePagePort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.icons import IconSet
 from app.ui.theme import THEME
 from app.ui.utils import run_on_ui, safe_update
@@ -39,7 +46,35 @@ from app.ui.views.mappings_operations import (
 )
 
 if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+    from app.services.config_service import ConfigService
+    from app.services.item_service import ItemService
+    from app.services.texture_service import TextureService
+
+
+class MappingsHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureFileDialogPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the mappings view."""
+
+    @property
+    def config(self) -> ConfigService:
+        """Return application mapping configuration."""
+        ...
+
+    @property
+    def item(self) -> ItemService:
+        """Return the item metadata service."""
+        ...
+
+    @property
+    def texture(self) -> TextureService:
+        """Return the texture service."""
+        ...
 
 
 ResultT = TypeVar("ResultT")
@@ -50,15 +85,15 @@ class MappingsView(ft.Column):
 
     _UUID_SAVE_DEBOUNCE_SECONDS = 0.15
 
-    def __init__(self, app: "FeatureContext") -> None:
+    def __init__(self, app: "MappingsHost") -> None:
         """初始化映射管理视图。
 
         Args:
-            app: 应用组合根，提供配置、物品服务与对话框能力。
+            app: 映射页面所需的配置、服务和 UI 端口。
         """
         super().__init__(spacing=0, scroll=ft.ScrollMode.AUTO)
         self.expand = True
-        self.app: "FeatureContext" = app
+        self.app = app
         self._item_service = app.item
         self._operations = _LatestOperationGroup(
             app.execution_runtime,

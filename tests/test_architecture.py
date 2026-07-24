@@ -397,10 +397,41 @@ def test_feature_views_declare_minimal_ui_ports() -> None:
     backup = (PROJECT_ROOT / "app/ui/views/backup_center.py").read_text(
         encoding="utf-8"
     )
+    entity_search = (
+        PROJECT_ROOT / "app/ui/views/entity_block_search.py"
+    ).read_text(encoding="utf-8")
+    explorer = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    save_repair = (PROJECT_ROOT / "app/ui/views/save_repair.py").read_text(
+        encoding="utf-8"
+    )
+    migrator = (PROJECT_ROOT / "app/ui/views/migrator.py").read_text(
+        encoding="utf-8"
+    )
+    mappings = (PROJECT_ROOT / "app/ui/views/mappings.py").read_text(
+        encoding="utf-8"
+    )
     assert 'def __init__(self, app: "MapExportHost")' in export_dialog
     assert 'def __init__(self, app: "ServerPropertiesHost")' in server_properties
     assert 'def __init__(self, app: "CompareHost")' in compare
     assert 'app: "BackupHost",' in backup
+    assert 'app: "EntityBlockSearchHost",' in entity_search
+    assert 'def __init__(self, app: "ExplorerHost")' in explorer
+    assert 'app: "SaveRepairHost",' in save_repair
+    assert 'def __init__(self, app: "MigratorHost")' in migrator
+    assert 'def __init__(self, app: "MappingsHost")' in mappings
+
+
+def test_feature_views_do_not_type_complete_feature_context() -> None:
+    """Views declare capability protocols instead of the complete context."""
+    views_root = PROJECT_ROOT / "app/ui/views"
+    offenders = [
+        path.relative_to(PROJECT_ROOT).as_posix()
+        for path in views_root.rglob("*.py")
+        if "FeatureContext" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
 
 
 def test_feature_registry_drives_catalog_and_application_budget() -> None:
