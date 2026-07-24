@@ -25,3 +25,6 @@ htmlcov/
 !claude.md
 /dev-docs/
 example_saves/
+/docs/bench/real_*.json
+/docs/bench/real_*.md
+/docs
