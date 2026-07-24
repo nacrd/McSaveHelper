@@ -3,10 +3,12 @@
 每个设置分区支持点击标题栏展开/收起，减少纵向占用。
 """
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Mapping, Optional
 
 import flet as ft
 
+from app.adapters.file_dialogs import FileType
 from app.controllers.settings_io_controller import (
     CacheClearOutcome,
     SettingsCacheSnapshot,
@@ -17,6 +19,7 @@ from app.models.config import ApplicationSettings
 from app.models.responsive_layout import ResponsiveLayout
 from app.presenters.runtime_observability import (
     format_cache_registry_report,
+    format_diagnostic_report,
     format_runtime_snapshot,
     format_ui_delivery_summary,
 )
@@ -69,6 +72,7 @@ class SettingsViewDependencies:
     info_dialog: DialogCallback
     error_dialog: DialogCallback
     pick_directory: Callable[[], Optional[str]]
+    save_file: Callable[[str, str, Optional[list[FileType]]], Optional[str]]
     cache_snapshot: CacheSnapshot
     clear_caches: CacheClear
     cache_path: Callable[[], str]
@@ -101,6 +105,11 @@ class SettingsView(ft.Column):
                 cache_path=dependencies.cache_path,
                 runtime_snapshot=dependencies.runtime_snapshot,
                 ui_delivery_summary=dependencies.ui_delivery_summary,
+                build_diagnostic_report=lambda snapshot: format_diagnostic_report(
+                    snapshot,
+                    format_size=format_size,
+                    translate=self._t,
+                ),
                 dispatch=self._dispatch_result,
                 save_debounce_seconds=dependencies.save_debounce_seconds,
             )
@@ -508,11 +517,18 @@ class SettingsView(ft.Column):
             height=44,
             on_click=lambda e: self._clear_map_cache(),
         )
+        self._cache_export_button = btn_ghost(
+            self._t("settings.cache.export", "导出诊断报告"),
+            width=140,
+            height=44,
+            on_click=lambda e: self._export_diagnostic_report(),
+        )
         return ft.Container(
             content=ft.Row(
                 [
                     self._cache_refresh_button,
                     self._cache_clear_button,
+                    self._cache_export_button,
                 ],
                 spacing=10,
             ),
@@ -580,6 +596,41 @@ class SettingsView(ft.Column):
             lambda error: self._apply_cache_error(error, True),
         )
 
+    def _export_diagnostic_report(self) -> None:
+        if self._state.is_disposed:
+            return
+        path = self._deps.save_file(
+            self._t("settings.cache.export_title", "保存诊断报告"),
+            ".txt",
+            [
+                (
+                    self._t("settings.cache.export_file", "文本文件"),
+                    "*.txt",
+                ),
+            ],
+        )
+        if not path:
+            return
+        self._set_cache_busy(True)
+        self._io_controller.export_diagnostic_report(
+            path,
+            self._apply_diagnostic_export_success,
+            lambda error: self._apply_cache_error(error, True),
+        )
+
+    def _apply_diagnostic_export_success(self, path: Path) -> None:
+        if self._state.is_disposed:
+            return
+        self._set_cache_busy(False)
+        self._deps.info_dialog(
+            self._t("dialogs.success", "成功"),
+            self._t(
+                "settings.cache.export_success",
+                "诊断报告已导出到 {path}",
+                path=str(path),
+            ),
+        )
+
     def _apply_cache_clear_success(self, outcome: CacheClearOutcome) -> None:
         if self._state.is_disposed:
             return
@@ -599,8 +650,10 @@ class SettingsView(ft.Column):
     def _set_cache_busy(self, busy: bool) -> None:
         self._cache_refresh_button.disabled = busy
         self._cache_clear_button.disabled = busy
+        self._cache_export_button.disabled = busy
         safe_update(self._cache_refresh_button)
         safe_update(self._cache_clear_button)
+        safe_update(self._cache_export_button)
 
     # ─── 批量处理 ───────────────────────────────
 

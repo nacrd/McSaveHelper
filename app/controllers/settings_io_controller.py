@@ -5,10 +5,12 @@ import threading
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import Callable, Mapping, Optional, TypeVar, cast
 
 from app.models.config import ApplicationSettings
 from app.services.cache_registry import CacheRegistryStats
+from app.services.diagnostic_report import write_diagnostic_report
 from app.services.execution_runtime import (
     CancellationToken,
     ExecutionLane,
@@ -34,6 +36,9 @@ class SettingsCacheSnapshot:
     runtime: Optional[ExecutionRuntimeSnapshot]
     ui_delivery: UiDeliveryMetricsSummary
     cache_path: str
+
+
+DiagnosticReportBuilder = Callable[[SettingsCacheSnapshot], str]
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,7 @@ class SettingsIOControllerDependencies:
     cache_path: Callable[[], str]
     runtime_snapshot: Callable[[], Optional[ExecutionRuntimeSnapshot]]
     ui_delivery_summary: Callable[[], UiDeliveryMetricsSummary]
+    build_diagnostic_report: DiagnosticReportBuilder
     dispatch: CallbackDispatcher
     save_debounce_seconds: float = 0.35
     debounce_wait: Optional[DebounceWait] = None
@@ -226,6 +232,35 @@ class SettingsIOController:
             self._CACHE,
             generation,
             "clear_cache",
+            work,
+            on_success,
+            on_error,
+            priority=TaskPriority.INTERACTIVE,
+        )
+
+    def export_diagnostic_report(
+        self,
+        path: Path | str,
+        on_success: Callable[[Path], None],
+        on_error: Callable[[Exception], None],
+    ) -> None:
+        """采集最新观测快照并在 I/O 通道原子写入报告。"""
+        started = self._begin_operation(self._CACHE)
+        if started is None:
+            return
+        generation, previous = started
+        self._cancel(previous)
+
+        def work(token: CancellationToken) -> Path:
+            snapshot = self._capture_cache_snapshot(token)
+            content = self._deps.build_diagnostic_report(snapshot)
+            token.raise_if_cancelled()
+            return write_diagnostic_report(path, content)
+
+        self._submit(
+            self._CACHE,
+            generation,
+            "export_diagnostic_report",
             work,
             on_success,
             on_error,

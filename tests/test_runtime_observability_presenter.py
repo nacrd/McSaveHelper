@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.presenters.runtime_observability import (
     format_cache_registry_report,
+    format_diagnostic_report,
     format_runtime_snapshot,
     format_ui_delivery_summary,
 )
@@ -79,3 +80,20 @@ def test_format_ui_delivery_summary_includes_p95_and_stale_count() -> None:
     assert "stale=1" in text
     assert "p95=12.35ms" in text
     assert "p95=1.25ms" in text
+
+
+def test_format_diagnostic_report_combines_snapshot_sections() -> None:
+    snapshot = SimpleNamespace(
+        cache=SimpleNamespace(bytes_used=1, budget_bytes=2, regions=()),
+        runtime=None,
+        ui_delivery=UiDeliveryMetricsSummary(sample_count=1),
+        cache_path="C:/cache",
+    )
+
+    text = format_diagnostic_report(snapshot, format_size=lambda n: f"{n}B")
+
+    assert text.startswith("MCSaveHelper 诊断报告\n")
+    assert "应用缓存: 1B / 2B" in text
+    assert "后台运行时: 不可用" in text
+    assert "UI 投递: samples=1" in text
+    assert "地图瓦片路径: C:/cache" in text

@@ -44,6 +44,7 @@ def _dependencies(
         info_dialog=lambda title, message: None,
         error_dialog=lambda title, message: None,
         pick_directory=lambda: None,
+        save_file=lambda title, default_ext, file_types: None,
         cache_snapshot=CacheRegistry().stats,
         clear_caches=lambda: {
             "deleted_files": 0,

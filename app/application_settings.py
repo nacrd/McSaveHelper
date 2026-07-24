@@ -25,6 +25,7 @@ class SettingsCoordinationMixin:
     info_dialog: Any
     error_dialog: Any
     pick_directory: Any
+    save_file: Any
 
     def create_settings_view(self) -> ft.Control:
         """Compose the settings view with explicit application ports."""
@@ -48,6 +49,7 @@ class SettingsCoordinationMixin:
             info_dialog=self.info_dialog,
             error_dialog=self.error_dialog,
             pick_directory=self.pick_directory,
+            save_file=self.save_file,
             cache_snapshot=self.services.cache_registry.stats,
             clear_caches=self._clear_application_caches,
             cache_path=self._map_cache_path,

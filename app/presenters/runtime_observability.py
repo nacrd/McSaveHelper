@@ -1,7 +1,7 @@
 """运行时与缓存注册表的纯文本投影（设置页观测，无 Flet）。"""
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from app.services.operation_metrics import UiDeliveryMetricsSummary
 
@@ -98,6 +98,55 @@ def format_ui_delivery_summary(
     )
 
 
+def format_diagnostic_report(
+    snapshot: Any,
+    *,
+    format_size: Optional[FormatSize] = None,
+    translate: Optional[Translate] = None,
+) -> str:
+    """将设置页观测快照组织为可导出的诊断报告。"""
+    cache = getattr(snapshot, "cache", None)
+    runtime = getattr(snapshot, "runtime", None)
+    ui_delivery = cast(
+        Optional[UiDeliveryMetricsSummary],
+        getattr(snapshot, "ui_delivery", None),
+    )
+    cache_path = str(getattr(snapshot, "cache_path", "") or "")
+    title = _translate(
+        translate,
+        "settings.cache.report_title",
+        "MCSaveHelper 诊断报告",
+    )
+    path_label = _translate(
+        translate,
+        "settings.cache.path_value",
+        "地图瓦片路径: {path}",
+        path=cache_path,
+    )
+    runtime_text = (
+        format_runtime_snapshot(runtime)
+        if runtime is not None
+        else _translate(
+            translate,
+            "settings.cache.runtime_unavailable",
+            "后台运行时: 不可用",
+        )
+    )
+    ui_text = format_ui_delivery_summary(
+        ui_delivery or UiDeliveryMetricsSummary(),
+        translate=translate,
+    )
+    return "\n\n".join(
+        (
+            title,
+            format_cache_registry_report(cache, format_size=format_size),
+            runtime_text,
+            ui_text,
+            path_label,
+        )
+    ) + "\n"
+
+
 def _translate(
     translate: Optional[Translate],
     key: str,
@@ -111,6 +160,7 @@ def _translate(
 
 __all__ = [
     "format_cache_registry_report",
+    "format_diagnostic_report",
     "format_runtime_snapshot",
     "format_ui_delivery_summary",
 ]

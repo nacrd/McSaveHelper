@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 
 from app.controllers.settings_io_controller import (
     CacheClearOutcome,
@@ -65,6 +66,7 @@ def test_debounced_save_cancels_stale_snapshot_and_uses_io_lane() -> None:
         cache_path=lambda: "",
         runtime_snapshot=runtime.snapshot,
         ui_delivery_summary=UiDeliveryMetricsSummary,
+        build_diagnostic_report=lambda snapshot: "report",
         dispatch=lambda callback: callback(),
         save_debounce_seconds=60,
         debounce_wait=debounce,
@@ -130,6 +132,7 @@ def test_cache_clear_runs_in_io_lane_and_close_suppresses_late_reset() -> None:
         cache_path=lambda: "cache",
         runtime_snapshot=runtime.snapshot,
         ui_delivery_summary=lambda: UiDeliveryMetricsSummary(sample_count=2),
+        build_diagnostic_report=lambda snapshot: "report",
         dispatch=lambda callback: callback(),
     ))
     try:
@@ -181,6 +184,7 @@ def test_close_flushes_latest_snapshot_still_inside_debounce_window() -> None:
         cache_path=lambda: "",
         runtime_snapshot=runtime.snapshot,
         ui_delivery_summary=UiDeliveryMetricsSummary,
+        build_diagnostic_report=lambda snapshot: "report",
         dispatch=lambda callback: callback(),
         debounce_wait=wait_for_close,
     ))
@@ -193,6 +197,46 @@ def test_close_flushes_latest_snapshot_still_inside_debounce_window() -> None:
         runtime.shutdown(wait=True)
 
         assert saved == [(settings, threading.current_thread().name)]
+    finally:
+        controller.close()
+        runtime.shutdown(wait=True)
+
+
+def test_diagnostic_export_builds_and_writes_on_io_lane(tmp_path: Path) -> None:
+    runtime = _runtime()
+    output = tmp_path / "diagnostics.txt"
+    build_threads: list[str] = []
+    completed = threading.Event()
+    errors: list[Exception] = []
+
+    def build_report(snapshot: object) -> str:
+        del snapshot
+        build_threads.append(threading.current_thread().name)
+        return "diagnostic report\n"
+
+    controller = SettingsIOController(SettingsIOControllerDependencies(
+        execution_runtime=runtime,
+        save_settings=lambda settings: None,
+        reset_settings=ApplicationSettings,
+        cache_snapshot=lambda: CacheRegistryStats(1, 0, ()),
+        clear_caches=lambda: {},
+        cache_path=lambda: "cache",
+        runtime_snapshot=runtime.snapshot,
+        ui_delivery_summary=UiDeliveryMetricsSummary,
+        build_diagnostic_report=build_report,
+        dispatch=lambda callback: callback(),
+    ))
+    try:
+        controller.export_diagnostic_report(
+            output,
+            lambda path: completed.set(),
+            errors.append,
+        )
+
+        assert completed.wait(2)
+        assert errors == []
+        assert build_threads == ["mcsavehelper-io-1"]
+        assert output.read_text(encoding="utf-8") == "diagnostic report\n"
     finally:
         controller.close()
         runtime.shutdown(wait=True)
