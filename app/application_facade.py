@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.services.migration_service import MigrationService
     from app.services.region_map import RegionMapService
     from app.services.texture_service import TextureService
+    from app.services.ui_delivery import UiDeliveryPort
     from app.services.uuid_service import UUIDService
     from app.ui.feature_context import MigrationCommands
 
@@ -35,6 +36,7 @@ class ApplicationFacadeMixin:
     migration_controller: Any
     save_context_manager: Any
     floating_log_panel: Any
+    ui_delivery: "UiDeliveryPort"
     _sidebar: Any
 
     def translate(self, key: str, default: str = "", **kwargs: Any) -> str:

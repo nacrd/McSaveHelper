@@ -25,6 +25,7 @@ from app.ui.views.explorer.map.surface_renderer import (
     MapSurfaceSpec,
     _rgb,
 )
+from core.logger import logger
 from core.mca.map_tiles import HIGH_DETAIL_TILE_LADDER, choose_tile_size
 from core.mca.topview_renderer import ULTRA_TILE_SIZE
 from core.mca.viewport import McaViewport
@@ -70,6 +71,8 @@ class MapSurfaceLayer:
         request_rebuild: Callable[[], None],
         is_active: Callable[[], bool],
         background_color: str,
+        on_ready: Optional[Callable[[], None]] = None,
+        on_unavailable: Optional[Callable[[Exception], None]] = None,
         cell_size: float = 32.0,
         buffer_regions: int = 2,
         max_regions: int = 192,
@@ -84,6 +87,8 @@ class MapSurfaceLayer:
             request_rebuild: 需要重绘时回调宿主。
             is_active: 图层所属页面是否仍活跃。
             background_color: 缓冲表面背景色。
+            on_ready: 第一帧成功上传后的通知回调。
+            on_unavailable: RawImage 运行时不可用时的通知回调。
             cell_size: 单区域基础像素边长。
             buffer_regions: 可见区外缓冲环数。
             max_regions: 单轴最大区域数。
@@ -94,6 +99,8 @@ class MapSurfaceLayer:
         self._schedule_task = schedule_task
         self._request_rebuild = request_rebuild
         self._is_active = is_active
+        self._on_ready = on_ready
+        self._on_unavailable = on_unavailable
         self._cell_size = max(1.0, float(cell_size))
         self._buffer_regions = max(1, int(buffer_regions))
         self._max_regions = max(8, int(max_regions))
@@ -114,6 +121,8 @@ class MapSurfaceLayer:
         self._rendering = False
         self._blocked_spec: Optional[MapSurfaceSpec] = None
         self._visible_regions: set[RegionCoord] = set()
+        self._covers_viewport = False
+        self._latest_visible_bounds: Optional[RegionBounds] = None
         self._scale = 1.0
         self._offset_x = 0.0
         self._offset_y = 0.0
@@ -168,6 +177,11 @@ class MapSurfaceLayer:
     def visible_regions(self) -> set[RegionCoord]:
         """本表面覆盖的区域坐标副本。"""
         return set(self._visible_regions)
+
+    @property
+    def covers_viewport(self) -> bool:
+        """当前已上传表面是否完整覆盖并匹配视口。"""
+        return self._covers_viewport
 
     @property
     def rendering(self) -> bool:
@@ -228,6 +242,8 @@ class MapSurfaceLayer:
         self._frame = None
         self._spec = None
         self._blocked_spec = None
+        self._covers_viewport = False
+        self._latest_visible_bounds = None
         self.hide()
 
     def close(self) -> None:
@@ -300,6 +316,14 @@ class MapSurfaceLayer:
         candidate, visible_bounds = self._surface_candidate(
             viewport, width, height, display_mode, use_topview
         )
+        self._latest_visible_bounds = visible_bounds
+        if not self._contains(candidate, visible_bounds):
+            self._use_canvas_fallback()
+            return []
+        self._covers_viewport = self._frame_matches_viewport(
+            candidate,
+            visible_bounds,
+        )
         reused = self._reuse_active_surface(data, candidate, visible_bounds)
         if reused is not None:
             return reused
@@ -321,6 +345,28 @@ class MapSurfaceLayer:
             self._update_geometry(self._frame.spec)
 
         return self._missing_tiles(surface_data, candidate)
+
+    def _use_canvas_fallback(self) -> None:
+        """使裁剪候选失效，避免不完整表面遮住 Canvas。"""
+        self._token += 1
+        self._dirty = True
+        self._covers_viewport = False
+        self._request_spec = None
+        self._request_data.clear()
+        self._request_colors.clear()
+        self._visible_regions.clear()
+        self._blocked_spec = None
+        self.hide()
+
+    def _frame_matches_viewport(
+        self,
+        candidate: MapSurfaceSpec,
+        visible_bounds: RegionBounds,
+    ) -> bool:
+        frame = self._frame
+        if frame is None or not self._contains(frame.spec, visible_bounds):
+            return False
+        return self._same_surface_format(frame.spec, candidate)
 
     def _sync_viewport_geometry(self, viewport: McaViewport) -> None:
         self._scale = max(0.001, float(viewport.scale))
@@ -656,7 +702,7 @@ class MapSurfaceLayer:
 
     def _can_render(self) -> bool:
         """仅允许仍存活且挂载的图层执行或发布表面。"""
-        return not self._is_closed() and self._is_active()
+        return self.enabled and not self._is_closed() and self._is_active()
 
     async def _render_request(self, request: _RenderRequest) -> bool:
         """Render one request and report whether a newer request should retry."""
@@ -682,11 +728,19 @@ class MapSurfaceLayer:
         return self._request_token_matches(request) and self._can_render()
 
     def _store_frame(self, request: _RenderRequest, frame: MapSurfaceFrame) -> None:
+        was_ready = self._covers_viewport
         self._frame = frame
         self._spec = request.spec
         self._dirty = False
         self._blocked_spec = None
+        visible_bounds = self._latest_visible_bounds
+        self._covers_viewport = (
+            visible_bounds is not None
+            and self._contains(request.spec, visible_bounds)
+        )
         self._update_geometry(request.spec)
+        if self._covers_viewport and not was_ready and self._on_ready is not None:
+            self._on_ready()
 
     def _capture_request(self) -> Optional[_RenderRequest]:
         spec = self._request_spec
@@ -774,15 +828,34 @@ class MapSurfaceLayer:
                 frame.pixels,
                 premultiplied=True,
             )
-        except Exception:
-            self._blocked_spec = request.spec
-            self._dirty = False
-            if self._frame is None:
-                self.hide()
+        except Exception as exc:
+            self._disable_after_upload_failure(exc)
             return False
         # ``clear()`` may invalidate this frame while its ACK is pending.  Do
         # not resurrect pixels from the previous world or camera generation.
         return request.token == self._token and self._is_active()
+
+    def _disable_after_upload_failure(self, error: Exception) -> None:
+        """禁用失效的 RawImage 通道并通知宿主切换到 Canvas。"""
+        with self._lifecycle_lock:
+            if self._closed or not self.enabled:
+                return
+            self.enabled = False
+            self._covers_viewport = False
+            self._token += 1
+            self._dirty = False
+            self._request_spec = None
+            self._request_data.clear()
+            self._request_colors.clear()
+            self._blocked_spec = None
+        self.hide()
+        logger.warning(
+            "RawImage 地图表面上传失败，已回退到 Canvas: "
+            f"{type(error).__name__}: {error}",
+            module="McaMapSurface",
+        )
+        if self._on_unavailable is not None:
+            self._on_unavailable(error)
 
     def _show(self) -> None:
         if self._is_closed():

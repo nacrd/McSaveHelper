@@ -4,6 +4,8 @@ from typing import Callable, Optional, Sequence, TypeVar
 
 import pytest
 
+from core.types import BatchResult
+
 from app.services.execution_runtime import ExecutionRuntime, LaneLimits
 from app.services.parallel_runner import RuntimeParallelRunner
 from core.batch_processor import BatchCancelledError, BatchProcessor
@@ -228,7 +230,7 @@ def test_default_handler_forwards_cancel_and_classifies_runtime_error(
 
     monkeypatch.setattr(target, fake_run_mode)
     processor = BatchProcessor(max_workers=1)
-    returned: list[dict[str, object]] = []
+    returned: list[BatchResult] = []
     thread = threading.Thread(
         target=lambda: returned.append(
             processor.process_batch(

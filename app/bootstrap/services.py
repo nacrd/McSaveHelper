@@ -261,11 +261,12 @@ def create_app_services(
             selected.cache_registry,
         )
         cache_registry = active_cache_registry
-        world_indexes = _create(
+        active_world_indexes: WorldIndexRegistry = _create(
             "world_indexes",
             selected.world_indexes,
             active_cache_registry,
         )
+        world_indexes = active_world_indexes
 
         def invalidate_world_caches(world: Path) -> None:
             active_cache_registry.invalidate_world(world)
@@ -280,7 +281,7 @@ def create_app_services(
         world_repository = _create(
             "world_repository",
             selected.world_repository,
-            world_indexes,
+            active_world_indexes,
             world_writes,
             backup,
             world_transactions,
@@ -301,12 +302,13 @@ def create_app_services(
         )
         uuid = _create("uuid", selected.uuid)
         item = _create("item", selected.item)
-        texture = _create(
+        active_texture: TextureService = _create(
             "texture",
             selected.texture,
             execution_runtime,
             active_cache_registry,
         )
+        texture = active_texture
         save_repair = _create(
             "save_repair",
             selected.save_repair,
@@ -320,12 +322,12 @@ def create_app_services(
             migration=migration,
             uuid=uuid,
             item=item,
-            texture=texture,
+            texture=active_texture,
             backup=backup,
             save_repair=save_repair,
             world_writes=world_writes,
             execution_runtime=execution_runtime,
-            world_indexes=world_indexes,
+            world_indexes=active_world_indexes,
             world_repository=world_repository,
             world_stats=world_stats,
             world_compare=world_compare,

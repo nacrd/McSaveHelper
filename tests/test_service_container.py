@@ -1,5 +1,6 @@
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Callable, cast
 
 import pytest
 
@@ -22,209 +23,241 @@ from app.services.save_repair_service import SaveRepairService
 from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
 from app.services.world_index_service import WorldIndexRegistry
+from app.services.world_compare_service import WorldCompareService
 from app.services.world_repository import WorldRepository
+from app.services.world_stats_service import WorldStatsService
 from app.services.world_transaction import WorldTransactionService
 from app.services.world_write_coordinator import WorldWriteCoordinator
 from core.mca.surface import CHUNK_DECODE_CACHE_MAX_BYTES
 from core.parallel import ParallelRunner
 
 
-def test_service_container_builds_in_dependency_order() -> None:
-    events = []
-    config = cast(ConfigService, object())
-    i18n = cast(I18nService, object())
-    migration = cast(MigrationService, object())
-    uuid = cast(UUIDService, object())
-    item = cast(ItemService, object())
-    texture = cast(TextureService, object())
-    backup = cast(BackupService, object())
-    save_repair = cast(SaveRepairService, object())
-    world_writes = cast(WorldWriteCoordinator, object())
-    execution_runtime = cast(ExecutionRuntime, object())
-    parallel_runner = cast(ParallelRunner, object())
-    operation_metrics = cast(OperationMetricsStore, object())
-    cache_invalidator_calls = []
+class _ServiceFactoryProbe:
+    """Typed service factories that record construction order."""
 
-    def invalidate_world_caches(world):
-        cache_invalidator_calls.append(world)
+    def __init__(self) -> None:
+        self.events: list[object] = []
+        self.invalidated_worlds: list[Path] = []
+        self.config = cast(ConfigService, object())
+        self.i18n = cast(I18nService, object())
+        self.migration = cast(MigrationService, object())
+        self.uuid = cast(UUIDService, object())
+        self.item = cast(ItemService, object())
+        self.texture = cast(TextureService, object())
+        self.backup = cast(BackupService, object())
+        self.save_repair = cast(SaveRepairService, object())
+        self.world_writes = cast(WorldWriteCoordinator, object())
+        self.execution_runtime = cast(ExecutionRuntime, object())
+        self.parallel_runner = cast(ParallelRunner, object())
+        self.operation_metrics = cast(OperationMetricsStore, object())
+        self.cache_registry = cast(
+            CacheRegistry,
+            SimpleNamespace(invalidate_world=self.invalidated_worlds.append),
+        )
+        self.world_indexes = cast(WorldIndexRegistry, object())
+        self.world_transactions = cast(WorldTransactionService, object())
+        self.world_repository = cast(WorldRepository, object())
+        self.world_stats = cast(WorldStatsService, object())
+        self.world_compare = cast(WorldCompareService, object())
 
-    cache_registry = cast(
-        CacheRegistry,
-        SimpleNamespace(invalidate_world=invalidate_world_caches),
-    )
-    world_indexes = cast(
-        WorldIndexRegistry,
-        SimpleNamespace(invalidate=lambda world: None),
-    )
-    world_transactions = cast(WorldTransactionService, object())
-    world_repository = cast(WorldRepository, object())
+    def factories(self) -> ServiceFactories:
+        return ServiceFactories(
+            config=self.create_config,
+            i18n=self.create_i18n,
+            migration=self.create_migration,
+            uuid=self.create_uuid,
+            item=self.create_item,
+            texture=self.create_texture,
+            cache_registry=self.create_cache_registry,
+            operation_metrics=self.create_operation_metrics,
+            execution_runtime=self.create_execution_runtime,
+            parallel_runner=self.create_parallel_runner,
+            world_indexes=self.create_world_indexes,
+            world_repository=self.create_world_repository,
+            world_stats=self.create_world_stats,
+            world_compare=self.create_world_compare,
+            world_transactions=self.create_world_transactions,
+            world_writes=self.create_world_writes,
+            backup=self.create_backup,
+            save_repair=self.create_save_repair,
+        )
 
-    def create_config():
-        events.append("config")
-        return config
+    def create_config(self) -> ConfigService:
+        self.events.append("config")
+        return self.config
 
-    def create_i18n(received_config):
-        events.append(("i18n", received_config))
-        return i18n
+    def create_i18n(self, config: ConfigService) -> I18nService:
+        self.events.append(("i18n", config))
+        return self.i18n
 
-    def create_migration(
-        received_config,
-        received_backup,
-        received_transactions,
-        received_parallel_runner,
-    ):
-        events.append((
-            "migration",
-            received_config,
-            received_backup,
-            received_transactions,
-            received_parallel_runner,
-        ))
-        return migration
+    def create_world_writes(self) -> WorldWriteCoordinator:
+        self.events.append("world_writes")
+        return self.world_writes
 
-    def create_uuid():
-        events.append("uuid")
-        return uuid
+    def create_backup(
+        self,
+        world_writes: WorldWriteCoordinator,
+    ) -> BackupService:
+        self.events.append(("backup", world_writes))
+        return self.backup
 
-    def create_item():
-        events.append("item")
-        return item
+    def create_operation_metrics(self) -> OperationMetricsStore:
+        self.events.append("operation_metrics")
+        return self.operation_metrics
 
-    def create_texture(received_runtime, received_cache_registry):
-        events.append((
-            "texture",
-            received_runtime,
-            received_cache_registry,
-        ))
-        return texture
+    def create_execution_runtime(
+        self,
+        metrics: OperationMetricsStore,
+    ) -> ExecutionRuntime:
+        self.events.append(("execution_runtime", metrics))
+        return self.execution_runtime
 
-    def create_world_writes():
-        events.append("world_writes")
-        return world_writes
+    def create_parallel_runner(
+        self,
+        runtime: ExecutionRuntime,
+    ) -> ParallelRunner:
+        self.events.append(("parallel_runner", runtime))
+        return self.parallel_runner
 
-    def create_operation_metrics():
-        events.append("operation_metrics")
-        return operation_metrics
+    def create_cache_registry(self) -> CacheRegistry:
+        self.events.append("cache_registry")
+        return self.cache_registry
 
-    def create_execution_runtime(received_operation_metrics):
-        events.append(("execution_runtime", received_operation_metrics))
-        return execution_runtime
-
-    def create_parallel_runner(received_runtime):
-        events.append(("parallel_runner", received_runtime))
-        return parallel_runner
-
-    def create_cache_registry():
-        events.append("cache_registry")
-        return cache_registry
-
-    def create_world_indexes(cache_registry):
-        events.append("world_indexes")
-        assert cache_registry is not None
-        return world_indexes
+    def create_world_indexes(
+        self,
+        cache_registry: CacheRegistry,
+    ) -> WorldIndexRegistry:
+        assert cache_registry is self.cache_registry
+        self.events.append("world_indexes")
+        return self.world_indexes
 
     def create_world_transactions(
-        received_world_writes,
-        received_backup,
-        invalidate_world,
-    ):
-        invalidate_world("world")
-        events.append((
-            "world_transactions",
-            received_world_writes,
-            received_backup,
-        ))
-        return world_transactions
+        self,
+        world_writes: WorldWriteCoordinator,
+        backup: BackupService,
+        invalidate_world: Callable[[Path], None],
+    ) -> WorldTransactionService:
+        invalidate_world(Path("world"))
+        self.events.append(("world_transactions", world_writes, backup))
+        return self.world_transactions
 
     def create_world_repository(
-        received_indexes,
-        received_world_writes,
-        received_backup,
-        received_transactions,
-    ):
-        del received_world_writes, received_backup, received_transactions
-        events.append(("world_repository", received_indexes))
-        return world_repository
+        self,
+        indexes: WorldIndexRegistry,
+        world_writes: WorldWriteCoordinator,
+        backup: BackupService,
+        transactions: WorldTransactionService,
+    ) -> WorldRepository:
+        del world_writes, backup, transactions
+        self.events.append(("world_repository", indexes))
+        return self.world_repository
 
-    def create_backup(received_world_writes):
-        events.append(("backup", received_world_writes))
-        return backup
+    def create_world_stats(self) -> WorldStatsService:
+        self.events.append("world_stats")
+        return self.world_stats
+
+    def create_world_compare(
+        self,
+        repository: WorldRepository,
+    ) -> WorldCompareService:
+        self.events.append(("world_compare", repository))
+        return self.world_compare
+
+    def create_migration(
+        self,
+        config: ConfigService,
+        backup: BackupService,
+        transactions: WorldTransactionService,
+        parallel_runner: ParallelRunner,
+    ) -> MigrationService:
+        self.events.append(
+            ("migration", config, backup, transactions, parallel_runner)
+        )
+        return self.migration
+
+    def create_uuid(self) -> UUIDService:
+        self.events.append("uuid")
+        return self.uuid
+
+    def create_item(self) -> ItemService:
+        self.events.append("item")
+        return self.item
+
+    def create_texture(
+        self,
+        runtime: ExecutionRuntime,
+        cache_registry: CacheRegistry,
+    ) -> TextureService:
+        self.events.append(("texture", runtime, cache_registry))
+        return self.texture
 
     def create_save_repair(
-        received_backup,
-        received_transactions,
-        received_runtime,
-    ):
-        events.append((
-            "save_repair",
-            received_backup,
-            received_transactions,
-            received_runtime,
-        ))
-        return save_repair
+        self,
+        backup: BackupService,
+        transactions: WorldTransactionService,
+        runtime: ExecutionRuntime,
+    ) -> SaveRepairService:
+        self.events.append(("save_repair", backup, transactions, runtime))
+        return self.save_repair
 
-    services = create_app_services(
-        ServiceFactories(
-            config=create_config,
-            i18n=create_i18n,
-            migration=create_migration,
-            uuid=create_uuid,
-            item=create_item,
-            texture=create_texture,
-            cache_registry=create_cache_registry,
-            operation_metrics=create_operation_metrics,
-            execution_runtime=create_execution_runtime,
-            parallel_runner=create_parallel_runner,
-            world_indexes=create_world_indexes,
-            world_repository=create_world_repository,
-            world_transactions=create_world_transactions,
-            world_writes=create_world_writes,
-            backup=create_backup,
-            save_repair=create_save_repair,
-        )
-    )
+    def expected_events(self) -> list[object]:
+        return [
+            "config",
+            ("i18n", self.config),
+            "world_writes",
+            ("backup", self.world_writes),
+            "operation_metrics",
+            ("execution_runtime", self.operation_metrics),
+            ("parallel_runner", self.execution_runtime),
+            "cache_registry",
+            "world_indexes",
+            ("world_transactions", self.world_writes, self.backup),
+            ("world_repository", self.world_indexes),
+            "world_stats",
+            ("world_compare", self.world_repository),
+            (
+                "migration",
+                self.config,
+                self.backup,
+                self.world_transactions,
+                self.parallel_runner,
+            ),
+            "uuid",
+            "item",
+            ("texture", self.execution_runtime, self.cache_registry),
+            (
+                "save_repair",
+                self.backup,
+                self.world_transactions,
+                self.execution_runtime,
+            ),
+        ]
 
-    assert services.config is config
-    assert services.i18n is i18n
-    assert services.migration is migration
-    assert services.uuid is uuid
-    assert services.item is item
-    assert services.texture is texture
-    assert services.backup is backup
-    assert services.save_repair is save_repair
-    assert services.world_writes is world_writes
-    assert services.execution_runtime is execution_runtime
-    assert services.parallel_runner is parallel_runner
-    assert services.operation_metrics is operation_metrics
-    assert services.cache_registry is cache_registry
-    assert services.world_indexes is world_indexes
-    assert services.world_repository is world_repository
-    assert services.world_transactions is world_transactions
-    assert cache_invalidator_calls == ["world"]
-    assert events == [
-        "config",
-        ("i18n", config),
-        "world_writes",
-        ("backup", world_writes),
-        "operation_metrics",
-        ("execution_runtime", operation_metrics),
-        ("parallel_runner", execution_runtime),
-        "cache_registry",
-        "world_indexes",
-        ("world_transactions", world_writes, backup),
-        ("world_repository", world_indexes),
-        (
-            "migration",
-            config,
-            backup,
-            world_transactions,
-            parallel_runner,
-        ),
-        "uuid",
-        "item",
-        ("texture", execution_runtime, cache_registry),
-        ("save_repair", backup, world_transactions, execution_runtime),
-    ]
+
+def test_service_container_builds_in_dependency_order() -> None:
+    probe = _ServiceFactoryProbe()
+    services = create_app_services(probe.factories())
+
+    assert services.config is probe.config
+    assert services.i18n is probe.i18n
+    assert services.migration is probe.migration
+    assert services.uuid is probe.uuid
+    assert services.item is probe.item
+    assert services.texture is probe.texture
+    assert services.backup is probe.backup
+    assert services.save_repair is probe.save_repair
+    assert services.world_writes is probe.world_writes
+    assert services.execution_runtime is probe.execution_runtime
+    assert services.parallel_runner is probe.parallel_runner
+    assert services.operation_metrics is probe.operation_metrics
+    assert services.cache_registry is probe.cache_registry
+    assert services.world_indexes is probe.world_indexes
+    assert services.world_repository is probe.world_repository
+    assert services.world_stats is probe.world_stats
+    assert services.world_compare is probe.world_compare
+    assert services.world_transactions is probe.world_transactions
+    assert probe.invalidated_worlds == [Path("world")]
+    assert probe.events == probe.expected_events()
 
 
 def test_service_container_reports_failed_service_and_stops() -> None:

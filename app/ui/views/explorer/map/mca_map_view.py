@@ -247,11 +247,15 @@ class McaMapView(ft.Container):
             request_rebuild=self._request_rebuild,
             is_active=self._surface_is_active,
             background_color=self.BACKGROUND_COLOR,
+            on_ready=self._on_surface_ready,
+            on_unavailable=self._on_surface_unavailable,
             cell_size=self.CELL_SIZE,
             buffer_regions=self.SURFACE_BUFFER_REGIONS,
             max_regions=self.SURFACE_MAX_REGIONS,
         )
-        self._surface_enabled = self._surface_layer.enabled
+        # RawImage presence only means the transport can be attempted.  Keep
+        # Canvas active until the client acknowledges the first uploaded frame.
+        self._surface_enabled = False
         self._surface_host = self._surface_layer.control
         self._surface_image = self._surface_layer.image
 
@@ -279,6 +283,24 @@ class McaMapView(ft.Container):
             expand=True,
             fit=ft.StackFit.EXPAND,
         )
+
+    def _on_surface_ready(self) -> None:
+        """首次表面帧就绪后再让 RawImage 接管底图。"""
+        if (
+            self._disposed
+            or not self._surface_layer.enabled
+            or not self._surface_layer.covers_viewport
+        ):
+            return
+        self._surface_enabled = True
+        self._request_rebuild()
+
+    def _on_surface_unavailable(self, _error: Exception) -> None:
+        """RawImage 通道失效后切换到稳定的 Canvas 底图。"""
+        if self._disposed:
+            return
+        self._surface_enabled = False
+        self._request_rebuild()
 
     @property
     def _scale(self) -> float:
@@ -753,16 +775,13 @@ class McaMapView(ft.Container):
         self._cached_stats = self._service.get_statistics()
         view_w = float(self.width or 800)
         view_h = float(self.height or 600)
-        # RawImage owns the opaque base layer.  Keeping the Canvas transparent
-        # is essential: a full-size background shape would cover the texture.
-        shapes: List[cv.Shape] = (
-            [] if self._surface_enabled else list(self._empty_shapes())
-        )
 
         if not self._current_data:
             self._visible_regions.clear()
             self._tile_requests.reset()
             self._surface_layer.clear()
+            self._surface_enabled = False
+            shapes = list(self._empty_shapes())
             shapes.extend(map_shapes.empty_state(view_w, view_h))
             shapes.extend(self._build_info_overlay())
             self._apply_shapes(shapes)
@@ -775,11 +794,24 @@ class McaMapView(ft.Container):
 
         draw_bounds = self._prepare_visible_bounds(coords, view_w, view_h)
         if draw_bounds is None:
-            self._apply_shapes(shapes)
+            self._apply_shapes(list(self._empty_shapes()))
             return
 
+        surface_missing: List[Tuple[int, int]] = []
+        if self._surface_layer.enabled:
+            surface_missing = self._prepare_surface(view_w, view_h)
+        self._surface_enabled = (
+            self._surface_layer.enabled
+            and self._surface_layer.frame is not None
+            and self._surface_layer.covers_viewport
+        )
+        # RawImage owns the opaque base layer only after a complete frame is
+        # ready.  Cropped or pending surfaces leave the Canvas background on.
+        shapes: List[cv.Shape] = (
+            [] if self._surface_enabled else list(self._empty_shapes())
+        )
         if self._surface_enabled:
-            missing = self._prepare_surface(view_w, view_h)
+            missing = surface_missing
             shapes.extend(self._build_surface_overlays(view_w, view_h))
         else:
             region_shapes, missing = self._build_visible_regions(
@@ -929,7 +961,7 @@ class McaMapView(ft.Container):
                 view_w,
                 view_h,
                 padding=0.78,
-                min_fit_scale=0.35,
+                min_fit_scale=self.MIN_SCALE,
                 max_fit_scale=3.0,
             )
             self._viewport.apply(target)
@@ -966,44 +998,59 @@ class McaMapView(ft.Container):
         show_block_grid = self._show_grid and (
             self._view_level == "block" or self._scale >= self.SCALE_BLOCK
         )
-        min_x, max_x, min_z, max_z = bounds
         desired_tile_size = self._tile_requests.visible_base_tile_size(
             self._scale,
         )
-        for z in range(min_z, max_z + 1):
-            for x in range(min_x, max_x + 1):
-                coord = (x, z)
-                rect = self._viewport.region_rect(coord)
-                if self._rect_outside_view(rect, view_w, view_h):
-                    continue
-                self._cell_bounds[coord] = rect
-                if coord in self._current_data:
-                    self._visible_regions.add(coord)
-                    if (
-                        self._display_mode in {"biome", "structure"}
-                        and not self._service.get_region_meta(coord)
-                    ):
-                        metadata_missing.append(coord)
-                    shapes.extend(self._build_present_region(
+        for coord in self._draw_coords(bounds):
+            rect = self._viewport.region_rect(coord)
+            if self._rect_outside_view(rect, view_w, view_h):
+                continue
+            self._cell_bounds[coord] = rect
+            if coord in self._current_data:
+                self._visible_regions.add(coord)
+                if (
+                    self._display_mode in {"biome", "structure"}
+                    and not self._service.get_region_meta(coord)
+                ):
+                    metadata_missing.append(coord)
+                shapes.extend(self._build_present_region(
+                    coord,
+                    rect,
+                    show_chunk_grid,
+                    show_block_grid,
+                ))
+                if (
+                    self._use_topview
+                    and not self._service.has_topview_tile(
                         coord,
-                        rect,
-                        show_chunk_grid,
-                        show_block_grid,
-                    ))
-                    if (
-                        self._use_topview
-                        and not self._service.has_topview_tile(
-                            coord,
-                            min_size=desired_tile_size,
-                        )
-                    ):
-                        missing.append(coord)
-                elif self._show_empty_regions:
-                    shapes.append(
-                        map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
+                        min_size=desired_tile_size,
                     )
+                ):
+                    missing.append(coord)
+            elif self._show_empty_regions:
+                shapes.append(
+                    map_shapes.empty_region(rect, self.EMPTY_REGION_COLOR)
+                )
         self._request_visible_metadata(metadata_missing)
         return shapes, missing
+
+    def _draw_coords(
+        self,
+        bounds: Tuple[int, int, int, int],
+    ) -> Iterable[Tuple[int, int]]:
+        """按稳定顺序返回需要绘制的真实或空区域坐标。"""
+        min_x, max_x, min_z, max_z = bounds
+        if self._show_empty_regions:
+            return (
+                (x, z)
+                for z in range(min_z, max_z + 1)
+                for x in range(min_x, max_x + 1)
+            )
+        return (
+            coord
+            for coord in sorted(self._current_data)
+            if min_x <= coord[0] <= max_x and min_z <= coord[1] <= max_z
+        )
 
     @staticmethod
     def _rect_outside_view(
@@ -1351,7 +1398,7 @@ class McaMapView(ft.Container):
             view_w,
             view_h,
             padding=padding,
-            min_fit_scale=0.2,
+            min_fit_scale=self.MIN_SCALE,
             max_fit_scale=8.0,
         )
         self._viewport.apply(target)

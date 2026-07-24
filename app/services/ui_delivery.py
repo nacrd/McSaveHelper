@@ -26,12 +26,29 @@ ProgressCallback = Callable[[ProgressSnapshot], None]
 class ProgressSource(Protocol):
     """Operation identity and progress subscription used by the UI channel."""
 
-    task_id: str
-    operation: str
-    feature: str
-    world_id: str
-    generation: int
-    metadata: Mapping[str, object]
+    @property
+    def task_id(self) -> str:
+        ...
+
+    @property
+    def operation(self) -> str:
+        ...
+
+    @property
+    def feature(self) -> str:
+        ...
+
+    @property
+    def world_id(self) -> str:
+        ...
+
+    @property
+    def generation(self) -> int:
+        ...
+
+    @property
+    def metadata(self) -> Mapping[str, object]:
+        ...
 
     def subscribe_progress(
         self,
@@ -52,12 +69,17 @@ class UiSchedulePort(Protocol):
 class UiDeliveryPort(Protocol):
     """Port used by controllers and views to publish a UI projection."""
 
+    def close(self) -> None:
+        """Reject queued and future deliveries."""
+        ...
+
     def post(
         self,
         spec: "UiDeliverySpec",
         callback: UiCallback,
         *,
         is_current: UiCurrentCheck,
+        on_complete: Optional[UiCallback] = None,
     ) -> str:
         """Queue a callback and return its unique delivery identifier."""
         ...
@@ -102,6 +124,297 @@ class UiDeliverySpec:
             "metadata",
             MappingProxyType(dict(self.metadata)),
         )
+
+
+class _DeliveryCompletion:
+    """Run one best-effort completion callback exactly once."""
+
+    def __init__(self, callback: Optional[UiCallback]) -> None:
+        self._callback = callback
+        self._lock = threading.Lock()
+        self._finished = False
+
+    @property
+    def is_finished(self) -> bool:
+        with self._lock:
+            return self._finished
+
+    def finish(self) -> None:
+        with self._lock:
+            if self._finished:
+                return
+            self._finished = True
+        if self._callback is None:
+            return
+        try:
+            self._callback()
+        except Exception:
+            return
+
+
+class _DeliveryAttempt:
+    """Own one scheduled callback and its terminal observability record."""
+
+    def __init__(
+        self,
+        channel: "UiDeliveryChannel",
+        delivery_id: str,
+        spec: UiDeliverySpec,
+        callback: UiCallback,
+        is_current: UiCurrentCheck,
+        completion: _DeliveryCompletion,
+        queued_ns: int,
+    ) -> None:
+        self._channel = channel
+        self._delivery_id = delivery_id
+        self._spec = spec
+        self._callback = callback
+        self._is_current = is_current
+        self._completion = completion
+        self._queued_ns = queued_ns
+
+    def reject_closed(self, queue_wait_ms: float = 0.0) -> None:
+        self._publish_stale("channel_closed", queue_wait_ms)
+        self._completion.finish()
+
+    def schedule(self) -> None:
+        try:
+            accepted = self._channel._schedule(self.drain)
+        except Exception as error:
+            self._reject_schedule(error)
+            return
+        if accepted is False:
+            self._reject_schedule(RuntimeError("UI 调度器拒绝投递"))
+
+    def drain(self) -> None:
+        started_ns = self._channel._now_ns()
+        queue_wait_ms = self._channel._elapsed_ms(
+            self._queued_ns,
+            started_ns,
+        )
+        try:
+            self._drain_current(queue_wait_ms)
+        finally:
+            self._completion.finish()
+
+    def _drain_current(self, queue_wait_ms: float) -> None:
+        if self._channel.is_closed:
+            self._publish_stale("channel_closed", queue_wait_ms)
+            return
+        if not self._passes_guard(queue_wait_ms):
+            return
+        self._run_callback(queue_wait_ms)
+
+    def _passes_guard(self, queue_wait_ms: float) -> bool:
+        try:
+            is_current = bool(self._is_current())
+        except Exception as error:
+            self._channel._publish_error(
+                self._delivery_id,
+                self._spec,
+                queue_wait_ms,
+                0.0,
+                error,
+                stage="guard",
+            )
+            return False
+        if is_current:
+            return True
+        self._publish_stale("generation_guard", queue_wait_ms)
+        return False
+
+    def _run_callback(self, queue_wait_ms: float) -> None:
+        started_ns = self._channel._now_ns()
+        try:
+            self._callback()
+        except Exception as error:
+            run_ms = self._elapsed_since(started_ns)
+            self._channel._publish_error(
+                self._delivery_id,
+                self._spec,
+                queue_wait_ms,
+                run_ms,
+                error,
+                stage="callback",
+            )
+            return
+        self._channel._publish(
+            self._delivery_id,
+            self._spec,
+            OperationOutcome.OK,
+            queue_wait_ms=queue_wait_ms,
+            run_ms=self._elapsed_since(started_ns),
+        )
+
+    def _elapsed_since(self, started_ns: int) -> float:
+        return self._channel._elapsed_ms(
+            started_ns,
+            self._channel._now_ns(),
+        )
+
+    def _reject_schedule(self, error: Exception) -> None:
+        if self._completion.is_finished:
+            return
+        self._channel._publish_error(
+            self._delivery_id,
+            self._spec,
+            queue_wait_ms=0.0,
+            run_ms=0.0,
+            error=error,
+            stage="schedule",
+        )
+        self._completion.finish()
+
+    def _publish_stale(self, reason: str, queue_wait_ms: float) -> None:
+        self._channel._publish(
+            self._delivery_id,
+            self._spec,
+            OperationOutcome.STALE,
+            queue_wait_ms=queue_wait_ms,
+            run_ms=0.0,
+            extra={"drop_reason": reason},
+        )
+
+
+class _ProgressObserver:
+    """Coalesce running snapshots and own one progress subscription."""
+
+    def __init__(
+        self,
+        channel: "UiDeliveryChannel",
+        source: ProgressSource,
+        callback: ProgressCallback,
+        is_current: UiCurrentCheck,
+    ) -> None:
+        self._channel = channel
+        self._source = source
+        self._callback = callback
+        self._is_current = is_current
+        self._lock = threading.Lock()
+        self._latest_running: Optional[ProgressSnapshot] = None
+        self._running_scheduled = False
+        self._running_consumed = False
+        self._disposed = False
+        self._source_unsubscribe: Optional[Callable[[], None]] = None
+
+    def start(self) -> Callable[[], None]:
+        self._source_unsubscribe = self._source.subscribe_progress(
+            self._on_progress,
+        )
+        return self.close
+
+    def close(self) -> None:
+        with self._lock:
+            if self._disposed:
+                return
+            self._disposed = True
+            self._latest_running = None
+            source_unsubscribe = self._source_unsubscribe
+        if source_unsubscribe is not None:
+            source_unsubscribe()
+
+    def _on_progress(self, snapshot: ProgressSnapshot) -> None:
+        if snapshot.state is OperationState.RUNNING:
+            self._record_running(snapshot)
+            return
+        self._channel.post(
+            self._build_spec(self._metadata(snapshot)),
+            lambda: self._callback(snapshot),
+            is_current=self._guarded_current,
+        )
+
+    def _record_running(self, snapshot: ProgressSnapshot) -> None:
+        with self._lock:
+            if self._disposed:
+                return
+            self._latest_running = snapshot
+        self._schedule_running()
+
+    def _schedule_running(self) -> None:
+        with self._lock:
+            if self._cannot_schedule_running():
+                return
+            self._running_scheduled = True
+            self._running_consumed = False
+            initial = self._latest_running
+        if initial is None:
+            return
+        try:
+            self._channel.post(
+                self._build_spec(self._metadata(initial, coalesced=True)),
+                self._deliver_latest_running,
+                is_current=self._guarded_current,
+                on_complete=self._finish_running_delivery,
+            )
+        except Exception:
+            with self._lock:
+                self._running_scheduled = False
+
+    def _cannot_schedule_running(self) -> bool:
+        return (
+            self._disposed
+            or self._running_scheduled
+            or self._latest_running is None
+        )
+
+    def _deliver_latest_running(self) -> None:
+        with self._lock:
+            snapshot = self._latest_running
+            self._latest_running = None
+            self._running_consumed = True
+        if snapshot is not None:
+            self._callback(snapshot)
+
+    def _finish_running_delivery(self) -> None:
+        with self._lock:
+            was_consumed = self._running_consumed
+            self._running_consumed = False
+            self._running_scheduled = False
+            should_reschedule = (
+                was_consumed
+                and not self._disposed
+                and self._latest_running is not None
+            )
+        if should_reschedule:
+            self._schedule_running()
+
+    def _guarded_current(self) -> bool:
+        with self._lock:
+            is_active = not self._disposed
+        return is_active and bool(self._is_current())
+
+    def _build_spec(self, metadata: Mapping[str, object]) -> UiDeliverySpec:
+        return UiDeliverySpec(
+            task_id=self._source.task_id,
+            operation=self._source.operation,
+            feature=self._source.feature,
+            world_id=self._source.world_id,
+            generation=self._source.generation,
+            event="progress",
+            metadata=metadata,
+        )
+
+    def _metadata(
+        self,
+        snapshot: ProgressSnapshot,
+        *,
+        coalesced: bool = False,
+    ) -> dict[str, object]:
+        metadata = dict(self._source.metadata)
+        metadata.update(
+            {
+                "state": snapshot.state.value,
+                "coalesced": coalesced,
+            }
+        )
+        if not coalesced:
+            metadata.update(
+                {
+                    "completed": snapshot.completed,
+                    "total": snapshot.total,
+                }
+            )
+        return metadata
 
 
 class UiDeliveryChannel:
@@ -182,132 +495,22 @@ class UiDeliveryChannel:
         Returns:
             A unique ID for this delivery attempt, including rejected attempts.
         """
-        if not isinstance(spec, UiDeliverySpec):
-            raise TypeError("UI 投递必须使用 UiDeliverySpec")
-        if not callable(callback):
-            raise TypeError("UI 投递回调必须可调用")
-        if not callable(is_current):
-            raise TypeError("UI 投递 current 检查必须可调用")
-        if on_complete is not None and not callable(on_complete):
-            raise TypeError("UI 投递完成回调必须可调用")
-
+        self._validate_post(spec, callback, is_current, on_complete)
         delivery_id = self._new_delivery_id()
         queued_ns = self._now_ns()
+        attempt = _DeliveryAttempt(
+            self,
+            delivery_id,
+            spec,
+            callback,
+            is_current,
+            _DeliveryCompletion(on_complete),
+            queued_ns,
+        )
         if self.is_closed:
-            self._publish(
-                delivery_id,
-                spec,
-                OperationOutcome.STALE,
-                queue_wait_ms=0.0,
-                run_ms=0.0,
-                extra={"drop_reason": "channel_closed"},
-            )
-            self._run_completion(on_complete)
+            attempt.reject_closed()
             return delivery_id
-
-        state_lock = threading.Lock()
-        state = {"finished": False}
-
-        def finish_delivery() -> None:
-            with state_lock:
-                if state["finished"]:
-                    return
-                state["finished"] = True
-            self._run_completion(on_complete)
-
-        def drain() -> None:
-            started_ns = self._now_ns()
-            queue_wait_ms = self._elapsed_ms(queued_ns, started_ns)
-            try:
-                if self.is_closed:
-                    self._publish(
-                        delivery_id,
-                        spec,
-                        OperationOutcome.STALE,
-                        queue_wait_ms=queue_wait_ms,
-                        run_ms=0.0,
-                        extra={"drop_reason": "channel_closed"},
-                    )
-                    return
-                try:
-                    current = bool(is_current())
-                except Exception as error:
-                    self._publish_error(
-                        delivery_id,
-                        spec,
-                        queue_wait_ms,
-                        0.0,
-                        error,
-                        stage="guard",
-                    )
-                    return
-                if not current:
-                    self._publish(
-                        delivery_id,
-                        spec,
-                        OperationOutcome.STALE,
-                        queue_wait_ms=queue_wait_ms,
-                        run_ms=0.0,
-                        extra={"drop_reason": "generation_guard"},
-                    )
-                    return
-
-                callback_started_ns = self._now_ns()
-                try:
-                    callback()
-                except Exception as error:
-                    self._publish_error(
-                        delivery_id,
-                        spec,
-                        queue_wait_ms,
-                        self._elapsed_ms(callback_started_ns, self._now_ns()),
-                        error,
-                        stage="callback",
-                    )
-                    return
-                self._publish(
-                    delivery_id,
-                    spec,
-                    OperationOutcome.OK,
-                    queue_wait_ms=queue_wait_ms,
-                    run_ms=self._elapsed_ms(callback_started_ns, self._now_ns()),
-                )
-            finally:
-                finish_delivery()
-
-        try:
-            accepted = self._schedule(drain)
-        except Exception as error:
-            with state_lock:
-                already_finished = bool(state["finished"])
-            if not already_finished:
-                self._publish_error(
-                    delivery_id,
-                    spec,
-                    queue_wait_ms=0.0,
-                    run_ms=0.0,
-                    error=error,
-                    stage="schedule",
-                )
-                finish_delivery()
-            return delivery_id
-
-        # Legacy schedulers often return None.  Only an explicit False is a
-        # rejection; this keeps migration compatible while making new adapters
-        # able to report backpressure deterministically.
-        if accepted is False:
-            with state_lock:
-                already_finished = bool(state["finished"])
-            if not already_finished:
-                self._publish_error(
-                    delivery_id,
-                    spec,
-                    queue_wait_ms=0.0,
-                    run_ms=0.0,
-                    error=RuntimeError("UI 调度器拒绝投递"),
-                    stage="schedule",
-                )
-                finish_delivery()
+        attempt.schedule()
         return delivery_id
 
     def observe_progress(
@@ -331,137 +534,39 @@ class UiDeliveryChannel:
         Returns:
             Idempotent function that removes the progress subscription.
         """
+        self._validate_progress_observer(callback, is_current)
+        return _ProgressObserver(
+            self,
+            source,
+            callback,
+            is_current,
+        ).start()
+
+    @staticmethod
+    def _validate_post(
+        spec: UiDeliverySpec,
+        callback: UiCallback,
+        is_current: UiCurrentCheck,
+        on_complete: Optional[UiCallback],
+    ) -> None:
+        if not isinstance(spec, UiDeliverySpec):
+            raise TypeError("UI 投递必须使用 UiDeliverySpec")
+        if not callable(callback):
+            raise TypeError("UI 投递回调必须可调用")
+        if not callable(is_current):
+            raise TypeError("UI 投递 current 检查必须可调用")
+        if on_complete is not None and not callable(on_complete):
+            raise TypeError("UI 投递完成回调必须可调用")
+
+    @staticmethod
+    def _validate_progress_observer(
+        callback: ProgressCallback,
+        is_current: UiCurrentCheck,
+    ) -> None:
         if not callable(callback):
             raise TypeError("UI 进度回调必须可调用")
         if not callable(is_current):
             raise TypeError("UI 进度 current 检查必须可调用")
-
-        state_lock = threading.Lock()
-        latest_running: Optional[ProgressSnapshot] = None
-        running_scheduled = False
-        running_consumed = False
-        disposed = False
-
-        def progress_metadata(
-            snapshot: ProgressSnapshot,
-            *,
-            coalesced: bool = False,
-        ) -> dict[str, object]:
-            metadata = dict(source.metadata)
-            metadata.update(
-                {
-                    "state": snapshot.state.value,
-                    "coalesced": coalesced,
-                }
-            )
-            if not coalesced:
-                metadata.update(
-                    {
-                        "completed": snapshot.completed,
-                        "total": snapshot.total,
-                    }
-                )
-            return metadata
-
-        def guarded_current() -> bool:
-            with state_lock:
-                active = not disposed
-            return active and bool(is_current())
-
-        def build_spec(metadata: Mapping[str, object]) -> UiDeliverySpec:
-            return UiDeliverySpec(
-                task_id=source.task_id,
-                operation=source.operation,
-                feature=source.feature,
-                world_id=source.world_id,
-                generation=source.generation,
-                event="progress",
-                metadata=metadata,
-            )
-
-        def deliver_latest_running() -> None:
-            nonlocal latest_running, running_consumed
-            with state_lock:
-                snapshot = latest_running
-                latest_running = None
-                running_consumed = True
-            if snapshot is not None:
-                callback(snapshot)
-
-        def finish_running_delivery() -> None:
-            nonlocal running_consumed, running_scheduled
-            with state_lock:
-                was_consumed = running_consumed
-                running_consumed = False
-                running_scheduled = False
-                should_reschedule = (
-                    was_consumed
-                    and not disposed
-                    and latest_running is not None
-                )
-            if should_reschedule:
-                schedule_running_delivery()
-
-        def schedule_running_delivery() -> None:
-            nonlocal running_consumed, running_scheduled
-            with state_lock:
-                if disposed or running_scheduled or latest_running is None:
-                    return
-                running_scheduled = True
-                running_consumed = False
-                initial = latest_running
-            try:
-                self.post(
-                    build_spec(progress_metadata(initial, coalesced=True)),
-                    deliver_latest_running,
-                    is_current=guarded_current,
-                    on_complete=finish_running_delivery,
-                )
-            except Exception:
-                # ID/clock/spec construction can fail before ``post`` owns
-                # the completion callback.  Release the coalescing latch so
-                # a later progress snapshot can retry after a transient
-                # adapter failure.
-                with state_lock:
-                    running_scheduled = False
-
-        def on_progress(snapshot: ProgressSnapshot) -> None:
-            nonlocal latest_running
-            if snapshot.state is OperationState.RUNNING:
-                with state_lock:
-                    if disposed:
-                        return
-                    latest_running = snapshot
-                schedule_running_delivery()
-                return
-            self.post(
-                build_spec(progress_metadata(snapshot)),
-                lambda: callback(snapshot),
-                is_current=guarded_current,
-            )
-
-        source_unsubscribe = source.subscribe_progress(on_progress)
-
-        def unsubscribe() -> None:
-            nonlocal disposed, latest_running
-            with state_lock:
-                if disposed:
-                    return
-                disposed = True
-                latest_running = None
-            source_unsubscribe()
-
-        return unsubscribe
-
-    @staticmethod
-    def _run_completion(callback: Optional[UiCallback]) -> None:
-        """Run best-effort delivery cleanup without changing UI semantics."""
-        if callback is None:
-            return
-        try:
-            callback()
-        except Exception:
-            return
 
     def _new_delivery_id(self) -> str:
         """Create and validate one unique delivery identifier."""

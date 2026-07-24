@@ -1,4 +1,5 @@
 """Behavioral tests for the pure MCA map viewport."""
+import flet.canvas as cv
 import pytest
 
 from core.mca.viewport import (
@@ -206,6 +207,69 @@ def test_map_view_unmount_releases_only_its_own_tile_callback() -> None:
 
     second.will_unmount()
     assert service._tile_ready_callback is None
+    service.close()
+
+
+def test_map_view_sparse_remote_regions_use_complete_canvas_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = RegionMapService(ExecutionRuntime())
+    service._mca_data.update({(-14, -19): 1024, (195, 195): 2048})
+    view = McaMapView(map_service=service, width=1760, height=1050)
+    view._use_topview = False
+    rendered_shapes: list[cv.Shape] = []
+
+    def capture_shapes(shapes: list[cv.Shape]) -> None:
+        rendered_shapes.extend(shapes)
+
+    monkeypatch.setattr(view, "_apply_shapes", capture_shapes)
+
+    view._rebuild_canvas()
+
+    assert view._scale < 0.2
+    assert view._surface_enabled is False
+    assert view._surface_layer.covers_viewport is False
+    assert view._visible_regions == {(-14, -19), (195, 195)}
+    assert set(view._cell_bounds) == {(-14, -19), (195, 195)}
+    assert len(rendered_shapes) > len(view._empty_shapes())
+
+    view._scale = 1.0
+    view.fit_to_view()
+    assert view._scale < 0.2
+    view.dispose()
+    service.close()
+
+
+def test_map_view_falls_back_to_canvas_when_surface_becomes_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = RegionMapService(ExecutionRuntime())
+    service._mca_data[(0, 0)] = 2048
+    view = McaMapView(map_service=service, width=640, height=360)
+    view._use_topview = False
+    rendered_shapes: list[cv.Shape] = []
+
+    def capture_shapes(shapes: list[cv.Shape]) -> None:
+        rendered_shapes.extend(shapes)
+
+    monkeypatch.setattr(view, "_apply_shapes", capture_shapes)
+
+    view._rebuild_canvas()
+
+    assert view._surface_enabled is False
+    assert view._surface_layer.enabled is True
+    assert set(view._cell_bounds) == {(0, 0)}
+    assert len(rendered_shapes) > len(view._empty_shapes())
+
+    rendered_shapes.clear()
+    view._surface_layer._disable_after_upload_failure(TimeoutError())
+    view._rebuild_canvas()
+
+    assert view._surface_enabled is False
+    assert view._surface_layer.enabled is False
+    assert set(view._cell_bounds) == {(0, 0)}
+    assert len(rendered_shapes) > len(view._empty_shapes())
+    view.dispose()
     service.close()
 
 

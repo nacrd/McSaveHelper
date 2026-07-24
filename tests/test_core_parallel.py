@@ -1,13 +1,13 @@
-"""core.parallel bounds and map helpers."""
+"""core.parallel serial fallback and worker-budget helpers."""
 from __future__ import annotations
 
-import threading
+import pytest
 
 from core.parallel import (
     ABSOLUTE_MAX_WORKERS,
-    bounded_executor,
+    ParallelCancelledError,
+    SerialParallelRunner,
     clamp_workers,
-    map_unordered,
 )
 
 
@@ -18,23 +18,37 @@ def test_clamp_workers_hard_cap() -> None:
     assert clamp_workers(4, item_count=2) == 2
 
 
-def test_map_unordered_preserves_results() -> None:
-    results = map_unordered([1, 2, 3, 4], lambda n: n * n, max_workers=2)
-    assert sorted(results) == [1, 4, 9, 16]
+def test_serial_runner_preserves_order_and_collects_errors() -> None:
+    runner = SerialParallelRunner()
+
+    def transform(value: int) -> int:
+        if value == 2:
+            raise ValueError("bad item")
+        return value * value
+
+    results = runner.map("test.serial", [1, 2, 3], transform)
+
+    assert results[0] == 1
+    assert isinstance(results[1], ValueError)
+    assert results[2] == 9
 
 
-def test_map_unordered_empty_and_single() -> None:
-    assert map_unordered([], lambda n: n) == []
-    assert map_unordered([7], lambda n: n + 1) == [8]
+def test_serial_runner_observes_cancellation_before_next_item() -> None:
+    runner = SerialParallelRunner()
+    cancelled = False
 
+    def cancel_check() -> bool:
+        return cancelled
 
-def test_bounded_executor_applies_cap_and_thread_prefix() -> None:
-    with bounded_executor(max_workers=99, item_count=3) as executor:
-        futures = [
-            executor.submit(lambda: threading.current_thread().name)
-            for _ in range(3)
-        ]
-        names = [future.result(timeout=1) for future in futures]
+    def transform(value: int) -> int:
+        nonlocal cancelled
+        cancelled = True
+        return value
 
-    assert len(set(names)) <= ABSOLUTE_MAX_WORKERS
-    assert all(name.startswith("MCSaveCore") for name in names)
+    with pytest.raises(ParallelCancelledError):
+        runner.map(
+            "test.cancel",
+            [1, 2],
+            transform,
+            cancel_check=cancel_check,
+        )

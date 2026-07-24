@@ -1,6 +1,6 @@
 """Tests for the extracted map fullscreen lifecycle."""
 from types import SimpleNamespace
-from typing import cast
+from typing import Callable, cast
 
 import flet as ft
 import pytest
@@ -12,29 +12,39 @@ from app.ui.views.explorer.map.mca_map_view import McaMapView
 
 
 class _DelayedCall:
-    def __init__(self, callback):
+    def __init__(self, callback: Callable[[], None]) -> None:
         self.callback = callback
         self.cancelled = False
 
-    def cancel(self):
+    def cancel(self) -> None:
         self.cancelled = True
 
-    def fire(self):
+    def fire(self) -> None:
         self.callback()
 
 
 class _DelayedScheduler:
-    def __init__(self):
-        self.calls = []
+    def __init__(self) -> None:
+        self.calls: list[_DelayedCall] = []
 
-    def __call__(self, _delay, callback):
+    def __call__(
+        self,
+        delay: float,
+        callback: Callable[[], None],
+    ) -> _DelayedCall:
+        del delay
         call = _DelayedCall(callback)
         self.calls.append(call)
         return call
 
 
 class _FailingScheduler:
-    def __call__(self, _delay, _callback):
+    def __call__(
+        self,
+        delay: float,
+        callback: Callable[[], None],
+    ) -> None:
+        del delay, callback
         raise RuntimeError("scheduler failed")
 
 

@@ -309,18 +309,26 @@ def test_region_destructive_delete_uses_world_transaction() -> None:
 
 def test_read_paths_use_world_repository_index() -> None:
     """Stage 2: compare/stats/explorer share world_repository for inventory."""
-    compare = (
-        PROJECT_ROOT / "app/ui/views/compare.py"
-    ).read_text(encoding="utf-8")
+    from app.bootstrap.services import create_app_services
+
     stats = (
         PROJECT_ROOT / "app/ui/views/explorer/stats_tab.py"
     ).read_text(encoding="utf-8")
     explorer = (
         PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
     ).read_text(encoding="utf-8")
-    assert "world_repository.get_index" in compare or "index_provider" in compare
-    assert "world_repository.get_index" in stats
-    assert "world_repository" in explorer
+    services = create_app_services()
+    try:
+        index_provider = services.world_compare._index_provider
+        assert index_provider is not None
+        assert index_provider.__self__ is services.world_repository
+        assert "world_repository.get_index" in stats
+        assert "world_repository" in explorer
+    finally:
+        services.texture.close()
+        services.world_indexes.close()
+        services.execution_runtime.shutdown(wait=False)
+        services.cache_registry.close()
 
 
 def test_feature_context_omits_migration_only_shortcuts() -> None:
@@ -440,7 +448,7 @@ def test_business_metrics_adapt_to_operation_record_protocol() -> None:
 
 
 def test_core_algorithm_pools_use_bounded_parallel_clamp() -> None:
-    """Core residual: algorithm pools go through clamp_workers hard caps."""
+    """Core algorithms expose bounded hints without creating executors."""
     for relative in (
         "core/worker.py",
         "core/pure_cleaner.py",
@@ -450,6 +458,33 @@ def test_core_algorithm_pools_use_bounded_parallel_clamp() -> None:
     ):
         source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
         assert "clamp_workers" in source, relative
+
+
+def test_background_worker_threads_have_explicit_infrastructure_owners() -> None:
+    """Business modules cannot add private executors or ad-hoc threads."""
+    allowed_thread_owners = {
+        "app/adapters/file_dialogs.py",
+        "app/core/gui_optimizer.py",
+        "app/services/execution_runtime.py",
+        "app/ui/hang_detector.py",
+        "app/ui/performance/resource.py",
+        "core/logging/manager.py",
+    }
+    thread_violations: list[str] = []
+    executor_violations: list[str] = []
+    for root_name in ("app", "core"):
+        for path in (PROJECT_ROOT / root_name).rglob("*.py"):
+            relative = path.relative_to(PROJECT_ROOT).as_posix()
+            source = path.read_text(encoding="utf-8")
+            if "ThreadPoolExecutor(" in source:
+                executor_violations.append(relative)
+            if (
+                "threading.Thread(" in source
+                and relative not in allowed_thread_owners
+            ):
+                thread_violations.append(relative)
+    assert executor_violations == []
+    assert thread_violations == []
 
 
 def test_map_and_world_index_register_with_cache_budget() -> None:

@@ -26,6 +26,10 @@ from core.mca.surface import (
 )
 
 
+def _surface_samples(block_id: str) -> surface_module.SurfaceSamples:
+    return {(0, 0): block_id}
+
+
 def test_nested_chunk_decode_pool_keeps_a_small_cpu_budget() -> None:
     assert 1 <= _DECODE_WORKERS <= 2
     assert _CHUNK_LRU_MAX == 4096
@@ -35,7 +39,7 @@ def test_chunk_decode_cache_reports_real_hit_and_miss_counts() -> None:
     clear_chunk_decode_cache()
     key = ("region", 1, 2, 0, 0, "")
     assert _lru_get(key)[0] is False
-    _lru_merge(key, {(0, 0): "minecraft:stone"}, _lru_epoch())
+    _lru_merge(key, _surface_samples("minecraft:stone"), _lru_epoch())
     assert _lru_get(key)[0] is True
     assert chunk_decode_cache_hits() == 1
     assert chunk_decode_cache_misses() == 1
@@ -49,7 +53,7 @@ def test_chunk_decode_cache_accounts_for_empty_sample_merges() -> None:
 
     _lru_merge(key, {}, _lru_epoch())
     first_bytes = surface_module.chunk_decode_cache_bytes()
-    samples = {(0, 0): "minecraft:stone"}
+    samples = _surface_samples("minecraft:stone")
     _lru_merge(key, samples, _lru_epoch())
 
     assert first_bytes == surface_module._estimate_surface_samples_bytes({})
@@ -73,8 +77,8 @@ def test_chunk_decode_cache_invalidation_is_scoped_to_one_world(tmp_path) -> Non
         0,
         "",
     )
-    _lru_merge(first_key, {(0, 0): "minecraft:stone"}, _lru_epoch())
-    _lru_merge(second_key, {(0, 0): "minecraft:dirt"}, _lru_epoch())
+    _lru_merge(first_key, _surface_samples("minecraft:stone"), _lru_epoch())
+    _lru_merge(second_key, _surface_samples("minecraft:dirt"), _lru_epoch())
 
     assert invalidate_chunk_decode_cache_for_world(first_world) == 1
     assert _lru_get(first_key)[0] is False

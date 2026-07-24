@@ -109,9 +109,9 @@ class _UiScheduledCall:
         """关联 Flet 返回的任务，并处理关联前已经发生的取消。"""
         with self._lock:
             self._task = task
-            should_cancel = self._cancelled and task is not None
-        if should_cancel:
-            self._cancel_task(task)
+            task_to_cancel = task if self._cancelled else None
+        if task_to_cancel is not None:
+            self._cancel_task(task_to_cancel)
 
     def claim(self) -> bool:
         """原子抢占回调执行权；取消先发生时返回 False。"""

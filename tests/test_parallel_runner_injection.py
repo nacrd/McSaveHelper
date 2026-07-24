@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Optional, Sequence, TypeVar
+from typing import Any, Callable, Optional, Sequence, TypeVar, cast
 
 import pytest
 
@@ -12,6 +12,7 @@ import core.full_mode as full_mode
 import core.mca.surface as surface
 import core.pure_cleaner as pure_cleaner
 import core.worker as worker
+from core.mca import RegionFile
 from core.parallel import ParallelRunner
 
 
@@ -160,7 +161,7 @@ def test_surface_decoder_uses_injected_runner(
     surface.clear_chunk_decode_cache()
     views: dict[tuple[int, int], Optional[Any]] = {}
     surface._decode_misses_with_runner(
-        object(),
+        cast(RegionFile, object()),
         [(0, 0, [(0, 0)]), (1, 0, [(0, 0)])],
         "region",
         1,

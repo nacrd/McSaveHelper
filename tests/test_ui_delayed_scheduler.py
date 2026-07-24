@@ -1,5 +1,8 @@
 import asyncio
 from concurrent.futures import Future
+from typing import cast
+
+import flet as ft
 
 from app.ui.delayed_scheduler import UiDelayedScheduler
 
@@ -16,7 +19,7 @@ class _Page:
 def test_ui_delayed_scheduler_runs_callback_once_on_page_loop() -> None:
     page = _Page()
     calls = []
-    scheduler = UiDelayedScheduler(lambda: page)
+    scheduler = UiDelayedScheduler(lambda: cast(ft.Page, page))
 
     scheduler(0.0, lambda: calls.append("run"))
     handler = page.handlers.pop()
@@ -29,7 +32,7 @@ def test_ui_delayed_scheduler_runs_callback_once_on_page_loop() -> None:
 def test_ui_delayed_scheduler_cancel_blocks_callback_even_if_task_drains() -> None:
     page = _Page()
     calls = []
-    scheduler = UiDelayedScheduler(lambda: page)
+    scheduler = UiDelayedScheduler(lambda: cast(ft.Page, page))
 
     handle = scheduler(0.0, lambda: calls.append("run"))
     assert handle is not None

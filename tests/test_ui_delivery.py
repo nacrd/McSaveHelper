@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import pytest
 
@@ -49,6 +49,44 @@ class _Clock:
         if not self.values:
             raise AssertionError("test clock exhausted")
         return self.values.pop(0)
+
+
+class _ProgressSource:
+    """Typed progress source backed by a real reporter."""
+
+    def __init__(self, task_id: str, reporter: ProgressReporter) -> None:
+        self._task_id = task_id
+        self._reporter = reporter
+
+    @property
+    def task_id(self) -> str:
+        return self._task_id
+
+    @property
+    def operation(self) -> str:
+        return "render"
+
+    @property
+    def feature(self) -> str:
+        return "map"
+
+    @property
+    def world_id(self) -> str:
+        return "world-a"
+
+    @property
+    def generation(self) -> int:
+        return 1
+
+    @property
+    def metadata(self) -> Mapping[str, object]:
+        return {}
+
+    def subscribe_progress(
+        self,
+        callback: Callable[[ProgressSnapshot], None],
+    ) -> Callable[[], None]:
+        return self._reporter.subscribe(callback)
 
 
 def _spec() -> UiDeliverySpec:
@@ -122,7 +160,7 @@ def test_post_drops_stale_result_at_drain_time_and_records_queue_delay() -> None
 
 def test_scheduler_rejection_records_error_without_queuing_callback() -> None:
     records: list[OperationRecord] = []
-    channel = UiDeliveryChannel(lambda _callback: False, records.append)
+    channel = UiDeliveryChannel(lambda callback: False, records.append)
     delivered: list[str] = []
 
     delivery_id = channel.post(
@@ -142,7 +180,8 @@ def test_scheduler_rejection_records_error_without_queuing_callback() -> None:
 def test_scheduler_exception_records_error() -> None:
     records: list[OperationRecord] = []
 
-    def fail(_callback: Callable[[], None]) -> bool:
+    def fail(callback: Callable[[], None]) -> bool:
+        del callback
         raise OSError("page closed")
 
     channel = UiDeliveryChannel(fail, records.append)
@@ -210,6 +249,10 @@ def test_cancel_progress_reaches_ui_callback_within_budget() -> None:
     observed = threading.Event()
     snapshots: list[ProgressSnapshot] = []
 
+    def capture_progress(snapshot: ProgressSnapshot) -> None:
+        snapshots.append(snapshot)
+        observed.set()
+
     def work(context: OperationContext) -> None:
         started.set()
         release.wait(1)
@@ -223,7 +266,7 @@ def test_cancel_progress_reaches_ui_callback_within_budget() -> None:
     )
     unsubscribe = channel.observe_progress(
         handle,
-        lambda snapshot: (snapshots.append(snapshot), observed.set()),
+        capture_progress,
         is_current=lambda: True,
     )
     try:
@@ -248,19 +291,7 @@ def test_running_progress_is_coalesced_to_latest_queued_snapshot() -> None:
     scheduler = _QueuedScheduler()
     records: list[OperationRecord] = []
     reporter = ProgressReporter("task-progress", "render", generation=1)
-    source = type(
-        "Source",
-        (),
-        {
-            "task_id": "task-progress",
-            "operation": "render",
-            "feature": "map",
-            "world_id": "world-a",
-            "generation": 1,
-            "metadata": {},
-            "subscribe_progress": reporter.subscribe,
-        },
-    )()
+    source = _ProgressSource("task-progress", reporter)
     channel = UiDeliveryChannel(scheduler, records.append)
     delivered: list[ProgressSnapshot] = []
     unsubscribe = channel.observe_progress(
@@ -290,24 +321,13 @@ def test_running_progress_is_coalesced_to_latest_queued_snapshot() -> None:
 
 def test_rejected_running_progress_is_not_rescheduled_recursively() -> None:
     reporter = ProgressReporter("task-rejected", "render", generation=1)
-    source = type(
-        "Source",
-        (),
-        {
-            "task_id": "task-rejected",
-            "operation": "render",
-            "feature": "map",
-            "world_id": "world-a",
-            "generation": 1,
-            "metadata": {},
-            "subscribe_progress": reporter.subscribe,
-        },
-    )()
+    source = _ProgressSource("task-rejected", reporter)
     schedule_calls = 0
     records: list[OperationRecord] = []
 
-    def reject(_callback: Callable[[], None]) -> bool:
+    def reject(callback: Callable[[], None]) -> bool:
         nonlocal schedule_calls
+        del callback
         schedule_calls += 1
         return False
 
@@ -335,19 +355,7 @@ def test_running_progress_recovers_after_delivery_setup_failure(
 ) -> None:
     scheduler = _QueuedScheduler()
     reporter = ProgressReporter("task-retry", "render", generation=1)
-    source = type(
-        "Source",
-        (),
-        {
-            "task_id": "task-retry",
-            "operation": "render",
-            "feature": "map",
-            "world_id": "world-a",
-            "generation": 1,
-            "metadata": {},
-            "subscribe_progress": reporter.subscribe,
-        },
-    )()
+    source = _ProgressSource("task-retry", reporter)
     id_attempts = 0
     clock_attempts = 0
 

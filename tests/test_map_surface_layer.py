@@ -26,6 +26,23 @@ class _ImageSink:
         self.frames.append((width, height, pixels))
 
 
+class _FailingImageSink:
+    def __init__(self) -> None:
+        self.render_calls = 0
+
+    async def render_rgba(
+        self,
+        width: int,
+        height: int,
+        pixels: bytes,
+        *,
+        premultiplied: bool,
+    ) -> None:
+        del width, height, pixels, premultiplied
+        self.render_calls += 1
+        raise TimeoutError
+
+
 class _RendererProbe:
     def __init__(self) -> None:
         self.close_calls = 0
@@ -142,6 +159,7 @@ def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
         service._mca_data[(0, 0)] = 1
         service._mark_data_dirty()
         active = True
+        ready_calls: list[str] = []
 
         def schedule(
             coro: Coroutine[Any, Any, Any],
@@ -155,6 +173,7 @@ def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
             request_rebuild=lambda: None,
             is_active=lambda: active,
             background_color="#162016",
+            on_ready=lambda: ready_calls.append("ready"),
         )
         sink = _ImageSink()
         layer.image = sink
@@ -174,6 +193,7 @@ def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
         assert task is not None
         await cast(asyncio.Future[Any], task)
         assert len(sink.frames) == 1
+        assert ready_calls == ["ready"]
 
         viewport.pan(8.0, -5.0)
         missing_after_reuse = layer.sync(
@@ -187,10 +207,138 @@ def test_surface_layer_reuses_uploaded_frame_for_small_camera_pan() -> None:
         )
 
         assert len(sink.frames) == 1
+        assert ready_calls == ["ready"]
         assert missing_after_reuse == [(0, 0)]
         assert layer.control is not None
         assert layer.control.left is not None
         service.close()
+
+    asyncio.run(scenario())
+
+
+def test_surface_layer_uses_canvas_until_new_zoom_lod_is_uploaded() -> None:
+    async def scenario() -> None:
+        runtime = ExecutionRuntime()
+        service = RegionMapService(runtime)
+        service._mca_data[(0, 0)] = 1
+        service._mark_data_dirty()
+        ready_calls: list[str] = []
+
+        def schedule(
+            coro: Coroutine[Any, Any, Any],
+        ) -> Optional[ScheduledTask]:
+            return asyncio.create_task(coro)
+
+        layer = MapSurfaceLayer(
+            service,
+            execution_runtime=runtime,
+            schedule_task=schedule,
+            request_rebuild=lambda: None,
+            is_active=lambda: True,
+            background_color="#162016",
+            on_ready=lambda: ready_calls.append("ready"),
+        )
+        sink = _ImageSink()
+        layer.image = sink
+        viewport = McaViewport(scale=1.0)
+
+        layer.sync(
+            viewport,
+            width=640,
+            height=360,
+            data=service.get_all_data(),
+            display_mode="topview",
+            use_topview=True,
+            color_for_region=lambda _coord, _size: "#4CAF50",
+        )
+        first_task = layer._task
+        assert first_task is not None
+        await cast(asyncio.Future[Any], first_task)
+        assert layer.covers_viewport is True
+
+        viewport.scale = 4.0
+        layer.sync(
+            viewport,
+            width=640,
+            height=360,
+            data=service.get_all_data(),
+            display_mode="topview",
+            use_topview=True,
+            color_for_region=lambda _coord, _size: "#4CAF50",
+        )
+        second_task = layer._task
+        assert second_task is not None
+        assert layer.covers_viewport is False
+
+        await cast(asyncio.Future[Any], second_task)
+        assert layer.covers_viewport is True
+        assert ready_calls == ["ready", "ready"]
+        assert len(sink.frames) == 2
+        layer.close()
+        service.close()
+        runtime.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_surface_layer_disables_raw_image_after_upload_timeout() -> None:
+    async def scenario() -> None:
+        runtime = ExecutionRuntime()
+        service = RegionMapService(runtime)
+        service._mca_data[(0, 0)] = 1
+        service._mark_data_dirty()
+        failures: list[Exception] = []
+
+        def schedule(
+            coro: Coroutine[Any, Any, Any],
+        ) -> Optional[ScheduledTask]:
+            return asyncio.create_task(coro)
+
+        layer = MapSurfaceLayer(
+            service,
+            execution_runtime=runtime,
+            schedule_task=schedule,
+            request_rebuild=lambda: None,
+            is_active=lambda: True,
+            background_color="#162016",
+            on_unavailable=failures.append,
+        )
+        sink = _FailingImageSink()
+        layer.image = sink
+        viewport = McaViewport()
+
+        layer.sync(
+            viewport,
+            width=640,
+            height=360,
+            data=service.get_all_data(),
+            display_mode="topview",
+            use_topview=True,
+            color_for_region=lambda _coord, _size: "#4CAF50",
+        )
+        task = layer._task
+        assert task is not None
+        await cast(asyncio.Future[Any], task)
+
+        assert layer.enabled is False
+        assert len(failures) == 1
+        assert isinstance(failures[0], TimeoutError)
+        assert sink.render_calls == 1
+
+        layer.sync(
+            viewport,
+            width=640,
+            height=360,
+            data=service.get_all_data(),
+            display_mode="topview",
+            use_topview=True,
+            color_for_region=lambda _coord, _size: "#4CAF50",
+        )
+        assert sink.render_calls == 1
+        assert len(failures) == 1
+        layer.close()
+        service.close()
+        runtime.shutdown()
 
     asyncio.run(scenario())
 
@@ -220,6 +368,34 @@ def test_surface_layer_ignores_tile_callbacks_outside_buffer() -> None:
 
     assert layer.mark_tile_ready((100, 100)) is False
     assert layer.mark_tile_ready((0, 0)) is True
+    service.close()
+
+
+def test_surface_layer_rejects_candidate_that_crops_visible_viewport() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    layer = MapSurfaceLayer(
+        service,
+        execution_runtime=service._execution_runtime,
+        schedule_task=lambda _coro: None,
+        request_rebuild=lambda: None,
+        is_active=lambda: False,
+        background_color="#162016",
+        max_regions=8,
+    )
+
+    layer.sync(
+        McaViewport(scale=1.0),
+        width=640,
+        height=360,
+        data={(0, 0): 1},
+        display_mode="topview",
+        use_topview=True,
+        color_for_region=lambda _coord, _size: "#4CAF50",
+    )
+
+    assert layer.covers_viewport is False
+    assert layer._request_spec is None
+    assert layer._task is None
     service.close()
 
 

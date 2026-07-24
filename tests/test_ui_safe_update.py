@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
+from typing import cast
+
+import flet as ft
 
 from app.ui.utils import (
     is_control_update_error,
     safe_update,
+    schedule_coroutine,
     schedule_on_ui,
     set_app_closing,
 )
@@ -63,3 +68,31 @@ def test_schedule_on_ui_reports_acceptance_and_runs_callback() -> None:
         assert schedule_on_ui(page, lambda: None) is False  # type: ignore[arg-type]
     finally:
         set_app_closing(False)
+
+
+def test_schedule_coroutine_without_ui_loop_closes_coroutine() -> None:
+    async def pending() -> None:
+        await asyncio.sleep(0)
+
+    coroutine = pending()
+
+    assert schedule_coroutine(coroutine) is None
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED
+
+
+def test_schedule_coroutine_closes_after_page_rejects_task() -> None:
+    async def pending() -> None:
+        await asyncio.sleep(0)
+
+    page = cast(
+        ft.Page,
+        SimpleNamespace(
+            run_task=lambda _factory: (_ for _ in ()).throw(
+                RuntimeError("page closed")
+            ),
+        ),
+    )
+    coroutine = pending()
+
+    assert schedule_coroutine(coroutine, page=page) is None
+    assert inspect.getcoroutinestate(coroutine) == inspect.CORO_CLOSED

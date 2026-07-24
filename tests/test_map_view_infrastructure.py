@@ -1,5 +1,6 @@
 import base64
 import threading
+from typing import Callable
 
 import pytest
 
@@ -31,7 +32,12 @@ def test_rebuild_scheduler_requests_immediately_only_while_active() -> None:
     active = True
 
     class _Scheduler:
-        def __call__(self, _delay, callback):
+        def __call__(
+            self,
+            delay: float,
+            callback: Callable[[], None],
+        ) -> None:
+            del delay
             callback()
             return None
 
@@ -56,18 +62,23 @@ def test_rebuild_scheduler_cancel_invalidates_delayed_callback() -> None:
     active = True
 
     class _Call:
-        def __init__(self, callback):
+        def __init__(self, callback: Callable[[], None]) -> None:
             self.callback = callback
             self.cancelled = False
 
-        def cancel(self):
+        def cancel(self) -> None:
             self.cancelled = True
 
-        def fire(self):
+        def fire(self) -> None:
             self.callback()
 
     class _Scheduler:
-        def __call__(self, _delay, callback):
+        def __call__(
+            self,
+            delay: float,
+            callback: Callable[[], None],
+        ) -> _Call:
+            del delay
             call = _Call(callback)
             pending.append(call)
             return call
@@ -93,7 +104,11 @@ def test_rebuild_scheduler_clears_pending_after_schedule_failure(
 ) -> None:
     calls = []
 
-    def schedule_delayed(_delay, _callback):
+    def schedule_delayed(
+        delay: float,
+        callback: Callable[[], None],
+    ) -> None:
+        del delay, callback
         if should_raise:
             raise RuntimeError("scheduler failed")
         return None

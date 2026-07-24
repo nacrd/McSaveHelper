@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from concurrent.futures import Future as ConcurrentFuture
 from typing import Any, Callable, Coroutine, Optional
 
@@ -148,7 +147,7 @@ def schedule_coroutine(
     *,
     page: Optional[ft.Page] = None,
 ) -> Optional[ScheduledTask]:
-    """Schedule a coroutine on the active loop, Flet page, or worker loop."""
+    """Schedule a coroutine on the active or Flet-owned UI loop."""
     try:
         return asyncio.get_running_loop().create_task(coroutine)
     except RuntimeError:
@@ -161,18 +160,12 @@ def schedule_coroutine(
 
             return page.run_task(_runner)
         except Exception as exc:
-            if not is_control_update_error(exc):
-                pass
+            coroutine.close()
+            if is_control_update_error(exc):
+                return None
+            raise
 
-    def _run_in_thread() -> None:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(coroutine)
-        finally:
-            loop.close()
-
-    threading.Thread(target=_run_in_thread, daemon=True).start()
+    coroutine.close()
     return None
 
 
