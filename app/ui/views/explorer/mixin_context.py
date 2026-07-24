@@ -7,6 +7,7 @@ import flet as ft
 
 from app.models.nbt_edit import NbtStageStore
 from app.presenters.nbt_view_state import NbtViewState
+from app.presenters.player_avatar_state import PlayerAvatarState
 from app.presenters.quick_backup_state import QuickBackupState
 from app.presenters.stats_view_state import StatsAnalysisState
 from app.services.execution_runtime import OperationScope
@@ -119,6 +120,7 @@ class ExplorerMixinHost:
 
     _current_player_data: Optional[Any]
     _nbt_view_state: NbtViewState
+    _player_avatar_state: PlayerAvatarState
     _current_dimension: str
     _dimension_region_dirs: Dict[str, str]
     _selected_region_coord: Optional[Tuple[int, int]]

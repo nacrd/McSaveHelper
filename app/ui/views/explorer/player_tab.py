@@ -7,6 +7,14 @@ from typing import Any, Dict, List, Optional
 import flet as ft
 
 from app.presenters.nbt_view_state import clear_chunk_target, set_nbt_target
+from app.presenters.player_avatar_state import (
+    AvatarRequestKind,
+    PlayerAvatarState,
+    avatar_generation,
+    begin_avatar_requests,
+    close_avatar_requests,
+    owns_avatar_request,
+)
 from app.services.asset_import import (
     AssetImportCounts,
     pick_asset_sources,
@@ -166,7 +174,7 @@ class PlayerTabMixin(ExplorerMixinHost):
 
     def _build_player_tab(self) -> None:
         t = self._t
-        self._player_avatar_generation = 0
+        self._player_avatar_state = PlayerAvatarState()
         self._player_tab_operations()
         self._player_refs_cache: List[Any] = []
         self._player_list_tiles: Dict[str, ft.Container] = {}
@@ -836,8 +844,9 @@ class PlayerTabMixin(ExplorerMixinHost):
         tiles: List[ft.Control] = []
         self._player_list_tiles = {}
         self._player_list_avatars: Dict[str, ft.CircleAvatar] = {}
-        self._player_list_avatar_gen = (
-            getattr(self, "_player_list_avatar_gen", 0) + 1
+        self._player_avatar_state = begin_avatar_requests(
+            self._player_avatar_state,
+            AvatarRequestKind.LIST,
         )
         if list_state.total_count == 0:
             tiles.append(
@@ -1000,11 +1009,18 @@ class PlayerTabMixin(ExplorerMixinHost):
         if avatar is None:
             return
         service = self._player_avatar_service()
-        generation = getattr(self, "_player_list_avatar_gen", 0)
+        generation = avatar_generation(
+            self._player_avatar_state,
+            AvatarRequestKind.LIST,
+        )
 
         def on_loaded(path: Optional[str]) -> None:
             def apply() -> None:
-                if generation != getattr(self, "_player_list_avatar_gen", 0):
+                if not owns_avatar_request(
+                    self._player_avatar_state,
+                    AvatarRequestKind.LIST,
+                    generation,
+                ):
                     return
                 current = getattr(self, "_player_list_avatars", {}).get(
                     ref.uuid_norm
@@ -1233,15 +1249,23 @@ class PlayerTabMixin(ExplorerMixinHost):
     ) -> None:
         if not hasattr(self, "_player_hud"):
             return
-        self._player_avatar_generation = getattr(
-            self, "_player_avatar_generation", 0
-        ) + 1
-        generation = self._player_avatar_generation
+        self._player_avatar_state = begin_avatar_requests(
+            self._player_avatar_state,
+            AvatarRequestKind.DETAIL,
+        )
+        generation = avatar_generation(
+            self._player_avatar_state,
+            AvatarRequestKind.DETAIL,
+        )
         service = self._player_avatar_service()
 
         def on_loaded(path: Optional[str]) -> None:
             def apply() -> None:
-                if generation != getattr(self, "_player_avatar_generation", 0):
+                if not owns_avatar_request(
+                    self._player_avatar_state,
+                    AvatarRequestKind.DETAIL,
+                    generation,
+                ):
                     return
                 if not hasattr(self, "_player_hud"):
                     return
@@ -1749,8 +1773,8 @@ class PlayerTabMixin(ExplorerMixinHost):
         operations = getattr(self, "_player_tab_operations_instance", None)
         if operations is not None:
             operations.close()
-        for name in ("_player_avatar_generation", "_player_list_avatar_gen"):
-            setattr(self, name, int(getattr(self, name, 0) or 0) + 1)
+        state = getattr(self, "_player_avatar_state", PlayerAvatarState())
+        self._player_avatar_state = close_avatar_requests(state)
         for name in (
             "_equipment",
             "_inventory",
