@@ -17,7 +17,6 @@ import json
 import statistics
 import sys
 import tempfile
-import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -29,10 +28,10 @@ if str(ROOT) not in sys.path:
 from app.services.backup_service import BackupService  # noqa: E402
 from app.services.cache_registry import CachePolicy, CacheRegistry  # noqa: E402
 from app.services.execution_runtime import (  # noqa: E402
-    ExecutionLane,
     ExecutionRuntime,
     LaneLimits,
 )
+from app.services.runtime_probes import probe_stale_ui_delivery  # noqa: E402
 from app.services.world_index_service import WorldIndexRegistry  # noqa: E402
 from app.services.world_repository import WorldRepository  # noqa: E402
 from app.services.world_write_coordinator import WorldWriteCoordinator  # noqa: E402
@@ -269,37 +268,14 @@ def _bench_runtime_and_stale() -> dict[str, Any]:
     limits = LaneLimits(max_workers=2, queue_capacity=8)
     runtime = ExecutionRuntime(io_limits=limits, cpu_limits=limits)
     cache = CacheRegistry(budget_bytes=1024 * 1024)
-    region = cache.create_region("bench.tiles", CachePolicy(4, 512 * 1024))
-    generation = 0
-    accepted = 0
-    stale = 0
-    lock = threading.Lock()
-    started = threading.Event()
-    release = threading.Event()
+    cache.create_region("bench.tiles", CachePolicy(4, 512 * 1024))
 
-    def worker(token: Any, gen: int) -> None:
-        nonlocal accepted, stale
-        del token
-        started.set()
-        release.wait(1)
-        with lock:
-            if gen != generation:
-                stale += 1
-            else:
-                accepted += 1
-                region.put(f"tile-{accepted}", b"x" * 64, 64)
+    def schedule(callback: Callable[[], None]) -> bool:
+        callback()
+        return True
 
     try:
-        first = runtime.submit(
-            "stale_callback_probe",
-            lambda token: worker(token, generation),
-            lane=ExecutionLane.CPU,
-        )
-        if not started.wait(1):
-            raise RuntimeError("stale 回调探针未启动")
-        generation += 1
-        release.set()
-        first.result(timeout=1)
+        stale_result = probe_stale_ui_delivery(schedule)
         snapshot = runtime.snapshot()
         cache_stats = cache.stats()
         return {
@@ -308,13 +284,13 @@ def _bench_runtime_and_stale() -> dict[str, Any]:
                 for lane, count in snapshot.worker_count_by_lane.items()
             },
             "active_tasks": runtime.active_task_count,
-            "stale_callbacks": stale,
-            "accepted_callbacks": accepted,
+            "stale_callbacks": int(stale_result.outcome.value == "stale"),
+            "accepted_callbacks": int(stale_result.callback_delivered),
+            "stale_queue_wait_ms": round(stale_result.queue_wait_ms, 3),
             "cache_bytes_used": cache_stats.bytes_used,
             "cache_budget_bytes": cache_stats.budget_bytes,
         }
     finally:
-        release.set()
         runtime.shutdown(wait=True)
         cache.close()
 

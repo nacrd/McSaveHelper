@@ -14,9 +14,9 @@ from app.services.execution_runtime import (
     ExecutionLane,
     ExecutionRuntime,
     LaneLimits,
-    OperationCancelledError,
     TaskQueueFullError,
 )
+from app.services.runtime_probes import probe_cancel_latency_ms
 from app.services.world_index_service import WorldIndexRegistry
 from app.services.world_write_coordinator import (
     WorldOperationBusyError,
@@ -53,7 +53,6 @@ def _runtime_budget_probe() -> dict[str, int | bool | float]:
     release = threading.Event()
     first = None
     queued = None
-    cancelled = None
 
     def wait_for_release(token: Any) -> None:
         started.set()
@@ -88,27 +87,10 @@ def _runtime_budget_probe() -> dict[str, int | bool | float]:
         first.result(timeout=1)
         queued.result(timeout=1)
 
-        cancel_started = threading.Event()
-
-        def wait_for_cancel(token: Any) -> None:
-            cancel_started.set()
-            token.wait(1)
-            token.raise_if_cancelled()
-
-        cancelled = runtime.submit(
-            "bench_cancel",
-            wait_for_cancel,
+        cancel_latency_ms = probe_cancel_latency_ms(
+            runtime,
             lane=ExecutionLane.CPU,
         )
-        if not cancel_started.wait(1):
-            raise RuntimeError("取消延迟基准任务未启动")
-        cancel_start = time.perf_counter()
-        cancelled.cancel()
-        try:
-            cancelled.result(timeout=1)
-        except OperationCancelledError:
-            pass
-        cancel_latency_ms = (time.perf_counter() - cancel_start) * 1000.0
         active_after_cancel = runtime.active_task_count
         return {
             "cpu_workers": workers,
@@ -119,7 +101,7 @@ def _runtime_budget_probe() -> dict[str, int | bool | float]:
         }
     finally:
         release.set()
-        for handle in (first, queued, cancelled):
+        for handle in (first, queued):
             if handle is None or handle.done:
                 continue
             handle.cancel()
