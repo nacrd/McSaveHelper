@@ -202,20 +202,13 @@ class PerfTracker:
         """
         start_time = time.perf_counter()
         start_memory = self._get_memory_mb()
-
-        with self._lock:
-            metric = self._metrics.get(operation)
-            if metric is None:
-                metric = PerformanceMetrics(
-                    operation=operation,
-                    duration_seconds=0.0,
-                    memory_peak_mb=0.0,
-                    memory_delta_mb=0.0,
-                    metadata=dict(metadata or {}),
-                )
-                self._metrics[operation] = metric
-            elif metadata:
-                metric.metadata.update(metadata)
+        metric = PerformanceMetrics(
+            operation=operation,
+            duration_seconds=0.0,
+            memory_peak_mb=0.0,
+            memory_delta_mb=0.0,
+            metadata=dict(metadata or {}),
+        )
         stack = getattr(self._local, "stack", None)
         if stack is None:
             stack = []
@@ -230,14 +223,41 @@ class PerfTracker:
             memory_delta = current_mem - start_memory if current_mem > 0 else 0.0
             memory_peak = current_mem if current_mem > 0 else 0.0
 
-            with self._lock:
-                metric.duration_seconds += duration
-                metric.memory_peak_mb = max(metric.memory_peak_mb, memory_peak)
-                metric.memory_delta_mb += memory_delta
+            metric.duration_seconds = duration
+            metric.memory_peak_mb = memory_peak
+            metric.memory_delta_mb = memory_delta
+            self._merge_metric(metric)
 
             self._log_metrics(metric)
             self._publish_metrics(metric)
             stack.pop()
+
+    def _merge_metric(self, sample: PerformanceMetrics) -> None:
+        """把独立单次样本合并到兼容的按操作累计查询中。"""
+        with self._lock:
+            aggregate = self._metrics.get(sample.operation)
+            if aggregate is None:
+                self._metrics[sample.operation] = PerformanceMetrics(
+                    operation=sample.operation,
+                    duration_seconds=sample.duration_seconds,
+                    memory_peak_mb=sample.memory_peak_mb,
+                    memory_delta_mb=sample.memory_delta_mb,
+                    files_processed=sample.files_processed,
+                    bytes_processed=sample.bytes_processed,
+                    errors=sample.errors,
+                    metadata=dict(sample.metadata),
+                )
+                return
+            aggregate.duration_seconds += sample.duration_seconds
+            aggregate.memory_peak_mb = max(
+                aggregate.memory_peak_mb,
+                sample.memory_peak_mb,
+            )
+            aggregate.memory_delta_mb += sample.memory_delta_mb
+            aggregate.files_processed += sample.files_processed
+            aggregate.bytes_processed += sample.bytes_processed
+            aggregate.errors += sample.errors
+            aggregate.metadata.update(sample.metadata)
 
     def _current_metric(self) -> Optional[PerformanceMetrics]:
         stack = getattr(self._local, "stack", None)

@@ -1,6 +1,9 @@
 """Unified observability protocol and UI adapter."""
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 from core.observability import (
     OperationOutcome,
     metrics_to_operation_record,
@@ -40,6 +43,51 @@ def test_perf_tracker_sink_receives_metrics() -> None:
     assert len(published) == 1
     assert published[0].operation == "unit"
     assert published[0].files_processed == 2
+
+
+def test_perf_tracker_publishes_independent_samples_and_keeps_aggregate() -> None:
+    published: list[PerformanceMetrics] = []
+    tracker = PerfTracker(metrics_sink=published.append)
+
+    with tracker.track("repeat", {"run": "first"}):
+        tracker.increment_files(2)
+    with tracker.track("repeat", {"run": "second"}):
+        tracker.increment_files(3)
+
+    assert len(published) == 2
+    assert published[0] is not published[1]
+    assert [sample.files_processed for sample in published] == [2, 3]
+    assert [sample.metadata["run"] for sample in published] == [
+        "first",
+        "second",
+    ]
+    aggregate = tracker.get_metrics("repeat")
+    assert aggregate is not None
+    assert aggregate.files_processed == 5
+    assert aggregate.duration_seconds >= sum(
+        sample.duration_seconds for sample in published
+    )
+
+
+def test_perf_tracker_isolates_concurrent_samples_for_same_operation() -> None:
+    published: list[PerformanceMetrics] = []
+    tracker = PerfTracker(metrics_sink=published.append)
+    barrier = threading.Barrier(2)
+
+    def run_sample(files: int) -> None:
+        with tracker.track("concurrent"):
+            tracker.increment_files(files)
+            barrier.wait(timeout=2)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(run_sample, files) for files in (2, 3)]
+        for future in futures:
+            future.result(timeout=2)
+
+    assert sorted(sample.files_processed for sample in published) == [2, 3]
+    aggregate = tracker.get_metrics("concurrent")
+    assert aggregate is not None
+    assert aggregate.files_processed == 5
 
 
 def test_ui_monitor_records_operation_protocol() -> None:
