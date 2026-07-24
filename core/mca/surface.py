@@ -429,7 +429,6 @@ def _build_all_lod_samples(
     return {chunk: sorted(samples) for chunk, samples in by_chunk.items()}
 
 
-_ALL_LOD_SAMPLES = _build_all_lod_samples()
 _FOCUSED_LOD_SAMPLES = _build_all_lod_samples(256)
 
 
@@ -458,9 +457,9 @@ def _load_chunk_views(
     views: Dict[Tuple[int, int], Optional[Any]] = {}
     jobs_by_chunk = _jobs_by_chunk(jobs)
     requested_edge = _requested_edge(jobs)
-    # Preview LODs should only decode the points they display.  Once a focused
-    # tile reaches 64px, preload the higher-detail positions for that chunk so
-    # subsequent 128/256/512 upgrades reuse one NBT decode.
+    # Preview LODs decode only displayed points. Intermediate 64/128px tiles
+    # preload the normal 256px ceiling, while direct 256/512px requests avoid
+    # reverse-preloading lower grids that cannot improve their output.
     preload_detail_positions = requested_edge >= 64
     external_signatures = external_signatures or {}
     cache_epoch = _lru_epoch()
@@ -576,13 +575,8 @@ def _collect_chunk_cache_misses(
         if hit and all(position in view for position in requested):
             views[(chunk_x, chunk_z)] = _SurfaceView(view)
             continue
-        if preload_detail_positions:
-            source_samples = (
-                _ALL_LOD_SAMPLES
-                if requested_edge >= 512
-                else _FOCUSED_LOD_SAMPLES
-            )
-            all_lod_positions = source_samples.get(
+        if preload_detail_positions and requested_edge < 256:
+            all_lod_positions = _FOCUSED_LOD_SAMPLES.get(
                 (chunk_x, chunk_z),
                 requested,
             )

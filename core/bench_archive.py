@@ -62,6 +62,15 @@ def extract_p95_rows(report: Mapping[str, Any]) -> list[dict[str, Any]]:
                 ),
                 "topview_tile_size": topview.get("tile_size"),
                 "topview_path": topview.get("path_semantics"),
+                "topview_visible_upgrade_p95_ms": topview.get(
+                    "visible_upgrade_p95_ms"
+                ),
+                "topview_visible_warm_p95_ms": topview.get(
+                    "visible_process_warm_p95_ms"
+                ),
+                "topview_visible_tile_size": topview.get(
+                    "visible_upgrade_tile_size"
+                ),
                 "shell_p95_ms": session.get("shell_open_p95_ms"),
                 "cold_session_p95_ms": session.get("cold_open_p95_ms"),
                 "warm_session_p95_ms": session.get(
@@ -136,14 +145,16 @@ def render_markdown_report(
             "",
             "| size | MCA open p95 | MCA read p95 | level NBT p95 | "
             "player NBT p95 | tile cold p95 | tile process-warm p95 | "
-            "tile disk-cache p95 | backup p95 |",
-            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+            "tile disk-cache p95 | visible upgrade p95 | "
+            "visible process-warm p95 | backup p95 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
         ]
     )
     for row in rows:
         lines.append(
             "| {size} | {mca_open} | {mca_read} | {level_nbt} | "
-            "{player_nbt} | {tile} | {process_warm} | {cache} | {backup} |".format(
+            "{player_nbt} | {tile} | {process_warm} | {cache} | "
+            "{visible_upgrade} | {visible_warm} | {backup} |".format(
                 size=row.get("size") or row.get("label") or "?",
                 mca_open=_cell(row.get("mca_open_p95_ms")),
                 mca_read=_cell(row.get("mca_read_p95_ms")),
@@ -152,6 +163,10 @@ def render_markdown_report(
                 tile=_cell(row.get("topview_p95_ms")),
                 process_warm=_cell(row.get("topview_process_warm_p95_ms")),
                 cache=_cell(row.get("topview_cache_p95_ms")),
+                visible_upgrade=_cell(
+                    row.get("topview_visible_upgrade_p95_ms")
+                ),
+                visible_warm=_cell(row.get("topview_visible_warm_p95_ms")),
                 backup=_cell(row.get("backup_p95_ms")),
             )
         )
@@ -162,8 +177,8 @@ def render_markdown_report(
                 "## Real sample metadata",
                 "",
                 "| size | scale hint | files | bytes | regions | read-only verified | "
-                "tile size | tile path |",
-                "|---|---|---:|---:|---:|---|---:|---|",
+                "preview size | visible size | tile path |",
+                "|---|---|---:|---:|---:|---|---:|---:|---|",
             ]
         )
         for row in rows:
@@ -171,7 +186,7 @@ def render_markdown_report(
                 continue
             lines.append(
                 "| {size} | {scale} | {files} | {bytes_} | {regions} | "
-                "{read_only} | {tile_size} | {tile_path} |".format(
+                "{read_only} | {tile_size} | {visible_size} | {tile_path} |".format(
                     size=row.get("size") or row.get("label") or "?",
                     scale=_plain_cell(row.get("scale_hint")),
                     files=_plain_cell(row.get("source_file_count")),
@@ -179,6 +194,9 @@ def render_markdown_report(
                     regions=_plain_cell(row.get("source_region_count")),
                     read_only=_plain_cell(row.get("read_only_verified")),
                     tile_size=_plain_cell(row.get("topview_tile_size")),
+                    visible_size=_plain_cell(
+                        row.get("topview_visible_tile_size")
+                    ),
                     tile_path=_plain_cell(row.get("topview_path")),
                 )
             )

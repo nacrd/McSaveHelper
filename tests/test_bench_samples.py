@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from core.bench_samples import SAMPLE_SPECS, SampleSize, create_sample_world
-from core.mca.topview_renderer import PREVIEW_TILE_SIZE
+from core.mca.topview_renderer import PREVIEW_TILE_SIZE, ULTRA_TILE_SIZE
 from scripts.bench_mca import run_benchmark
 from scripts.bench_real_world import run_real_world_benchmark
 
@@ -68,4 +68,7 @@ def test_real_world_benchmark_is_read_only_and_skips_backup(tmp_path: Path) -> N
     assert sample["topview"]["path_semantics"] == (
         "ui_initial_preview_largest_overworld_region"
     )
+    assert sample["topview"]["visible_upgrade_tile_size"] == ULTRA_TILE_SIZE
+    assert sample["topview"]["visible_upgrade_p95_ms"] >= 0.0
+    assert sample["topview"]["visible_cache_entries"] >= 1
     assert after == before

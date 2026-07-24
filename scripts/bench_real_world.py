@@ -13,8 +13,17 @@ from typing import Any, Callable, Optional
 
 from app.services.world_index_service import WorldIndexRegistry
 from app.services.world_repository import WorldRepository
-from core.mca import RegionFile, clear_chunk_decode_cache
-from core.mca.topview_renderer import PREVIEW_TILE_SIZE, render_region_topview
+from core.mca import (
+    RegionFile,
+    chunk_decode_cache_bytes,
+    chunk_decode_cache_size,
+    clear_chunk_decode_cache,
+)
+from core.mca.topview_renderer import (
+    PREVIEW_TILE_SIZE,
+    ULTRA_TILE_SIZE,
+    render_region_topview,
+)
 from core.nbt import load as load_nbt
 from core.observability import p95
 from core.omni.world_session import WorldSession
@@ -266,10 +275,11 @@ def _bench_cache_hit(
 
 
 def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
-    """Measure the UI's initial preview path cold, process-warm and disk-warm."""
-    tile_size = PREVIEW_TILE_SIZE
+    """Measure the UI's preview and subsequent ordinary visible LOD."""
+    preview_size = PREVIEW_TILE_SIZE
+    visible_size = ULTRA_TILE_SIZE
 
-    def render() -> Optional[bytes]:
+    def render(tile_size: int) -> Optional[bytes]:
         return render_region_topview(
             target,
             tile_size=tile_size,
@@ -278,32 +288,69 @@ def _bench_topview(target: Path, loops: int) -> dict[str, Any]:
         )
 
     clear_chunk_decode_cache()
-    render()
+    render(preview_size)
     cold_samples: list[float] = []
     png: Optional[bytes] = None
     for _ in range(loops):
         clear_chunk_decode_cache()
-        render_ms, png = _timed(render)
+        render_ms, png = _timed(lambda: render(preview_size))
         cold_samples.append(render_ms)
     clear_chunk_decode_cache()
-    png = render()
+    png = render(preview_size)
     warm_samples: list[float] = []
     for _ in range(loops):
-        render_ms, png = _timed(render)
+        render_ms, png = _timed(lambda: render(preview_size))
         warm_samples.append(render_ms)
     if not png:
         raise RuntimeError(f"真实世界俯视图渲染没有生成瓦片: {target}")
-    cache_hit = _bench_cache_hit(target, png, tile_size, loops)
+
+    visible_upgrade_samples: list[float] = []
+    visible_png: Optional[bytes] = None
+    clear_chunk_decode_cache()
+    render(preview_size)
+    render(visible_size)
+    for _ in range(loops):
+        clear_chunk_decode_cache()
+        render(preview_size)
+        upgrade_ms, visible_png = _timed(lambda: render(visible_size))
+        visible_upgrade_samples.append(upgrade_ms)
+    visible_warm_samples: list[float] = []
+    for _ in range(loops):
+        warm_ms, visible_png = _timed(lambda: render(visible_size))
+        visible_warm_samples.append(warm_ms)
+    if not visible_png:
+        raise RuntimeError(f"真实世界可见 LOD 渲染没有生成瓦片: {target}")
+
+    visible_cache_entries = chunk_decode_cache_size()
+    visible_cache_bytes = chunk_decode_cache_bytes()
+    cache_hit = _bench_cache_hit(target, png, preview_size, loops)
     clear_chunk_decode_cache()
     return {
         "region_file": target.name,
-        "tile_size": tile_size,
+        "tile_size": preview_size,
         "path_semantics": "ui_initial_preview_largest_overworld_region",
         "tile_median_ms": round(_median(cold_samples), 3),
         "tile_p95_ms": round(p95(cold_samples), 3),
         "memory_warm_median_ms": round(_median(warm_samples), 3),
         "memory_warm_p95_ms": round(p95(warm_samples), 3),
+        "visible_upgrade_tile_size": visible_size,
+        "visible_upgrade_median_ms": round(
+            _median(visible_upgrade_samples),
+            3,
+        ),
+        "visible_upgrade_p95_ms": round(p95(visible_upgrade_samples), 3),
+        "visible_process_warm_median_ms": round(
+            _median(visible_warm_samples),
+            3,
+        ),
+        "visible_process_warm_p95_ms": round(
+            p95(visible_warm_samples),
+            3,
+        ),
+        "visible_cache_entries": visible_cache_entries,
+        "visible_cache_bytes": visible_cache_bytes,
         "tile_bytes": len(png),
+        "visible_tile_bytes": len(visible_png),
         "rendered": True,
         "loops": loops,
         "warmup_runs": 1,

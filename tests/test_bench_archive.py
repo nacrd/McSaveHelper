@@ -85,6 +85,9 @@ def test_render_real_sample_metadata_and_process_warm_metrics() -> None:
         {
             "memory_warm_p95_ms": 26.9,
             "tile_size": 16,
+            "visible_upgrade_tile_size": 256,
+            "visible_upgrade_p95_ms": 6500.0,
+            "visible_process_warm_p95_ms": 360.0,
             "path_semantics": "ui_initial_preview_largest_overworld_region",
         }
     )
@@ -93,10 +96,12 @@ def test_render_real_sample_metadata_and_process_warm_metrics() -> None:
     markdown = render_markdown_report(report)
 
     assert rows[0]["topview_process_warm_p95_ms"] == 26.9
+    assert rows[0]["topview_visible_upgrade_p95_ms"] == 6500.0
     assert rows[0]["read_only_verified"] is True
     assert "Real sample metadata" in markdown
     assert "105143991" in markdown
     assert "ui_initial_preview_largest_overworld_region" in markdown
+    assert "6500.000" in markdown
 
 
 def test_write_bench_archive(tmp_path: Path) -> None:

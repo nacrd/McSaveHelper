@@ -304,6 +304,19 @@ def test_leaf_lod_does_not_expand_normal_lod_chunk_sampling(monkeypatch) -> None
 
         sample_counts.clear()
         clear_chunk_decode_cache()
+        jobs = _build_sample_jobs(256)
+        _load_chunk_views(
+            region,
+            _needed_chunks(region, jobs),
+            "visible-lod",
+            1,
+            jobs,
+            decode_workers=1,
+        )
+        assert set(sample_counts) == {64}
+
+        sample_counts.clear()
+        clear_chunk_decode_cache()
         jobs = _build_sample_jobs(512)
         _load_chunk_views(
             region,
