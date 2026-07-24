@@ -61,6 +61,21 @@ def test_builder_returns_deterministic_immutable_world_snapshot(
     assert snapshot.probe.fingerprint
 
 
+def test_display_path_does_not_resolve_verified_world_content(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    world = _world(tmp_path).resolve()
+    internal = world / "stats" / "aabb.json"
+
+    def reject_resolve(_path: Path) -> Path:
+        raise AssertionError("世界内已验证路径不应再次 resolve")
+
+    monkeypatch.setattr(Path, "resolve", reject_resolve)
+
+    assert WorldIndexBuilder._display_path(world, internal) == "stats/aabb.json"
+
+
 def test_progressive_builder_publishes_monotonic_frames_and_same_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -109,6 +124,46 @@ def test_progressive_builder_cancellation_does_not_publish_complete_frame(
 
     assert frames
     assert not any(frame.is_complete for frame in frames)
+
+
+def test_progressive_builder_preserves_external_usercache_candidate(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    (world / "usercache.json").unlink()
+    external_cache = tmp_path / "usercache.json"
+    external_cache.write_text(
+        json.dumps([{"uuid": "aabb", "name": "External Alex"}]),
+        encoding="utf-8",
+    )
+    builder = WorldIndexBuilder()
+
+    expected = builder.build(world)
+    progressive = builder.build_progressive(world, batch_size=1)
+
+    assert progressive == expected
+    assert progressive.usercache_map() == {"aabb": "External Alex"}
+    assert str(external_cache.resolve()) in {
+        stamp.relative_path for stamp in progressive.probe.files
+    }
+
+
+def test_progressive_builder_excludes_linked_world_file(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+    linked = world / "stats" / "linked.json"
+    try:
+        linked.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"当前平台不能创建测试符号链接: {exc}")
+
+    snapshot = WorldIndexBuilder().build_progressive(world, batch_size=1)
+
+    assert linked not in snapshot.stats_files
+    assert outside not in snapshot.stats_files
 
 
 def test_registry_cancellation_does_not_cache_partial_snapshot(

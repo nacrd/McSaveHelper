@@ -762,11 +762,13 @@ class WorldIndexBuilder:
     @staticmethod
     def _display_path(world: Path, path: Path) -> str:
         """世界内使用相对路径，外部 usercache 使用绝对规范路径。"""
-        resolved = path.resolve()
+        absolute = path.absolute()
         try:
-            return resolved.relative_to(world).as_posix()
+            return absolute.relative_to(world).as_posix()
         except ValueError:
-            return str(resolved)
+            pass
+        resolved = path.resolve()
+        return str(resolved)
 
     @staticmethod
     def _glob_files(

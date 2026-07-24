@@ -1,6 +1,7 @@
 """可取消的 WorldIndex 渐进构建协议与批次实现。"""
 from __future__ import annotations
 
+import stat
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -143,11 +144,19 @@ class ProgressiveWorldIndexBuild:
         discovered = 0
         pending = 0
 
-        def collect(path: Path) -> None:
+        def collect(path: Path, *, allow_external: bool = False) -> None:
             nonlocal discovered, pending
             self._check_cancel()
             discovered += 1
-            if self._is_safe_path(world, path, directory_safety):
+            if allow_external:
+                is_accepted = path.is_file()
+            else:
+                is_accepted = self._is_safe_path(
+                    world,
+                    path,
+                    directory_safety,
+                )
+            if is_accepted:
                 paths.add(path)
             pending += 1
             if pending >= self._batch_size:
@@ -163,10 +172,9 @@ class ProgressiveWorldIndexBuild:
                 collect(path)
         for candidate in self._builder._usercache_candidates(world):
             if self._builder._is_lexically_within(candidate, world):
-                if self._builder._is_safe_world_content_path(world, candidate):
-                    collect(candidate)
-            else:
                 collect(candidate)
+            else:
+                collect(candidate, allow_external=True)
         if pending:
             self._publish_discovery(world, discovered, len(paths))
         active_region_dirs = {
@@ -186,12 +194,24 @@ class ProgressiveWorldIndexBuild:
         path: Path,
         directory_safety: dict[Path, bool],
     ) -> bool:
-        """验证一个世界内候选路径并确认其仍然存在。"""
-        return self._builder._is_safe_world_content_path_cached(
-            world,
-            path,
-            directory_safety,
-        ) and (path.is_file() or path.is_dir())
+        """用一次 lstat 验证世界内常规文件及其父目录。"""
+        candidate = path.absolute()
+        try:
+            candidate.relative_to(world)
+            metadata = candidate.lstat()
+        except (OSError, ValueError):
+            return False
+        if not stat.S_ISREG(metadata.st_mode):
+            return False
+        directory = candidate.parent
+        is_safe_directory = directory_safety.get(directory)
+        if is_safe_directory is None:
+            is_safe_directory = self._builder._is_safe_world_directory(
+                world,
+                directory,
+            )
+            directory_safety[directory] = is_safe_directory
+        return is_safe_directory
 
     @staticmethod
     def _path_sources(
@@ -216,8 +236,7 @@ class ProgressiveWorldIndexBuild:
                 continue
             try:
                 for path in directory.glob(pattern):
-                    if path.is_file():
-                        yield path
+                    yield path
             except OSError:
                 continue
 
