@@ -394,9 +394,13 @@ def test_feature_views_declare_minimal_ui_ports() -> None:
     compare = (PROJECT_ROOT / "app/ui/views/compare.py").read_text(
         encoding="utf-8"
     )
+    backup = (PROJECT_ROOT / "app/ui/views/backup_center.py").read_text(
+        encoding="utf-8"
+    )
     assert 'def __init__(self, app: "MapExportHost")' in export_dialog
     assert 'def __init__(self, app: "ServerPropertiesHost")' in server_properties
     assert 'def __init__(self, app: "CompareHost")' in compare
+    assert 'app: "BackupHost",' in backup
 
 
 def test_feature_registry_drives_catalog_and_application_budget() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from concurrent.futures import CancelledError
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import Callable, Optional, Protocol
 
 import flet as ft
 
@@ -29,14 +29,34 @@ from app.services.execution_runtime import (
 from app.ui.components.buttons import btn_danger, btn_primary
 from app.ui.components.cards import card, placeholder
 from app.ui.components.fields import current_save_field, dropdown, text_field
+from app.ui.feature_context import (
+    FeatureDialogPort,
+    FeaturePagePort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    FeatureTranslationPort,
+)
 from app.ui.components.layout import page_header, section_header
 from app.ui.icons import IconSet
 from app.ui.theme import THEME, mc_border
 from app.ui.utils import format_size, run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 
-if TYPE_CHECKING:
-    from app.ui.feature_context import FeatureContext
+
+class BackupHost(
+    FeaturePagePort,
+    FeatureTranslationPort,
+    FeatureDialogPort,
+    FeatureProgressPort,
+    FeatureRuntimePort,
+    Protocol,
+):
+    """Ports required by the managed backup view."""
+
+    @property
+    def backup(self) -> BackupService:
+        """Return the shared backup service."""
+        ...
 
 
 class BackupCenterView(ft.Column):
@@ -44,13 +64,13 @@ class BackupCenterView(ft.Column):
 
     def __init__(
         self,
-        app: "FeatureContext",
+        app: "BackupHost",
         service: Optional[BackupService] = None,
     ) -> None:
         """初始化备份中心视图。
 
         Args:
-            app: 应用组合根。
+            app: 备份页面所需的 UI、运行时和备份服务端口。
             service: 可选备份服务；缺省使用上下文的备份端口。
         """
         super().__init__(spacing=18, scroll=ft.ScrollMode.AUTO, expand=True)
