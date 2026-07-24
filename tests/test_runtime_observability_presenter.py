@@ -6,9 +6,11 @@ from types import SimpleNamespace
 from app.presenters.runtime_observability import (
     format_cache_registry_report,
     format_runtime_snapshot,
+    format_ui_delivery_summary,
 )
 from app.services.cache_registry import CacheStats
 from app.services.execution_runtime import ExecutionLane
+from app.services.operation_metrics import UiDeliveryMetricsSummary
 
 
 def test_format_cache_registry_report_lists_regions() -> None:
@@ -57,3 +59,23 @@ def test_format_runtime_snapshot_includes_queue_wait() -> None:
     assert "active=2" in text
     assert "max=12.00ms" in text
     assert "拒绝提交: 1" in text
+
+
+def test_format_ui_delivery_summary_includes_p95_and_stale_count() -> None:
+    summary = UiDeliveryMetricsSummary(
+        sample_count=8,
+        ok_count=6,
+        stale_count=1,
+        error_count=1,
+        queue_wait_p95_ms=12.345,
+        queue_wait_max_ms=20.0,
+        run_p95_ms=1.25,
+        run_max_ms=2.0,
+    )
+
+    text = format_ui_delivery_summary(summary)
+
+    assert "samples=8" in text
+    assert "stale=1" in text
+    assert "p95=12.35ms" in text
+    assert "p95=1.25ms" in text

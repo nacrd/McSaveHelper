@@ -9,6 +9,7 @@ from app.models.responsive_layout import resolve_responsive_layout
 from app.services.config_service import ConfigService
 from app.services.cache_registry import CacheRegistry
 from app.services.execution_runtime import ExecutionRuntime, LaneLimits
+from app.services.operation_metrics import UiDeliveryMetricsSummary
 from app.ui.views.settings import SettingsView, SettingsViewDependencies
 
 
@@ -52,6 +53,7 @@ def _dependencies(
         cache_path=lambda: "",
         execution_runtime=runtime,
         runtime_snapshot=runtime.snapshot,
+        ui_delivery_summary=UiDeliveryMetricsSummary,
         save_debounce_seconds=0,
     )
 

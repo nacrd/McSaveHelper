@@ -53,6 +53,9 @@ class SettingsCoordinationMixin:
             cache_path=self._map_cache_path,
             execution_runtime=self.services.execution_runtime,
             runtime_snapshot=self.services.execution_runtime.snapshot,
+            ui_delivery_summary=(
+                self.services.operation_metrics.ui_delivery_summary
+            ),
         ))
 
     def _clear_application_caches(self) -> dict[str, int]:

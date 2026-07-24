@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Optional
 from uuid import uuid4
@@ -12,8 +12,24 @@ from core.observability import (
     OperationOutcome,
     OperationRecord,
     metrics_to_operation_record,
+    p95,
 )
 from core.performance import PerformanceMetrics
+
+
+@dataclass(frozen=True)
+class UiDeliveryMetricsSummary:
+    """最近一组真实 UI 投递记录的有界汇总。"""
+
+    sample_count: int = 0
+    ok_count: int = 0
+    stale_count: int = 0
+    error_count: int = 0
+    cancelled_count: int = 0
+    queue_wait_p95_ms: float = 0.0
+    queue_wait_max_ms: float = 0.0
+    run_p95_ms: float = 0.0
+    run_max_ms: float = 0.0
 
 
 class OperationMetricsStore:
@@ -134,5 +150,51 @@ class OperationMetricsStore:
         with self._lock:
             self._records.clear()
 
+    def ui_delivery_summary(
+        self,
+        *,
+        limit: int = 200,
+    ) -> UiDeliveryMetricsSummary:
+        """汇总最近由 ``UiDeliveryChannel`` 发布的真实投递记录。
 
-__all__ = ["OperationMetricsStore"]
+        Args:
+            limit: 最多统计的最近投递数，不扫描超出存储容量的数据。
+        Returns:
+            投递数量、终态计数及队列和回调耗时 p95/max。
+        Raises:
+            ValueError: limit 小于零。
+        """
+        if limit < 0:
+            raise ValueError("UI 投递指标查询数量不能为负数")
+        records = tuple(
+            record
+            for record in self.snapshot()
+            if "delivery_id" in record.metadata
+        )
+        selected = records[-limit:] if limit else ()
+        queue_waits = [record.queue_wait_ms for record in selected]
+        run_times = [record.run_ms for record in selected]
+        return UiDeliveryMetricsSummary(
+            sample_count=len(selected),
+            ok_count=self._count_outcome(selected, OperationOutcome.OK),
+            stale_count=self._count_outcome(selected, OperationOutcome.STALE),
+            error_count=self._count_outcome(selected, OperationOutcome.ERROR),
+            cancelled_count=self._count_outcome(
+                selected,
+                OperationOutcome.CANCELLED,
+            ),
+            queue_wait_p95_ms=p95(queue_waits),
+            queue_wait_max_ms=max(queue_waits, default=0.0),
+            run_p95_ms=p95(run_times),
+            run_max_ms=max(run_times, default=0.0),
+        )
+
+    @staticmethod
+    def _count_outcome(
+        records: tuple[OperationRecord, ...],
+        outcome: OperationOutcome,
+    ) -> int:
+        return sum(record.outcome is outcome for record in records)
+
+
+__all__ = ["OperationMetricsStore", "UiDeliveryMetricsSummary"]

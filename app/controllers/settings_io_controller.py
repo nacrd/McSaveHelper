@@ -18,6 +18,7 @@ from app.services.execution_runtime import (
     OperationHandle,
     TaskPriority,
 )
+from app.services.operation_metrics import UiDeliveryMetricsSummary
 
 
 ResultT = TypeVar("ResultT")
@@ -31,6 +32,7 @@ class SettingsCacheSnapshot:
 
     cache: CacheRegistryStats
     runtime: Optional[ExecutionRuntimeSnapshot]
+    ui_delivery: UiDeliveryMetricsSummary
     cache_path: str
 
 
@@ -73,6 +75,7 @@ class SettingsIOControllerDependencies:
     clear_caches: Callable[[], Mapping[str, int]]
     cache_path: Callable[[], str]
     runtime_snapshot: Callable[[], Optional[ExecutionRuntimeSnapshot]]
+    ui_delivery_summary: Callable[[], UiDeliveryMetricsSummary]
     dispatch: CallbackDispatcher
     save_debounce_seconds: float = 0.35
     debounce_wait: Optional[DebounceWait] = None
@@ -256,9 +259,10 @@ class SettingsIOController:
         cache = self._deps.cache_snapshot()
         token.raise_if_cancelled()
         runtime = self._deps.runtime_snapshot()
+        ui_delivery = self._deps.ui_delivery_summary()
         cache_path = self._deps.cache_path()
         token.raise_if_cancelled()
-        return SettingsCacheSnapshot(cache, runtime, cache_path)
+        return SettingsCacheSnapshot(cache, runtime, ui_delivery, cache_path)
 
     def _begin_operation(
         self,

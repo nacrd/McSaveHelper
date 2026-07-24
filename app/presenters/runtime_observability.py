@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from app.services.operation_metrics import UiDeliveryMetricsSummary
+
 
 FormatSize = Callable[[int], str]
+Translate = Callable[..., str]
 
 
 def format_cache_registry_report(
@@ -66,7 +69,48 @@ def format_runtime_snapshot(snapshot: Any) -> str:
     )
 
 
+def format_ui_delivery_summary(
+    summary: UiDeliveryMetricsSummary,
+    *,
+    translate: Optional[Translate] = None,
+) -> str:
+    """将真实 UI 投递终态与调度耗时格式化为诊断文本。"""
+    if summary.sample_count == 0:
+        return _translate(
+            translate,
+            "settings.cache.ui_delivery_empty",
+            "UI 投递: 暂无样本",
+        )
+    return _translate(
+        translate,
+        "settings.cache.ui_delivery_summary",
+        "UI 投递: samples={samples} ok={ok} stale={stale} error={errors}\n"
+        "调度等待: p95={queue_p95}ms max={queue_max}ms\n"
+        "回调执行: p95={run_p95}ms max={run_max}ms",
+        samples=summary.sample_count,
+        ok=summary.ok_count,
+        stale=summary.stale_count,
+        errors=summary.error_count,
+        queue_p95=f"{summary.queue_wait_p95_ms:.2f}",
+        queue_max=f"{summary.queue_wait_max_ms:.2f}",
+        run_p95=f"{summary.run_p95_ms:.2f}",
+        run_max=f"{summary.run_max_ms:.2f}",
+    )
+
+
+def _translate(
+    translate: Optional[Translate],
+    key: str,
+    fallback: str,
+    **kwargs: object,
+) -> str:
+    if translate is not None:
+        return translate(key, fallback, **kwargs)
+    return fallback.format(**kwargs)
+
+
 __all__ = [
     "format_cache_registry_report",
     "format_runtime_snapshot",
+    "format_ui_delivery_summary",
 ]

@@ -18,6 +18,7 @@ from app.models.responsive_layout import ResponsiveLayout
 from app.presenters.runtime_observability import (
     format_cache_registry_report,
     format_runtime_snapshot,
+    format_ui_delivery_summary,
 )
 from app.presenters.settings_view_state import (
     SettingsFeedbackPhase,
@@ -34,6 +35,7 @@ from app.services.execution_runtime import (
     ExecutionRuntime,
     ExecutionRuntimeSnapshot,
 )
+from app.services.operation_metrics import UiDeliveryMetricsSummary
 from app.ui.theme import THEME
 from app.ui.icons import IconSet
 from app.ui.components.buttons import btn_ghost
@@ -72,6 +74,7 @@ class SettingsViewDependencies:
     cache_path: Callable[[], str]
     execution_runtime: ExecutionRuntime
     runtime_snapshot: Callable[[], Optional[ExecutionRuntimeSnapshot]]
+    ui_delivery_summary: Callable[[], UiDeliveryMetricsSummary]
     save_debounce_seconds: float = 0.35
 
 
@@ -97,6 +100,7 @@ class SettingsView(ft.Column):
                 clear_caches=dependencies.clear_caches,
                 cache_path=dependencies.cache_path,
                 runtime_snapshot=dependencies.runtime_snapshot,
+                ui_delivery_summary=dependencies.ui_delivery_summary,
                 dispatch=self._dispatch_result,
                 save_debounce_seconds=dependencies.save_debounce_seconds,
             )
@@ -465,6 +469,16 @@ class SettingsView(ft.Column):
             font_family="monospace",
             selectable=True,
         )
+        self._ui_delivery_summary = ft.Text(
+            self._t(
+                "settings.cache.ui_delivery_loading",
+                "正在读取 UI 投递指标…",
+            ),
+            size=12,
+            color=THEME.text_primary,
+            font_family="monospace",
+            selectable=True,
+        )
         self._cache_path_label = ft.Text(
             self._t("settings.cache.path_loading", "地图瓦片路径: —"),
             size=11,
@@ -475,6 +489,7 @@ class SettingsView(ft.Column):
             content=ft.Column([
                 self._cache_summary,
                 self._runtime_summary,
+                self._ui_delivery_summary,
                 self._cache_path_label,
             ], spacing=8),
             padding=ft.Padding(left=16, right=16, bottom=10),
@@ -526,6 +541,10 @@ class SettingsView(ft.Column):
             if snapshot.runtime is not None
             else self._t("settings.cache.runtime_unavailable", "后台运行时: 不可用")
         )
+        self._ui_delivery_summary.value = format_ui_delivery_summary(
+            snapshot.ui_delivery,
+            translate=self._t,
+        )
         self._cache_path_label.value = self._t(
             "settings.cache.path_value",
             "地图瓦片路径: {path}",
@@ -533,6 +552,7 @@ class SettingsView(ft.Column):
         )
         safe_update(self._cache_summary)
         safe_update(self._runtime_summary)
+        safe_update(self._ui_delivery_summary)
         safe_update(self._cache_path_label)
 
     def _apply_cache_error(self, error: Exception, show_error: bool) -> None:

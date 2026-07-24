@@ -82,3 +82,34 @@ def test_store_accepts_concurrent_publishers() -> None:
 
     assert store.record_count == 32
     assert len({item.operation_id for item in store.snapshot()}) == 32
+
+
+def test_ui_delivery_summary_filters_noise_and_reports_recent_p95() -> None:
+    store = OperationMetricsStore()
+    store.record(_record(0))
+    outcomes = (
+        OperationOutcome.OK,
+        OperationOutcome.OK,
+        OperationOutcome.STALE,
+        OperationOutcome.ERROR,
+    )
+    for index, outcome in enumerate(outcomes):
+        store.record(OperationRecord(
+            operation_id=f"delivery-{index}",
+            feature="explorer",
+            queue_wait_ms=float(index + 1),
+            run_ms=float(index) / 2.0,
+            outcome=outcome,
+            metadata={"delivery_id": f"delivery-{index}"},
+        ))
+
+    summary = store.ui_delivery_summary(limit=3)
+
+    assert summary.sample_count == 3
+    assert summary.ok_count == 1
+    assert summary.stale_count == 1
+    assert summary.error_count == 1
+    assert summary.queue_wait_p95_ms == 4.0
+    assert summary.queue_wait_max_ms == 4.0
+    assert summary.run_p95_ms == 1.5
+    assert summary.run_max_ms == 1.5

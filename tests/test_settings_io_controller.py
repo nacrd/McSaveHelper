@@ -15,6 +15,7 @@ from app.services.execution_runtime import (
     ExecutionRuntime,
     LaneLimits,
 )
+from app.services.operation_metrics import UiDeliveryMetricsSummary
 
 
 class _ControlledDebounce:
@@ -63,6 +64,7 @@ def test_debounced_save_cancels_stale_snapshot_and_uses_io_lane() -> None:
         clear_caches=lambda: {},
         cache_path=lambda: "",
         runtime_snapshot=runtime.snapshot,
+        ui_delivery_summary=UiDeliveryMetricsSummary,
         dispatch=lambda callback: callback(),
         save_debounce_seconds=60,
         debounce_wait=debounce,
@@ -127,6 +129,7 @@ def test_cache_clear_runs_in_io_lane_and_close_suppresses_late_reset() -> None:
         clear_caches=clear_caches,
         cache_path=lambda: "cache",
         runtime_snapshot=runtime.snapshot,
+        ui_delivery_summary=lambda: UiDeliveryMetricsSummary(sample_count=2),
         dispatch=lambda callback: callback(),
     ))
     try:
@@ -138,6 +141,7 @@ def test_cache_clear_runs_in_io_lane_and_close_suppresses_late_reset() -> None:
         assert clear_threads == ["mcsavehelper-io-1"]
         assert clear_results[0].metrics.deleted_files == 3
         assert clear_results[0].snapshot.cache_path == "cache"
+        assert clear_results[0].snapshot.ui_delivery.sample_count == 2
 
         controller.reset(reset_results.append, lambda error: None)
         assert reset_started.wait(2)
@@ -176,6 +180,7 @@ def test_close_flushes_latest_snapshot_still_inside_debounce_window() -> None:
         clear_caches=lambda: {},
         cache_path=lambda: "",
         runtime_snapshot=runtime.snapshot,
+        ui_delivery_summary=UiDeliveryMetricsSummary,
         dispatch=lambda callback: callback(),
         debounce_wait=wait_for_close,
     ))
