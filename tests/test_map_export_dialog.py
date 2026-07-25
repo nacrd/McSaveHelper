@@ -1,12 +1,15 @@
 """Tests for map-integrated export dialog."""
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
-from app.services.execution_runtime import ExecutionRuntime
+from app.presenters.map_export_state import begin_map_export
+from app.services.execution_runtime import ExecutionRuntime, TaskQueueFullError
 from app.ui.feature_context import FeatureContext
 from app.ui.views.explorer.map.export_dialog import (
     MapExportDialog,
@@ -57,6 +60,22 @@ class _App:
 
     def save_file(self, **_kwargs: object) -> str | None:
         return None
+
+
+class _QueuedPage:
+    """Queue Flet async callables so tests can control delivery order."""
+
+    def __init__(self) -> None:
+        self.tasks: list[Callable[[], Coroutine[Any, Any, None]]] = []
+
+    def run_task(
+        self,
+        callback: Callable[[], Coroutine[Any, Any, None]],
+    ) -> None:
+        self.tasks.append(callback)
+
+    def show_dialog(self, dialog: Any) -> None:
+        dialog.open = True
 
 
 def test_default_output_path_uses_dimension_suffix() -> None:
@@ -117,12 +136,12 @@ def test_dispose_cancels_export_and_closes_dialog(tmp_path: Path) -> None:
     cancel = MagicMock()
     cancel.set = MagicMock()
     dialog._cancel_event = cancel
-    dialog._exporting = True
+    dialog._export_state = begin_map_export(dialog._export_state)
 
     dialog.dispose()
 
-    assert dialog._disposed is True
-    assert dialog._exporting is False
+    assert dialog._export_state.is_disposed is True
+    assert dialog._export_state.is_running is False
     cancel.set.assert_called_once()
     assert dialog._dialog is None
 
@@ -158,3 +177,57 @@ def test_region_tab_export_requires_save() -> None:
     tab._open_map_export_dialog()
 
     assert app.warnings
+
+
+def test_submission_failure_restores_export_controls_for_retry(
+    tmp_path: Path,
+) -> None:
+    app = _App()
+    dialog = MapExportDialog(cast(FeatureContext, app))
+    world = tmp_path / "world"
+    world.mkdir()
+    dialog.open(MapExportSession(world, "overworld"))
+    dialog._service = cast(Any, object())
+    dialog._output_path_field.value = str(tmp_path / "map.png")
+    dialog._task_scope = cast(
+        Any,
+        SimpleNamespace(
+            submit=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                TaskQueueFullError("full")
+            ),
+        ),
+    )
+
+    dialog._start_export()
+
+    assert dialog._export_state.is_running is False
+    assert dialog._cancel_event is None
+    assert dialog._export_btn.disabled is False
+    assert dialog._cancel_export_btn.disabled is True
+    assert app.errors == [("错误", "地图导出失败")]
+
+
+def test_completion_invalidates_queued_progress_callback(tmp_path: Path) -> None:
+    app = _App()
+    page = _QueuedPage()
+    app.page = cast(Any, page)
+    dialog = MapExportDialog(cast(FeatureContext, app))
+    world = tmp_path / "world"
+    world.mkdir()
+    dialog.open(MapExportSession(world, "overworld"))
+    dialog._export_state = begin_map_export(dialog._export_state)
+    generation = dialog._export_state.generation
+    delivered: list[str] = []
+    dialog._run_for_generation(generation, delivered.append, "progress")
+    dialog._run_for_generation(
+        generation,
+        dialog._finish_export,
+        generation,
+        {"success": False, "cancelled": True},
+    )
+
+    asyncio.run(page.tasks[1]())
+    asyncio.run(page.tasks[0]())
+
+    assert dialog._export_state.is_running is False
+    assert delivered == []

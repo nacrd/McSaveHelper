@@ -8,13 +8,26 @@ from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 
 import flet as ft
 
+from app.presenters.map_export_state import (
+    MapExportState,
+    begin_map_export,
+    dispose_map_export,
+    finish_map_export,
+    owns_map_export,
+    request_map_export_cancel,
+)
+from app.services.execution_runtime import (
+    ExecutionLane,
+    RuntimeClosedError,
+    TaskPriority,
+    TaskQueueFullError,
+)
 from app.services.map_export_service import (
     MapExportService,
     MapExportSpec,
     MapSelection,
     PIL_AVAILABLE,
 )
-from app.services.execution_runtime import ExecutionLane, TaskPriority
 from app.ui.components.buttons import btn_ghost, btn_primary
 from app.ui.components.fields import dropdown, text_field
 from app.ui.feature_context import (
@@ -64,11 +77,9 @@ class MapExportDialog:
         self._task_scope = app.execution_runtime.create_scope(
             "map_export_dialog"
         )
-        self._exporting = False
+        self._export_state = MapExportState()
         self._auto_output_path = ""
         self._cancel_event: Optional[threading.Event] = None
-        self._task_generation = 0
-        self._disposed = False
         self._dialog: Optional[ft.AlertDialog] = None
         self._session: Optional[MapExportSession] = None
         self._service: Optional[MapExportService] = None
@@ -80,12 +91,12 @@ class MapExportDialog:
 
     def open(self, session: MapExportSession) -> None:
         """Open the export dialog prefilled from the active map session."""
-        if self._disposed:
+        if self._export_state.is_disposed:
             return
         if self._service is None or not PIL_AVAILABLE:
             self._show_missing_pillow()
             return
-        if self._exporting:
+        if self._export_state.is_running:
             self.app.warn_dialog(
                 self.app.translate("map_export.notice", "提示"),
                 self.app.translate(
@@ -107,9 +118,7 @@ class MapExportDialog:
 
     def dispose(self) -> None:
         """Cancel in-flight export and drop late UI callbacks."""
-        self._disposed = True
-        self._task_generation += 1
-        self._exporting = False
+        self._export_state = dispose_map_export(self._export_state)
         if self._cancel_event is not None:
             self._cancel_event.set()
         self._task_scope.close()
@@ -402,8 +411,9 @@ class MapExportDialog:
         return self._session
 
     def _cancel_export(self, _event: Any = None) -> None:
-        if self._cancel_event is None or not self._exporting:
+        if self._cancel_event is None or not self._export_state.is_running:
             return
+        self._export_state = request_map_export_cancel(self._export_state)
         self._cancel_event.set()
         self._cancel_export_btn.disabled = True
         self._result_text.value = self.app.translate(
@@ -414,9 +424,9 @@ class MapExportDialog:
         safe_update(self._result_text)
 
     def _start_export(self, _event: Any = None) -> None:
-        if self._disposed or self._service is None:
+        if self._export_state.is_disposed or self._service is None:
             return
-        if self._exporting:
+        if self._export_state.is_running:
             self.app.warn_dialog(
                 self.app.translate("map_export.notice", "提示"),
                 self.app.translate(
@@ -448,9 +458,8 @@ class MapExportDialog:
                 str(exc),
             )
             return
-        self._exporting = True
-        self._task_generation += 1
-        generation = self._task_generation
+        self._export_state = begin_map_export(self._export_state)
+        generation = self._export_state.generation
         cancel_event = threading.Event()
         self._cancel_event = cancel_event
         self._set_export_controls_enabled(False)
@@ -459,18 +468,23 @@ class MapExportDialog:
             "正在导出地图...",
         )
         safe_update(self._result_text)
-        self._task_scope.submit(
-            "export_map",
-            lambda token: self._export_thread(
-                session.world_path,
-                Path(str(output_path)),
-                spec,
-                cancel_event,
-                generation,
-            ),
-            lane=ExecutionLane.CPU,
-            priority=TaskPriority.INTERACTIVE,
-        )
+        try:
+            self._task_scope.submit(
+                "export_map",
+                lambda token: self._export_thread(
+                    session.world_path,
+                    Path(str(output_path)),
+                    spec,
+                    cancel_event,
+                    generation,
+                ),
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.INTERACTIVE,
+            )
+        except (RuntimeClosedError, TaskQueueFullError) as error:
+            cancel_event.set()
+            self._reset_export_state(generation)
+            self._show_export_failure(error, "map_export.failed")
 
     def _resolve_export_scale(self) -> int:
         try:
@@ -542,11 +556,25 @@ class MapExportDialog:
                 progress_callback=progress_callback,
                 cancel_event=cancel_event,
             )
-            self._run_for_generation(generation, self._finish_export, results)
+            self._run_for_generation(
+                generation,
+                self._finish_export,
+                generation,
+                results,
+            )
         except Exception as exc:
-            self._run_for_generation(generation, self._finish_export_error, exc)
+            self._run_for_generation(
+                generation,
+                self._finish_export_error,
+                generation,
+                exc,
+            )
 
-    def _finish_export(self, results: Mapping[str, Any]) -> None:
+    def _finish_export(
+        self,
+        generation: int,
+        results: Mapping[str, Any],
+    ) -> None:
         if results["success"]:
             self._show_export_success(results)
         elif results.get("cancelled"):
@@ -559,7 +587,7 @@ class MapExportDialog:
                 or self.app.translate("map_export.see_log", "请查看日志"),
                 "map_export.failed_message",
             )
-        self._reset_export_state()
+        self._reset_export_state(generation)
 
     def _show_export_success(self, results: Mapping[str, Any]) -> None:
         dimensions = results["dimensions"]
@@ -580,9 +608,9 @@ class MapExportDialog:
             self.app.translate("map_export.completed_message", "地图导出完成！"),
         )
 
-    def _finish_export_error(self, error: Exception) -> None:
+    def _finish_export_error(self, generation: int, error: Exception) -> None:
         self._show_export_failure(error, "map_export.failed")
-        self._reset_export_state()
+        self._reset_export_state(generation)
 
     def _show_export_failure(self, error: object, message_key: str) -> None:
         self._publish_export_result(
@@ -602,14 +630,16 @@ class MapExportDialog:
         safe_update(self._result_text)
         self.app.hide_progress()
 
-    def _reset_export_state(self) -> None:
-        self._exporting = False
+    def _reset_export_state(self, generation: int) -> None:
+        self._export_state = finish_map_export(
+            self._export_state,
+            generation,
+        )
         self._cancel_event = None
-        self._task_generation += 1
         self._set_export_controls_enabled(True)
 
     def _is_current_generation(self, generation: int) -> bool:
-        return not self._disposed and generation == self._task_generation
+        return owns_map_export(self._export_state, generation)
 
     def _run_for_generation(
         self,
