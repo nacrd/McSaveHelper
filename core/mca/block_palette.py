@@ -556,9 +556,32 @@ class ChunkBlocks:
         if y is None:
             return ()
         strata: List[Tuple[str, int]] = []
+        loaded_section_y: Optional[int] = None
+        loaded_section: Optional[_SectionData] = None
         for depth in range(max(0, int(max_depth)) + 1):
             sample_y = y - depth
-            name = self.block_id_at(x, sample_y, z)
+            section_y = sample_y // 16
+            if section_y != loaded_section_y:
+                loaded_section_y = section_y
+                loaded_section = self._ensure_section(section_y)
+            if loaded_section is None:
+                name = _AIR_BLOCK_ID
+            elif loaded_section.legacy_blocks is not None:
+                name = _legacy_block_id(
+                    loaded_section.legacy_blocks,
+                    x,
+                    sample_y,
+                    z,
+                    section_y,
+                )
+            else:
+                name = _palette_block_id(
+                    loaded_section,
+                    x,
+                    sample_y,
+                    z,
+                    section_y,
+                )
             if is_air_name(name):
                 continue
             assert name is not None

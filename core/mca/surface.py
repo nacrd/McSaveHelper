@@ -26,6 +26,7 @@ from core.mca.block_palette import (
     is_transparent_surface_name,
 )
 from core.mca.errors import McaError
+from core.mca.format import CHUNKS_PER_SIDE
 from core.mca.region_file import RegionFile
 
 PathLike = Union[str, Path]
@@ -581,7 +582,7 @@ def _collect_chunk_cache_misses(
     views: ChunkViews,
 ) -> List[Tuple[int, int, List[Tuple[int, int]]]]:
     misses: List[Tuple[int, int, List[Tuple[int, int]]]] = []
-    for chunk_x, chunk_z in sorted(needed):
+    for chunk_x, chunk_z in sorted(needed, key=lambda coord: (coord[1], coord[0])):
         external_signature = external_signatures.get((chunk_x, chunk_z), "")
         hit, view = _lru_get(
             (
@@ -1139,22 +1140,84 @@ def _build_color_progress_callback(
     if callback is None:
         return None
 
+    colors: List[List[Color]] = []
+    previous_refined: Set[Tuple[int, int]] = set()
+
     def publish(
         partial: List[List[SurfaceValue]],
         refined_chunks: Set[Tuple[int, int]],
         processed: int,
         total: int,
     ) -> None:
-        colors = _colorize_surface_grid(
+        nonlocal colors, previous_refined
+        if not colors or len(colors) != len(partial):
+            colors = [
+                [DEFAULT_EMPTY for _ in row]
+                for row in partial
+            ]
+            previous_refined = set()
+        dirty_rows = _progress_dirty_rows(
+            refined_chunks - previous_refined,
+            len(partial),
+        )
+        if not _colorize_progress_rows(
             partial,
+            colors,
+            dirty_rows,
             color_for_block=color_for_block,
             color_for_surface=color_for_surface,
             cancel_check=cancel_check,
-        )
-        if colors is not None:
-            callback(colors, refined_chunks, processed, total)
+        ):
+            return
+        previous_refined = set(refined_chunks)
+        callback(colors, refined_chunks, processed, total)
 
     return publish
+
+
+def _progress_dirty_rows(
+    new_chunks: Set[Tuple[int, int]],
+    edge: int,
+) -> List[int]:
+    """Return rows affected by new chunks and their south-side relief edge."""
+    rows: Set[int] = set()
+    for _chunk_x, chunk_z in new_chunks:
+        start = chunk_z * edge // CHUNKS_PER_SIDE
+        end = (chunk_z + 1) * edge // CHUNKS_PER_SIDE
+        rows.update(range(start, min(edge, end + 1)))
+    return sorted(rows)
+
+
+def _colorize_progress_rows(
+    samples: List[List[SurfaceValue]],
+    colors: List[List[Color]],
+    rows: List[int],
+    *,
+    color_for_block: Optional[ColorFunc],
+    color_for_surface: Optional[SurfaceColorFunc],
+    cancel_check: Optional[Callable[[], bool]],
+) -> bool:
+    """Refresh only rows whose local relief inputs changed."""
+    edge = _coarse_edge(len(samples))
+    sample_spacing = max(1.0, 512.0 / max(1, edge))
+    spacing_scale = min(1.0, 2.0 / sample_spacing)
+    for row_index in rows:
+        if cancel_check is not None and cancel_check():
+            return False
+        previous_heights = None
+        if row_index > 0:
+            previous_heights = [
+                _surface_parts(value)[1]
+                for value in samples[row_index - 1]
+            ]
+        colors[row_index], _heights = _colorize_surface_row(
+            samples[row_index],
+            previous_heights=previous_heights,
+            spacing_scale=spacing_scale,
+            color_for_block=color_for_block,
+            color_for_surface=color_for_surface,
+        )
+    return True
 
 
 def _colorize_surface_grid(

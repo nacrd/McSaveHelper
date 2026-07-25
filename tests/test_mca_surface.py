@@ -92,6 +92,37 @@ def test_chunk_decode_cache_reports_real_hit_and_miss_counts() -> None:
     clear_chunk_decode_cache()
 
 
+def test_chunk_cache_misses_follow_map_row_order(monkeypatch) -> None:
+    monkeypatch.setattr(
+        surface_module,
+        "_lru_get",
+        lambda _key: (False, {}),
+    )
+    needed = {(1, 0), (0, 1), (0, 0)}
+    jobs_by_chunk = {
+        coord: [(0, 0)]
+        for coord in needed
+    }
+
+    misses = surface_module._collect_chunk_cache_misses(
+        needed=needed,
+        path_key="row-order.mca",
+        mtime_ns=1,
+        file_size=2,
+        external_signatures={},
+        jobs_by_chunk=jobs_by_chunk,
+        preload_detail_positions=False,
+        requested_edge=256,
+        views={},
+    )
+
+    assert [(chunk_x, chunk_z) for chunk_x, chunk_z, _samples in misses] == [
+        (0, 0),
+        (1, 0),
+        (0, 1),
+    ]
+
+
 def test_chunk_decode_cache_accounts_for_empty_sample_merges() -> None:
     clear_chunk_decode_cache()
     key = ("empty-region", 1, 2, 0, 0, "")
@@ -612,3 +643,47 @@ def test_surface_colors_pass_biome_and_blend_transparent_overlay(monkeypatch) ->
         ("minecraft:short_grass", "minecraft:forest"),
     ]
     assert colors == [[(50, 150, 50)]]
+
+
+def test_progress_colors_refresh_changed_rows_and_relief_neighbors(
+    monkeypatch,
+) -> None:
+    partial: list[list[surface_module.SurfaceValue]] = [
+        [None for _ in range(32)] for _ in range(32)
+    ]
+    frames = []
+    colored_rows = 0
+    original = surface_module._colorize_surface_row
+
+    def count_rows(*args, **kwargs):
+        nonlocal colored_rows
+        colored_rows += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(surface_module, "_colorize_surface_row", count_rows)
+    callback = surface_module._build_color_progress_callback(
+        lambda grid, refined, _processed, _total: frames.append((
+            [list(row) for row in grid],
+            set(refined),
+        )),
+        color_for_block=lambda _name: (100, 100, 100),
+        color_for_surface=None,
+        cancel_check=None,
+    )
+    assert callback is not None
+
+    partial[0][1] = ("minecraft:stone", 64, 0)
+    callback(partial, {(1, 0)}, 1, 2)
+    partial[0][0] = ("minecraft:stone", 80, 0)
+    callback(partial, {(0, 0), (1, 0)}, 2, 2)
+
+    expected = surface_module._colorize_surface_grid(
+        partial,
+        color_for_block=lambda _name: (100, 100, 100),
+        color_for_surface=None,
+    )
+    assert expected is not None
+    assert frames[0][1] == {(1, 0)}
+    assert frames[1][1] == {(0, 0), (1, 0)}
+    assert frames[1][0][0][:2] == expected[0][:2]
+    assert colored_rows == 36
