@@ -104,3 +104,39 @@ def test_map_export_reports_failure_when_all_regions_are_unreadable(tmp_path: Pa
     assert result["success"] is False
     assert result["chunks_processed"] == 0
     assert not (tmp_path / "map.png").exists()
+
+
+def test_map_export_preserves_full_resolution_scale_for_large_map(
+    tmp_path: Path,
+):
+    """Large exports keep 1:1 scale and delegate to the streaming renderer."""
+    from app.services.map_export_service import MapExportService, PIL_AVAILABLE
+    from core.mca.map_export_renderer import MapImageSpec
+    from unittest.mock import patch
+
+    if not PIL_AVAILABLE:
+        pytest.skip("PIL not available")
+    world = tmp_path / "world"
+    region_dir = world / "region"
+    region_dir.mkdir(parents=True)
+    (region_dir / "r.0.0.mca").write_bytes(b"\x00" * 16)
+
+    service = MapExportService()
+    with patch(
+        "app.services.map_export_service.analyze_region_bounds",
+        return_value={"min_x": 0, "max_x": 209, "min_z": 0, "max_z": 214},
+    ), patch.object(
+        service._renderer,
+        "save_map_image",
+        return_value=MapImageSpec(107520, 110080, 33860.0),
+    ) as save_map_image:
+        result = service.export_map(
+            world,
+            tmp_path / "map.png",
+            scale=1,
+        )
+
+    assert result["success"] is True
+    assert result["scale"] == 1
+    assert result["dimensions"] == (107520, 110080)
+    assert save_map_image.call_args.args[4] == 1

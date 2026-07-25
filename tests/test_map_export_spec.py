@@ -8,6 +8,7 @@ from typing import Any
 from PIL import Image
 
 from app.services.map_export_service import MapExportService
+from core.mca.format import HEADER_SIZE
 from core.mca.map_export_renderer import MapExportRenderer, MapRenderCancelled
 from core.mca.map_models import MapExportSpec, MapSelection
 
@@ -35,8 +36,11 @@ class _FakeRenderer(MapExportRenderer):
 
 def _region(path: Path, *coords: tuple[int, int]) -> Path:
     path.mkdir(parents=True, exist_ok=True)
+    header = bytearray(HEADER_SIZE)
+    header[0:3] = (2).to_bytes(3, "big")
+    header[3] = 1
     for x, z in coords:
-        (path / f"r.{x}.{z}.mca").touch()
+        (path / f"r.{x}.{z}.mca").write_bytes(header)
     return path
 
 
