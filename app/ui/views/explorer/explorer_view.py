@@ -322,6 +322,9 @@ class ExplorerView(
             compact=self._compact_mode,
         )
         self._tab_search.content = self._entity_block_search_view
+        current_path = self.app.current_save_path
+        if current_path:
+            self._entity_block_search_view.on_save_selected(current_path)
 
     def on_save_selected(self, path: str) -> None:
         """当存档被选择时调用（从侧边栏）"""
