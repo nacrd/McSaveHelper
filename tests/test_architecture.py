@@ -321,6 +321,85 @@ def test_region_destructive_delete_uses_world_transaction() -> None:
     assert "world_transactions.mutate" in editor
 
 
+def test_low_level_world_writers_are_transaction_bound() -> None:
+    """Only staged mutation services may import low-level world writers."""
+    app_root = PROJECT_ROOT / "app"
+    allowed_importers = {
+        "app/services/migration_service.py",
+        "app/services/region_editor_service.py",
+    }
+    mutable_mca_exports = {
+        "RegionEditor",
+        "WritableRegion",
+        "copy_chunk_record",
+        "delete_chunk_entries",
+        "write_chunk_record",
+    }
+    writer_modules = {
+        "core.converter",
+        "core.fast_mode",
+        "core.full_mode",
+        "core.mca.editor",
+        "core.mca.writer",
+        "core.omni.action_executor",
+    }
+    importers: set[str] = set()
+    for path in app_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports_writer = any(
+                    alias.name in writer_modules for alias in node.names
+                )
+            elif isinstance(node, ast.ImportFrom):
+                imports_writer = (
+                    node.module in writer_modules
+                    or (
+                        node.module == "core.mca"
+                        and any(
+                            alias.name in mutable_mca_exports
+                            for alias in node.names
+                        )
+                    )
+                )
+            else:
+                continue
+            if imports_writer:
+                importers.add(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert importers == allowed_importers
+    migration = (
+        PROJECT_ROOT / "app/services/migration_service.py"
+    ).read_text(encoding="utf-8")
+    region_editor = (
+        PROJECT_ROOT / "app/services/region_editor_service.py"
+    ).read_text(encoding="utf-8")
+    assert "world_transactions.publish_prepared" in migration
+    assert "world_transactions.mutate" in region_editor
+
+
+def test_world_session_commit_has_one_application_write_boundary() -> None:
+    """Explorer NBT commits must stay behind the typed commit service."""
+    callers: list[str] = []
+    for path in (PROJECT_ROOT / "app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "commit"
+            for node in ast.walk(tree)
+        ):
+            callers.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert callers == ["app/services/nbt_commit_service.py"]
+    source = (
+        PROJECT_ROOT / "app/services/nbt_commit_service.py"
+    ).read_text(encoding="utf-8")
+    assert "session.new_action_session()" in source
+    assert "commit_session.commit(" in source
+    assert "backup=True" in source
+
+
 def test_read_paths_use_world_repository_index() -> None:
     """Stage 2: compare/stats/explorer share world_repository for inventory."""
     from app.bootstrap.services import create_app_services
