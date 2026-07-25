@@ -357,6 +357,7 @@ class ExplorerView(
             generation = self._world_load_generation
             self._invalidate_quick_backup_state()
             self._invalidate_stats_analysis_state()
+            self._invalidate_player_async_state()
             self._set_map_marker_busy(False)
             self.app.hide_progress()
 
@@ -606,6 +607,7 @@ class ExplorerView(
     def _populate_world(self, session: WorldSession) -> None:
         """在 WorldSession 加载完成后填充 UI（可在后台线程调用）"""
         self.world_session = session
+        self._reset_player_selection()
         self._world_label.value = f"当前存档: {session.world_path.name}"
         self._world_label.color = THEME.text_muted
         self._nbt_view_state = clear_nbt_target(self._nbt_view_state)

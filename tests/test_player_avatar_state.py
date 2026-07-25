@@ -5,6 +5,7 @@ from app.presenters.player_avatar_state import (
     avatar_generation,
     begin_avatar_requests,
     close_avatar_requests,
+    invalidate_avatar_requests,
     owns_avatar_request,
 )
 
@@ -65,3 +66,36 @@ def test_close_invalidates_both_avatar_request_kinds() -> None:
     )
     assert begin_avatar_requests(closed, AvatarRequestKind.LIST) is closed
     assert close_avatar_requests(closed) is closed
+
+
+def test_invalidate_expires_both_kinds_without_closing_state() -> None:
+    state = begin_avatar_requests(
+        PlayerAvatarState(),
+        AvatarRequestKind.LIST,
+    )
+    state = begin_avatar_requests(state, AvatarRequestKind.DETAIL)
+    list_generation = avatar_generation(state, AvatarRequestKind.LIST)
+    detail_generation = avatar_generation(state, AvatarRequestKind.DETAIL)
+
+    invalidated = invalidate_avatar_requests(state)
+
+    assert invalidated.is_closed is False
+    assert not owns_avatar_request(
+        invalidated,
+        AvatarRequestKind.LIST,
+        list_generation,
+    )
+    assert not owns_avatar_request(
+        invalidated,
+        AvatarRequestKind.DETAIL,
+        detail_generation,
+    )
+    restarted = begin_avatar_requests(
+        invalidated,
+        AvatarRequestKind.DETAIL,
+    )
+    assert owns_avatar_request(
+        restarted,
+        AvatarRequestKind.DETAIL,
+        avatar_generation(restarted, AvatarRequestKind.DETAIL),
+    )

@@ -13,6 +13,7 @@ from app.presenters.player_avatar_state import (
     avatar_generation,
     begin_avatar_requests,
     close_avatar_requests,
+    invalidate_avatar_requests,
     owns_avatar_request,
 )
 from app.services.asset_import import (
@@ -899,6 +900,31 @@ class PlayerTabMixin(ExplorerMixinHost):
                 )
         self._player_list_column.controls = tiles
         safe_update(self._player_list_column)
+
+    def _invalidate_player_async_state(self) -> None:
+        """使上一世界的玩家任务与头像回调全部失效。"""
+        operations = getattr(self, "_player_tab_operations_instance", None)
+        if operations is not None:
+            operations.invalidate()
+        state = getattr(self, "_player_avatar_state", PlayerAvatarState())
+        self._player_avatar_state = invalidate_avatar_requests(state)
+
+    def _reset_player_selection(self) -> None:
+        """清除上一世界玩家投影；新列表会按需选择首个玩家。"""
+        self.current_uuid = None
+        self._current_player_data = None
+        hud = getattr(self, "_player_hud", None)
+        if hud is not None:
+            hud.reset()
+        for name in ("_inventory", "_ender_inventory", "_container_preview_grid"):
+            grid = getattr(self, name, None)
+            if grid is not None:
+                grid.set_inventory([])
+        self._apply_attributes_ui([])
+        self._apply_effects_ui([])
+        for field in getattr(self, "_player_edit_fields", {}).values():
+            field.value = ""
+            safe_update(field)
 
     def _player_list_prev_page(self, _e: Any = None) -> None:
         page = int(getattr(self, "_player_list_page", 0) or 0)

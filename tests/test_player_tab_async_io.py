@@ -235,6 +235,76 @@ def test_operations_close_drops_queued_ui_callback() -> None:
     assert callbacks == []
 
 
+def test_operations_invalidate_drops_old_ui_and_accepts_next_world() -> None:
+    old_handle = _FakeHandle(AssetImportCounts(1, 0, 0, 1), complete=True)
+    new_handle = _FakeHandle(AssetImportCounts(0, 2, 1, 1), complete=True)
+    handles = iter((old_handle, new_handle))
+    page = _QueuedPage()
+    callbacks: list[AssetImportCounts] = []
+    operations = PlayerTabOperations(
+        cast(
+            Any,
+            SimpleNamespace(submit=lambda *_args, **_kwargs: next(handles)),
+        ),
+        get_page=lambda: cast(Any, page),
+        get_world_session=lambda: None,
+        get_current_uuid=lambda: None,
+    )
+    request = _AssetImportRequest((), "zh_cn", None, None)
+
+    operations.submit_asset_import(
+        request,
+        object(),
+        object(),
+        callbacks.append,
+        lambda error: pytest.fail(str(error)),
+    )
+    operations.invalidate()
+    operations.submit_asset_import(
+        request,
+        object(),
+        object(),
+        callbacks.append,
+        lambda error: pytest.fail(str(error)),
+    )
+    asyncio.run(page.tasks.pop(0)())
+    asyncio.run(page.tasks.pop(0)())
+
+    assert old_handle.cancel_calls == 0
+    assert callbacks == [AssetImportCounts(0, 2, 1, 1)]
+
+
+def test_reset_player_selection_clears_previous_world_projection() -> None:
+    cleared_grids: list[list[object]] = []
+    hud_resets: list[bool] = []
+    field = SimpleNamespace(value="old", update=lambda: None)
+    tab = PlayerTabMixin()
+    tab.current_uuid = "old-player"
+    tab._current_player_data = object()
+    tab._player_hud = cast(
+        Any,
+        SimpleNamespace(reset=lambda: hud_resets.append(True)),
+    )
+    grid = cast(
+        Any,
+        SimpleNamespace(
+            set_inventory=lambda items: cleared_grids.append(items),
+        ),
+    )
+    tab._inventory = grid
+    tab._ender_inventory = grid
+    tab._container_preview_grid = grid
+    tab._player_edit_fields = {"Health": field}
+
+    tab._reset_player_selection()
+
+    assert tab.current_uuid is None
+    assert tab._current_player_data is None
+    assert hud_resets == [True]
+    assert cleared_grids == [[], [], []]
+    assert field.value == ""
+
+
 def test_player_export_drops_callback_after_switching_player() -> None:
     handle = _FakeHandle(1, complete=True)
     page = _QueuedPage()

@@ -55,6 +55,16 @@ def owns_avatar_request(
     )
 
 
+def invalidate_avatar_requests(state: PlayerAvatarState) -> PlayerAvatarState:
+    """推进两类请求 generation，使当前排队回调同时过期。"""
+    if state.is_closed:
+        return state
+    return PlayerAvatarState(
+        list_generation=state.list_generation + 1,
+        detail_generation=state.detail_generation + 1,
+    )
+
+
 def close_avatar_requests(state: PlayerAvatarState) -> PlayerAvatarState:
     """关闭状态并同时使列表与详情请求失效。"""
     if state.is_closed:
@@ -72,5 +82,6 @@ __all__ = [
     "avatar_generation",
     "begin_avatar_requests",
     "close_avatar_requests",
+    "invalidate_avatar_requests",
     "owns_avatar_request",
 ]

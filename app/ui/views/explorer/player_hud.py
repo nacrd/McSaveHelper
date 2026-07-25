@@ -146,6 +146,14 @@ class PlayerHUDCard(ft.Column):
             )
         safe_update(self)
 
+    def reset(self) -> None:
+        """清除上一玩家的身份和指标投影。"""
+        self._name_text.value = "--"
+        self._uuid_text.value = ""
+        for value in self._attrs.values():
+            value.value = "--"
+        self.set_avatar_src(None)
+
     def set_identity(
         self,
         name: str,

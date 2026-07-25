@@ -273,10 +273,26 @@ class PlayerTabOperations:
 
     def close(self) -> None:
         """取消本协调器的句柄并让已排队 UI 回调失效；可重复调用。"""
+        handles = self._invalidate_requests(close=True)
+        for handle in handles:
+            handle.cancel()
+
+    def invalidate(self) -> None:
+        """取消当前世界请求并保留协调器供下一个世界复用。"""
+        handles = self._invalidate_requests(close=False)
+        for handle in handles:
+            handle.cancel()
+
+    def _invalidate_requests(
+        self,
+        *,
+        close: bool,
+    ) -> tuple[OperationHandle[object], ...]:
+        """推进所有 generation，并返回需要在锁外取消的句柄。"""
         with self._lock:
             if self._closed:
-                return
-            self._closed = True
+                return ()
+            self._closed = close
             handles = tuple(
                 state.handle
                 for state in self._states.values()
@@ -285,8 +301,7 @@ class PlayerTabOperations:
             for state in self._states.values():
                 state.generation += 1
                 state.handle = None
-        for handle in handles:
-            handle.cancel()
+        return handles
 
     def _submit(
         self,
