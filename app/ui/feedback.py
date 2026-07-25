@@ -66,7 +66,7 @@ class FeedbackCollector:
     def __init__(self) -> None:
         """初始化本地反馈目录与 JSONL 文件路径。"""
         self.enabled: bool = True
-        self.feedback_dir: Path = Path.home() / ".mcsavehelper" / "feedback"
+        self.feedback_dir: Path = Path.home() / ".mc_save_helper" / "feedback"
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
 
         self.feedback_file: Path = self.feedback_dir / "feedback.jsonl"

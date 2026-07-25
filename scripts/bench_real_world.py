@@ -254,7 +254,7 @@ def _bench_cache_hit(
     from core.mca import tile_cache
 
     previous_cache_dir = tile_cache._CACHE_DIR
-    with tempfile.TemporaryDirectory(prefix="mcsavehelper-real-tile-bench-") as raw:
+    with tempfile.TemporaryDirectory(prefix="mc_save_helper-real-tile-bench-") as raw:
         tile_cache._CACHE_DIR = Path(raw)
         try:
             tile_cache.store_tile(region_path, tile_size, png)

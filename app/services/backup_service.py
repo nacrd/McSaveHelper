@@ -29,7 +29,7 @@ _BACKUP_ID_RE = re.compile(r"^\d{8}T\d{6}Z-[0-9a-f]{8}$")
 _METADATA_FILE = "backup.json"
 _MANIFEST_FILE = "manifest.json"
 _SNAPSHOT_DIR = "world"
-_REPOSITORY_DIR = ".mcsavehelper_backups"
+_REPOSITORY_DIR = ".mc_save_helper_backups"
 _SESSION_LOCK_FILE = "session.lock"
 _PUBLISH_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2, 0.4)
 

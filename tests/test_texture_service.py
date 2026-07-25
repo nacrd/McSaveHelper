@@ -299,7 +299,7 @@ def test_async_texture_load_uses_injected_runtime(
         )
 
         assert loaded.wait(1)
-        assert worker_names[0].startswith("mcsavehelper-io-")
+        assert worker_names[0].startswith("mc_save_helper-io-")
         assert service._execution_runtime is runtime
     finally:
         service.close()

@@ -88,7 +88,7 @@ def test_debounced_save_cancels_stale_snapshot_and_uses_io_lane() -> None:
         debounce.release_second.set()
 
         assert completed.wait(2)
-        assert saved == [(22, "mcsavehelper-io-1")]
+        assert saved == [(22, "mc_save_helper-io-1")]
     finally:
         controller.close()
         runtime.shutdown(wait=True)
@@ -141,7 +141,7 @@ def test_cache_clear_runs_in_io_lane_and_close_suppresses_late_reset() -> None:
             lambda error: None,
         )
         assert clear_completed.wait(2)
-        assert clear_threads == ["mcsavehelper-io-1"]
+        assert clear_threads == ["mc_save_helper-io-1"]
         assert clear_results[0].metrics.deleted_files == 3
         assert clear_results[0].snapshot.cache_path == "cache"
         assert clear_results[0].snapshot.ui_delivery.sample_count == 2
@@ -154,7 +154,7 @@ def test_cache_clear_runs_in_io_lane_and_close_suppresses_late_reset() -> None:
         runtime.shutdown(wait=True)
 
         assert controller.is_closed
-        assert reset_threads == ["mcsavehelper-io-1"]
+        assert reset_threads == ["mc_save_helper-io-1"]
         assert reset_results == []
     finally:
         reset_release.set()
@@ -235,7 +235,7 @@ def test_diagnostic_export_builds_and_writes_on_io_lane(tmp_path: Path) -> None:
 
         assert completed.wait(2)
         assert errors == []
-        assert build_threads == ["mcsavehelper-io-1"]
+        assert build_threads == ["mc_save_helper-io-1"]
         assert output.read_text(encoding="utf-8") == "diagnostic report\n"
     finally:
         controller.close()

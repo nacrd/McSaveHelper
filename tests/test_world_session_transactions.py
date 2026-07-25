@@ -32,7 +32,7 @@ def test_failed_later_action_does_not_publish_earlier_action(tmp_path: Path) -> 
     assert session.commit(backup=False) is False
     assert not (world / "marker.txt").exists()
     assert session.get_queue_size() == 2
-    assert not list(tmp_path.glob(".mcsavehelper_commit_*"))
+    assert not list(tmp_path.glob(".mc_save_helper_commit_*"))
 
 
 def test_session_accepts_matching_shared_world_index(tmp_path: Path) -> None:

@@ -213,7 +213,7 @@ def _bench_topview_cache_hit(
     from core.mca import tile_cache
 
     previous_cache_dir = tile_cache._CACHE_DIR
-    with tempfile.TemporaryDirectory(prefix="mcsavehelper-tile-bench-") as raw:
+    with tempfile.TemporaryDirectory(prefix="mc_save_helper-tile-bench-") as raw:
         cache_root = Path(raw)
         tile_cache._CACHE_DIR = cache_root
         try:
@@ -320,7 +320,7 @@ def run_benchmark(
     """Run fixed-sample MCA/index/session/tile/backup benchmarks."""
     selected = sizes or [SampleSize.SMALL, SampleSize.MEDIUM, SampleSize.LARGE]
     effective_loops = max(1, int(loops))
-    with tempfile.TemporaryDirectory(prefix="mcsavehelper-mca-bench-") as raw:
+    with tempfile.TemporaryDirectory(prefix="mc_save_helper-mca-bench-") as raw:
         root = Path(raw)
         samples = [
             _bench_size(size, root / size.value, effective_loops)

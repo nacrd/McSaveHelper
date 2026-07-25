@@ -38,7 +38,7 @@ def setup_default_logging(
         logger.add_handler(ConsoleHandler(level=level))
     if enable_file:
         if file_path is None:
-            file_path = Path.home() / ".mcsavehelper" / "logs" / "app.log"
+            file_path = Path.home() / ".mc_save_helper" / "logs" / "app.log"
         logger.add_handler(FileHandler(
             filepath=file_path,
             level=level,

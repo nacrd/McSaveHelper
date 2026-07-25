@@ -254,7 +254,7 @@ class WorldTransactionService:
         cancel_check: Optional[CancelCheck],
     ) -> None:
         """分块复制世界，并排除运行锁和应用自己的备份仓库。"""
-        ignored = {"session.lock", ".mcsavehelper_backups"}
+        ignored = {"session.lock", ".mc_save_helper_backups"}
         prepared.mkdir()
         for directory, directory_names, file_names in os.walk(world):
             cls._raise_if_cancelled(cancel_check)

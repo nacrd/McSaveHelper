@@ -268,7 +268,7 @@ class WorldWriteCoordinator:
     @classmethod
     def _acquire_process_lock(cls, key: str) -> BinaryIO:
         """持有不随世界目录 exchange 移动的跨进程应用写锁。"""
-        lock_root = Path(tempfile.gettempdir()) / "mcsavehelper-world-locks"
+        lock_root = Path(tempfile.gettempdir()) / "mc_save_helper-world-locks"
         lock_root.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
         lock_path = lock_root / f"{digest}.lock"

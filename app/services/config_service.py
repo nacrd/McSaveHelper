@@ -16,7 +16,7 @@ class ConfigService:
     """配置管理服务
 
     职责：
-      - 从 ~/.mcsavehelper/config.json 加载/保存持久化配置
+      - 从 ~/.mc_save_helper/config.json 加载/保存持久化配置
       - 提供运行时迁移参数（MigrationConfig）
       - 自动修复无效配置字段
       - 提供 Minecraft 版本检测功能
@@ -30,9 +30,9 @@ class ConfigService:
         """创建配置目录并加载 ``config.json``。
 
         Args:
-            config_dir: 配置根目录；默认 ``~/.mcsavehelper``。
+            config_dir: 配置根目录；默认 ``~/.mc_save_helper``。
         """
-        self._config_dir: Path = config_dir or (Path.home() / ".mcsavehelper")
+        self._config_dir: Path = config_dir or (Path.home() / ".mc_save_helper")
         self._config_dir.mkdir(parents=True, exist_ok=True)
         self._config: Dict[str, Any] = {}
         self._migration: MigrationConfig = MigrationConfig()

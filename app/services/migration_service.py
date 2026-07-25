@@ -498,7 +498,7 @@ class MigrationService:
         with self._backup_service.exclusive_operation(output_path):
             self._raise_if_batch_cancelled(operation_check)
             staging_root = Path(tempfile.mkdtemp(
-                prefix=f".mcsavehelper_migrate_{world_name}_",
+                prefix=f".mc_save_helper_migrate_{world_name}_",
                 dir=dest_path,
             ))
             try:

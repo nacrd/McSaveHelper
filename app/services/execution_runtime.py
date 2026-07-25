@@ -856,9 +856,9 @@ class ExecutionRuntime:
         self._operation_sink = operation_sink
         self._worker_limit_total = total_worker_limit
         self._lanes = {
-            ExecutionLane.IO: self._create_lane("mcsavehelper-io", selected_io),
+            ExecutionLane.IO: self._create_lane("mc_save_helper-io", selected_io),
             ExecutionLane.CPU: self._create_lane(
-                "mcsavehelper-cpu",
+                "mc_save_helper-cpu",
                 selected_cpu,
             ),
         }

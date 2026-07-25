@@ -126,7 +126,7 @@ def test_avatar_fetch_uses_injected_runtime(
         )
 
         assert fetched.wait(1)
-        assert worker_names[0].startswith("mcsavehelper-io-")
+        assert worker_names[0].startswith("mc_save_helper-io-")
         assert service._execution_runtime is runtime
     finally:
         service.close()
@@ -160,7 +160,7 @@ def test_async_avatar_disk_lookup_runs_on_io_lane(
         )
 
         assert completed.wait(1)
-        assert worker_names[0].startswith("mcsavehelper-io-")
+        assert worker_names[0].startswith("mc_save_helper-io-")
     finally:
         service.close()
         runtime.shutdown(wait=True)

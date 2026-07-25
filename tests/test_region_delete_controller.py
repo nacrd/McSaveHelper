@@ -91,7 +91,7 @@ def test_start_returns_while_delete_runs_on_io_worker(tmp_path: Path) -> None:
         assert transactions.started.wait(1)
         assert not handle.done
         assert not completed.is_set()
-        assert transactions.worker_name.startswith("mcsavehelper-io-")
+        assert transactions.worker_name.startswith("mc_save_helper-io-")
 
         transactions.release.set()
         assert handle.result(timeout=1).value is True

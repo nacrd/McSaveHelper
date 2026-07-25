@@ -70,7 +70,7 @@ def test_cancelled_create_removes_partial_directory(tmp_path: Path) -> None:
     with pytest.raises(BackupCancelledError):
         service.create_backup(world, progress_callback=cancel_after_first_file)
 
-    repository = tmp_path / ".mcsavehelper_backups" / "world"
+    repository = tmp_path / ".mc_save_helper_backups" / "world"
     assert list(repository.iterdir()) == []
 
 
@@ -99,7 +99,7 @@ def test_create_rejects_world_changed_during_copy(
     with pytest.raises(BackupError, match="复制期间源文件发生变化"):
         service.create_backup(world)
 
-    repository = tmp_path / ".mcsavehelper_backups" / "world"
+    repository = tmp_path / ".mc_save_helper_backups" / "world"
     assert list(repository.iterdir()) == []
 
 
@@ -117,7 +117,7 @@ def test_operation_cancel_check_stops_chunked_backup(tmp_path: Path) -> None:
     with pytest.raises(BackupCancelledError):
         service.create_backup(world, cancel_check=cancel_check)
 
-    repository = tmp_path / ".mcsavehelper_backups" / "world"
+    repository = tmp_path / ".mc_save_helper_backups" / "world"
     assert list(repository.iterdir()) == []
 
 
@@ -198,7 +198,7 @@ def test_create_cancelled_at_final_checkpoint_is_not_published(
             cancel_check=lambda: cancelled,
         )
 
-    repository = tmp_path / ".mcsavehelper_backups" / "world"
+    repository = tmp_path / ".mc_save_helper_backups" / "world"
     assert list(repository.iterdir()) == []
 
 

@@ -112,7 +112,7 @@ class MigrationConfig:
 
 @dataclass
 class AppConfig:
-    """应用完整配置（持久化到 ~/.mcsavehelper/config.json）
+    """应用完整配置（持久化到 ~/.mc_save_helper/config.json）
 
     用于存储应用程序的所有持久化配置项。
     """

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from app.services.data_migration import migrate_legacy_home_dir
 from app.services.backup_service import BackupService
 from app.services.cache_registry import CacheRegistry
 from app.services.config_service import ConfigService
@@ -233,6 +234,7 @@ def create_app_services(
     factories: Optional[ServiceFactories] = None,
 ) -> AppServices:
     """Build services in dependency order or fail with an actionable error."""
+    migrate_legacy_home_dir()
     selected = factories or ServiceFactories()
     config = _create("config", selected.config)
     i18n = _create("i18n", selected.i18n, config)

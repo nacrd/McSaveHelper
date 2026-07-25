@@ -130,7 +130,7 @@ class ActionExecutor:
     ) -> bool:
         target_world.parent.mkdir(parents=True, exist_ok=True)
         staging_root = Path(tempfile.mkdtemp(
-            prefix=f".mcsavehelper_commit_{target_world.name}_",
+            prefix=f".mc_save_helper_commit_{target_world.name}_",
             dir=target_world.parent,
         ))
         prepared = staging_root / target_world.name
@@ -168,7 +168,7 @@ class ActionExecutor:
         names: list[str],
     ) -> set[str]:
         """暂存复制排除根 session.lock 与应用内部备份目录。"""
-        ignored = {".mcsavehelper_backups"}.intersection(names)
+        ignored = {".mc_save_helper_backups"}.intersection(names)
         if Path(directory).resolve() == self.world_path.resolve():
             ignored.update({"session.lock"}.intersection(names))
         return ignored

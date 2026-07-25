@@ -168,7 +168,7 @@ def _write_lock_probe(root: Path) -> dict[str, bool]:
 
 def run_benchmark() -> dict[str, object]:
     """运行所有无需真实存档的架构基准并返回 JSON 兼容报告。"""
-    with tempfile.TemporaryDirectory(prefix="mcsavehelper-architecture-") as raw:
+    with tempfile.TemporaryDirectory(prefix="mc_save_helper-architecture-") as raw:
         root = Path(raw)
         world = _create_world(root, "world")
         registry = WorldIndexRegistry(builder=WorldIndexBuilder())

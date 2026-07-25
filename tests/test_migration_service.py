@@ -129,7 +129,7 @@ def test_single_migration_failure_leaves_existing_target_untouched(
         )
 
     assert (existing / "level.dat").read_bytes() == b"existing"
-    assert not list(destination.glob(".mcsavehelper_migrate_*"))
+    assert not list(destination.glob(".mc_save_helper_migrate_*"))
 
 
 def test_single_migration_rejects_empty_destination(tmp_path: Path) -> None:
