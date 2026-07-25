@@ -24,6 +24,7 @@ from core.nbt import (
     load,
     save,
 )
+from core.nbt.tag import read_string
 
 
 def test_numeric_roundtrip_and_range() -> None:
@@ -117,6 +118,18 @@ def test_little_endian_roundtrip() -> None:
     assert raw[-5:-1] == b"\x01\x00\x00\x00"
     parsed = File.parse(io.BytesIO(raw), byteorder="little")
     assert int(parsed["x"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("byteorder", "raw"),
+    (("big", b"\x00\x05stone"), ("little", b"\x05\x00stone")),
+)
+def test_read_string_handles_both_byte_orders(byteorder: str, raw: bytes) -> None:
+    assert read_string(io.BytesIO(raw), byteorder) == "stone"
+
+
+def test_read_string_keeps_short_prefix_compatibility() -> None:
+    assert read_string(io.BytesIO(b"\x00")) == ""
 
 
 def test_gzip_load_save(tmp_path: Path) -> None:

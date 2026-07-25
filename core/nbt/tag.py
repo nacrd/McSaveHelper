@@ -152,7 +152,12 @@ def write_numeric(
 
 def read_string(fileobj: BinaryIO, byteorder: ByteOrder = "big") -> str:
     """Read a modified-UTF-8 length-prefixed string."""
-    length = int(read_numeric(USHORT, fileobj, byteorder))
+    try:
+        struct = USHORT[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    prefix = fileobj.read(struct.size)
+    length = struct.unpack(prefix)[0] if len(prefix) == struct.size else 0
     return fileobj.read(length).decode("utf-8", "replace")
 
 
