@@ -4,6 +4,7 @@ from typing import cast
 import pytest
 from PIL import Image
 
+from app.services.cache_registry import CacheRegistry
 from app.ui.views.explorer.map.surface_renderer import (
     MapSurfaceRenderer,
     MapSurfaceSpec,
@@ -103,6 +104,34 @@ def test_surface_renderer_close_releases_decoded_tiles_idempotently() -> None:
     renderer.close()
 
     assert not renderer._decoded
+
+
+def test_surface_renderer_registers_and_evicts_by_decoded_bytes() -> None:
+    tile_bytes = 4 * 4 * 3
+    registry = CacheRegistry(budget_bytes=tile_bytes)
+    renderer = MapSurfaceRenderer(
+        max_decoded_bytes=tile_bytes,
+        cache_registry=registry,
+    )
+    spec = MapSurfaceSpec(0, 1, 0, 0, pixels_per_region=4)
+
+    renderer.compose(
+        spec,
+        {(0, 0): 1, (1, 0): 1},
+        {(0, 0): _png((10, 20, 30)), (1, 0): _png((40, 50, 60))},
+        {(0, 0): 1, (1, 0): 1},
+        {},
+    )
+
+    stats = renderer.stats()
+    assert stats.entries == 1
+    assert stats.bytes_used == tile_bytes
+    assert stats.misses == 2
+    assert stats.evictions == 1
+    assert registry.stats().regions == (stats,)
+
+    renderer.close()
+    assert registry.stats().regions == ()
 
 
 def test_surface_spec_rejects_more_than_sixteen_megapixels() -> None:

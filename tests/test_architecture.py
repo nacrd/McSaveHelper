@@ -578,6 +578,7 @@ def test_map_and_world_index_register_with_cache_budget() -> None:
     """Stage 4: map topview and world index participate in CacheRegistry."""
     from app.bootstrap.services import create_app_services
     from app.services.region_map import RegionMapService
+    from app.ui.views.explorer.map.mca_map_view import McaMapView
 
     services = create_app_services()
     try:
@@ -587,21 +588,41 @@ def test_map_and_world_index_register_with_cache_budget() -> None:
             services.execution_runtime,
             cache_registry=services.cache_registry,
         )
+        map_view = None
         try:
+            map_view = McaMapView(
+                map_service,
+                execution_runtime=services.execution_runtime,
+                cache_registry=services.cache_registry,
+            )
             names_with_map = {
                 item.name for item in services.cache_registry.stats().regions
             }
             assert any(name.startswith("map.topview.") for name in names_with_map)
+            assert any(
+                name.startswith("map.tile-source.")
+                for name in names_with_map
+            )
+            assert any(
+                name.startswith("map.surface-decoded.")
+                for name in names_with_map
+            )
+            snapshot = services.cache_registry.stats()
+            assert sum(
+                item.max_bytes for item in snapshot.regions
+            ) <= snapshot.budget_bytes
             generation_before = map_service.get_topview_generation()
             map_service.clear_data()
             assert map_service.get_topview_generation() > generation_before
         finally:
+            if map_view is not None:
+                map_view.dispose()
             map_service.close()
             names_after = {
                 item.name for item in services.cache_registry.stats().regions
             }
             assert not any(
-                name.startswith("map.topview.") for name in names_after
+                name.startswith("map.") for name in names_after
             )
     finally:
         services.world_indexes.close()

@@ -31,6 +31,7 @@ from core.mca.topview_renderer import ULTRA_TILE_SIZE
 from core.mca.viewport import McaViewport
 
 if TYPE_CHECKING:
+    from app.services.cache_registry import CacheRegistry
     from app.services.region_map import RegionMapService
 
 
@@ -77,6 +78,7 @@ class MapSurfaceLayer:
         buffer_regions: int = 2,
         max_regions: int = 192,
         max_pixels: int = 6_000_000,
+        cache_registry: Optional[CacheRegistry] = None,
     ) -> None:
         """绑定服务与调度回调，并尝试创建 RawImage 宿主。
 
@@ -93,6 +95,7 @@ class MapSurfaceLayer:
             buffer_regions: 可见区外缓冲环数。
             max_regions: 单轴最大区域数。
             max_pixels: 表面像素预算上限。
+            cache_registry: 可选应用缓存预算注册表。
         """
         self._service = service
         self._execution_runtime = execution_runtime
@@ -106,7 +109,7 @@ class MapSurfaceLayer:
         self._max_regions = max(8, int(max_regions))
         self._max_pixels = max(1_000_000, int(max_pixels))
 
-        self._renderer = MapSurfaceRenderer()
+        self._renderer = MapSurfaceRenderer(cache_registry=cache_registry)
         self._frame: Optional[MapSurfaceFrame] = None
         self._spec: Optional[MapSurfaceSpec] = None
         self._task: Optional[ScheduledTask] = None

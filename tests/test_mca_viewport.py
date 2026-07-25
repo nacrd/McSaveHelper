@@ -15,6 +15,7 @@ from app.services.cache_registry import CacheRegistry
 from app.services.execution_runtime import ExecutionRuntime
 from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.mca_map_view import McaMapView
+from app.ui.views.explorer.map.surface_renderer import MapSurfaceRenderer
 from app.ui.views.explorer.map.tile_source_cache import TileSourceCache
 
 
@@ -275,12 +276,21 @@ def test_map_view_falls_back_to_canvas_when_surface_becomes_unavailable(
 
 def test_map_view_dispose_unregisters_tile_source_cache() -> None:
     runtime = ExecutionRuntime()
-    registry = CacheRegistry(budget_bytes=32 * 1024 * 1024)
+    registry = CacheRegistry(
+        budget_bytes=(
+            TileSourceCache.MAX_BYTES
+            + MapSurfaceRenderer.MAX_DECODED_BYTES
+        ),
+    )
     service = RegionMapService(runtime)
     view = McaMapView(map_service=service, cache_registry=registry)
 
     assert any(
         item.name.startswith(TileSourceCache.CACHE_NAME_PREFIX)
+        for item in registry.stats().regions
+    )
+    assert any(
+        item.name.startswith(MapSurfaceRenderer.CACHE_NAME_PREFIX)
         for item in registry.stats().regions
     )
 
@@ -296,7 +306,12 @@ def test_map_view_constructor_failure_releases_tile_source_registration(
     monkeypatch,
 ) -> None:
     runtime = ExecutionRuntime()
-    registry = CacheRegistry(budget_bytes=32 * 1024 * 1024)
+    registry = CacheRegistry(
+        budget_bytes=(
+            TileSourceCache.MAX_BYTES
+            + MapSurfaceRenderer.MAX_DECODED_BYTES
+        ),
+    )
     service = RegionMapService(runtime)
 
     def fail_interaction_state(_view) -> None:

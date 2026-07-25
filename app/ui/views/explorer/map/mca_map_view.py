@@ -153,6 +153,9 @@ class McaMapView(ft.Container):
             self._init_layers_and_content(width, height)
         except Exception:
             # 可选 Flet/canvas 边界可能在预算登记后失败，必须归还视图缓存预算。
+            surface_layer = getattr(self, "_surface_layer", None)
+            if surface_layer is not None:
+                surface_layer.close()
             tile_sources = getattr(self, "_tile_sources", None)
             if tile_sources is not None:
                 tile_sources.close()
@@ -190,6 +193,7 @@ class McaMapView(ft.Container):
         ] = {}
         self._cached_stats: Optional[Dict[str, Any]] = None
         self._tile_sources = TileSourceCache(cache_registry)
+        self._cache_registry = cache_registry
         self._metadata_pending: set[Tuple[int, int]] = set()
         self._marker_layer = MapMarkerLayer()
         self._tile_ready_callback = self._on_tile_ready
@@ -252,6 +256,7 @@ class McaMapView(ft.Container):
             cell_size=self.CELL_SIZE,
             buffer_regions=self.SURFACE_BUFFER_REGIONS,
             max_regions=self.SURFACE_MAX_REGIONS,
+            cache_registry=self._cache_registry,
         )
         # RawImage presence only means the transport can be attempted.  Keep
         # Canvas active until the client acknowledges the first uploaded frame.
