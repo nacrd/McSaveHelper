@@ -182,7 +182,12 @@ def test_topview_chunk_decode_uses_world_surface_view(monkeypatch) -> None:
     calls = []
 
     class _Region:
-        def read_chunk(self, _chunk_x: int, _chunk_z: int) -> object:
+        def read_chunk_fields(
+            self,
+            _chunk_x: int,
+            _chunk_z: int,
+            _root_fields: object,
+        ) -> object:
             return marker
 
     class _Blocks:
@@ -215,7 +220,12 @@ def test_topview_chunk_decode_keeps_biome_and_transparent_stratum(
     monkeypatch,
 ) -> None:
     class _RegionWithBiome:
-        def read_chunk(self, _chunk_x: int, _chunk_z: int) -> object:
+        def read_chunk_fields(
+            self,
+            _chunk_x: int,
+            _chunk_z: int,
+            _root_fields: object,
+        ) -> object:
             return object()
 
     class _BiomeBlocks:

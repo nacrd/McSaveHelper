@@ -5,6 +5,7 @@ from struct import Struct
 from typing import (
     Any,
     BinaryIO,
+    Collection,
     Dict,
     Iterable,
     Iterator,
@@ -170,6 +171,20 @@ class Compound(Base, Dict[str, Any]):
     end_tag: bytes
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = ...) -> Compound: ...
+    @classmethod
+    def parse_fields(
+        cls,
+        fileobj: BinaryIO,
+        include_names: Collection[str],
+        byteorder: ByteOrder = ...,
+    ) -> Compound: ...
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = ...) -> None: ...
     def unpack(self, json: bool = ...) -> Dict[str, Any]: ...
     def merge(self, other: Dict[str, Any]) -> None: ...
+
+def parse_compound_fields(
+    compound_type: Type[Compound],
+    fileobj: BinaryIO,
+    include_names: Collection[str],
+    byteorder: ByteOrder = ...,
+) -> Compound: ...

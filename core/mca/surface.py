@@ -39,6 +39,17 @@ DEFAULT_EMPTY = (45, 60, 50)
 DEFAULT_WATERISH = (64, 164, 223)
 DEFAULT_UNKNOWN = (100, 100, 100)
 DEFAULT_PROGRESS_BATCH_CHUNKS = 128
+_SURFACE_ROOT_FIELDS = frozenset({
+    "DataVersion",
+    "dataVersion",
+    "sections",
+    "Sections",
+    "Heightmaps",
+    "heightmaps",
+    "Biomes",
+    "biomes",
+    "Level",
+})
 _OVERLAY_ALPHA_BY_NAME = {
     "lily_pad": 0.72,
     "kelp": 0.72,
@@ -226,7 +237,7 @@ def _decode_one(
     cz: int,
     samples: List[Tuple[int, int]],
 ) -> Tuple[Tuple[int, int], SurfaceSamples]:
-    nbt = region.read_chunk(cx, cz)
+    nbt = region.read_chunk_fields(cx, cz, _SURFACE_ROOT_FIELDS)
     blocks = get_world_surface_chunk_blocks(nbt)
     return (
         (cx, cz),

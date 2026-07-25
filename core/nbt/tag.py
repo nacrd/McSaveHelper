@@ -15,6 +15,7 @@ from typing import (
     BinaryIO,
     Callable,
     ClassVar,
+    Collection,
     Dict,
     Iterable,
     Iterator,
@@ -57,6 +58,7 @@ __all__ = [
     "write_numeric",
     "read_string",
     "write_string",
+    "parse_compound_fields",
     "BYTE",
     "SHORT",
     "USHORT",
@@ -84,6 +86,8 @@ LONG = get_format(Struct, "q")
 FLOAT = get_format(Struct, "f")
 DOUBLE = get_format(Struct, "d")
 SIGNED_ARRAY_TYPECODES = {1: "b", 4: "i", 8: "q"}
+FIXED_PAYLOAD_SIZES = {1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8}
+ARRAY_ITEM_SIZES = {7: 1, 11: 4, 12: 8}
 
 
 class EndInstantiation(TypeError):
@@ -170,6 +174,82 @@ def write_string(
     data = value.encode("utf-8")
     write_numeric(USHORT, len(data), fileobj, byteorder)
     fileobj.write(data)
+
+
+def _read_exact(fileobj: BinaryIO, size: int, label: str) -> bytes:
+    data = fileobj.read(size)
+    if len(data) != size:
+        raise ValueError(f"{label} truncated: need {size} bytes, got {len(data)}")
+    return data
+
+
+def _discard_exact(fileobj: BinaryIO, size: int, label: str) -> None:
+    remaining = size
+    while remaining:
+        chunk = fileobj.read(min(remaining, 64 * 1024))
+        if not chunk:
+            raise ValueError(f"{label} truncated: {remaining} bytes missing")
+        remaining -= len(chunk)
+
+
+def _read_non_negative_count(
+    fileobj: BinaryIO,
+    byteorder: ByteOrder,
+    label: str,
+) -> int:
+    try:
+        struct = INT[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    count = int(struct.unpack(_read_exact(fileobj, struct.size, label))[0])
+    if count < 0:
+        raise ValueError(f"{label} has negative length: {count}")
+    return count
+
+
+def _skip_string_payload(fileobj: BinaryIO, byteorder: ByteOrder) -> None:
+    try:
+        struct = USHORT[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    length = int(struct.unpack(_read_exact(fileobj, struct.size, "String"))[0])
+    _discard_exact(fileobj, length, "String")
+
+
+def _skip_payload(
+    tag_id: int,
+    fileobj: BinaryIO,
+    byteorder: ByteOrder,
+) -> None:
+    """Consume one tag payload without constructing its Python tag tree."""
+    fixed_size = FIXED_PAYLOAD_SIZES.get(tag_id)
+    if fixed_size is not None:
+        _discard_exact(fileobj, fixed_size, f"TAG_{tag_id}")
+        return
+    if tag_id in ARRAY_ITEM_SIZES:
+        count = _read_non_negative_count(fileobj, byteorder, f"TAG_{tag_id}")
+        _discard_exact(fileobj, count * ARRAY_ITEM_SIZES[tag_id], f"TAG_{tag_id}")
+        return
+    if tag_id == String.tag_id:
+        _skip_string_payload(fileobj, byteorder)
+        return
+    if tag_id == List.tag_id:
+        element_id = _read_exact(fileobj, 1, "TAG_List subtype")[0]
+        count = _read_non_negative_count(fileobj, byteorder, "TAG_List")
+        if element_id == End.tag_id and count:
+            raise ValueError("TAG_List with TAG_End subtype must be empty")
+        for _ in range(count):
+            _skip_payload(element_id, fileobj, byteorder)
+        return
+    if tag_id == Compound.tag_id:
+        while True:
+            child_id = _read_exact(fileobj, 1, "TAG_Compound child id")[0]
+            if child_id == End.tag_id:
+                return
+            _skip_string_payload(fileobj, byteorder)
+            _skip_payload(child_id, fileobj, byteorder)
+    else:
+        raise ValueError(f"Unknown NBT tag id: {tag_id}")
 
 
 class Base:
@@ -702,6 +782,61 @@ class Compound(Base, Dict[str, Any]):
             self[name] = cls.get_tag(tag_id).parse(fileobj, byteorder)
         return self
 
+    @classmethod
+    def parse_fields(
+        cls,
+        fileobj: BinaryIO,
+        include_names: Collection[str],
+        byteorder: ByteOrder = "big",
+    ) -> "Compound":
+        """Parse selected direct children while validating skipped payloads.
+
+        Args:
+            fileobj: Compound payload stream positioned at its first child.
+            include_names: Direct child names to retain.
+            byteorder: NBT byte order.
+
+        Returns:
+            Compound: Partial compound containing selected children.
+
+        Raises:
+            ValueError: A skipped payload is malformed or truncated.
+        """
+        return Compound._parse_fields_as(
+            cls,
+            fileobj,
+            include_names,
+            byteorder,
+        )
+
+    @staticmethod
+    def _parse_fields_as(
+        compound_type: Type["Compound"],
+        fileobj: BinaryIO,
+        include_names: Collection[str],
+        byteorder: ByteOrder,
+    ) -> "Compound":
+        try:
+            tag_struct = BYTE[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        selected = frozenset(include_names)
+        self = compound_type()
+        while True:
+            tag_id = tag_struct.unpack(
+                _read_exact(fileobj, tag_struct.size, "TAG_Compound child id")
+            )[0]
+            if tag_id == End.tag_id:
+                return self
+            name = read_string(fileobj, byteorder)
+            if name in selected:
+                self[name] = compound_type.get_tag(tag_id).parse(
+                    fileobj,
+                    byteorder,
+                )
+            else:
+                _skip_payload(tag_id, fileobj, byteorder)
+
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:
         for name, tag in self.items():
             write_numeric(BYTE, cast(Base, tag).tag_id or 0, fileobj, byteorder)
@@ -719,3 +854,31 @@ class Compound(Base, Dict[str, Any]):
                 cast(Compound, self[key]).merge(value)
             else:
                 self[key] = value
+
+
+def parse_compound_fields(
+    compound_type: Type[Compound],
+    fileobj: BinaryIO,
+    include_names: Collection[str],
+    byteorder: ByteOrder = "big",
+) -> Compound:
+    """Parse selected direct fields into the requested Compound subtype.
+
+    Args:
+        compound_type: Compound subclass to instantiate.
+        fileobj: Compound payload stream positioned at its first child.
+        include_names: Direct child names to retain.
+        byteorder: NBT byte order.
+
+    Returns:
+        Compound: Partial instance of ``compound_type``.
+
+    Raises:
+        ValueError: A skipped payload is malformed or truncated.
+    """
+    return Compound._parse_fields_as(
+        compound_type,
+        fileobj,
+        include_names,
+        byteorder,
+    )

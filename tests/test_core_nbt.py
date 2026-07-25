@@ -146,6 +146,64 @@ def test_container_parsers_keep_short_header_compatibility() -> None:
     assert Compound.parse(io.BytesIO()) == {}
 
 
+@pytest.mark.parametrize("byteorder", ("big", "little"))
+def test_root_field_projection_skips_every_payload_type(byteorder: str) -> None:
+    root = File(
+        {
+            "byte": Byte(1),
+            "short": Short(2),
+            "int": Int(3),
+            "long": Long(4),
+            "float": Float(5.0),
+            "double": Double(6.0),
+            "bytes": ByteArray([1, 2]),
+            "string": String("skip"),
+            "list": List[Int]([Int(7), Int(8)]),
+            "compound": Compound({"nested": String("skip")}),
+            "ints": IntArray([9, 10]),
+            "longs": LongArray([11, 12]),
+            "keep": String("selected"),
+        },
+        byteorder=byteorder,
+    )
+    raw = io.BytesIO()
+    root.write(raw, byteorder=byteorder)
+
+    projected = File.parse_root_fields(
+        io.BytesIO(raw.getvalue()),
+        {"keep"},
+        byteorder,
+    )
+
+    assert list(projected) == ["keep"]
+    assert projected["keep"] == "selected"
+
+
+def test_root_field_projection_rejects_truncated_skipped_payload() -> None:
+    raw = b"\x0a\x00\x00\x07\x00\x04skip\x00\x00\x00\x03\x01"
+
+    with pytest.raises(ValueError, match="truncated"):
+        File.parse_root_fields(io.BytesIO(raw), {"keep"})
+
+
+def test_root_field_projection_keeps_selected_compound_complete() -> None:
+    root = File({
+        "Level": Compound({
+            "Sections": List[Compound]([
+                Compound({"Y": Byte(4), "Name": String("kept")}),
+            ]),
+        }),
+        "structures": Compound({"skip": String("unused")}),
+    })
+    raw = io.BytesIO()
+    root.write(raw)
+
+    projected = File.parse_root_fields(io.BytesIO(raw.getvalue()), {"Level"})
+
+    assert list(projected) == ["Level"]
+    assert projected["Level"]["Sections"][0]["Name"] == "kept"
+
+
 def test_gzip_load_save(tmp_path: Path) -> None:
     path = tmp_path / "level.dat"
     original = File(
