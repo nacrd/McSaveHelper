@@ -229,7 +229,20 @@ class Numeric(Base):
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "Numeric":
         assert cls.fmt is not None
-        return cls(read_numeric(cls.fmt, fileobj, byteorder))  # type: ignore[call-arg]
+        try:
+            struct = cls.fmt[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        data = fileobj.read(struct.size)
+        try:
+            value = struct.unpack(data)[0] if len(data) == struct.size else 0
+        except StructError:
+            value = 0
+        if issubclass(cls, int):
+            integer_cls = cast(Type[int], cls)
+            # The struct already enforces the tag's signed width.
+            return cast(Numeric, int.__new__(integer_cls, int(value)))
+        return cls(value)  # type: ignore[call-arg]
 
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:
         assert self.fmt is not None

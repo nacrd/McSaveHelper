@@ -37,6 +37,14 @@ def test_numeric_roundtrip_and_range() -> None:
     assert float(Float(1.5)) == pytest.approx(1.5)
 
 
+@pytest.mark.parametrize("tag_type", (Byte, Int, Long, Float, Double))
+def test_numeric_parser_keeps_short_payload_zero_compatibility(tag_type) -> None:
+    parsed = tag_type.parse(io.BytesIO(b"\x00"))
+
+    assert isinstance(parsed, tag_type)
+    assert float(parsed) == 0.0
+
+
 def test_string_and_compound_write_parse() -> None:
     root = File(
         {
