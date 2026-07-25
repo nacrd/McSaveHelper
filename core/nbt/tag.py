@@ -401,7 +401,17 @@ class Array(Base, MutableSequence[int]):
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "Array":
         assert cls.item_fmt is not None
-        count = int(read_numeric(INT, fileobj, byteorder))
+        try:
+            count_struct = INT[byteorder]
+            fmt = cls.item_fmt[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        count_raw = fileobj.read(count_struct.size)
+        count = (
+            count_struct.unpack(count_raw)[0]
+            if len(count_raw) == count_struct.size
+            else 0
+        )
         item_size = cls.item_fmt["big"].size
         raw = fileobj.read(count * item_size)
         if len(raw) < count * item_size:
@@ -409,7 +419,6 @@ class Array(Base, MutableSequence[int]):
                 f"{cls.__name__} truncated: need {count * item_size} bytes, "
                 f"got {len(raw)}"
             )
-        fmt = cls.item_fmt[byteorder]
         native_values = NativeArray(SIGNED_ARRAY_TYPECODES[item_size])
         if native_values.itemsize == item_size:
             native_values.frombytes(raw)
@@ -595,8 +604,20 @@ class List(Base, list):  # type: ignore[type-arg]
 
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "List":
-        tag = cls.get_tag(int(read_numeric(BYTE, fileobj, byteorder)))
-        length = int(read_numeric(INT, fileobj, byteorder))
+        try:
+            tag_struct = BYTE[byteorder]
+            length_struct = INT[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        tag_raw = fileobj.read(tag_struct.size)
+        tag_id = tag_struct.unpack(tag_raw)[0] if len(tag_raw) == tag_struct.size else 0
+        length_raw = fileobj.read(length_struct.size)
+        length = (
+            length_struct.unpack(length_raw)[0]
+            if len(length_raw) == length_struct.size
+            else 0
+        )
+        tag = cls.get_tag(tag_id)
         list_cls = cls.__class_getitem__(tag)
         return list_cls(tag.parse(fileobj, byteorder) for _ in range(length))
 
@@ -663,12 +684,22 @@ class Compound(Base, Dict[str, Any]):
 
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "Compound":
+        try:
+            tag_struct = BYTE[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
         self = cls()
-        tag_id = int(read_numeric(BYTE, fileobj, byteorder))
-        while tag_id != 0:
+        while True:
+            tag_raw = fileobj.read(tag_struct.size)
+            tag_id = (
+                tag_struct.unpack(tag_raw)[0]
+                if len(tag_raw) == tag_struct.size
+                else 0
+            )
+            if tag_id == 0:
+                break
             name = read_string(fileobj, byteorder)
             self[name] = cls.get_tag(tag_id).parse(fileobj, byteorder)
-            tag_id = int(read_numeric(BYTE, fileobj, byteorder))
         return self
 
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:

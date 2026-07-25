@@ -140,6 +140,12 @@ def test_read_string_keeps_short_prefix_compatibility() -> None:
     assert read_string(io.BytesIO(b"\x00")) == ""
 
 
+def test_container_parsers_keep_short_header_compatibility() -> None:
+    assert IntArray.parse(io.BytesIO()) == []
+    assert List.parse(io.BytesIO()) == []
+    assert Compound.parse(io.BytesIO()) == {}
+
+
 def test_gzip_load_save(tmp_path: Path) -> None:
     path = tmp_path / "level.dat"
     original = File(
