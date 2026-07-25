@@ -20,6 +20,7 @@ from typing import (
     Iterable,
     Iterator,
     List as TypingList,
+    Mapping,
     MutableSequence,
     Optional,
     Sequence,
@@ -788,6 +789,9 @@ class Compound(Base, Dict[str, Any]):
         fileobj: BinaryIO,
         include_names: Collection[str],
         byteorder: ByteOrder = "big",
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str]]
+        ] = None,
     ) -> "Compound":
         """Parse selected direct children while validating skipped payloads.
 
@@ -795,6 +799,8 @@ class Compound(Base, Dict[str, Any]):
             fileobj: Compound payload stream positioned at its first child.
             include_names: Direct child names to retain.
             byteorder: NBT byte order.
+            compound_list_fields: Optional child names to retain for selected
+                direct TAG_List values containing compounds.
 
         Returns:
             Compound: Partial compound containing selected children.
@@ -807,6 +813,7 @@ class Compound(Base, Dict[str, Any]):
             fileobj,
             include_names,
             byteorder,
+            compound_list_fields,
         )
 
     @staticmethod
@@ -815,12 +822,14 @@ class Compound(Base, Dict[str, Any]):
         fileobj: BinaryIO,
         include_names: Collection[str],
         byteorder: ByteOrder,
+        compound_list_fields: Optional[Mapping[str, Collection[str]]],
     ) -> "Compound":
         try:
             tag_struct = BYTE[byteorder]
         except KeyError as exc:
             raise ValueError("Invalid byte order") from exc
         selected = frozenset(include_names)
+        list_projections = compound_list_fields or {}
         self = compound_type()
         while True:
             tag_id = tag_struct.unpack(
@@ -830,10 +839,22 @@ class Compound(Base, Dict[str, Any]):
                 return self
             name = read_string(fileobj, byteorder)
             if name in selected:
-                self[name] = compound_type.get_tag(tag_id).parse(
-                    fileobj,
-                    byteorder,
-                )
+                nested_fields = list_projections.get(name)
+                if nested_fields is not None:
+                    if tag_id != List.tag_id:
+                        raise ValueError(
+                            f"Projected field {name!r} must be TAG_List"
+                        )
+                    self[name] = _parse_compound_list_fields(
+                        fileobj,
+                        nested_fields,
+                        byteorder,
+                    )
+                else:
+                    self[name] = compound_type.get_tag(tag_id).parse(
+                        fileobj,
+                        byteorder,
+                    )
             else:
                 _skip_payload(tag_id, fileobj, byteorder)
 
@@ -861,6 +882,7 @@ def parse_compound_fields(
     fileobj: BinaryIO,
     include_names: Collection[str],
     byteorder: ByteOrder = "big",
+    compound_list_fields: Optional[Mapping[str, Collection[str]]] = None,
 ) -> Compound:
     """Parse selected direct fields into the requested Compound subtype.
 
@@ -869,6 +891,8 @@ def parse_compound_fields(
         fileobj: Compound payload stream positioned at its first child.
         include_names: Direct child names to retain.
         byteorder: NBT byte order.
+        compound_list_fields: Optional child names to retain for selected
+            direct TAG_List values containing compounds.
 
     Returns:
         Compound: Partial instance of ``compound_type``.
@@ -881,4 +905,29 @@ def parse_compound_fields(
         fileobj,
         include_names,
         byteorder,
+        compound_list_fields,
+    )
+
+
+def _parse_compound_list_fields(
+    fileobj: BinaryIO,
+    include_names: Collection[str],
+    byteorder: ByteOrder,
+) -> List:
+    element_id = _read_exact(fileobj, 1, "TAG_List subtype")[0]
+    count = _read_non_negative_count(fileobj, byteorder, "TAG_List")
+    if element_id == End.tag_id:
+        if count:
+            raise ValueError("TAG_List with TAG_End subtype must be empty")
+        return List()
+    if element_id != Compound.tag_id:
+        raise ValueError("Projected TAG_List must contain TAG_Compound elements")
+    return List[Compound](
+        parse_compound_fields(
+            Compound,
+            fileobj,
+            include_names,
+            byteorder,
+        )
+        for _ in range(count)
     )

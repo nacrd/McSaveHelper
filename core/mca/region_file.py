@@ -10,7 +10,18 @@ import hashlib
 import mmap
 import re
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Collection, Dict, Iterable, Optional, Tuple, Union
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    Collection,
+    Dict,
+    Iterable,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import core.nbt as nbtlib
 
@@ -503,6 +514,9 @@ class RegionFile:
         local_cx: int,
         local_cz: int,
         root_fields: Collection[str],
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str]]
+        ] = None,
     ) -> nbtlib.Compound:
         """Read one chunk while retaining only selected root NBT fields.
 
@@ -510,6 +524,8 @@ class RegionFile:
             local_cx: Region-local chunk X coordinate.
             local_cz: Region-local chunk Z coordinate.
             root_fields: Direct root field names to retain.
+            compound_list_fields: Optional selected child fields for direct
+                root compound lists.
 
         Returns:
             Compound: Partial chunk root containing selected fields.
@@ -520,7 +536,11 @@ class RegionFile:
         """
         raw = self.read_chunk_raw(local_cx, local_cz)
         try:
-            return nbtlib.File.parse_root_fields(io.BytesIO(raw), root_fields)
+            return nbtlib.File.parse_root_fields(
+                io.BytesIO(raw),
+                root_fields,
+                compound_list_fields=compound_list_fields,
+            )
         except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
             raise CorruptChunk(
                 f"Chunk ({local_cx}, {local_cz}) projected NBT parse failed: {exc}"

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import gzip
 from pathlib import Path
-from typing import Any, BinaryIO, Collection, Optional, Union, cast
+from typing import Any, BinaryIO, Collection, Mapping, Optional, Union, cast
 
 from core.nbt.tag import (
     BYTE,
@@ -133,6 +133,9 @@ class File(Compound):
         fileobj: Stream,
         include_names: Collection[str],
         byteorder: ByteOrder = "big",
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str]]
+        ] = None,
     ) -> "File":
         """Parse only selected root compound fields.
 
@@ -140,6 +143,8 @@ class File(Compound):
             fileobj: Binary NBT stream positioned at the named root tag.
             include_names: Direct root field names to retain.
             byteorder: NBT byte order.
+            compound_list_fields: Optional selected child fields for direct
+                root TAG_List values containing compounds.
 
         Returns:
             File: A partial root tree containing only selected fields.
@@ -150,7 +155,13 @@ class File(Compound):
         name = read_string(fileobj, byteorder)
         self = cast(
             "File",
-            parse_compound_fields(cls, fileobj, include_names, byteorder),
+            parse_compound_fields(
+                cls,
+                fileobj,
+                include_names,
+                byteorder,
+                compound_list_fields,
+            ),
         )
         self.root_name = name
         self.byteorder = byteorder

@@ -187,6 +187,7 @@ def test_topview_chunk_decode_uses_world_surface_view(monkeypatch) -> None:
             _chunk_x: int,
             _chunk_z: int,
             _root_fields: object,
+            _compound_list_fields: object,
         ) -> object:
             return marker
 
@@ -225,6 +226,7 @@ def test_topview_chunk_decode_keeps_biome_and_transparent_stratum(
             _chunk_x: int,
             _chunk_z: int,
             _root_fields: object,
+            _compound_list_fields: object,
         ) -> object:
             return object()
 

@@ -10,6 +10,7 @@ from typing import (
     Iterable,
     Iterator,
     List as TypingList,
+    Mapping,
     MutableSequence,
     Optional,
     Sequence,
@@ -177,6 +178,9 @@ class Compound(Base, Dict[str, Any]):
         fileobj: BinaryIO,
         include_names: Collection[str],
         byteorder: ByteOrder = ...,
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str]]
+        ] = ...,
     ) -> Compound: ...
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = ...) -> None: ...
     def unpack(self, json: bool = ...) -> Dict[str, Any]: ...
@@ -187,4 +191,5 @@ def parse_compound_fields(
     fileobj: BinaryIO,
     include_names: Collection[str],
     byteorder: ByteOrder = ...,
+    compound_list_fields: Optional[Mapping[str, Collection[str]]] = ...,
 ) -> Compound: ...

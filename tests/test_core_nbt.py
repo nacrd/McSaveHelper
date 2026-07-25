@@ -204,6 +204,46 @@ def test_root_field_projection_keeps_selected_compound_complete() -> None:
     assert projected["Level"]["Sections"][0]["Name"] == "kept"
 
 
+def test_root_field_projection_filters_direct_compound_lists() -> None:
+    root = File({
+        "sections": List[Compound]([
+            Compound({
+                "Y": Byte(4),
+                "block_states": Compound({"value": Int(1)}),
+                "BlockLight": ByteArray([1, 2, 3]),
+            }),
+        ]),
+    })
+    raw = io.BytesIO()
+    root.write(raw)
+
+    projected = File.parse_root_fields(
+        io.BytesIO(raw.getvalue()),
+        {"sections"},
+        compound_list_fields={
+            "sections": {"Y", "block_states"},
+        },
+    )
+
+    section = projected["sections"][0]
+    assert set(section) == {"Y", "block_states"}
+    assert int(section["Y"]) == 4
+    assert int(section["block_states"]["value"]) == 1
+
+
+def test_root_field_projection_rejects_non_compound_projected_list() -> None:
+    root = File({"sections": List[Int]([Int(1)])})
+    raw = io.BytesIO()
+    root.write(raw)
+
+    with pytest.raises(ValueError, match="must contain TAG_Compound"):
+        File.parse_root_fields(
+            io.BytesIO(raw.getvalue()),
+            {"sections"},
+            compound_list_fields={"sections": {"Y"}},
+        )
+
+
 def test_gzip_load_save(tmp_path: Path) -> None:
     path = tmp_path / "level.dat"
     original = File(

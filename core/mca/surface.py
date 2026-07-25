@@ -50,6 +50,20 @@ _SURFACE_ROOT_FIELDS = frozenset({
     "biomes",
     "Level",
 })
+_SURFACE_SECTION_FIELDS = frozenset({
+    "Y",
+    "y",
+    "block_states",
+    "BlockStates",
+    "Palette",
+    "Blocks",
+    "biomes",
+    "Biomes",
+})
+_SURFACE_COMPOUND_LIST_FIELDS = {
+    "sections": _SURFACE_SECTION_FIELDS,
+    "Sections": _SURFACE_SECTION_FIELDS,
+}
 _OVERLAY_ALPHA_BY_NAME = {
     "lily_pad": 0.72,
     "kelp": 0.72,
@@ -237,7 +251,12 @@ def _decode_one(
     cz: int,
     samples: List[Tuple[int, int]],
 ) -> Tuple[Tuple[int, int], SurfaceSamples]:
-    nbt = region.read_chunk_fields(cx, cz, _SURFACE_ROOT_FIELDS)
+    nbt = region.read_chunk_fields(
+        cx,
+        cz,
+        _SURFACE_ROOT_FIELDS,
+        _SURFACE_COMPOUND_LIST_FIELDS,
+    )
     blocks = get_world_surface_chunk_blocks(nbt)
     return (
         (cx, cz),
