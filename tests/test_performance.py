@@ -26,6 +26,25 @@ def test_perf_tracker_publishes_metrics_without_ui_dependency() -> None:
     assert published[0].bytes_processed == 1024
 
 
+def test_perf_tracker_only_clears_the_current_sink_owner() -> None:
+    first: list[object] = []
+    second: list[object] = []
+    first_sink = first.append
+    second_sink = second.append
+    tracker = PerfTracker(metrics_sink=first_sink)
+
+    assert tracker.clear_metrics_sink(second_sink) is False
+    with tracker.track("first"):
+        pass
+    assert len(first) == 1
+
+    assert tracker.clear_metrics_sink(first_sink) is True
+    with tracker.track("detached"):
+        pass
+    assert len(first) == 1
+    assert second == []
+
+
 def test_perf_tracker_supports_nested_operations() -> None:
     tracker = PerfTracker()
     with tracker.track("outer"):

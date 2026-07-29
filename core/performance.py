@@ -165,6 +165,17 @@ class PerfTracker:
         with self._lock:
             self._metrics_sink = sink
 
+    def clear_metrics_sink(
+        self,
+        sink: Callable[[PerformanceMetrics], None],
+    ) -> bool:
+        """仅在调用方仍拥有当前接收器时解除绑定。"""
+        with self._lock:
+            if self._metrics_sink is not sink:
+                return False
+            self._metrics_sink = None
+            return True
+
     def _publish_metrics(self, metrics: PerformanceMetrics) -> None:
         with self._lock:
             sink = self._metrics_sink
@@ -326,6 +337,13 @@ def set_metrics_sink(
 ) -> None:
     """Attach an infrastructure/UI metrics adapter to the global tracker."""
     get_tracker().set_metrics_sink(sink)
+
+
+def clear_metrics_sink(
+    sink: Callable[[PerformanceMetrics], None],
+) -> bool:
+    """仅当全局 tracker 仍绑定指定接收器时解除绑定。"""
+    return get_tracker().clear_metrics_sink(sink)
 
 
 def reset_tracker() -> None:

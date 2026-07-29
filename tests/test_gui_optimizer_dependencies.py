@@ -119,6 +119,7 @@ def test_gui_optimizer_records_business_metric_in_shared_store() -> None:
 
 def test_gui_optimizer_stop_closes_hang_detector(monkeypatch) -> None:
     calls: list[object] = []
+    cleared_sinks: list[object] = []
     hang_detector = SimpleNamespace(
         enable=lambda: calls.append("hang_enable"),
         disable=lambda: calls.append("hang_disable"),
@@ -140,6 +141,10 @@ def test_gui_optimizer_stop_closes_hang_detector(monkeypatch) -> None:
         "_stop_hang_detector_heartbeat",
         lambda: calls.append("heartbeat_stop"),
     )
+    monkeypatch.setattr(
+        "app.core.gui_optimizer.clear_metrics_sink",
+        cleared_sinks.append,
+    )
 
     optimizer.stop()
 
@@ -148,3 +153,4 @@ def test_gui_optimizer_stop_closes_hang_detector(monkeypatch) -> None:
         "heartbeat_stop",
         "hang_disable",
     ]
+    assert cleared_sinks == [optimizer._metrics_adapter]

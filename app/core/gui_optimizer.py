@@ -25,7 +25,11 @@ from app.ui.accessibility import validate_theme_accessibility
 from app.ui.utils import run_on_ui
 from core.logger import logger
 from core.observability import OperationRecord
-from core.performance import PerformanceMetrics, set_metrics_sink
+from core.performance import (
+    PerformanceMetrics,
+    clear_metrics_sink,
+    set_metrics_sink,
+)
 
 
 def _default_operation_metrics_sink(
@@ -210,6 +214,7 @@ class GUIOptimizer:
         self._health_monitor = dependencies.health_monitor
         self._hang_detector = dependencies.hang_detector
         self._operation_metrics_sink = dependencies.operation_metrics_sink
+        self._metrics_adapter = self._record_business_metric
         self.notification_manager: Optional[NotificationManager] = None
         self._heartbeat_stop = threading.Event()
         self._hang_heartbeat_stop = threading.Event()
@@ -221,7 +226,7 @@ class GUIOptimizer:
         try:
             # 1. 初始化通知管理器和业务指标桥接
             self.notification_manager = NotificationManager(self.page)
-            set_metrics_sink(self._record_business_metric)
+            set_metrics_sink(self._metrics_adapter)
 
             # 2. 启用卡死检测器（静默启用）
             self._hang_detector.enable()
@@ -496,4 +501,4 @@ class GUIOptimizer:
         self.configure_performance_monitor(False)
         self._stop_hang_detector_heartbeat()
         self._hang_detector.disable()
-        set_metrics_sink(None)
+        clear_metrics_sink(self._metrics_adapter)
