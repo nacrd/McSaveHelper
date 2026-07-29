@@ -223,26 +223,90 @@ def check_region_delete_uses_transaction() -> CheckResult:
     )
 
 
-def check_views_use_feature_context() -> CheckResult:
-    """顶层视图构造参数只接受 FeatureContext，不再联合 Application。"""
+def check_views_use_narrow_host_ports() -> CheckResult:
+    """确认生产视图不直接依赖完整应用或 FeatureContext。"""
     offenders: list[str] = []
     views_root = APP_ROOT / "ui" / "views"
     for path in _iter_py_files(views_root):
-        source = path.read_text(encoding="utf-8-sig")
-        if "Application | FeatureContext" in source:
-            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
-        if 'from app.application import Application' in source:
-            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+        relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+        try:
+            tree = ast.parse(
+                path.read_text(encoding="utf-8-sig"),
+                filename=str(path),
+            )
+        except (OSError, SyntaxError, UnicodeError) as exc:
+            offenders.append(f"{relative_path}: parse: {exc}")
+            continue
+        forbidden_references = {"Application", "FeatureContext"}
+        has_forbidden_reference = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                imported_names = {alias.name for alias in node.names}
+                if imported_names & forbidden_references:
+                    has_forbidden_reference = True
+                    break
+            if isinstance(node, ast.Name) and node.id in forbidden_references:
+                has_forbidden_reference = True
+                break
+            if isinstance(node, ast.Attribute) and node.attr in forbidden_references:
+                has_forbidden_reference = True
+                break
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value in forbidden_references
+            ):
+                has_forbidden_reference = True
+                break
+        if has_forbidden_reference:
+            offenders.append(relative_path)
     if offenders:
         return CheckResult(
-            "views_feature_context",
+            "views_narrow_host_ports",
             False,
             ", ".join(sorted(set(offenders))),
         )
     return CheckResult(
-        "views_feature_context",
+        "views_narrow_host_ports",
         True,
-        "views depend on FeatureContext only",
+        "views declare capability-specific host protocols",
+    )
+
+
+def check_world_view_context_lifecycle() -> CheckResult:
+    """确认世界感知视图提供对称的选择和清空入口。"""
+    offenders: list[str] = []
+    views_root = APP_ROOT / "ui" / "views"
+    for path in _iter_py_files(views_root):
+        relative_path = path.relative_to(PROJECT_ROOT).as_posix()
+        try:
+            tree = ast.parse(
+                path.read_text(encoding="utf-8-sig"),
+                filename=str(path),
+            )
+        except (OSError, SyntaxError, UnicodeError) as exc:
+            offenders.append(f"{relative_path}: parse: {exc}")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            methods = {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if "on_save_selected" in methods and "on_save_cleared" not in methods:
+                offenders.append(f"{relative_path}:{node.name}")
+    if offenders:
+        return CheckResult(
+            "world_view_context_lifecycle",
+            False,
+            ", ".join(sorted(set(offenders))),
+        )
+    return CheckResult(
+        "world_view_context_lifecycle",
+        True,
+        "world-aware views handle selection and clearing",
     )
 
 
@@ -604,7 +668,8 @@ def run_all() -> list[CheckResult]:
         check_app_threadpools(),
         check_no_private_execution_runtime_fallback(),
         check_region_delete_uses_transaction(),
-        check_views_use_feature_context(),
+        check_views_use_narrow_host_ports(),
+        check_world_view_context_lifecycle(),
         check_core_threadpool_bounds(),
         check_forbidden_runtime_dependencies(),
         check_region_map_package(),

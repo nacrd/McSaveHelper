@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 
 from scripts import verify_architecture
 from scripts.verify_architecture import (
@@ -12,6 +13,8 @@ from scripts.verify_architecture import (
     check_forbidden_runtime_dependencies,
     check_region_map_package,
     check_translation_parity,
+    check_views_use_narrow_host_ports,
+    check_world_view_context_lifecycle,
     check_world_index_cache,
     run_mca_benchmark,
 )
@@ -26,9 +29,72 @@ def test_architecture_static_acceptance_checks_pass() -> None:
         check_region_map_package(),
         check_world_index_cache(),
         check_translation_parity(),
+        check_views_use_narrow_host_ports(),
+        check_world_view_context_lifecycle(),
     ]
     failed = [item for item in checks if not item.ok]
     assert failed == [], failed
+
+
+def _write_view(tmp_path: Path, source: str) -> None:
+    views_root = tmp_path / "app" / "ui" / "views"
+    views_root.mkdir(parents=True)
+    (views_root / "bad_view.py").write_text(source, encoding="utf-8")
+
+
+def test_narrow_host_check_rejects_complete_context(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_view(
+        tmp_path,
+        "from app.ui.feature_context import FeatureContext\n",
+    )
+    monkeypatch.setattr(verify_architecture, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(verify_architecture, "APP_ROOT", tmp_path / "app")
+
+    result = check_views_use_narrow_host_ports()
+
+    assert result.ok is False
+    assert result.detail == "app/ui/views/bad_view.py"
+
+
+def test_narrow_host_check_rejects_qualified_application_type(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_view(
+        tmp_path,
+        "import app.application as application\n"
+        "def build(host: application.Application) -> None:\n"
+        "    pass\n",
+    )
+    monkeypatch.setattr(verify_architecture, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(verify_architecture, "APP_ROOT", tmp_path / "app")
+
+    result = check_views_use_narrow_host_ports()
+
+    assert result.ok is False
+    assert result.detail == "app/ui/views/bad_view.py"
+
+
+def test_world_view_lifecycle_check_rejects_missing_clear_hook(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _write_view(
+        tmp_path,
+        "class BadView:\n"
+        "    def on_save_selected(self, path: str) -> None:\n"
+        "        pass\n",
+    )
+    monkeypatch.setattr(verify_architecture, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(verify_architecture, "APP_ROOT", tmp_path / "app")
+
+    result = check_world_view_context_lifecycle()
+
+    assert result.ok is False
+    assert result.detail == "app/ui/views/bad_view.py:BadView"
 
 
 def test_command_timeout_becomes_structured_failure(monkeypatch) -> None:
