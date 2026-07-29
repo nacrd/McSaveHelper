@@ -500,6 +500,15 @@ def run_pytest() -> CheckResult:
     )
 
 
+def run_source_entrypoint_smoke() -> CheckResult:
+    """在隔离进程导入源码入口及其组合根依赖。"""
+    return _run_command(
+        "source_entrypoint_import",
+        [sys.executable, "-c", "import main"],
+        timeout_seconds=15,
+    )
+
+
 def run_benchmark() -> CheckResult:
     command = [sys.executable, "-m", "scripts.bench_architecture"]
     try:
@@ -717,6 +726,7 @@ def run_all() -> list[CheckResult]:
             ["git", "diff", "--check"],
             timeout_seconds=30,
         ),
+        run_source_entrypoint_smoke(),
     ]
     return [
         *static_checks,

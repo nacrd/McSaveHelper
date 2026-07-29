@@ -17,6 +17,7 @@ from scripts.verify_architecture import (
     check_world_view_context_lifecycle,
     check_world_index_cache,
     run_mca_benchmark,
+    run_source_entrypoint_smoke,
 )
 
 
@@ -112,6 +113,64 @@ def test_command_timeout_becomes_structured_failure(monkeypatch) -> None:
 
     assert result.ok is False
     assert result.detail == "timeout>1s"
+
+
+def test_source_entrypoint_smoke_imports_main_in_isolated_process(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(verify_architecture.subprocess, "run", run)
+
+    result = run_source_entrypoint_smoke()
+
+    assert result.ok is True
+    assert result.name == "source_entrypoint_import"
+    command, kwargs = calls[0]
+    assert command == [verify_architecture.sys.executable, "-c", "import main"]
+    assert kwargs["cwd"] == verify_architecture.PROJECT_ROOT
+    assert kwargs["timeout"] == 15
+
+
+def test_source_entrypoint_smoke_reports_import_failure(monkeypatch) -> None:
+    completed = subprocess.CompletedProcess(
+        args=["python", "-c", "import main"],
+        returncode=1,
+        stdout="",
+        stderr="ImportError: missing flet",
+    )
+    monkeypatch.setattr(
+        verify_architecture.subprocess,
+        "run",
+        lambda *args, **kwargs: completed,
+    )
+
+    result = run_source_entrypoint_smoke()
+
+    assert result.ok is False
+    assert result.detail == "ImportError: missing flet"
+
+
+def test_source_entrypoint_smoke_reports_timeout(monkeypatch) -> None:
+    def timeout(*args, **kwargs):
+        del args, kwargs
+        raise subprocess.TimeoutExpired(["python"], timeout=15)
+
+    monkeypatch.setattr(verify_architecture.subprocess, "run", timeout)
+
+    result = run_source_entrypoint_smoke()
+
+    assert result.ok is False
+    assert result.detail == "timeout>15s"
 
 
 def test_benchmark_invalid_json_becomes_structured_failure(monkeypatch) -> None:
