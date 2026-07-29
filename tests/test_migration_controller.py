@@ -67,7 +67,9 @@ def _create_controller(config, migration, state, start_worker=None):
         set_progress_value=lambda value: state.setdefault(
             "progress_values", []
         ).append(value),
-        start_worker=start_worker or (lambda target, argument: None),
+        start_worker=start_worker or (
+            lambda operation, target, argument: None
+        ),
     )
     return MigrationController(dependencies)
 
@@ -82,7 +84,9 @@ def test_controller_rejects_missing_source_without_starting_worker(
         config,
         FakeMigrationService(),
         state,
-        start_worker=lambda target, argument: workers.append((target, argument)),
+        start_worker=lambda operation, target, argument: workers.append(
+            (operation, target, argument)
+        ),
     )
 
     controller.start()
@@ -104,15 +108,15 @@ def test_controller_selects_single_worker_and_injects_destination(
         config,
         FakeMigrationService(),
         state,
-        start_worker=lambda target, argument: workers.append(
-            (target.__name__, argument)
+        start_worker=lambda operation, target, argument: workers.append(
+            (operation, target.__name__, argument)
         ),
     )
 
     controller.start()
 
     assert workers == [
-        ("run_single_thread", str(tmp_path / "output"))
+        ("migration_single", "run_single_thread", str(tmp_path / "output"))
     ]
     assert state["enabled"] == [False]
     assert state["updates"] == [True]
@@ -127,7 +131,9 @@ def test_controller_rejects_missing_destination(tmp_path: Path) -> None:
         config,
         FakeMigrationService(),
         state,
-        start_worker=lambda target, argument: workers.append((target, argument)),
+        start_worker=lambda operation, target, argument: workers.append(
+            (operation, target, argument)
+        ),
     )
 
     controller.start()

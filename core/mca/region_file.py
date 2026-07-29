@@ -10,7 +10,18 @@ import hashlib
 import mmap
 import re
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Dict, Iterable, Optional, Tuple, Union
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    Collection,
+    Dict,
+    Iterable,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import core.nbt as nbtlib
 
@@ -497,6 +508,50 @@ class RegionFile:
                 f"Chunk ({local_cx}, {local_cz}) NBT parse failed: {exc}"
             ) from exc
         return nbt_file
+
+    def read_chunk_fields(
+        self,
+        local_cx: int,
+        local_cz: int,
+        root_fields: Collection[str],
+        compound_list_fields: Optional[
+            Mapping[
+                str,
+                Collection[str] | nbtlib.CompoundProjection,
+            ]
+        ] = None,
+    ) -> nbtlib.Compound:
+        """Read one chunk while retaining only selected root NBT fields.
+
+        Args:
+            local_cx: Region-local chunk X coordinate.
+            local_cz: Region-local chunk Z coordinate.
+            root_fields: Direct root field names to retain.
+            compound_list_fields: Optional selected child fields for direct
+                root compound lists.
+
+        Returns:
+            Compound: Partial chunk root containing selected fields.
+
+        Raises:
+            ChunkMissing: The chunk is absent.
+            CorruptChunk: The compressed stream or projected NBT is invalid.
+        """
+        raw = self.read_chunk_raw(local_cx, local_cz)
+        try:
+            return nbtlib.File.parse_root_fields(
+                io.BytesIO(raw),
+                root_fields,
+                compound_list_fields=compound_list_fields,
+            )
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            raise CorruptChunk(
+                f"Chunk ({local_cx}, {local_cz}) projected NBT parse failed: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise CorruptChunk(
+                f"Chunk ({local_cx}, {local_cz}) projected NBT parse failed: {exc}"
+            ) from exc
 
     def read_chunk_or_none(
         self, local_cx: int, local_cz: int

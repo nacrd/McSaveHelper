@@ -146,6 +146,14 @@ class PlayerHUDCard(ft.Column):
             )
         safe_update(self)
 
+    def reset(self) -> None:
+        """清除上一玩家的身份和指标投影。"""
+        self._name_text.value = "--"
+        self._uuid_text.value = ""
+        for value in self._attrs.values():
+            value.value = "--"
+        self.set_avatar_src(None)
+
     def set_identity(
         self,
         name: str,
@@ -333,6 +341,8 @@ class PlayerHUDCard(ft.Column):
         if x is None and y is None and z is None:
             return "--"
         try:
+            if x is None or y is None or z is None:
+                raise TypeError("坐标不完整")
             coords = f"{float(x):.0f},{float(y):.0f},{float(z):.0f}"
         except (TypeError, ValueError):
             coords = f"{x},{y},{z}"

@@ -109,7 +109,7 @@ def _update_ui_texts(self):
 
 ## 配置集成
 
-语言设置会自动保存到用户配置中（`~/.mcsavehelper/config.json`），下次启动时会自动加载上次使用的语言。
+语言设置会自动保存到用户配置中（`~/.mc_save_helper/config.json`），下次启动时会自动加载上次使用的语言。
 
 ## 注意事项
 

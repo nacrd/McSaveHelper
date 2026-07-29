@@ -10,7 +10,7 @@ from app.ui.components.floating_log_panel import (
     FloatingLogButton,
     FloatingLogPanel,
 )
-from app.ui.icons import IconSet
+from app.ui.feature_registry import DEFAULT_FEATURE_REGISTRY, FeatureRegistry
 from app.ui.sidebar import Sidebar
 from app.ui.theme import THEME
 
@@ -32,6 +32,7 @@ class ApplicationShellDependencies:
     show_log_panel: bool
     progress_control: ft.Container
     title_bar: ft.Control
+    available_capabilities: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -49,38 +50,23 @@ class ApplicationShell:
     frame: ft.Column
 
 
-def build_tab_definitions(translate: Translate) -> List[Dict[str, Any]]:
+def build_tab_definitions(
+    translate: Translate,
+    registry: FeatureRegistry = DEFAULT_FEATURE_REGISTRY,
+    available_capabilities: frozenset[str] | None = None,
+) -> List[Dict[str, Any]]:
     """Build the translated sidebar catalog in one deterministic place."""
-    definitions = (
-        ("explorer", "sidebar.explorer", "存档浏览器", IconSet.MAP),
-        ("migrator", "sidebar.migrator", "存档转换", IconSet.PACKAGE),
-        ("save_repair", "sidebar.save_repair", "存档修复", IconSet.BUILD),
-        ("backup_center", "sidebar.backup_center", "备份与恢复", IconSet.HISTORY),
-        ("compare", "sidebar.compare", "存档对比", IconSet.BALANCE),
-        ("mappings", "sidebar.mappings", "映射管理", IconSet.LINK),
-        (
-            "server_properties",
-            "sidebar.server_properties",
-            "服务器配置",
-            IconSet.CLIPBOARD,
-        ),
-        ("settings", "sidebar.settings", "设置", IconSet.SETTINGS),
-    )
-    return [
-        {
-            "id": view_id,
-            "label": translate(translation_key, default),
-            "icon": icon,
-        }
-        for view_id, translation_key, default, icon in definitions
-    ]
+    return registry.sidebar_definitions(translate, available_capabilities)
 
 
 def build_application_shell(
     dependencies: ApplicationShellDependencies,
 ) -> ApplicationShell:
     """Assemble the visual shell without coordinating application services."""
-    tab_defs = build_tab_definitions(dependencies.translate)
+    tab_defs = build_tab_definitions(
+        dependencies.translate,
+        available_capabilities=dependencies.available_capabilities,
+    )
     content = ft.Container(
         padding=24,
         bgcolor=THEME.bg_primary,

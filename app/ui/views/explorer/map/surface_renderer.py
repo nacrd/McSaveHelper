@@ -13,6 +13,13 @@ from typing import Callable, Mapping, Optional, Tuple
 
 from PIL import Image, ImageDraw
 
+from app.services.cache_registry import (
+    CachePolicy,
+    CacheRegistration,
+    CacheRegistry,
+    CacheStats,
+)
+
 RegionCoord = Tuple[int, int]
 Color = Tuple[int, int, int]
 CancelCheck = Callable[[], bool]
@@ -104,17 +111,45 @@ class MapSurfaceRenderer:
     解码瓦片有 LRU 上限；可在后台线程调用，不触碰 Flet 控件。
     """
 
-    def __init__(self, max_decoded_tiles: int = 192) -> None:
+    MAX_DECODED_TILES = 192
+    MAX_DECODED_BYTES = 15 * 1024 * 1024
+    CACHE_NAME_PREFIX = "map.surface-decoded."
+
+    def __init__(
+        self,
+        max_decoded_tiles: int = MAX_DECODED_TILES,
+        max_decoded_bytes: int = MAX_DECODED_BYTES,
+        cache_registry: Optional[CacheRegistry] = None,
+    ) -> None:
         """创建渲染器并限制已解码瓦片缓存容量。
 
         Args:
             max_decoded_tiles: 解码缓存上限；小于 16 时抬升到 16。
+            max_decoded_bytes: 解码 RGB 像素的总字节上限。
+            cache_registry: 可选应用缓存预算；关闭时自动注销。
         """
         self._max_decoded_tiles = max(16, int(max_decoded_tiles))
+        self._max_decoded_bytes = max(1, int(max_decoded_bytes))
         self._decoded: OrderedDict[
             Tuple[int, RegionCoord, int, int], Image.Image
         ] = OrderedDict()
+        self._decoded_bytes = 0
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
         self._lock = RLock()
+        self._name = f"{self.CACHE_NAME_PREFIX}{id(self)}"
+        self._registration: Optional[CacheRegistration] = None
+        if cache_registry is not None:
+            self._registration = cache_registry.register_external(
+                self._name,
+                CachePolicy(
+                    self._max_decoded_tiles,
+                    self._max_decoded_bytes,
+                ),
+                self.stats,
+                self.invalidate,
+            )
 
     def invalidate(self, coord: Optional[RegionCoord] = None) -> None:
         """丢弃已解码源图；可仅针对单个 region。
@@ -127,11 +162,35 @@ class MapSurfaceRenderer:
                 for image in self._decoded.values():
                     image.close()
                 self._decoded.clear()
+                self._decoded_bytes = 0
                 return
             stale = [key for key in self._decoded if key[1] == coord]
             for key in stale:
                 image = self._decoded.pop(key)
+                self._decoded_bytes -= self._image_bytes(image)
                 image.close()
+
+    def close(self) -> None:
+        """关闭全部解码图像；可重复调用。"""
+        self.invalidate()
+        registration = self._registration
+        self._registration = None
+        if registration is not None:
+            registration.close()
+
+    def stats(self) -> CacheStats:
+        """返回应用缓存注册表可消费的统计快照。"""
+        with self._lock:
+            return CacheStats(
+                name=self._name,
+                entries=len(self._decoded),
+                bytes_used=self._decoded_bytes,
+                max_entries=self._max_decoded_tiles,
+                max_bytes=self._max_decoded_bytes,
+                hits=self._hits,
+                misses=self._misses,
+                evictions=self._evictions,
+            )
 
     def compose(
         self,
@@ -225,16 +284,21 @@ class MapSurfaceRenderer:
                 y1 = y0 + pixels_per_region
                 raw = tile_bytes.get(coord)
                 if spec.use_topview and raw:
-                    tile = self._decoded_tile(
+                    decoded = self._decoded_tile(
                         spec.source_generation,
                         coord,
                         int(tile_revisions.get(coord, 0) or 0),
                         pixels_per_region,
                         raw,
                     )
-                    if tile is not None:
-                        image.paste(tile, (x0, y0))
-                        continue
+                    if decoded is not None:
+                        tile, is_transient = decoded
+                        try:
+                            image.paste(tile, (x0, y0))
+                            continue
+                        finally:
+                            if is_transient:
+                                tile.close()
                 draw.rectangle(
                     (x0, y0, max(x0, x1 - 1), max(y0, y1 - 1)),
                     fill=_rgb(colors.get(coord, (42, 58, 46))),
@@ -247,13 +311,15 @@ class MapSurfaceRenderer:
         revision: int,
         pixels_per_region: int,
         raw: bytes,
-    ) -> Optional[Image.Image]:
+    ) -> Optional[Tuple[Image.Image, bool]]:
         key = (source_generation, coord, revision, pixels_per_region)
         with self._lock:
             cached = self._decoded.get(key)
             if cached is not None:
                 self._decoded.move_to_end(key)
-                return cached
+                self._hits += 1
+                return cached, False
+            self._misses += 1
         try:
             with Image.open(BytesIO(raw)) as source:
                 # Region tiles are already contiguous in the composed image.
@@ -274,13 +340,27 @@ class MapSurfaceRenderer:
                 )
         except Exception:
             return None
+        decoded_bytes = self._image_bytes(decoded)
+        if decoded_bytes > self._max_decoded_bytes:
+            return decoded, True
         with self._lock:
             self._decoded[key] = decoded
+            self._decoded_bytes += decoded_bytes
             self._decoded.move_to_end(key)
-            while len(self._decoded) > self._max_decoded_tiles:
+            while (
+                len(self._decoded) > self._max_decoded_tiles
+                or self._decoded_bytes > self._max_decoded_bytes
+            ):
                 _old_key, old_image = self._decoded.popitem(last=False)
+                self._decoded_bytes -= self._image_bytes(old_image)
+                self._evictions += 1
                 old_image.close()
-        return decoded
+        return decoded, False
+
+    @staticmethod
+    def _image_bytes(image: Image.Image) -> int:
+        """Return decoded pixel bytes for one Pillow image."""
+        return image.width * image.height * len(image.getbands())
 
 
 class _SurfaceCancelled(Exception):

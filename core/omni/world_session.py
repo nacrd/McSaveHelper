@@ -4,20 +4,30 @@
 实现非破坏性、延迟加载机制，支持任务队列与统一提交。
 采用模块化设计，各功能拆分到独立模块。
 """
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from contextlib import nullcontext
-from contextlib import AbstractContextManager
-from typing import Dict, List, Optional, Tuple, Any, Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
-from .models import WorldInfo
-from .world_scanner import WorldScanner
-from .nbt_loader import NbtLoader
-from .player_manager import PlayerManager
-from .action_queue import ActionQueue
-from .action_executor import ActionExecutor
+from core.nbt import Compound
+from core.world_index import WorldIndexSnapshot
+
 from ..region_utils import DimensionInfo
 from ..types import LogCallback
-from core.nbt import Compound
+from .action_executor import ActionExecutor
+from .action_queue import ActionQueue
+from .models import WorldInfo
+from .nbt_loader import NbtLoader
+from .player_manager import PlayerManager
+from .world_scanner import WorldScanner
+
+
+IndexProvider = Callable[[Path, bool], WorldIndexSnapshot]
+CancelCheck = Callable[[], bool]
+WorldMutation = Callable[[Path], None]
+TransactionCallback = Callable[
+    [Path, WorldMutation, Optional[CancelCheck]],
+    Any,
+]
 
 
 class WorldSession:
@@ -31,6 +41,9 @@ class WorldSession:
             Callable[[Path], AbstractContextManager[Any]]
         ] = None,
         backup_callback: Optional[Callable[[Path], Path]] = None,
+        index_snapshot: Optional[WorldIndexSnapshot] = None,
+        transaction_callback: Optional[TransactionCallback] = None,
+        index_provider: Optional[IndexProvider] = None,
     ) -> None:
         """初始化会话：扫描目录、加载 level.dat 并装配队列。
 
@@ -39,11 +52,17 @@ class WorldSession:
             log: 日志回调 ``(message, level)``。
             write_lease_factory: 可选写租约工厂，用于提交阶段互斥。
             backup_callback: 可选提交前备份钩子，返回备份路径。
+            index_snapshot: 可选共享只读索引，避免重复目录扫描。
+            transaction_callback: 可选统一世界事务提交端口。
+            index_provider: 可选索引提供端口；会话刷新时用它获取最新快照。
         """
         self.world_path = world_path.resolve()
         self.log = log or (lambda msg, lvl="INFO": None)
         self._write_lease_factory = write_lease_factory
         self._backup_callback = backup_callback
+        self._transaction_callback = transaction_callback
+        self._index_snapshot = index_snapshot
+        self._index_provider = index_provider
 
         self._scanner = WorldScanner(self.world_path, self.log)
         self._nbt_loader = NbtLoader(self.world_path, self.log)
@@ -57,11 +76,21 @@ class WorldSession:
         tracker = get_tracker()
 
         with tracker.track("存档加载", {"world": self.world_path.name}):
-            scan_result = self._scanner.scan_all()
-            self._player_files = scan_result["player_files"]
-            self._region_files = scan_result["region_files"]
-            self._data_files = scan_result["data_files"]
-            usercache = scan_result["usercache"]
+            if index_snapshot is None:
+                scan_result = self._scanner.scan_all()
+                self._player_files = scan_result["player_files"]
+                self._region_files = scan_result["region_files"]
+                self._data_files = scan_result["data_files"]
+                usercache = scan_result["usercache"]
+            else:
+                self._validate_index_snapshot(index_snapshot)
+                self._player_files = index_snapshot.player_file_map()
+                self._region_files = {
+                    key: value
+                    for key, value in index_snapshot.region_file_map().items()
+                }
+                self._data_files = list(index_snapshot.data_files)
+                usercache = index_snapshot.usercache_map()
 
             self._player_manager.initialize_names(
                 self._player_files,
@@ -96,7 +125,17 @@ class WorldSession:
         Returns:
             维度信息列表，每项包含 id, name, region_dir
         """
-        return self._scanner.scan_dimensions(self._region_files)
+        if self._index_snapshot is None:
+            return self._scanner.scan_dimensions(self._region_files)
+        return [
+            {
+                "id": dimension.id,
+                "name": dimension.name,
+                "region_dir": str(dimension.region_dir),
+                "coordinate_scale": dimension.coordinate_scale,
+            }
+            for dimension in self._index_snapshot.dimensions
+        ]
 
     # ════════════════════════════════════════════
     #  玩家数据访问
@@ -303,26 +342,83 @@ class WorldSession:
     #  提交和执行
     # ════════════════════════════════════════════
 
-    def commit(self, dest_path: Optional[Path] = None, backup: bool = True) -> bool:
+    def commit(
+        self,
+        dest_path: Optional[Path] = None,
+        backup: bool = True,
+        cancel_check: Optional[CancelCheck] = None,
+    ) -> bool:
         """执行所有队列中的操作，并将结果写入目标路径
 
         Args:
             dest_path: 目标存档路径，若为 None 则原地修改（强烈不建议）
             backup: 是否在修改前备份原存档
+            cancel_check: 可选协作取消检查；原子发布开始后不再取消。
 
         Returns:
             成功返回 True，失败返回 False
         """
         actions = self._action_queue.get_queue()
         target = (dest_path or self.world_path).resolve()
+        if (
+            self._transaction_callback is not None
+            and actions
+            and target == self.world_path
+        ):
+            try:
+                self._transaction_callback(
+                    target,
+                    lambda staged: self._executor.apply_actions(
+                        actions,
+                        staged,
+                        cancel_check,
+                    ),
+                    cancel_check,
+                )
+                self._action_queue.clear_queue()
+                return True
+            except Exception as exc:
+                self.log(f"存档事务提交失败: {exc}", "ERROR")
+                return False
         lease = (
             self._write_lease_factory(target)
             if self._write_lease_factory
             else nullcontext()
         )
         try:
-            with lease:
-                success = self._executor.execute_all(actions, dest_path, backup)
+            with lease as acquired_lease:
+                publication_window = getattr(
+                    acquired_lease,
+                    "publication_window",
+                    None,
+                )
+                exchange_context = cast(
+                    Optional[AbstractContextManager[None]],
+                    publication_window()
+                    if callable(publication_window)
+                    else None,
+                )
+                success = self._executor.execute_all(
+                    actions,
+                    dest_path,
+                    backup,
+                    cancel_check,
+                    exchange_context,
+                )
+                consume_error = getattr(
+                    acquired_lease,
+                    "consume_publication_error",
+                    None,
+                )
+                rebind_error = (
+                    consume_error() if callable(consume_error) else None
+                )
+                if rebind_error is not None:
+                    self.log(
+                        "存档已提交，但 session.lock 重绑失败: "
+                        f"{rebind_error}",
+                        "WARN",
+                    )
         except Exception as exc:
             self.log(f"存档写操作冲突: {exc}", "ERROR")
             return False
@@ -334,12 +430,39 @@ class WorldSession:
 
     def spawn(self) -> "WorldSession":
         """Reload this world while preserving application write dependencies."""
+        index_snapshot = self._index_snapshot
+        if self._index_provider is not None:
+            index_snapshot = self._index_provider(self.world_path, False)
+        return self._copy_with_index(index_snapshot)
+
+    def new_action_session(self) -> "WorldSession":
+        """Create an empty action queue over the current immutable read model."""
+        return self._copy_with_index(self._index_snapshot)
+
+    def _copy_with_index(
+        self,
+        index_snapshot: Optional[WorldIndexSnapshot],
+    ) -> "WorldSession":
+        """Copy session dependencies while allocating fresh mutable state."""
         return WorldSession(
             self.world_path,
             log=self.log,
             write_lease_factory=self._write_lease_factory,
             backup_callback=self._backup_callback,
+            index_snapshot=index_snapshot,
+            transaction_callback=self._transaction_callback,
+            index_provider=self._index_provider,
         )
+
+    def _validate_index_snapshot(
+        self,
+        snapshot: WorldIndexSnapshot,
+    ) -> None:
+        """拒绝把其他世界的索引错误注入当前会话。"""
+        if snapshot.world_path != self.world_path:
+            raise ValueError(
+                f"世界索引路径不匹配: {snapshot.world_path} != {self.world_path}"
+            )
 
     # ════════════════════════════════════════════
     #  工具方法

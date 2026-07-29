@@ -139,6 +139,38 @@ def test_world_surface_chunk_view_uses_world_surface_without_changing_default() 
     )
 
 
+def test_surface_strata_crosses_section_boundary_without_losing_overlay() -> None:
+    upper_indices = [0] * 4096
+    upper_indices[0] = 1
+    lower_indices = [0] * 4096
+    lower_indices[15 * 256] = 1
+    chunk = nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "sections": nbtlib.List[nbtlib.Compound]([
+            _palette_section(
+                0,
+                ["minecraft:air", "minecraft:stone"],
+                _pack_indices(lower_indices, bits=4, stretch=False),
+            ),
+            _palette_section(
+                1,
+                ["minecraft:air", "minecraft:oak_leaves"],
+                _pack_indices(upper_indices, bits=4, stretch=False),
+            ),
+        ]),
+        "Heightmaps": nbtlib.Compound({
+            "WORLD_SURFACE": nbtlib.LongArray(_pack_heightmap([81] * 256)),
+        }),
+    })
+
+    blocks = get_world_surface_chunk_blocks(chunk)
+
+    assert blocks.surface_strata(0, 0) == (
+        ("minecraft:oak_leaves", 16),
+        ("minecraft:stone", 15),
+    )
+
+
 def test_block_id_multi_palette_compact() -> None:
     palette = nbtlib.List[nbtlib.Compound]([
         nbtlib.Compound({"Name": nbtlib.String("minecraft:air")}),

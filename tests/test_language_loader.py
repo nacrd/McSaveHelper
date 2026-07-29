@@ -5,6 +5,8 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from app.services.item.language_loader import (
     extract_language_from_jar,
     extract_language_from_local_minecraft,
@@ -296,6 +298,27 @@ def test_item_service_import_from_local_minecraft_with_path(
     )
     assert result.count >= 1
     assert service.get_item_name("minecraft:iron_ingot") == "铁锭"
+
+
+def test_save_custom_mapping_preserves_existing_file_when_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_path = tmp_path / "custom_items.json"
+    output_path.write_text("original", encoding="utf-8")
+    service = ItemService()
+    service.set_item_mapping("example:widget", "小零件")
+
+    def fail_replace(source: Path, destination: Path) -> None:
+        raise OSError(f"cannot replace {destination} from {source}")
+
+    monkeypatch.setattr("core.io_atomic.os.replace", fail_replace)
+
+    with pytest.raises(OSError, match="cannot replace"):
+        service.save_custom_mapping_file(output_path)
+
+    assert output_path.read_text(encoding="utf-8") == "original"
+    assert list(tmp_path.glob(".custom_items.json.*.tmp")) == []
 
 
 def test_extract_missing_jar_returns_zero(tmp_path: Path) -> None:

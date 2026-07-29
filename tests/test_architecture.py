@@ -2,10 +2,50 @@
 from __future__ import annotations
 
 import ast
+import threading
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _is_view_service_container_access(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Attribute) or node.attr != "services":
+        return False
+    owner = node.value
+    if isinstance(owner, ast.Name):
+        return owner.id == "app"
+    return (
+        isinstance(owner, ast.Attribute)
+        and owner.attr == "app"
+        and isinstance(owner.value, ast.Name)
+        and owner.value.id == "self"
+    )
+
+
+def _decorator_name(node: ast.AST) -> str:
+    """返回简单装饰器或属性装饰器的末级名称。"""
+    target = node.func if isinstance(node, ast.Call) else node
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return ""
+
+
+def _has_explicit_bounded_maxsize(node: ast.Call) -> bool:
+    """检查 lru_cache 是否显式声明非 None 的 maxsize。"""
+    values = [
+        keyword.value
+        for keyword in node.keywords
+        if keyword.arg == "maxsize"
+    ]
+    if not values and node.args:
+        values = [node.args[0]]
+    return bool(values) and not any(
+        isinstance(value, ast.Constant) and value.value is None
+        for value in values
+    )
 
 
 def test_core_does_not_import_application_layer() -> None:
@@ -23,6 +63,30 @@ def test_core_does_not_import_application_layer() -> None:
                 violations.append(str(source_path.relative_to(PROJECT_ROOT)))
 
     assert violations == [], f"core 反向导入 app: {sorted(set(violations))}"
+
+
+def test_core_function_caches_have_explicit_bounds() -> None:
+    """禁止 core 引入无界进程级函数缓存。"""
+    violations = []
+    for source_path in (PROJECT_ROOT / "core").rglob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                name = _decorator_name(decorator)
+                is_unbounded_lru = (
+                    name == "lru_cache"
+                    and (
+                        not isinstance(decorator, ast.Call)
+                        or not _has_explicit_bounded_maxsize(decorator)
+                    )
+                )
+                if name == "cache" or is_unbounded_lru:
+                    relative = source_path.relative_to(PROJECT_ROOT)
+                    violations.append(f"{relative}:{node.lineno}")
+
+    assert violations == [], f"core 存在无界函数缓存: {violations}"
 
 
 def test_services_do_not_import_ui_implementations() -> None:
@@ -177,10 +241,533 @@ def test_item_and_texture_services_are_application_scoped() -> None:
     assert "get_texture_service" not in view_sources
 
 
-def test_application_does_not_mutate_migrator_private_controls() -> None:
-    application_source = (
-        PROJECT_ROOT / "app" / "application.py"
+def test_app_services_require_injected_execution_runtime() -> None:
+    """Map/texture/repair/avatar must not silently create private runtimes."""
+    services_root = PROJECT_ROOT / "app" / "services"
+    forbidden = (
+        "or ExecutionRuntime()",
+        "execution_runtime or ExecutionRuntime",
+        "ExecutionRuntime() if execution_runtime is None",
+        "or CacheRegistry(",
+    )
+    offenders: list[str] = []
+    for path in services_root.rglob("*.py"):
+        if path.name == "execution_runtime.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        if any(token in source for token in forbidden):
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+    assert offenders == []
+
+
+def test_map_controller_requires_marker_service_injection() -> None:
+    """MapController must not self-construct MapMarkerService."""
+    from inspect import Parameter, signature
+
+    from app.controllers.map_controller import MapController
+    from app.services.map_marker_service import MapMarkerService
+
+    source = (
+        PROJECT_ROOT / "app/controllers/map_controller.py"
     ).read_text(encoding="utf-8")
+    assert "or MapMarkerService()" not in source
+    param = signature(MapController.__init__).parameters["marker_service"]
+    assert param.default is Parameter.empty
+
+    markers = MapMarkerService()
+    controller = MapController(markers)
+    assert controller._marker_service is markers
+
+
+def test_stats_tab_does_not_silently_construct_world_stats_service() -> None:
+    """Explorer stats path reuses a cached service, not ad-hoc fallbacks."""
+    source = (
+        PROJECT_ROOT / "app/ui/views/explorer/stats_tab.py"
+    ).read_text(encoding="utf-8")
+    assert "or WorldStatsService()" not in source
+    assert "get_world_stats_service" not in source
+    assert "_ensure_world_stats_service" in source
+
+
+def test_composition_root_injects_shared_runtime_into_services() -> None:
+    """App bootstrap and map factory wire the same runtime instance."""
+    from app.bootstrap.services import create_app_services
+    from app.services.region_map import RegionMapService
+
+    services = create_app_services()
+    try:
+        assert services.texture._execution_runtime is services.execution_runtime
+        assert (
+            services.save_repair._execution_runtime
+            is services.execution_runtime
+        )
+        map_service = RegionMapService(
+            services.execution_runtime,
+            cache_registry=services.cache_registry,
+        )
+        try:
+            assert map_service.execution_runtime is services.execution_runtime
+            # Background work must stay on the shared runtime, not a private pool.
+            handle = map_service.execution_runtime.submit(
+                "architecture_runtime_probe",
+                lambda token: token.is_cancelled,
+            )
+            published = threading.Event()
+            handle.add_done_callback(lambda completed: published.set())
+            assert handle.result(timeout=2) is False
+            assert published.wait(2)
+            record = services.operation_metrics.snapshot(limit=1)[0]
+            assert record.operation_id == handle.task_id
+            assert record.metadata["operation"] == "architecture_runtime_probe"
+        finally:
+            map_service.close()
+    finally:
+        services.execution_runtime.shutdown(wait=False)
+        services.cache_registry.close()
+
+
+def test_app_services_forbid_private_threadpool_and_write_fallbacks() -> None:
+    """Stage 1/3: no private pools or BackupService self-construction in services."""
+    services_root = PROJECT_ROOT / "app" / "services"
+    offenders: list[str] = []
+    for path in services_root.rglob("*.py"):
+        if path.name == "execution_runtime.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        rel = path.relative_to(PROJECT_ROOT).as_posix()
+        if "ThreadPoolExecutor" in source or "threading.Thread(" in source:
+            offenders.append(f"{rel}:pool")
+        if any(
+            token in source
+            for token in (
+                "or BackupService(",
+                "or ExecutionRuntime()",
+                "or CacheRegistry(",
+            )
+        ):
+            offenders.append(f"{rel}:fallback")
+    assert offenders == []
+
+
+def test_region_destructive_delete_uses_world_transaction() -> None:
+    """Stage 3: UI region delete routes through runtime and transaction."""
+    region_tab = (
+        PROJECT_ROOT / "app/ui/views/explorer/region_tab.py"
+    ).read_text(encoding="utf-8")
+    controller = (
+        PROJECT_ROOT / "app/controllers/region_delete_controller.py"
+    ).read_text(encoding="utf-8")
+    editor = (
+        PROJECT_ROOT / "app/services/region_editor_service.py"
+    ).read_text(encoding="utf-8")
+    assert "RegionDeleteRequest" in region_tab
+    assert "_region_delete_controller.start" in region_tab
+    assert "world_writes.reserve" not in region_tab
+    assert "reset_region(region_path, backup=True)" not in region_tab
+    assert "scope.submit" in controller
+    assert "delete_region_via_transaction" in controller
+    assert "def delete_region_via_transaction" in editor
+    assert "world_transactions.mutate" in editor
+
+
+def test_low_level_world_writers_are_transaction_bound() -> None:
+    """Only staged mutation services may import low-level world writers."""
+    app_root = PROJECT_ROOT / "app"
+    allowed_importers = {
+        "app/services/migration_service.py",
+        "app/services/region_editor_service.py",
+    }
+    mutable_mca_exports = {
+        "RegionEditor",
+        "WritableRegion",
+        "copy_chunk_record",
+        "delete_chunk_entries",
+        "write_chunk_record",
+    }
+    writer_modules = {
+        "core.converter",
+        "core.fast_mode",
+        "core.full_mode",
+        "core.mca.editor",
+        "core.mca.writer",
+        "core.omni.action_executor",
+    }
+    importers: set[str] = set()
+    for path in app_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports_writer = any(
+                    alias.name in writer_modules for alias in node.names
+                )
+            elif isinstance(node, ast.ImportFrom):
+                imports_writer = (
+                    node.module in writer_modules
+                    or (
+                        node.module == "core.mca"
+                        and any(
+                            alias.name in mutable_mca_exports
+                            for alias in node.names
+                        )
+                    )
+                )
+            else:
+                continue
+            if imports_writer:
+                importers.add(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert importers == allowed_importers
+    migration = (
+        PROJECT_ROOT / "app/services/migration_service.py"
+    ).read_text(encoding="utf-8")
+    region_editor = (
+        PROJECT_ROOT / "app/services/region_editor_service.py"
+    ).read_text(encoding="utf-8")
+    assert "world_transactions.publish_prepared" in migration
+    assert "world_transactions.mutate" in region_editor
+
+
+def test_world_session_commit_has_one_application_write_boundary() -> None:
+    """Explorer NBT commits must stay behind the typed commit service."""
+    callers: list[str] = []
+    for path in (PROJECT_ROOT / "app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "commit"
+            for node in ast.walk(tree)
+        ):
+            callers.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert callers == ["app/services/nbt_commit_service.py"]
+    source = (
+        PROJECT_ROOT / "app/services/nbt_commit_service.py"
+    ).read_text(encoding="utf-8")
+    assert "session.new_action_session()" in source
+    assert "commit_session.commit(" in source
+    assert "backup=True" in source
+
+
+def test_read_paths_use_world_repository_index() -> None:
+    """Stage 2: compare/stats/explorer share world_repository for inventory."""
+    from app.bootstrap.services import create_app_services
+
+    stats = (
+        PROJECT_ROOT / "app/ui/views/explorer/stats_tab.py"
+    ).read_text(encoding="utf-8")
+    explorer = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    services = create_app_services()
+    try:
+        index_provider = services.world_compare._index_provider
+        assert index_provider is not None
+        assert index_provider.__self__ is services.world_repository
+        assert "world_repository.get_index" in stats
+        assert "world_repository" in explorer
+    finally:
+        services.texture.close()
+        services.world_indexes.close()
+        services.execution_runtime.shutdown(wait=False)
+        services.cache_registry.close()
+
+
+def test_feature_context_omits_migration_only_shortcuts() -> None:
+    """FeatureContext exposes a narrow migration command port."""
+    source = (
+        PROJECT_ROOT / "app/ui/feature_context.py"
+    ).read_text(encoding="utf-8")
+    # Migration methods are represented by one explicit command port.
+    assert "\n    def start(self)" not in source
+    assert "\n    def set_dest(self)" not in source
+    assert "\n    def set_batch_dir(self)" not in source
+    migrator = (
+        PROJECT_ROOT / "app/ui/views/migrator.py"
+    ).read_text(encoding="utf-8")
+    assert "self.app.migration_commands.start" in migrator
+    assert "choose_destination" in migrator
+
+
+def test_feature_views_do_not_reach_into_application_service_container() -> None:
+    """Feature views consume explicit context ports, never AppServices."""
+    views_root = PROJECT_ROOT / "app" / "ui" / "views"
+    offenders: list[str] = []
+    for path in views_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        if any(_is_view_service_container_access(node) for node in ast.walk(tree)):
+            offenders.append(path.relative_to(PROJECT_ROOT).as_posix())
+
+    assert offenders == []
+
+
+def test_feature_context_does_not_expose_application_service_container() -> None:
+    """The view context must keep the composition-root container private."""
+    source = (
+        PROJECT_ROOT / "app/ui/feature_context.py"
+    ).read_text(encoding="utf-8")
+
+    assert "AppServices" not in source
+    assert "def services(" not in source
+
+
+def test_feature_views_declare_minimal_ui_ports() -> None:
+    """High-traffic UI components must not type against the whole context."""
+    export_dialog = (
+        PROJECT_ROOT / "app/ui/views/explorer/map/export_dialog.py"
+    ).read_text(encoding="utf-8")
+    server_properties = (
+        PROJECT_ROOT / "app/ui/views/server_properties.py"
+    ).read_text(encoding="utf-8")
+    compare = (PROJECT_ROOT / "app/ui/views/compare.py").read_text(
+        encoding="utf-8"
+    )
+    backup = (PROJECT_ROOT / "app/ui/views/backup_center.py").read_text(
+        encoding="utf-8"
+    )
+    entity_search = (
+        PROJECT_ROOT / "app/ui/views/entity_block_search.py"
+    ).read_text(encoding="utf-8")
+    explorer = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    save_repair = (PROJECT_ROOT / "app/ui/views/save_repair.py").read_text(
+        encoding="utf-8"
+    )
+    migrator = (PROJECT_ROOT / "app/ui/views/migrator.py").read_text(
+        encoding="utf-8"
+    )
+    mappings = (PROJECT_ROOT / "app/ui/views/mappings.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'def __init__(self, app: "MapExportHost")' in export_dialog
+    assert 'def __init__(self, app: "ServerPropertiesHost")' in server_properties
+    assert 'def __init__(self, app: "CompareHost")' in compare
+    assert 'app: "BackupHost",' in backup
+    assert 'app: "EntityBlockSearchHost",' in entity_search
+    assert 'def __init__(self, app: "ExplorerHost")' in explorer
+    assert 'app: "SaveRepairHost",' in save_repair
+    assert 'def __init__(self, app: "MigratorHost")' in migrator
+    assert 'def __init__(self, app: "MappingsHost")' in mappings
+
+
+def test_feature_views_do_not_type_complete_feature_context() -> None:
+    """Views declare capability protocols instead of the complete context."""
+    views_root = PROJECT_ROOT / "app/ui/views"
+    offenders = [
+        path.relative_to(PROJECT_ROOT).as_posix()
+        for path in views_root.rglob("*.py")
+        if "FeatureContext" in path.read_text(encoding="utf-8")
+    ]
+    assert offenders == []
+
+
+def test_feature_registry_drives_catalog_and_application_budget() -> None:
+    """Stage 5: registry catalog + FeatureContext views + thin application."""
+    view_catalog = (
+        PROJECT_ROOT / "app/ui/view_catalog.py"
+    ).read_text(encoding="utf-8")
+    assert "DEFAULT_FEATURE_REGISTRY" in view_catalog
+    app_lines = (PROJECT_ROOT / "app/application.py").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert len(app_lines) < 250
+    views_root = PROJECT_ROOT / "app/ui/views"
+    for path in views_root.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert "Application | FeatureContext" not in source
+        assert "from app.application import Application" not in source
+
+
+def test_scoped_views_dispose_task_scopes() -> None:
+    """Stage 5: views owning runtime scopes cancel them on dispose."""
+    for relative in (
+        "app/ui/views/explorer/explorer_view.py",
+        "app/ui/views/compare.py",
+        "app/ui/views/save_repair.py",
+        "app/ui/views/backup_center.py",
+        "app/ui/views/entity_block_search.py",
+    ):
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        assert "create_scope" in source, relative
+        assert "def dispose" in source, relative
+        assert "_task_scope.close()" in source, relative
+
+
+def test_explorer_progressive_shell_metadata_and_tile_adapter() -> None:
+    """Remaining residual: progressive shell load + tile request adapter."""
+    explorer = (
+        PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
+    ).read_text(encoding="utf-8")
+    assert "repository.open(world)" in explorer
+    assert "read_context.shell" in explorer
+    assert "_apply_shell_metadata" in explorer
+    adapter = (
+        PROJECT_ROOT
+        / "app/ui/views/explorer/map/map_tile_request_adapter.py"
+    )
+    assert adapter.is_file()
+    assert "adapt_viewport_tile_requests" in adapter.read_text(encoding="utf-8")
+    map_view = (
+        PROJECT_ROOT / "app/ui/views/explorer/map/mca_map_view.py"
+    ).read_text(encoding="utf-8")
+    assert "adapt_viewport_tile_requests" in map_view
+    assert "snapshot_from_map_view" in map_view
+    settings = (
+        PROJECT_ROOT / "app/ui/views/settings.py"
+    ).read_text(encoding="utf-8")
+    assert "format_runtime_snapshot" in settings
+    assert "format_cache_registry_report" in settings
+
+
+def test_explorer_surfaces_consume_view_state_presenters() -> None:
+    """Residual checklist: map/player/stats UI paths call real presenters."""
+    checks = (
+        (
+            "app/ui/views/explorer/region_tab.py",
+            "decide_map_rebuild",
+        ),
+        (
+            "app/ui/views/explorer/player_tab.py",
+            "build_player_list_state",
+        ),
+        (
+            "app/ui/views/explorer/stats_tab.py",
+            "build_stats_view_state",
+        ),
+    )
+    for relative, symbol in checks:
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        assert symbol in source, relative
+    player_source = (
+        PROJECT_ROOT / "app/ui/views/explorer/player_tab.py"
+    ).read_text(encoding="utf-8")
+    assert "page_size = 40" in player_source
+    assert "max(40, len(refs)" not in player_source
+
+
+def test_business_metrics_adapt_to_operation_record_protocol() -> None:
+    """Observability residual: GUI sink adapts core metrics via OperationRecord."""
+    optimizer = (
+        PROJECT_ROOT / "app/core/gui_optimizer.py"
+    ).read_text(encoding="utf-8")
+    monitor = (
+        PROJECT_ROOT / "app/ui/performance/monitor.py"
+    ).read_text(encoding="utf-8")
+    performance = (
+        PROJECT_ROOT / "core/performance.py"
+    ).read_text(encoding="utf-8")
+    assert "to_operation_record" in optimizer
+    assert "record_operation" in monitor
+    assert "metrics_to_operation_record" in performance
+
+
+def test_core_algorithm_pools_use_bounded_parallel_clamp() -> None:
+    """Core algorithms expose bounded hints without creating executors."""
+    for relative in (
+        "core/worker.py",
+        "core/pure_cleaner.py",
+        "core/batch_processor.py",
+        "core/converter.py",
+        "core/mca/surface.py",
+    ):
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        assert "clamp_workers" in source, relative
+
+
+def test_background_worker_threads_have_explicit_infrastructure_owners() -> None:
+    """Business modules cannot add private executors or ad-hoc threads."""
+    allowed_thread_owners = {
+        "app/adapters/file_dialogs.py",
+        "app/core/gui_optimizer.py",
+        "app/services/execution_runtime.py",
+        "app/ui/hang_detector.py",
+        "app/ui/performance/resource.py",
+        "core/logging/manager.py",
+    }
+    thread_violations: list[str] = []
+    executor_violations: list[str] = []
+    for root_name in ("app", "core"):
+        for path in (PROJECT_ROOT / root_name).rglob("*.py"):
+            relative = path.relative_to(PROJECT_ROOT).as_posix()
+            source = path.read_text(encoding="utf-8")
+            if "ThreadPoolExecutor(" in source:
+                executor_violations.append(relative)
+            if (
+                "threading.Thread(" in source
+                and relative not in allowed_thread_owners
+            ):
+                thread_violations.append(relative)
+    assert executor_violations == []
+    assert thread_violations == []
+
+
+def test_map_and_world_index_register_with_cache_budget() -> None:
+    """Stage 4: map topview and world index participate in CacheRegistry."""
+    from app.bootstrap.services import create_app_services
+    from app.services.region_map import RegionMapService
+    from app.ui.views.explorer.map.mca_map_view import McaMapView
+
+    services = create_app_services()
+    try:
+        names = {item.name for item in services.cache_registry.stats().regions}
+        assert "world.index" in names
+        map_service = RegionMapService(
+            services.execution_runtime,
+            cache_registry=services.cache_registry,
+        )
+        map_view = None
+        try:
+            map_view = McaMapView(
+                map_service,
+                execution_runtime=services.execution_runtime,
+                cache_registry=services.cache_registry,
+            )
+            names_with_map = {
+                item.name for item in services.cache_registry.stats().regions
+            }
+            assert any(name.startswith("map.topview.") for name in names_with_map)
+            assert any(
+                name.startswith("map.tile-source.")
+                for name in names_with_map
+            )
+            assert any(
+                name.startswith("map.surface-decoded.")
+                for name in names_with_map
+            )
+            snapshot = services.cache_registry.stats()
+            assert sum(
+                item.max_bytes for item in snapshot.regions
+            ) <= snapshot.budget_bytes
+            generation_before = map_service.get_topview_generation()
+            map_service.clear_data()
+            assert map_service.get_topview_generation() > generation_before
+        finally:
+            if map_view is not None:
+                map_view.dispose()
+            map_service.close()
+            names_after = {
+                item.name for item in services.cache_registry.stats().regions
+            }
+            assert not any(
+                name.startswith("map.") for name in names_after
+            )
+    finally:
+        services.world_indexes.close()
+        services.execution_runtime.shutdown(wait=False)
+        services.cache_registry.close()
+
+
+def test_application_does_not_mutate_migrator_private_controls() -> None:
+    app_root = PROJECT_ROOT / "app"
+    application_source = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            app_root / "application.py",
+            app_root / "application_facade.py",
+        )
+        if path.exists()
+    )
 
     assert "_update_migrator_field" not in application_source
     assert '"_src_field"' not in application_source
@@ -276,8 +863,15 @@ def test_migration_controller_does_not_hold_application() -> None:
 
 
 def test_region_map_service_is_not_a_global_singleton() -> None:
-    service_path = PROJECT_ROOT / "app" / "services" / "region_map_service.py"
-    source = service_path.read_text(encoding="utf-8")
+    shim_path = PROJECT_ROOT / "app" / "services" / "region_map_service.py"
+    service_path = (
+        PROJECT_ROOT / "app" / "services" / "region_map" / "service.py"
+    )
+    source = (
+        shim_path.read_text(encoding="utf-8")
+        + "\n"
+        + service_path.read_text(encoding="utf-8")
+    )
 
     assert "def __new__" not in source
     assert "_region_map_service_instance" not in source
@@ -290,9 +884,14 @@ def test_region_map_service_is_not_a_global_singleton() -> None:
     explorer_source = (
         PROJECT_ROOT / "app/ui/views/explorer/explorer_view.py"
     ).read_text(encoding="utf-8")
-    application_source = (
-        PROJECT_ROOT / "app/application.py"
-    ).read_text(encoding="utf-8")
+    application_source = "".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            PROJECT_ROOT / "app/application.py",
+            PROJECT_ROOT / "app/application_facade.py",
+        )
+        if path.exists()
+    )
     assert "get_region_map_service" not in map_view_source
     assert "get_region_map_service" not in explorer_source
     assert "create_region_map_service" in application_source
@@ -366,3 +965,20 @@ def test_region_tab_delegates_fullscreen_overlay_lifecycle() -> None:
     assert "page.overlay" not in region_tab_source
     assert "threading.Thread" not in region_tab_source
     assert "_dispose_region_tab()" in explorer_source
+
+
+def test_world_aware_views_handle_selection_and_clear_context() -> None:
+    for path in (PROJECT_ROOT / "app/ui/views").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            methods = {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if "on_save_selected" in methods:
+                assert "on_save_cleared" in methods, path.relative_to(
+                    PROJECT_ROOT
+                )

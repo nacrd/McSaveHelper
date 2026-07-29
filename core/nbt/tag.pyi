@@ -5,10 +5,12 @@ from struct import Struct
 from typing import (
     Any,
     BinaryIO,
+    Collection,
     Dict,
     Iterable,
     Iterator,
     List as TypingList,
+    Mapping,
     MutableSequence,
     Optional,
     Sequence,
@@ -165,11 +167,42 @@ class List(Base, TypingList[T]):
     @classmethod
     def cast_item(cls, item: Any) -> Base: ...
 
+class CompoundProjection:
+    include_names: Collection[str]
+    compound_fields: Mapping[str, CompoundProjection]
+    compound_list_fields: Mapping[str, CompoundProjection]
+    def __init__(
+        self,
+        include_names: Collection[str],
+        compound_fields: Mapping[str, CompoundProjection] = ...,
+        compound_list_fields: Mapping[str, CompoundProjection] = ...,
+    ) -> None: ...
+
 class Compound(Base, Dict[str, Any]):
     tag_id: int
     end_tag: bytes
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = ...) -> Compound: ...
+    @classmethod
+    def parse_fields(
+        cls,
+        fileobj: BinaryIO,
+        include_names: Collection[str],
+        byteorder: ByteOrder = ...,
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str] | CompoundProjection]
+        ] = ...,
+    ) -> Compound: ...
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = ...) -> None: ...
     def unpack(self, json: bool = ...) -> Dict[str, Any]: ...
     def merge(self, other: Dict[str, Any]) -> None: ...
+
+def parse_compound_fields(
+    compound_type: Type[Compound],
+    fileobj: BinaryIO,
+    include_names: Collection[str],
+    byteorder: ByteOrder = ...,
+    compound_list_fields: Optional[
+        Mapping[str, Collection[str] | CompoundProjection]
+    ] = ...,
+) -> Compound: ...

@@ -24,6 +24,7 @@ class ActionView(ft.Column):
         )
         self.controls = [self._page_header]
         self.selected_paths = []
+        self.clear_calls = 0
         self.command_calls = 0
         self.compact_modes = []
 
@@ -35,6 +36,9 @@ class ActionView(ft.Column):
 
     def on_save_selected(self, path: str) -> None:
         self.selected_paths.append(path)
+
+    def on_save_cleared(self) -> None:
+        self.clear_calls += 1
 
     def set_compact_mode(self, compact: bool) -> None:
         self.compact_modes.append(compact)
@@ -48,12 +52,35 @@ class ManyActionView(ActionView):
         ]
 
 
-def _manager(create_view, selected=lambda: "test"):
+class DisposableActionView(ActionView):
+    def __init__(self, *, fail_top_actions: bool = False) -> None:
+        super().__init__()
+        self.dispose_calls = 0
+        self.fail_top_actions = fail_top_actions
+
+    def get_top_actions(self) -> list[ViewAction]:
+        if self.fail_top_actions:
+            raise RuntimeError("top action projection failed")
+        return super().get_top_actions()
+
+    def dispose(self) -> None:
+        self.dispose_calls += 1
+
+
+def _manager(
+    create_view,
+    selected=lambda: "test",
+    get_top_actions=None,
+    current_path=lambda: "C:/world",
+):
     updates = []
     logs = []
+    action_provider = get_top_actions or (
+        lambda _view_id, view: view.get_top_actions()
+    )
     manager = ViewManager(ViewManagerDependencies(
         create_view=create_view,
-        get_current_save_path=lambda: "C:/world",
+        get_current_save_path=current_path,
         get_selected_view_id=selected,
         build_error_placeholder=lambda view_id, error: ft.Text(
             f"{view_id}: {error}"
@@ -61,6 +88,7 @@ def _manager(create_view, selected=lambda: "test"):
         update_page=lambda: updates.append("update"),
         log=lambda message, level: logs.append((message, level)),
         translate=lambda key, default: default,
+        get_top_actions=action_provider,
     ))
     content = ft.Container()
     manager.attach_host(ViewHost(content))
@@ -104,9 +132,42 @@ def test_view_manager_projects_view_actions_and_save_context() -> None:
     assert isinstance(view._page_header.content, ft.Row)
     assert view._page_header.content.wrap is False
     assert view.compact_modes[-1] is False
-
     manager.notify_current_view_save_selected("D:/other")
     assert view.selected_paths[-1] == "D:/other"
+
+
+def test_view_manager_clears_new_and_all_cached_world_aware_views() -> None:
+    first = ActionView()
+    second = ActionView()
+    views = {"first": first, "second": second}
+    manager, _, _, logs = _manager(
+        lambda view_id: views[view_id],
+        selected=lambda: "first",
+        current_path=lambda: None,
+    )
+
+    manager.switch_view("first")
+    manager.views["second"] = second
+    manager.notify_all_views_save_cleared()
+
+    assert first.selected_paths == []
+    assert first.clear_calls == 2
+    assert second.clear_calls == 1
+    assert logs == []
+
+
+def test_view_manager_prefers_registered_action_factory() -> None:
+    view = DisposableActionView(fail_top_actions=True)
+    manager, content, _updates, logs = _manager(
+        lambda _view_id: view,
+        get_top_actions=lambda _view_id, _view: [],
+    )
+
+    manager.switch_view("test")
+
+    assert content.content is view
+    assert view._page_header.action_row.visible is False
+    assert logs == []
 
 
 def test_narrow_toolbar_moves_extra_commands_into_full_label_menu() -> None:
@@ -162,10 +223,41 @@ def test_view_manager_renders_factory_errors_without_application_access() -> Non
 
 
 def test_view_manager_cache_has_explicit_accessors() -> None:
-    view = ActionView()
+    view = DisposableActionView()
     manager, _, _, _ = _manager(lambda view_id: view)
     manager.switch_view("test")
 
     assert manager.get_view("test") is view
     assert manager.remove_view("test") is view
     assert manager.get_view("test") is None
+    assert view.dispose_calls == 1
+    assert manager.remove_view("test") is None
+    assert view.dispose_calls == 1
+
+
+def test_detach_view_transfers_resource_ownership_without_dispose() -> None:
+    view = DisposableActionView()
+    manager, _, _, _ = _manager(lambda view_id: view)
+    manager.switch_view("test")
+
+    assert manager.detach_view("test") is view
+    assert view.dispose_calls == 0
+
+
+def test_retry_after_loaded_view_error_disposes_previous_instance() -> None:
+    failed = DisposableActionView(fail_top_actions=True)
+    replacement = DisposableActionView()
+    pending = [failed, replacement]
+    manager, content, _, logs = _manager(lambda view_id: pending.pop(0))
+
+    manager.switch_view("test")
+    assert manager.get_view("test") is failed
+    assert isinstance(content.content, ft.Text)
+
+    assert manager.remove_view("test") is failed
+    manager.switch_view("test")
+
+    assert failed.dispose_calls == 1
+    assert manager.get_view("test") is replacement
+    assert content.content is replacement
+    assert logs[0][1] == "ERROR"

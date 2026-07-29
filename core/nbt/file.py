@@ -6,9 +6,18 @@ from __future__ import annotations
 
 import gzip
 from pathlib import Path
-from typing import Any, BinaryIO, Optional, Union, cast
+from typing import Any, BinaryIO, Collection, Mapping, Optional, Union, cast
 
-from core.nbt.tag import BYTE, Compound, read_numeric, read_string, write_numeric, write_string
+from core.nbt.tag import (
+    BYTE,
+    Compound,
+    CompoundProjection,
+    parse_compound_fields,
+    read_numeric,
+    read_string,
+    write_numeric,
+    write_string,
+)
 
 __all__ = ["load", "save", "File"]
 
@@ -117,6 +126,48 @@ class File(Compound):
             self.filename = None
         if not hasattr(self, "gzipped"):
             self.gzipped = False
+        return self
+
+    @classmethod
+    def parse_root_fields(
+        cls,
+        fileobj: Stream,
+        include_names: Collection[str],
+        byteorder: ByteOrder = "big",
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str] | CompoundProjection]
+        ] = None,
+    ) -> "File":
+        """Parse only selected root compound fields.
+
+        Args:
+            fileobj: Binary NBT stream positioned at the named root tag.
+            include_names: Direct root field names to retain.
+            byteorder: NBT byte order.
+            compound_list_fields: Optional selected child fields for direct
+                root TAG_List values containing compounds.
+
+        Returns:
+            File: A partial root tree containing only selected fields.
+        """
+        tag_id = int(read_numeric(BYTE, fileobj, byteorder))
+        if tag_id != cls.tag_id:
+            raise TypeError(f"Expected Compound root tag, got id {tag_id}")
+        name = read_string(fileobj, byteorder)
+        self = cast(
+            "File",
+            parse_compound_fields(
+                cls,
+                fileobj,
+                include_names,
+                byteorder,
+                compound_list_fields,
+            ),
+        )
+        self.root_name = name
+        self.byteorder = byteorder
+        self.filename = None
+        self.gzipped = False
         return self
 
     def write(self, fileobj: Stream, byteorder: ByteOrder = "big") -> None:

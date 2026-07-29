@@ -120,6 +120,11 @@ class TestRegionFileSynthetic:
         assert int(nbt["zPos"]) == 3
         assert str(nbt["Status"]) == "full"
 
+        projected = rf.read_chunk_fields(2, 3, {"DataVersion", "Status"})
+        assert set(projected) == {"DataVersion", "Status"}
+        assert int(projected["DataVersion"]) == 3463
+        assert str(projected["Status"]) == "full"
+
     def test_repeated_location_scans_reuse_parsed_table(self) -> None:
         blob = _build_region_with_chunk(2, 3, _build_minimal_chunk_nbt())
         rf = RegionFile.from_bytes(blob)

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 
 ViewFactory = Callable[[Any], Any]
+TopActionsFactory = Callable[[Any], Iterable[Any]]
 
 
 @dataclass(frozen=True)
@@ -42,8 +43,15 @@ class ViewCatalog:
     def __init__(self) -> None:
         """创建空注册表。"""
         self._factories: Dict[str, ViewFactory] = {}
+        self._top_actions_factories: Dict[str, TopActionsFactory] = {}
 
-    def register(self, view_id: str, factory: ViewFactory) -> None:
+    def register(
+        self,
+        view_id: str,
+        factory: ViewFactory,
+        *,
+        top_actions_factory: Optional[TopActionsFactory] = None,
+    ) -> None:
         """注册可调用工厂。
 
         Args:
@@ -58,11 +66,22 @@ class ViewCatalog:
             raise ValueError("view_id 不能为空")
         if not callable(factory):
             raise TypeError("视图工厂必须可调用")
+        if top_actions_factory is not None and not callable(top_actions_factory):
+            raise TypeError("top_actions_factory must be callable")
         if view_id in self._factories:
             raise ValueError(f"视图已注册: {view_id}")
         self._factories[view_id] = factory
+        if top_actions_factory is not None:
+            self._top_actions_factories[view_id] = top_actions_factory
 
-    def register_lazy(self, view_id: str, module: str, class_name: str) -> None:
+    def register_lazy(
+        self,
+        view_id: str,
+        module: str,
+        class_name: str,
+        *,
+        top_actions_factory: Optional[TopActionsFactory] = None,
+    ) -> None:
         """注册惰性工厂（首次创建时才 import 模块）。
 
         Args:
@@ -70,7 +89,11 @@ class ViewCatalog:
             module: 可 import 的模块路径。
             class_name: 模块内视图类名。
         """
-        self.register(view_id, LazyViewFactory(module, class_name))
+        self.register(
+            view_id,
+            LazyViewFactory(module, class_name),
+            top_actions_factory=top_actions_factory,
+        )
 
     def create(self, view_id: str, app: Any) -> Any:
         """调用已注册工厂创建视图。
@@ -90,6 +113,26 @@ class ViewCatalog:
         except KeyError as exc:
             raise KeyError(f"未注册的视图: {view_id}") from exc
         return factory(app)
+
+    def get_top_actions(self, view_id: str, view: Any) -> Tuple[Any, ...]:
+        """Build registered top actions for one instantiated view.
+
+        Args:
+            view_id: Stable identifier registered with the view factory.
+            view: Instantiated view consumed by the action factory.
+
+        Returns:
+            Immutable action sequence, or an empty tuple when none is defined.
+
+        Raises:
+            KeyError: The view identifier is not registered.
+        """
+        if view_id not in self._factories:
+            raise KeyError(f"未注册的视图: {view_id}")
+        factory = self._top_actions_factories.get(view_id)
+        if factory is None:
+            return ()
+        return tuple(factory(view))
 
     @property
     def view_ids(self) -> Tuple[str, ...]:

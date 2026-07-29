@@ -1,0 +1,67 @@
+{
+  "archive_machine_notes": "os=Windows 11; python=3.14.4; machine=AMD64; profile=synthetic-fixed-samples",
+  "budget_violations": [],
+  "budgets_ok": true,
+  "loops": 1,
+  "reference_machine": {
+    "budget_module": "core.bench_budgets.DEFAULT_BUDGETS",
+    "how_to_run": "python scripts/bench_mca.py --sizes small medium large --loops 3 --check-budgets --json",
+    "notes": "使用固定合成世界档位，而不是真实存档路径；跨机器比较相对耗时与缓存命中，而不是绝对 wall-clock 基线。",
+    "profile": "synthetic-fixed-samples",
+    "true_machine_sla": "真机 p95 需在固定硬件上手动采集真实存档并归档；本仓库默认门禁仅使用合成预算。"
+  },
+  "runtime": {
+    "accepted_callbacks": 0,
+    "active_tasks": 0,
+    "cache_budget_bytes": 1048576,
+    "cache_bytes_used": 0,
+    "stale_callbacks": 1,
+    "worker_count_by_lane": {
+      "cpu": 2,
+      "io": 0
+    }
+  },
+  "samples": [
+    {
+      "backup": {
+        "backup_ms": 12.319,
+        "file_count": 2,
+        "size_bytes": 24639,
+        "valid": true
+      },
+      "chunks_per_region": 4,
+      "label": "small (1 region x 4 chunks)",
+      "mca": {
+        "chunk_count": 4,
+        "loops": 1,
+        "open_median_ms": 0.193,
+        "read_batch_median_ms": 2.626,
+        "region_file": "r.0.0.mca"
+      },
+      "region_count": 1,
+      "size": "small",
+      "topview": {
+        "region_file": "r.0.0.mca",
+        "rendered": true,
+        "tile_bytes": 121,
+        "tile_median_ms": 37.517,
+        "tile_p95_ms": 37.517
+      },
+      "world_index": {
+        "builds": 1,
+        "cold_ms": 18.078,
+        "hits": 1,
+        "players": 0,
+        "regions": 1,
+        "warm_median_ms": 2.795,
+        "warm_p95_ms": 2.795
+      },
+      "world_session": {
+        "open_with_index_median_ms": 0.665,
+        "open_with_index_p95_ms": 0.665,
+        "player_count": 0,
+        "region_count": 1
+      }
+    }
+  ]
+}

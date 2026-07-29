@@ -1,4 +1,5 @@
 """NBT tab mixin for ExplorerView - 三栏布局版本"""
+from pathlib import Path
 from typing import Any, List, Optional
 
 import flet as ft
@@ -9,19 +10,28 @@ from app.models.nbt_edit import (
     NbtPathPart,
     NbtTarget,
 )
+from app.presenters.nbt_view_state import (
+    set_nbt_target,
+    set_nbt_view,
+    toggle_left_panel,
+    toggle_right_panel,
+)
 from app.ui.views.explorer.nbt import (
     NbtDataLoader,
     NbtStageManager,
     ChunkOperations,
+    NbtCommitExecution,
     NbtCommitHandler,
+    NbtCommitMessages,
+    NbtCommitUi,
 )
 from app.ui.views.explorer.mixin_context import ExplorerMixinHost
+from app.ui.utils import run_on_ui
 from app.ui.views.explorer.utils import safe_update
 from app.ui.views.explorer.nbt_tab_chrome import (
     NbtTabCallbacks,
     build_nbt_tab_chrome,
 )
-from core.omni.world_session import WorldSession
 
 
 class NbtTabMixin(ExplorerMixinHost):
@@ -29,8 +39,6 @@ class NbtTabMixin(ExplorerMixinHost):
 
     def _build_nbt_tab(self) -> None:
         """构建 NBT 页签 UI - 三栏布局"""
-        self._nbt_left_collapsed = False
-        self._nbt_right_collapsed = False
         chrome = self._create_nbt_chrome()
         self._bind_nbt_chrome(chrome)
         self._wire_nbt_coordinators()
@@ -40,7 +48,7 @@ class NbtTabMixin(ExplorerMixinHost):
     def _create_nbt_chrome(self) -> Any:
         """Build static chrome controls for the NBT tab."""
         return build_nbt_tab_chrome(
-            current_label=self._current_nbt_label,
+            current_label=self._nbt_view_state.label,
             callbacks=NbtTabCallbacks(
                 load_target=self._load_selected_nbt_target,
                 load_player=self._load_current_player_nbt,
@@ -138,9 +146,9 @@ class NbtTabMixin(ExplorerMixinHost):
             store=self._nbt_stage_store,
             status_control=self._nbt_stage_status,
             list_control=self._nbt_stage_list,
-            get_current_target=lambda: self._current_nbt_target,
-            get_current_label=lambda: self._current_nbt_label,
-            get_current_format=lambda: self._current_edit_format,
+            get_current_target=lambda: self._nbt_view_state.target,
+            get_current_label=lambda: self._nbt_view_state.label,
+            get_current_format=lambda: self._nbt_view_state.edit_format,
             reload_current_target=self._reload_current_nbt_target,
             warn=self.app.warn_dialog,
             info=self.app.info_dialog,
@@ -151,6 +159,8 @@ class NbtTabMixin(ExplorerMixinHost):
         )
 
     def _create_nbt_chunk_ops(self) -> ChunkOperations:
+        from core.mca.block_data_service import BlockDataService
+
         return ChunkOperations(
             objects_list=self._chunk_objects_list,
             nbt_tree=self._nbt_tree,
@@ -160,7 +170,7 @@ class NbtTabMixin(ExplorerMixinHost):
             block_y_field=self._block_y_field,
             block_result=self._block_query_result,
             block_name_field=self._block_replace_name_field,
-            get_chunk_target=lambda: self._current_chunk_target,
+            get_chunk_target=lambda: self._nbt_view_state.chunk_target,
             set_view_state=self._set_nbt_view_state,
             stage_change=self._stage_manager.stage_change,
             warn=self.app.warn_dialog,
@@ -168,14 +178,15 @@ class NbtTabMixin(ExplorerMixinHost):
             handle_error=lambda ex, title: self.app.handle_exception(
                 ex, title=title
             ),
+            block_service=BlockDataService(),
         )
 
     def _create_nbt_data_loader(self) -> NbtDataLoader:
         return NbtDataLoader(
             get_world_session=lambda: self.world_session,
             get_current_uuid=lambda: self.current_uuid,
-            get_current_target=lambda: self._current_nbt_target,
-            get_current_label=lambda: self._current_nbt_label,
+            get_current_target=lambda: self._nbt_view_state.target,
+            get_current_label=lambda: self._nbt_view_state.label,
             get_dimension=lambda: self._current_dimension,
             set_target_state=self._set_nbt_target_state,
             load_player_data=self._load_player_data,
@@ -197,35 +208,110 @@ class NbtTabMixin(ExplorerMixinHost):
                 ex, title=title
             ),
             save_file=self.app.save_file,
+            task_scope=self._task_scope,
+            page=self.app.page,
         )
 
     def _create_nbt_commit_handler(self) -> NbtCommitHandler:
         return NbtCommitHandler(
             store=self._nbt_stage_store,
             get_world_session=lambda: self.world_session,
-            replace_world_session=self._replace_world_session,
-            get_page=lambda: self.app.page,
-            refresh_stage=self._stage_manager.update_stage_status,
-            reload_current_target=self._data_loader.reload_current_nbt_target,
-            warn=self.app.warn_dialog,
-            info=self.app.info_dialog,
-            error=self.app.error_dialog,
-            handle_error=lambda ex, title: self.app.handle_exception(
-                ex, title=title
+            execution=NbtCommitExecution(
+                scope=self._task_scope,
+                post_to_ui=lambda callback: run_on_ui(
+                    self.app.page,
+                    callback,
+                ),
+                get_generation=lambda: self._world_load_generation,
+                is_world_current=self._is_nbt_world_current,
+                reload_world=self._load_world,
             ),
-            log=self.app.log,
+            ui=NbtCommitUi(
+                get_page=lambda: self.app.page,
+                refresh_stage=self._stage_manager.update_stage_status,
+                warn=self.app.warn_dialog,
+                info=self.app.info_dialog,
+                error=self.app.error_dialog,
+                handle_error=lambda ex, title: self.app.handle_exception(
+                    ex,
+                    title=title,
+                ),
+                log=self.app.log,
+            ),
+            messages=NbtCommitMessages(
+                world_changed=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.world_changed_title",
+                        "存档已切换",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.world_changed_message",
+                        "当前存档已改变，请重新打开提交预览。",
+                    ),
+                ),
+                busy=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.busy_title",
+                        "提交进行中",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.busy_message",
+                        "已有 NBT 提交正在执行，请等待当前操作完成。",
+                    ),
+                ),
+                cancelled=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.cancelled_title",
+                        "提交已取消",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.cancelled_message",
+                        "NBT 提交已在安全检查点取消，原存档保持不变。",
+                    ),
+                ),
+                queue_full=(
+                    self._translate_nbt_commit(
+                        "nbt_commit.queue_full_title",
+                        "后台任务繁忙",
+                    ),
+                    self._translate_nbt_commit(
+                        "nbt_commit.queue_full_message",
+                        "后台 I/O 队列已满，请稍后重试。",
+                    ),
+                ),
+            ),
         )
 
-    def _replace_world_session(self, session: WorldSession) -> None:
-        self.world_session = session
+    def _translate_nbt_commit(self, key: str, fallback: str) -> str:
+        """Translate new commit guard text while supporting lightweight test hosts."""
+        translate = getattr(self.app, "translate", None)
+        if callable(translate):
+            return str(translate(key, fallback))
+        return fallback
+
+    def _is_nbt_world_current(self, world_path: Path) -> bool:
+        """提交前确认暂存变更仍属于应用当前选择的世界。"""
+        current_path = self.app.current_save_path
+        if not current_path:
+            return False
+        try:
+            return (
+                Path(current_path).expanduser().resolve()
+                == world_path.expanduser().resolve()
+            )
+        except (OSError, RuntimeError):
+            return False
 
     def _set_nbt_view_state(
         self,
         label: str,
         edit_format: NbtEditFormat,
     ) -> None:
-        self._current_nbt_label = label
-        self._current_edit_format = edit_format
+        self._nbt_view_state = set_nbt_view(
+            self._nbt_view_state,
+            label,
+            edit_format,
+        )
 
     def _set_nbt_target_state(
         self,
@@ -234,23 +320,26 @@ class NbtTabMixin(ExplorerMixinHost):
         edit_format: NbtEditFormat,
         chunk_target: Optional[ChunkNbtTarget],
     ) -> None:
-        self._current_nbt_target = target
-        self._current_nbt_label = label
-        self._current_edit_format = edit_format
-        self._current_chunk_target = chunk_target
+        self._nbt_view_state = set_nbt_target(
+            self._nbt_view_state,
+            target,
+            label,
+            edit_format,
+            chunk_target,
+        )
 
     # ========== 折叠功能（预留） ==========
 
     def _toggle_left_panel(self, e: Any = None) -> None:
         """切换左侧面板显示/隐藏"""
-        self._nbt_left_collapsed = not self._nbt_left_collapsed
-        self._nbt_left_panel.visible = not self._nbt_left_collapsed
+        self._nbt_view_state = toggle_left_panel(self._nbt_view_state)
+        self._nbt_left_panel.visible = not self._nbt_view_state.is_left_collapsed
         self._nbt_left_panel.update()
 
     def _toggle_right_panel(self, e: Any = None) -> None:
         """切换右侧面板显示/隐藏"""
-        self._nbt_right_collapsed = not self._nbt_right_collapsed
-        self._nbt_right_panel.visible = not self._nbt_right_collapsed
+        self._nbt_view_state = toggle_right_panel(self._nbt_view_state)
+        self._nbt_right_panel.visible = not self._nbt_view_state.is_right_collapsed
         self._nbt_right_panel.update()
 
     # ========== 以下是委托方法（与之前相同） ==========

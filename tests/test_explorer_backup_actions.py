@@ -1,50 +1,122 @@
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Callable, cast
 
+from app.services.execution_runtime import CancellationToken, OperationScope
 from app.ui.views.explorer.world_info_tab import WorldInfoTabMixin
 
 
-class _ImmediateThread:
-    def __init__(self, target, daemon: bool) -> None:
-        del daemon
-        self._target = target
+class _ImmediateScope:
+    def submit(self, operation, work, **kwargs) -> None:
+        del operation, kwargs
+        work(CancellationToken())
 
-    def start(self) -> None:
-        self._target()
+
+class _DeferredScope:
+    def __init__(self) -> None:
+        self.work = []
+
+    def submit(self, operation, work, **kwargs) -> None:
+        del operation, kwargs
+        self.work.append(work)
 
 
 def test_explorer_quick_backup_uses_managed_backup_service(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
     calls = []
 
     class BackupService:
-        def create_backup(self, world_path, label, progress_callback):
-            calls.append((world_path, label, progress_callback))
+        def create_backup(
+            self,
+            world_path,
+            label,
+            progress_callback,
+            cancel_check,
+        ):
+            calls.append((world_path, label, progress_callback, cancel_check))
             return SimpleNamespace(backup_path=tmp_path / "backup")
 
     host = WorldInfoTabMixin()
+    host._task_scope = cast(OperationScope, _ImmediateScope())
     host.world_session = cast(Any, SimpleNamespace(world_path=tmp_path / "world"))
+    host._world_load_generation = 1
+    setattr(host, "_disposed", False)
     host.app = cast(Any, SimpleNamespace(
         page=None,
-        services=SimpleNamespace(backup=BackupService()),
+        backup=BackupService(),
         show_progress=lambda message: None,
         update_progress_with_task=lambda message, value: None,
         info_dialog=lambda title, message: None,
         handle_exception=lambda error, title: None,
         hide_progress=lambda: None,
     ))
-    monkeypatch.setattr(
-        "app.ui.views.explorer.world_info_tab.threading.Thread",
-        _ImmediateThread,
-    )
 
     host._create_backup()
 
     assert calls[0][0] == tmp_path / "world"
     assert calls[0][1] == "Explorer 快速备份"
+    assert calls[0][3]() is False
+
+
+def test_explorer_quick_backup_drops_ui_after_world_switch(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    queued: list[Callable[[], None]] = []
+    events: list[object] = []
+
+    def queue_ui(page, callback, *args, **kwargs) -> None:
+        del page
+        queued.append(lambda: callback(*args, **kwargs))
+
+    monkeypatch.setattr(
+        "app.ui.views.explorer.world_info_tab.run_on_ui",
+        queue_ui,
+    )
+
+    class BackupService:
+        def create_backup(
+            self,
+            world_path,
+            label,
+            progress_callback,
+            cancel_check,
+        ):
+            del world_path, label
+            assert cancel_check() is False
+            progress_callback(0.5, "copying")
+            return SimpleNamespace(backup_path=tmp_path / "backup")
+
+    old_session = SimpleNamespace(world_path=tmp_path / "old")
+    host = WorldInfoTabMixin()
+    host._task_scope = cast(OperationScope, _ImmediateScope())
+    host.world_session = cast(Any, old_session)
+    host._world_load_generation = 1
+    setattr(host, "_disposed", False)
+    host.app = cast(Any, SimpleNamespace(
+        page=object(),
+        backup=BackupService(),
+        show_progress=lambda message: events.append(("show", message)),
+        update_progress_with_task=lambda message, value: events.append(
+            ("progress", message, value)
+        ),
+        info_dialog=lambda title, message: events.append((title, message)),
+        handle_exception=lambda error, title: events.append((title, error)),
+        hide_progress=lambda: events.append("hide"),
+    ))
+
+    host._create_backup()
+    assert queued
+    host.world_session = cast(
+        Any,
+        SimpleNamespace(world_path=tmp_path / "new"),
+    )
+    host._world_load_generation += 1
+    for callback in queued:
+        callback()
+
+    assert events == []
 
 
 def test_explorer_restore_action_opens_backup_center(tmp_path: Path) -> None:
@@ -60,3 +132,26 @@ def test_explorer_restore_action_opens_backup_center(tmp_path: Path) -> None:
     host._restore_backup()
 
     assert switched == ["backup_center"]
+
+
+def test_explorer_quick_backup_rejects_reentry(tmp_path: Path) -> None:
+    warnings = []
+    scope = _DeferredScope()
+    host = WorldInfoTabMixin()
+    host._task_scope = cast(OperationScope, scope)
+    host.world_session = cast(
+        Any,
+        SimpleNamespace(world_path=tmp_path / "world"),
+    )
+    host._world_load_generation = 1
+    setattr(host, "_disposed", False)
+    host.app = cast(Any, SimpleNamespace(
+        warn_dialog=lambda title, message: warnings.append((title, message)),
+        handle_exception=lambda error, title: None,
+    ))
+
+    host._create_backup()
+    host._create_backup()
+
+    assert len(scope.work) == 1
+    assert warnings == [("提示", "快速备份正在进行中，请稍候")]

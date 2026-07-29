@@ -43,6 +43,31 @@ def test_update_server_properties_rejects_newline_injection(tmp_path: Path):
     assert props.read_bytes() == original
 
 
+def test_update_server_properties_preserves_file_when_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    props = tmp_path / "server.properties"
+    original = "level-name=old\ngamemode=survival\n"
+    props.write_text(original, encoding="utf-8")
+    messages: list[tuple[str, str]] = []
+
+    def fail_replace(source: Path, destination: Path) -> None:
+        raise OSError(f"cannot replace {destination} from {source}")
+
+    monkeypatch.setattr("core.io_atomic.os.replace", fail_replace)
+
+    update_server_properties(
+        tmp_path,
+        "new-world",
+        lambda message, level: messages.append((message, level)),
+    )
+
+    assert props.read_text(encoding="utf-8") == original
+    assert messages[-1][1] == "ERROR"
+    assert list(tmp_path.glob(".server.properties.*.tmp")) == []
+
+
 def test_scan_all_regions_filters_and_sorts(tmp_path: Path):
     region = tmp_path / "region"
     region.mkdir()

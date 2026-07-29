@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 from app.models.config import ApplicationSettings
 from app.models.save_context import CurrentSaveContext
@@ -40,10 +40,11 @@ def _make_app_stub(
 
     from app.application import Application
 
-    app = Application.__new__(Application)
+    app = cast(Any, Application.__new__(Application))
     app._auto_lang_import_path = None
     app._auto_lang_import_generation = 0
     app._auto_lang_import_lock = threading.Lock()
+    app._auto_lang_import_task = None
     app.page = SimpleNamespace()  # run_on_ui tolerates missing run_task
     # config/item/i18n 是只读 property，经 services 注入测试替身。
     app.services = SimpleNamespace(
@@ -63,6 +64,7 @@ def _make_app_stub(
             ),
         ),
         i18n=SimpleNamespace(current_language="zh_CN"),
+        execution_runtime=SimpleNamespace(submit=lambda *args, **kwargs: None),
     )
     app.gui_optimizer = SimpleNamespace(notification_manager=None)
     logs: list[tuple[str, str]] = []
@@ -119,24 +121,22 @@ def test_schedule_skips_when_disabled(tmp_path: Path) -> None:
 
 
 def test_schedule_deduplicates_same_path(tmp_path: Path, monkeypatch) -> None:
+    del monkeypatch
     started: list[str] = []
 
-    class FakeThread:
-        def __init__(self, target=None, args=(), name="", daemon=False):
-            self._target = target
-            self._args = args
-
-        def start(self) -> None:
-            started.append(self._args[0])
-
-    monkeypatch.setattr("app.application.threading.Thread", FakeThread)
+    class FakeRuntime:
+        def submit(self, operation, work, *, lane=None):
+            del operation, work, lane
+            started.append("submitted")
+            return SimpleNamespace(cancel=lambda: True)
 
     app = _make_app_stub(enabled=True)
+    app.services.execution_runtime = FakeRuntime()
     context = CurrentSaveContext.from_path(tmp_path / "World")
     app._schedule_auto_import_mc_language(context)
     app._schedule_auto_import_mc_language(context)
 
-    assert started == [str(context.path)]
+    assert started == ["submitted"]
     assert app._auto_lang_import_generation == 1
 
 

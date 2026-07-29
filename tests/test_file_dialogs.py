@@ -152,7 +152,12 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
         get_sidebar_mode=lambda: "auto",
         stop_gui_optimizer=lambda: disposed.append("optimizer"),
         dispose_views=lambda: disposed.append("views"),
+        close_ui_delivery=lambda: disposed.append("ui_delivery"),
         dispose_file_dialogs=lambda: disposed.append("file_dialogs"),
+        close_texture_service=lambda: disposed.append("texture"),
+        shutdown_execution_runtime=lambda: disposed.append("runtime"),
+        close_world_indexes=lambda: disposed.append("world_indexes"),
+        close_cache_registry=lambda: disposed.append("cache_registry"),
     ))
 
     with patch("app.ui.utils.set_app_closing"), patch(
@@ -162,4 +167,59 @@ def test_window_manager_shutdown_disposes_file_dialogs() -> None:
 
     assert "optimizer" in disposed
     assert "views" in disposed
+    assert "ui_delivery" in disposed
     assert "file_dialogs" in disposed
+    assert "texture" in disposed
+    assert "runtime" in disposed
+    assert "world_indexes" in disposed
+    assert "cache_registry" in disposed
+    assert disposed.index("ui_delivery") < disposed.index("views")
+    assert disposed.index("views") < disposed.index("runtime")
+    assert disposed.index("ui_delivery") < disposed.index("runtime")
+    assert disposed.index("runtime") < disposed.index("texture")
+    assert disposed.index("runtime") < disposed.index("world_indexes")
+    assert disposed.index("runtime") < disposed.index("cache_registry")
+
+
+def test_window_manager_keeps_dependencies_when_runtime_drain_times_out() -> None:
+    disposed: list[str] = []
+    page = cast(
+        ft.Page,
+        SimpleNamespace(
+            window=SimpleNamespace(
+                prevent_close=True,
+                destroy=MagicMock(),
+                close=MagicMock(),
+            ),
+            run_task=lambda coro: disposed.append("run_task"),
+        ),
+    )
+
+    def timeout_runtime() -> bool:
+        disposed.append("runtime")
+        return False
+
+    manager = WindowManager(WindowManagerDependencies(
+        page=page,
+        translate=lambda key, default: default,
+        apply_responsive_layout=lambda layout: None,
+        get_sidebar_mode=lambda: "auto",
+        stop_gui_optimizer=lambda: disposed.append("optimizer"),
+        dispose_views=lambda: disposed.append("views"),
+        dispose_file_dialogs=lambda: disposed.append("file_dialogs"),
+        close_texture_service=lambda: disposed.append("texture"),
+        shutdown_execution_runtime=timeout_runtime,
+        close_world_indexes=lambda: disposed.append("world_indexes"),
+        close_cache_registry=lambda: disposed.append("cache_registry"),
+    ))
+
+    with patch("app.ui.utils.set_app_closing"), patch(
+        "core.logger.logger.shutdown", create=True
+    ):
+        manager.shutdown()
+
+    assert "runtime" in disposed
+    assert "texture" not in disposed
+    assert "world_indexes" not in disposed
+    assert "cache_registry" not in disposed
+    assert "run_task" in disposed

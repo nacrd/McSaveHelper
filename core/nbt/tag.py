@@ -6,17 +6,22 @@
 """
 from __future__ import annotations
 
+from array import array as NativeArray
+from dataclasses import dataclass, field
 from struct import Struct
 from struct import error as StructError
+from sys import byteorder as native_byteorder
 from typing import (
     Any,
     BinaryIO,
     Callable,
     ClassVar,
+    Collection,
     Dict,
     Iterable,
     Iterator,
     List as TypingList,
+    Mapping,
     MutableSequence,
     Optional,
     Sequence,
@@ -50,11 +55,13 @@ __all__ = [
     "OutOfRange",
     "IncompatibleItemType",
     "CastError",
+    "CompoundProjection",
     "get_format",
     "read_numeric",
     "write_numeric",
     "read_string",
     "write_string",
+    "parse_compound_fields",
     "BYTE",
     "SHORT",
     "USHORT",
@@ -69,6 +76,25 @@ ByteOrder = str
 T = TypeVar("T", bound="Base")
 
 
+@dataclass(frozen=True)
+class CompoundProjection:
+    """Selected fields for one compound and its nested compound children.
+
+    Attributes:
+        include_names: Direct child names to retain.
+        compound_fields: Selected direct compounds and their projections.
+        compound_list_fields: Selected compound lists and element projections.
+    """
+
+    include_names: Collection[str]
+    compound_fields: Mapping[str, "CompoundProjection"] = field(
+        default_factory=dict
+    )
+    compound_list_fields: Mapping[str, "CompoundProjection"] = field(
+        default_factory=dict
+    )
+
+
 def get_format(fmt: Callable[[str], Struct], string: str) -> Dict[str, Struct]:
     """Return big/little Struct formats for *string*."""
     return {"big": fmt(">" + string), "little": fmt("<" + string)}
@@ -81,6 +107,9 @@ INT = get_format(Struct, "i")
 LONG = get_format(Struct, "q")
 FLOAT = get_format(Struct, "f")
 DOUBLE = get_format(Struct, "d")
+SIGNED_ARRAY_TYPECODES = {1: "b", 4: "i", 8: "q"}
+FIXED_PAYLOAD_SIZES = {1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8}
+ARRAY_ITEM_SIZES = {7: 1, 11: 4, 12: 8}
 
 
 class EndInstantiation(TypeError):
@@ -149,7 +178,12 @@ def write_numeric(
 
 def read_string(fileobj: BinaryIO, byteorder: ByteOrder = "big") -> str:
     """Read a modified-UTF-8 length-prefixed string."""
-    length = int(read_numeric(USHORT, fileobj, byteorder))
+    try:
+        struct = USHORT[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    prefix = fileobj.read(struct.size)
+    length = struct.unpack(prefix)[0] if len(prefix) == struct.size else 0
     return fileobj.read(length).decode("utf-8", "replace")
 
 
@@ -162,6 +196,82 @@ def write_string(
     data = value.encode("utf-8")
     write_numeric(USHORT, len(data), fileobj, byteorder)
     fileobj.write(data)
+
+
+def _read_exact(fileobj: BinaryIO, size: int, label: str) -> bytes:
+    data = fileobj.read(size)
+    if len(data) != size:
+        raise ValueError(f"{label} truncated: need {size} bytes, got {len(data)}")
+    return data
+
+
+def _discard_exact(fileobj: BinaryIO, size: int, label: str) -> None:
+    remaining = size
+    while remaining:
+        chunk = fileobj.read(min(remaining, 64 * 1024))
+        if not chunk:
+            raise ValueError(f"{label} truncated: {remaining} bytes missing")
+        remaining -= len(chunk)
+
+
+def _read_non_negative_count(
+    fileobj: BinaryIO,
+    byteorder: ByteOrder,
+    label: str,
+) -> int:
+    try:
+        struct = INT[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    count = int(struct.unpack(_read_exact(fileobj, struct.size, label))[0])
+    if count < 0:
+        raise ValueError(f"{label} has negative length: {count}")
+    return count
+
+
+def _skip_string_payload(fileobj: BinaryIO, byteorder: ByteOrder) -> None:
+    try:
+        struct = USHORT[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    length = int(struct.unpack(_read_exact(fileobj, struct.size, "String"))[0])
+    _discard_exact(fileobj, length, "String")
+
+
+def _skip_payload(
+    tag_id: int,
+    fileobj: BinaryIO,
+    byteorder: ByteOrder,
+) -> None:
+    """Consume one tag payload without constructing its Python tag tree."""
+    fixed_size = FIXED_PAYLOAD_SIZES.get(tag_id)
+    if fixed_size is not None:
+        _discard_exact(fileobj, fixed_size, f"TAG_{tag_id}")
+        return
+    if tag_id in ARRAY_ITEM_SIZES:
+        count = _read_non_negative_count(fileobj, byteorder, f"TAG_{tag_id}")
+        _discard_exact(fileobj, count * ARRAY_ITEM_SIZES[tag_id], f"TAG_{tag_id}")
+        return
+    if tag_id == String.tag_id:
+        _skip_string_payload(fileobj, byteorder)
+        return
+    if tag_id == List.tag_id:
+        element_id = _read_exact(fileobj, 1, "TAG_List subtype")[0]
+        count = _read_non_negative_count(fileobj, byteorder, "TAG_List")
+        if element_id == End.tag_id and count:
+            raise ValueError("TAG_List with TAG_End subtype must be empty")
+        for _ in range(count):
+            _skip_payload(element_id, fileobj, byteorder)
+        return
+    if tag_id == Compound.tag_id:
+        while True:
+            child_id = _read_exact(fileobj, 1, "TAG_Compound child id")[0]
+            if child_id == End.tag_id:
+                return
+            _skip_string_payload(fileobj, byteorder)
+            _skip_payload(child_id, fileobj, byteorder)
+    else:
+        raise ValueError(f"Unknown NBT tag id: {tag_id}")
 
 
 class Base:
@@ -221,7 +331,20 @@ class Numeric(Base):
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "Numeric":
         assert cls.fmt is not None
-        return cls(read_numeric(cls.fmt, fileobj, byteorder))  # type: ignore[call-arg]
+        try:
+            struct = cls.fmt[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        data = fileobj.read(struct.size)
+        try:
+            value = struct.unpack(data)[0] if len(data) == struct.size else 0
+        except StructError:
+            value = 0
+        if issubclass(cls, int):
+            integer_cls = cast(Type[int], cls)
+            # The struct already enforces the tag's signed width.
+            return cast(Numeric, int.__new__(integer_cls, int(value)))
+        return cls(value)  # type: ignore[call-arg]
 
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:
         assert self.fmt is not None
@@ -380,7 +503,17 @@ class Array(Base, MutableSequence[int]):
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "Array":
         assert cls.item_fmt is not None
-        count = int(read_numeric(INT, fileobj, byteorder))
+        try:
+            count_struct = INT[byteorder]
+            fmt = cls.item_fmt[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        count_raw = fileobj.read(count_struct.size)
+        count = (
+            count_struct.unpack(count_raw)[0]
+            if len(count_raw) == count_struct.size
+            else 0
+        )
         item_size = cls.item_fmt["big"].size
         raw = fileobj.read(count * item_size)
         if len(raw) < count * item_size:
@@ -388,12 +521,19 @@ class Array(Base, MutableSequence[int]):
                 f"{cls.__name__} truncated: need {count * item_size} bytes, "
                 f"got {len(raw)}"
             )
-        fmt = cls.item_fmt[byteorder]
-        items = [
-            int(fmt.unpack_from(raw, offset)[0])
-            for offset in range(0, count * item_size, item_size)
-        ]
-        return cls(items)
+        native_values = NativeArray(SIGNED_ARRAY_TYPECODES[item_size])
+        if native_values.itemsize == item_size:
+            native_values.frombytes(raw)
+            if item_size > 1 and byteorder != native_byteorder:
+                native_values.byteswap()
+            items = native_values.tolist()
+        else:
+            items = [int(values[0]) for values in fmt.iter_unpack(raw)]
+        parsed = cls()
+        # Both decoding paths return signed values in the tag's exact width.
+        # Avoid applying the constructor's mask normalization to every item again.
+        parsed._items = items
+        return parsed
 
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:
         assert self.item_fmt is not None
@@ -566,8 +706,20 @@ class List(Base, list):  # type: ignore[type-arg]
 
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "List":
-        tag = cls.get_tag(int(read_numeric(BYTE, fileobj, byteorder)))
-        length = int(read_numeric(INT, fileobj, byteorder))
+        try:
+            tag_struct = BYTE[byteorder]
+            length_struct = INT[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        tag_raw = fileobj.read(tag_struct.size)
+        tag_id = tag_struct.unpack(tag_raw)[0] if len(tag_raw) == tag_struct.size else 0
+        length_raw = fileobj.read(length_struct.size)
+        length = (
+            length_struct.unpack(length_raw)[0]
+            if len(length_raw) == length_struct.size
+            else 0
+        )
+        tag = cls.get_tag(tag_id)
         list_cls = cls.__class_getitem__(tag)
         return list_cls(tag.parse(fileobj, byteorder) for _ in range(length))
 
@@ -634,13 +786,100 @@ class Compound(Base, Dict[str, Any]):
 
     @classmethod
     def parse(cls, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> "Compound":
+        try:
+            tag_struct = BYTE[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
         self = cls()
-        tag_id = int(read_numeric(BYTE, fileobj, byteorder))
-        while tag_id != 0:
+        while True:
+            tag_raw = fileobj.read(tag_struct.size)
+            tag_id = (
+                tag_struct.unpack(tag_raw)[0]
+                if len(tag_raw) == tag_struct.size
+                else 0
+            )
+            if tag_id == 0:
+                break
             name = read_string(fileobj, byteorder)
             self[name] = cls.get_tag(tag_id).parse(fileobj, byteorder)
-            tag_id = int(read_numeric(BYTE, fileobj, byteorder))
         return self
+
+    @classmethod
+    def parse_fields(
+        cls,
+        fileobj: BinaryIO,
+        include_names: Collection[str],
+        byteorder: ByteOrder = "big",
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str] | CompoundProjection]
+        ] = None,
+    ) -> "Compound":
+        """Parse selected direct children while validating skipped payloads.
+
+        Args:
+            fileobj: Compound payload stream positioned at its first child.
+            include_names: Direct child names to retain.
+            byteorder: NBT byte order.
+            compound_list_fields: Optional child names to retain for selected
+                direct TAG_List values containing compounds.
+
+        Returns:
+            Compound: Partial compound containing selected children.
+
+        Raises:
+            ValueError: A skipped payload is malformed or truncated.
+        """
+        return Compound._parse_fields_as(
+            cls,
+            fileobj,
+            include_names,
+            byteorder,
+            compound_list_fields,
+        )
+
+    @staticmethod
+    def _parse_fields_as(
+        compound_type: Type["Compound"],
+        fileobj: BinaryIO,
+        include_names: Collection[str],
+        byteorder: ByteOrder,
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str] | CompoundProjection]
+        ],
+    ) -> "Compound":
+        try:
+            tag_struct = BYTE[byteorder]
+        except KeyError as exc:
+            raise ValueError("Invalid byte order") from exc
+        selected = frozenset(include_names)
+        list_projections = compound_list_fields or {}
+        self = compound_type()
+        while True:
+            tag_id = tag_struct.unpack(
+                _read_exact(fileobj, tag_struct.size, "TAG_Compound child id")
+            )[0]
+            if tag_id == End.tag_id:
+                return self
+            name = read_string(fileobj, byteorder)
+            if name in selected:
+                nested_projection = list_projections.get(name)
+                if nested_projection is not None:
+                    if tag_id != List.tag_id:
+                        raise ValueError(
+                            f"Projected field {name!r} must be TAG_List"
+                        )
+                    self[name] = _parse_compound_list_fields(
+                        fileobj,
+                        nested_projection,
+                        byteorder,
+                    )
+                else:
+                    self[name] = compound_type.get_tag(tag_id).parse(
+                        fileobj,
+                        byteorder,
+                    )
+            else:
+                _skip_payload(tag_id, fileobj, byteorder)
 
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = "big") -> None:
         for name, tag in self.items():
@@ -659,3 +898,119 @@ class Compound(Base, Dict[str, Any]):
                 cast(Compound, self[key]).merge(value)
             else:
                 self[key] = value
+
+
+def parse_compound_fields(
+    compound_type: Type[Compound],
+    fileobj: BinaryIO,
+    include_names: Collection[str],
+    byteorder: ByteOrder = "big",
+    compound_list_fields: Optional[
+        Mapping[str, Collection[str] | CompoundProjection]
+    ] = None,
+) -> Compound:
+    """Parse selected direct fields into the requested Compound subtype.
+
+    Args:
+        compound_type: Compound subclass to instantiate.
+        fileobj: Compound payload stream positioned at its first child.
+        include_names: Direct child names to retain.
+        byteorder: NBT byte order.
+        compound_list_fields: Optional child names to retain for selected
+            direct TAG_List values containing compounds.
+
+    Returns:
+        Compound: Partial instance of ``compound_type``.
+
+    Raises:
+        ValueError: A skipped payload is malformed or truncated.
+    """
+    return Compound._parse_fields_as(
+        compound_type,
+        fileobj,
+        include_names,
+        byteorder,
+        compound_list_fields,
+    )
+
+
+def _parse_compound_list_fields(
+    fileobj: BinaryIO,
+    projection: Collection[str] | CompoundProjection,
+    byteorder: ByteOrder,
+) -> List:
+    element_id = _read_exact(fileobj, 1, "TAG_List subtype")[0]
+    count = _read_non_negative_count(fileobj, byteorder, "TAG_List")
+    if element_id == End.tag_id:
+        if count:
+            raise ValueError("TAG_List with TAG_End subtype must be empty")
+        return List()
+    if element_id != Compound.tag_id:
+        raise ValueError("Projected TAG_List must contain TAG_Compound elements")
+    selected = (
+        projection
+        if isinstance(projection, CompoundProjection)
+        else CompoundProjection(projection)
+    )
+    return List[Compound](
+        _parse_compound_projection(
+            Compound,
+            fileobj,
+            selected,
+            byteorder,
+        )
+        for _ in range(count)
+    )
+
+
+def _parse_compound_projection(
+    compound_type: Type[Compound],
+    fileobj: BinaryIO,
+    projection: CompoundProjection,
+    byteorder: ByteOrder,
+) -> Compound:
+    """Parse one compound using a recursive projection specification."""
+    try:
+        tag_struct = BYTE[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    selected = frozenset(projection.include_names)
+    self = compound_type()
+    while True:
+        tag_id = tag_struct.unpack(
+            _read_exact(fileobj, tag_struct.size, "TAG_Compound child id")
+        )[0]
+        if tag_id == End.tag_id:
+            return self
+        name = read_string(fileobj, byteorder)
+        if name not in selected:
+            _skip_payload(tag_id, fileobj, byteorder)
+            continue
+        compound_projection = projection.compound_fields.get(name)
+        list_projection = projection.compound_list_fields.get(name)
+        if compound_projection is not None:
+            if tag_id != Compound.tag_id:
+                raise ValueError(
+                    f"Projected field {name!r} must be TAG_Compound"
+                )
+            self[name] = _parse_compound_projection(
+                compound_type,
+                fileobj,
+                compound_projection,
+                byteorder,
+            )
+        elif list_projection is not None:
+            if tag_id != List.tag_id:
+                raise ValueError(
+                    f"Projected field {name!r} must be TAG_List"
+                )
+            self[name] = _parse_compound_list_fields(
+                fileobj,
+                list_projection,
+                byteorder,
+            )
+        else:
+            self[name] = compound_type.get_tag(tag_id).parse(
+                fileobj,
+                byteorder,
+            )

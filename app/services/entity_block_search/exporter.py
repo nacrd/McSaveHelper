@@ -1,10 +1,11 @@
 """Result export for entity/block/container search."""
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 from typing import List, Optional, TextIO
 
-from core.logger import logger
+from core.io_atomic import atomic_write_text
 
 from .models import SearchResult, SearchSummary
 
@@ -23,14 +24,12 @@ def export_results_to_text(
         stored_results: 服务内部缓存结果。
         results: 可选覆盖导出列表。
     """
-    try:
-        export_results = results if results is not None else stored_results
-        with open(output_path, "w", encoding="utf-8") as handle:
-            _write_header(handle, summary, len(export_results))
-            for idx, result in enumerate(export_results, 1):
-                _write_result(handle, idx, result)
-    except OSError as exc:
-        logger.error(f"导出结果失败: {exc}", module="EntityBlockSearch")
+    export_results = results if results is not None else stored_results
+    buffer = StringIO()
+    _write_header(buffer, summary, len(export_results))
+    for idx, result in enumerate(export_results, 1):
+        _write_result(buffer, idx, result)
+    atomic_write_text(output_path, buffer.getvalue())
 
 
 def _write_header(handle: TextIO, summary: SearchSummary, total: int) -> None:

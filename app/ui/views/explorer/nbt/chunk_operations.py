@@ -42,7 +42,7 @@ class ChunkOperations:
         warn: DialogCallback,
         info: DialogCallback,
         handle_error: ErrorCallback,
-        block_service: Optional[BlockDataService] = None,
+        block_service: BlockDataService,
     ) -> None:
         """绑定区块对象列表、坐标字段与方块服务。
 
@@ -61,7 +61,7 @@ class ChunkOperations:
             warn: 警告对话框。
             info: 信息对话框。
             handle_error: 异常处理。
-            block_service: 可选方块读写服务；默认新建实例。
+            block_service: 方块读写服务（必填，禁止 UI 静默自建）。
         """
         self._objects_list = objects_list
         self._nbt_tree = nbt_tree
@@ -77,7 +77,7 @@ class ChunkOperations:
         self._warn = warn
         self._info = info
         self._handle_error = handle_error
-        self._block_service = block_service or BlockDataService()
+        self._block_service = block_service
         self._last_objects: List[Dict[str, Any]] = []
 
     def render_chunk_objects(self, chunk_data: Any) -> None:

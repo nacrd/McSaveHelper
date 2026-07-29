@@ -8,8 +8,10 @@ from typing import Any
 
 import pytest
 
-from app.services import region_map_service as region_map_module
-from app.services.region_map_service import RegionMapService
+from app.services.region_map import meta as region_map_meta
+from app.services.region_map import scan as region_map_scan
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 
 
 def test_silent_scan_registers_paths_without_parsing_metadata(
@@ -21,17 +23,17 @@ def test_silent_scan_registers_paths_without_parsing_metadata(
     calls: list[Path] = []
 
     monkeypatch.setattr(
-        region_map_module,
+        region_map_scan,
         "scan_region_dir",
         lambda _path: [region],
     )
     monkeypatch.setattr(
-        region_map_module,
+        region_map_meta,
         "scan_region_meta",
         lambda path: calls.append(Path(path)) or {"chunk_count": 1},
     )
 
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     try:
         asyncio.run(service.start_silent_scan(str(tmp_path)))
 
@@ -51,17 +53,17 @@ def test_region_metadata_is_loaded_once_and_cached(
     calls: list[Path] = []
 
     monkeypatch.setattr(
-        region_map_module,
+        region_map_scan,
         "scan_region_dir",
         lambda _path: [region],
     )
     monkeypatch.setattr(
-        region_map_module,
+        region_map_meta,
         "scan_region_meta",
         lambda path: calls.append(Path(path)) or {"dominant_biome": "plains"},
     )
 
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     try:
         asyncio.run(service.start_silent_scan(str(tmp_path)))
         first = asyncio.run(service.ensure_region_meta((0, 0)))
@@ -91,10 +93,10 @@ def test_late_metadata_result_is_discarded_after_clear(
         return {"late": "value"}
 
     # Let the worker finish only after the scan generation has been invalidated.
-    monkeypatch.setattr(region_map_module, "scan_region_dir", lambda _path: [region])
-    monkeypatch.setattr(region_map_module, "scan_region_meta", slow_meta)
+    monkeypatch.setattr(region_map_scan, "scan_region_dir", lambda _path: [region])
+    monkeypatch.setattr(region_map_meta, "scan_region_meta", slow_meta)
 
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     try:
         asyncio.run(service.start_silent_scan(str(tmp_path)))
 
@@ -130,9 +132,9 @@ def test_cancelling_one_metadata_waiter_keeps_shared_parse_alive(
         release.wait(timeout=2)
         return {"chunk_count": 7}
 
-    monkeypatch.setattr(region_map_module, "scan_region_dir", lambda _path: [region])
-    monkeypatch.setattr(region_map_module, "scan_region_meta", slow_meta)
-    service = RegionMapService()
+    monkeypatch.setattr(region_map_scan, "scan_region_dir", lambda _path: [region])
+    monkeypatch.setattr(region_map_meta, "scan_region_meta", slow_meta)
+    service = RegionMapService(ExecutionRuntime())
     try:
         asyncio.run(service.start_silent_scan(str(tmp_path)))
 

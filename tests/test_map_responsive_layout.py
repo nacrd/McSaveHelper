@@ -6,7 +6,8 @@ from typing import Any, Callable, cast
 
 import flet as ft
 
-from app.services.region_map_service import RegionMapService
+from app.services.execution_runtime import ExecutionRuntime
+from app.services.region_map import RegionMapService
 from app.ui.views.explorer.map.mca_map_view import McaMapView
 from app.ui.views.explorer.region_tab_chrome import build_region_tab_chrome
 
@@ -32,7 +33,7 @@ def _build_chrome(map_view: McaMapView):
 
 
 def test_inline_map_stacks_force_the_map_to_fill_available_space() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service, width=900, height=560)
 
     inner_stack = cast(ft.Stack, view.content)
@@ -49,7 +50,7 @@ def test_inline_map_stacks_force_the_map_to_fill_available_space() -> None:
 
 
 def test_canvas_measurement_updates_viewport_without_locking_child_layers() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service, width=900, height=560)
     view._viewport.offset_x = 37.0
     view._viewport.offset_y = -19.0
@@ -73,7 +74,7 @@ def test_canvas_measurement_updates_viewport_without_locking_child_layers() -> N
 
 
 def test_expanding_map_host_propagates_window_size_to_map_view() -> None:
-    service = RegionMapService()
+    service = RegionMapService(ExecutionRuntime())
     view = McaMapView(map_service=service, width=900, height=560)
     chrome = _build_chrome(view)
     rebuilds: list[None] = []

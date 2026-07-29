@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, cast
 
 from app.services.item.language_loader import normalize_locale
 
@@ -93,7 +93,8 @@ def pick_asset_sources(app: Any, title: str) -> list[Path]:
     if callable(pick_files):
         selected = pick_files(title=title, file_types=file_types)
         if selected:
-            return [Path(item) for item in selected if item]
+            selected_paths = cast(Sequence[str], selected)
+            return [Path(item) for item in selected_paths if item]
         return []
     path = app.pick_file(title=title, file_types=file_types)
     return [Path(path)] if path else []

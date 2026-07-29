@@ -15,19 +15,19 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from core.logger import logger
-from core.region_utils import (
-    discover_dimension_region_dirs,
-    parse_region_coords,
-    scan_region_dir,
-)
+from core.mca.map_export_bounds import analyze_region_bounds
 from core.mca.map_export_renderer import (
     MapExportRenderer,
     MapImageSpec,
     MapRenderCancelled,
     PIL_AVAILABLE,
-    analyze_region_bounds,
 )
 from core.mca.map_models import MapExportSpec, MapSelection, SUPPORTED_MAP_STYLES
+from core.region_utils import (
+    discover_dimension_region_dirs,
+    parse_region_coords,
+    scan_region_dir,
+)
 
 __all__ = [
     "MapExportService",
@@ -247,6 +247,7 @@ class MapExportService:
         results["output_path"] = str(output_path)
         results["dimensions"] = image_size
         results["chunks_processed"] = chunks_processed
+        results["scale"] = effective_scale
         tracker.increment_files(chunks_processed)
         progress(1.0, "导出完成")
 
@@ -347,55 +348,38 @@ class MapExportService:
         )
         os.close(fd)
         temporary_path: Optional[Path] = Path(temporary_name)
-        image: Any = None
         try:
             progress(0.25, "创建地图图像...")
-            image = self._create_export_image(job, log, progress)
-            self._check_cancelled(job.cancel_event)
-            image_size = (int(image.size[0]), int(image.size[1]))
-            progress(0.95, "保存图像...")
-            image.save(temporary_path, "PNG")
-            image.close()
-            image = None
-            self._check_cancelled(job.cancel_event)
+            renderer_kwargs: Dict[str, Any] = {}
+            if job.selection_bounds is not None:
+                renderer_kwargs["block_bounds"] = job.selection_bounds
+            if job.cancel_event is not None:
+                renderer_kwargs["cancel_event"] = job.cancel_event
             assert temporary_path is not None
+            image_spec = self._renderer.save_map_image(
+                temporary_path,
+                list(job.region_files),
+                dict(job.bounds),
+                job.style,
+                job.scale,
+                log,
+                progress,
+                **renderer_kwargs,
+            )
+            self._check_cancelled(job.cancel_event)
             temporary_path.replace(output_path)
             temporary_path = None
             log(f"地图已保存: {output_path}", "INFO")
-            return image_size, self._renderer.last_rendered_chunks
+            return (
+                (int(image_spec.width), int(image_spec.height)),
+                self._renderer.last_rendered_chunks,
+            )
         finally:
-            if image is not None:
-                try:
-                    image.close()
-                except Exception:
-                    # best-effort：关闭失败不应掩盖主异常。
-                    pass
             if temporary_path is not None:
                 try:
                     temporary_path.unlink(missing_ok=True)
                 except OSError:
                     pass
-
-    def _create_export_image(
-        self,
-        job: _RenderJob,
-        log: LogFn,
-        progress: ProgressFn,
-    ) -> Any:
-        renderer_kwargs: Dict[str, Any] = {}
-        if job.selection_bounds is not None:
-            renderer_kwargs["block_bounds"] = job.selection_bounds
-        if job.cancel_event is not None:
-            renderer_kwargs["cancel_event"] = job.cancel_event
-        return self._renderer.create_map_image(
-            list(job.region_files),
-            dict(job.bounds),
-            job.style,
-            job.scale,
-            log,
-            progress,
-            **renderer_kwargs,
-        )
 
     @staticmethod
     def _dimension_id(spec: Optional[MapExportSpec]) -> str:

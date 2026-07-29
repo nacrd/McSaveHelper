@@ -5,11 +5,18 @@
 from __future__ import annotations
 
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    ExecutionRuntime,
+    OperationCancelledError,
+    TaskPriority,
+)
+from app.services.runtime_map import map_items
 from core.scanner import scan_all_regions
 
 from .models import RepairReport
@@ -37,22 +44,32 @@ class ChunkRepairResult:
 class ChunkRepairer:
     """区块修复器。
 
-    通过线程池并行检查 region 文件；取消时停止接受新任务。
+    通过统一执行运行时并行检查 region 文件；取消时停止新任务。
     当前实现以检测与隔离为主，不重写损坏区块内容。
     """
 
-    def __init__(self, cancel_event: threading.Event) -> None:
+    def __init__(
+        self,
+        cancel_event: threading.Event,
+        execution_runtime: ExecutionRuntime,
+    ) -> None:
         """初始化修复器。
 
         Args:
             cancel_event: 协作式取消事件。
+            execution_runtime: 应用共享后台运行时（必填）。
         """
         self._cancel_event = cancel_event
+        self._execution_runtime = execution_runtime
 
     @property
     def is_cancelled(self) -> bool:
         """当前修复是否已被请求取消。"""
         return self._cancel_event.is_set()
+
+    def close(self) -> None:
+        """幂等关闭钩子；不关闭共享运行时。"""
+        return
 
     def repair_chunks(
         self,
@@ -77,38 +94,43 @@ class ChunkRepairer:
 
         log(f"找到 {total} 个区块文件", "INFO")
         max_workers = min(max(1, (total + 3) // 4), 8)
+        completed = 0
 
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {
-                pool.submit(self._repair_region, region_file, log): region_file
-                for region_file in region_files
-            }
-            completed = 0
-            for future in as_completed(futures):
-                if self.is_cancelled:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    break
-                region_file = futures[future]
-                try:
-                    result = future.result(timeout=120)
-                except TimeoutError as exc:
-                    log(f"处理 {region_file.name} 超时: {exc}", "ERROR")
-                except (OSError, ValueError, RuntimeError) as exc:
-                    log(f"处理 {region_file.name} 异常: {exc}", "ERROR")
-                except Exception as exc:
-                    # 线程入口边界：保留失败语义，继续其余区域。
-                    log(f"处理 {region_file.name} 异常: {exc}", "ERROR")
-                else:
-                    report.chunks_checked += result.checked_regions
-                    report.chunks_damaged += result.damaged_chunks
-                    report.chunks_quarantined_regions += (
-                        result.quarantined_regions
-                    )
-                completed += 1
-                progress(
-                    0.10 + (completed / total) * 0.65,
-                    f"检查区块文件 {completed}/{total}",
-                )
+        def on_item_done(_index: int, value: object) -> None:
+            nonlocal completed
+            completed += 1
+            if isinstance(value, ChunkRepairResult):
+                report.chunks_checked += value.checked_regions
+                report.chunks_damaged += value.damaged_chunks
+                report.chunks_quarantined_regions += value.quarantined_regions
+            elif isinstance(value, BaseException):
+                log(f"处理区域文件异常: {value}", "ERROR")
+            progress(
+                0.10 + (completed / total) * 0.65,
+                f"检查区块文件 {completed}/{total}",
+            )
+
+        def worker(
+            token: CancellationToken,
+            region_file: Path,
+        ) -> ChunkRepairResult:
+            del token
+            return self._repair_region(region_file, log)
+
+        try:
+            map_items(
+                self._execution_runtime,
+                "repair_region",
+                region_files,
+                worker,
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.BACKGROUND,
+                cancel_check=lambda: self.is_cancelled,
+                on_item_done=on_item_done,
+                max_in_flight=max_workers,
+            )
+        except OperationCancelledError:
+            log("区块检查已取消", "WARNING")
 
     def _repair_region(
         self,
