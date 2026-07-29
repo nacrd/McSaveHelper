@@ -14,6 +14,7 @@ from app.presenters.compare_view_state import (
     fail_compare,
     initial_compare_state,
     invalidate_compare,
+    select_compare_baseline,
 )
 from app.services.world_compare_service import WorldCompareResult, WorldCompareService
 from app.services.execution_runtime import (
@@ -248,7 +249,7 @@ class CompareView(ft.Column):
             self._group(group)
             for group in self._state.groups
         )
-        self.update()
+        safe_update(self)
 
     def _group(self, group: CompareGroupState) -> ft.Container:
         rows = []
@@ -278,13 +279,19 @@ class CompareView(ft.Column):
                     padding=12)
 
     def on_save_selected(self, path: str) -> None:
-        """统一入口设置当前存档回调"""
+        """切换基准存档并使旧世界的对比结果失效。
+
+        Args:
+            path: 新选中的基准世界路径。
+        """
+        self._state = select_compare_baseline(self._state, Path(path))
+        self._task_scope.cancel_all()
         try:
             self._left_field.value = path
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
-        safe_update(self._left_field)
+        self._render_state()
 
     def dispose(self) -> None:
         """取消页面拥有的对比任务；可重复调用。"""

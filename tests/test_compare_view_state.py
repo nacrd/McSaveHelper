@@ -7,6 +7,7 @@ from app.presenters.compare_view_state import (
     fail_compare,
     initial_compare_state,
     invalidate_compare,
+    select_compare_baseline,
 )
 from app.services.world_compare_service import CompareItem, WorldCompareResult
 
@@ -53,3 +54,16 @@ def test_compare_state_failure_and_dispose_end_busy_phase() -> None:
     assert failed.is_comparing is False
     assert disposed.phase is ComparePhase.IDLE
     assert disposed.generation == running.generation + 1
+
+
+def test_selecting_new_baseline_clears_old_projection() -> None:
+    running = begin_compare(initial_compare_state(), Path("old"), Path("target"))
+    completed = complete_compare(running, _result(), running.generation)
+
+    selected = select_compare_baseline(completed, Path("new"))
+
+    assert selected.phase is ComparePhase.IDLE
+    assert selected.generation == completed.generation + 1
+    assert selected.left_path == Path("new")
+    assert selected.right_path is None
+    assert selected.groups == ()

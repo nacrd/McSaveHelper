@@ -9,6 +9,9 @@ from typing import Sequence
 from app.services.world_compare_service import CompareItem, WorldCompareResult
 
 
+_EMPTY_SUMMARY = "通过侧边栏设置基准存档，再指定目标存档后开始对比。"
+
+
 class ComparePhase(str, Enum):
     """对比页面可观察阶段。"""
 
@@ -59,7 +62,7 @@ def initial_compare_state() -> CompareViewState:
         generation=0,
         left_path=None,
         right_path=None,
-        summary="通过侧边栏设置基准存档，再指定目标存档后开始对比。",
+        summary=_EMPTY_SUMMARY,
         groups=(),
     )
 
@@ -130,6 +133,29 @@ def invalidate_compare(state: CompareViewState) -> CompareViewState:
     )
 
 
+def select_compare_baseline(
+    state: CompareViewState,
+    left_path: Path,
+) -> CompareViewState:
+    """Reset comparison projection for a newly selected baseline world.
+
+    Args:
+        state: Current immutable comparison state.
+        left_path: Newly selected baseline world.
+
+    Returns:
+        An idle generation that rejects callbacks from the old baseline.
+    """
+    return CompareViewState(
+        phase=ComparePhase.IDLE,
+        generation=state.generation + 1,
+        left_path=left_path,
+        right_path=None,
+        summary=_EMPTY_SUMMARY,
+        groups=(),
+    )
+
+
 def _build_group(
     title: str,
     items: Sequence[CompareItem],
@@ -156,4 +182,5 @@ __all__ = [
     "fail_compare",
     "initial_compare_state",
     "invalidate_compare",
+    "select_compare_baseline",
 ]
