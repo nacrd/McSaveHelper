@@ -41,6 +41,28 @@ def _default_machine_notes(report: dict[str, object]) -> str:
     )
 
 
+def _store_budget_result(
+    report: dict[str, object],
+    violations: list[str],
+    profile: str,
+) -> None:
+    """把显式预算检查结果写回待归档报告。"""
+    samples = report.get("samples")
+    checked_samples = len(samples) if isinstance(samples, list) else 0
+    report["budget_violations"] = violations
+    report["budgets_ok"] = not violations
+    report["budget_result"] = {
+        "ok": not violations,
+        "violations": violations,
+        "checked_samples": checked_samples,
+        "profile": profile,
+    }
+
+
+def _print_budget_violations(violations: list[str]) -> None:
+    print("budget violations:", *violations, sep="\n- ")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Archive bench p95 report")
     parser.add_argument(
@@ -76,10 +98,16 @@ def main() -> int:
         default="",
         help="Optional free-text hardware notes for true-machine archives",
     )
-    parser.add_argument(
+    budget_checks = parser.add_mutually_exclusive_group()
+    budget_checks.add_argument(
         "--check-budgets",
         action="store_true",
         help="Fail if synthetic budgets are violated",
+    )
+    budget_checks.add_argument(
+        "--check-real-budgets",
+        action="store_true",
+        help="Fail if fixed-reference real-world LOD budgets are violated",
     )
     args = parser.parse_args()
 
@@ -103,6 +131,8 @@ def main() -> int:
     else:
         if args.sample_size is not None:
             parser.error("--sample-size 仅适用于 --world")
+        if args.check_real_budgets:
+            parser.error("--check-real-budgets 仅适用于 --world/--from-json")
         from scripts.bench_mca import evaluate_report_budgets, run_benchmark
 
         sizes = [SampleSize(item) for item in args.sizes]
@@ -111,7 +141,24 @@ def main() -> int:
         report["budget_violations"] = violations
         report["budgets_ok"] = not violations
         if args.check_budgets and violations:
-            print("budget violations:", *violations, sep="\n- ")
+            _print_budget_violations(violations)
+            return 2
+
+    if args.from_json and args.check_budgets:
+        from scripts.bench_mca import evaluate_report_budgets
+
+        violations = evaluate_report_budgets(report)
+        _store_budget_result(report, violations, "synthetic-fixed-samples")
+        if violations:
+            _print_budget_violations(violations)
+            return 2
+    if args.check_real_budgets:
+        from core.bench_budgets import evaluate_real_world_lod_report
+
+        violations = evaluate_real_world_lod_report(report)
+        _store_budget_result(report, violations, "real-world-reference")
+        if violations:
+            _print_budget_violations(violations)
             return 2
 
     notes = args.machine_notes or _default_machine_notes(report)

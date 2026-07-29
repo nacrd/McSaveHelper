@@ -1,6 +1,7 @@
 """固定合成样本与 MCA 架构基准不变量。"""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any, Callable, cast
@@ -110,3 +111,39 @@ def test_real_world_cli_requires_explicit_sample_size(
         entrypoint()
 
     assert error.value.code == 2
+
+
+def test_archive_cli_checks_existing_real_world_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_path = tmp_path / "real.json"
+    report_path.write_text(
+        json.dumps({
+            "samples": [{
+                "sample_size": "large",
+                "read_only_verified": True,
+                "world_session": {"shell_open_p95_ms": 10.0},
+                "topview": {
+                    "rendered": True,
+                    "tile_p95_ms": 10.0,
+                    "cache_hit_p95_ms": 1.0,
+                    "visible_process_warm_p95_ms": 100.0,
+                    "visible_first_progress_p95_ms": 200.0,
+                    "visible_upgrade_p95_ms": 5000.0,
+                },
+            }],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", [
+        "archive_bench_report.py",
+        "--from-json",
+        str(report_path),
+        "--check-real-budgets",
+        "--output-dir",
+        str(tmp_path / "archive"),
+    ])
+
+    assert archive_bench_main() == 2
+    assert not (tmp_path / "archive").exists()
