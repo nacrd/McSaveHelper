@@ -11,6 +11,18 @@ from app.ui.views.explorer.explorer_view import ExplorerView
 from core.observability import OperationOutcome, OperationRecord
 
 
+class _DeferredScope:
+    def __init__(self) -> None:
+        self.cancel_calls = 0
+        self.submissions: list[tuple[str, Any, dict[str, Any]]] = []
+
+    def cancel_all(self) -> None:
+        self.cancel_calls += 1
+
+    def submit(self, operation: str, work: Any, **kwargs: Any) -> None:
+        self.submissions.append((operation, work, kwargs))
+
+
 def _bare_explorer(*, disposed: bool, generation: int) -> ExplorerView:
     view = ExplorerView.__new__(ExplorerView)
     view._disposed = disposed
@@ -41,6 +53,54 @@ def test_disposed_explorer_rejects_delayed_world_results() -> None:
     view._show_world_load_error(RuntimeError("late"), 4)
 
     assert applied == []
+
+
+def test_world_load_detaches_old_session_before_background_open() -> None:
+    view = _bare_explorer(disposed=False, generation=4)
+    old_session = object()
+    map_events: list[str] = []
+    scope = _DeferredScope()
+    view.world_session = cast(Any, old_session)
+    view.current_uuid = "old-player"
+    view._current_player_data = object()
+    view.player_uuid_map = {"old-player": "Old"}
+    view._player_refs_cache = [object()]
+    view._player_list_page = 2
+    view._selected_region_coord = (3, 4)
+    view._map_controller = cast(
+        Any,
+        SimpleNamespace(
+            unbind_world=lambda: map_events.append("unbind"),
+        ),
+    )
+    view._world_label = cast(
+        Any,
+        SimpleNamespace(value="old", color=None, update=lambda: None),
+    )
+    view._task_scope = cast(Any, scope)
+    view._invalidate_quick_backup_state = cast(Any, lambda: None)
+    view._invalidate_stats_analysis_state = cast(Any, lambda: None)
+    view._invalidate_player_async_state = cast(Any, lambda: None)
+    view._set_map_marker_busy = cast(Any, lambda _busy: None)
+    view.app = cast(
+        Any,
+        SimpleNamespace(
+            hide_progress=lambda: None,
+            handle_exception=lambda *_args, **_kwargs: None,
+        ),
+    )
+
+    view._load_world("new-world")
+
+    assert view.world_session is None
+    assert view.current_uuid is None
+    assert view.player_uuid_map == {}
+    assert view._player_refs_cache == []
+    assert view._selected_region_coord is None
+    assert map_events == ["unbind"]
+    assert scope.cancel_calls == 1
+    assert scope.submissions[0][0] == "load_world"
+    assert scope.submissions[0][2]["generation"] == 5
 
 
 def test_cancelled_world_worker_does_not_open_or_post_result() -> None:

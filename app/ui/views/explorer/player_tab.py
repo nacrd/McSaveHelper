@@ -913,6 +913,12 @@ class PlayerTabMixin(ExplorerMixinHost):
         """清除上一世界玩家投影；新列表会按需选择首个玩家。"""
         self.current_uuid = None
         self._current_player_data = None
+        player_uuid_map = getattr(self, "player_uuid_map", None)
+        if player_uuid_map is not None:
+            player_uuid_map.clear()
+        self._player_refs_cache = []
+        self._player_list_page = 0
+        self._apply_player_list()
         hud = getattr(self, "_player_hud", None)
         if hud is not None:
             hud.reset()

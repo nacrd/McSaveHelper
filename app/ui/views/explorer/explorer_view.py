@@ -358,6 +358,7 @@ class ExplorerView(
             safe_update(self._world_label)
             self._world_load_generation += 1
             generation = self._world_load_generation
+            self._detach_current_world()
             self._invalidate_quick_backup_state()
             self._invalidate_stats_analysis_state()
             self._invalidate_player_async_state()
@@ -379,6 +380,15 @@ class ExplorerView(
             )
         except Exception as ex:
             self.app.handle_exception(ex, title="设置当前存档失败")
+
+    def _detach_current_world(self) -> None:
+        """新会话加载期间解除旧世界操作身份。"""
+        self.world_session = None
+        self._selected_region_coord = None
+        self._map_controller.unbind_world()
+        self._reset_player_selection()
+        if hasattr(self, "_map_marker_list"):
+            self._refresh_map_markers()
 
     def _load_world_worker(
         self,

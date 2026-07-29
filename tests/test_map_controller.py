@@ -39,6 +39,24 @@ def test_map_controller_keeps_independent_dimension_states(tmp_path: Path) -> No
     assert controller.switch_dimension("minecraft:the_nether").center_x == 25
 
 
+def test_map_controller_unbind_clears_runtime_state_not_persisted_markers(
+    tmp_path: Path,
+) -> None:
+    world = tmp_path / "world"
+    world.mkdir()
+    service = MapMarkerService(tmp_path / "markers")
+    controller = MapController(service)
+    controller.bind_world(world, _dimensions(tmp_path))
+    marker = controller.upsert_marker("旧世界", 12, 34)
+
+    controller.unbind_world()
+
+    assert controller.world_path is None
+    assert controller.dimensions == ()
+    assert controller.markers() == []
+    assert [saved.id for saved in service.list(world)] == [marker.id]
+
+
 def test_map_controller_infers_vanilla_nether_scale_when_metadata_is_legacy(
     tmp_path: Path,
 ) -> None:

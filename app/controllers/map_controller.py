@@ -142,6 +142,18 @@ class MapController:
         self._notify()
         return self._state
 
+    def unbind_world(self) -> None:
+        """解除当前世界绑定并使地图标记任务失效。"""
+        self._ensure_open()
+        self._marker_operations.invalidate()
+        self._world_path = None
+        self._dimensions.clear()
+        self._states.clear()
+        self._state = MapViewState()
+        self._markers.clear()
+        self._marker_snapshots.clear()
+        self._notify()
+
     def switch_dimension(self, dimension_id: str) -> MapViewState:
         """切换维度并按 coordinate scale 保持相同的世界锚点。
 
