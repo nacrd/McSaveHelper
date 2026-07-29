@@ -23,6 +23,31 @@ def _is_view_service_container_access(node: ast.AST) -> bool:
     )
 
 
+def _decorator_name(node: ast.AST) -> str:
+    """返回简单装饰器或属性装饰器的末级名称。"""
+    target = node.func if isinstance(node, ast.Call) else node
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return ""
+
+
+def _has_explicit_bounded_maxsize(node: ast.Call) -> bool:
+    """检查 lru_cache 是否显式声明非 None 的 maxsize。"""
+    values = [
+        keyword.value
+        for keyword in node.keywords
+        if keyword.arg == "maxsize"
+    ]
+    if not values and node.args:
+        values = [node.args[0]]
+    return bool(values) and not any(
+        isinstance(value, ast.Constant) and value.value is None
+        for value in values
+    )
+
+
 def test_core_does_not_import_application_layer() -> None:
     violations = []
     for source_path in (PROJECT_ROOT / "core").rglob("*.py"):
@@ -38,6 +63,30 @@ def test_core_does_not_import_application_layer() -> None:
                 violations.append(str(source_path.relative_to(PROJECT_ROOT)))
 
     assert violations == [], f"core 反向导入 app: {sorted(set(violations))}"
+
+
+def test_core_function_caches_have_explicit_bounds() -> None:
+    """禁止 core 引入无界进程级函数缓存。"""
+    violations = []
+    for source_path in (PROJECT_ROOT / "core").rglob("*.py"):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for decorator in node.decorator_list:
+                name = _decorator_name(decorator)
+                is_unbounded_lru = (
+                    name == "lru_cache"
+                    and (
+                        not isinstance(decorator, ast.Call)
+                        or not _has_explicit_bounded_maxsize(decorator)
+                    )
+                )
+                if name == "cache" or is_unbounded_lru:
+                    relative = source_path.relative_to(PROJECT_ROOT)
+                    violations.append(f"{relative}:{node.lineno}")
+
+    assert violations == [], f"core 存在无界函数缓存: {violations}"
 
 
 def test_services_do_not_import_ui_implementations() -> None:
