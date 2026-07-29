@@ -415,14 +415,7 @@ class EntityBlockSearchView(ft.Column):
         self._status_title_text.color = THEME.text_primary
         self._status_summary_text.value = ""
         self._status_progress.visible = False
-        if hasattr(self._world_path_field, 'update'):
-            self._world_path_field.update()
-        safe_update(self._results_list)
-        safe_update(self._search_btn)
-        safe_update(self._export_btn)
-        safe_update(self._status_title_text)
-        safe_update(self._status_summary_text)
-        safe_update(self._status_progress)
+        safe_update(self)
 
     def _on_search_type_change(self, e: Any) -> None:
         """搜索范围改变时更新预设标签"""
