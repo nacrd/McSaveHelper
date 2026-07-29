@@ -113,6 +113,10 @@ class SaveRepairController:
         """
         self._invalidate(self._path_identity(world_path))
 
+    def clear_world(self) -> None:
+        """Clear the selected world and cancel any operation that owns it."""
+        self._invalidate(None)
+
     def cancel(self) -> None:
         """同时取消领域工作与运行时句柄。"""
         self._invalidate(None, preserve_world=True)

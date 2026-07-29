@@ -10,6 +10,7 @@ import flet as ft
 from app.presenters.compare_view_state import (
     CompareGroupState,
     begin_compare,
+    clear_compare_baseline,
     complete_compare,
     fail_compare,
     initial_compare_state,
@@ -291,6 +292,13 @@ class CompareView(ft.Column):
         except Exception:
             # UI best-effort: control may already be unmounted.
             pass
+        self._render_state()
+
+    def on_save_cleared(self) -> None:
+        """取消对比并清空已选择的基准世界。"""
+        self._state = clear_compare_baseline(self._state)
+        self._task_scope.cancel_all()
+        self._left_field.value = ""
         self._render_state()
 
     def dispose(self) -> None:

@@ -24,6 +24,7 @@ class ActionView(ft.Column):
         )
         self.controls = [self._page_header]
         self.selected_paths = []
+        self.clear_calls = 0
         self.command_calls = 0
         self.compact_modes = []
 
@@ -35,6 +36,9 @@ class ActionView(ft.Column):
 
     def on_save_selected(self, path: str) -> None:
         self.selected_paths.append(path)
+
+    def on_save_cleared(self) -> None:
+        self.clear_calls += 1
 
     def set_compact_mode(self, compact: bool) -> None:
         self.compact_modes.append(compact)
@@ -67,6 +71,7 @@ def _manager(
     create_view,
     selected=lambda: "test",
     get_top_actions=None,
+    current_path=lambda: "C:/world",
 ):
     updates = []
     logs = []
@@ -75,7 +80,7 @@ def _manager(
     )
     manager = ViewManager(ViewManagerDependencies(
         create_view=create_view,
-        get_current_save_path=lambda: "C:/world",
+        get_current_save_path=current_path,
         get_selected_view_id=selected,
         build_error_placeholder=lambda view_id, error: ft.Text(
             f"{view_id}: {error}"
@@ -129,6 +134,26 @@ def test_view_manager_projects_view_actions_and_save_context() -> None:
     assert view.compact_modes[-1] is False
     manager.notify_current_view_save_selected("D:/other")
     assert view.selected_paths[-1] == "D:/other"
+
+
+def test_view_manager_clears_new_and_all_cached_world_aware_views() -> None:
+    first = ActionView()
+    second = ActionView()
+    views = {"first": first, "second": second}
+    manager, _, _, logs = _manager(
+        lambda view_id: views[view_id],
+        selected=lambda: "first",
+        current_path=lambda: None,
+    )
+
+    manager.switch_view("first")
+    manager.views["second"] = second
+    manager.notify_all_views_save_cleared()
+
+    assert first.selected_paths == []
+    assert first.clear_calls == 2
+    assert second.clear_calls == 1
+    assert logs == []
 
 
 def test_view_manager_prefers_registered_action_factory() -> None:

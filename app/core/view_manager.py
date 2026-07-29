@@ -301,14 +301,27 @@ class ViewManager:
 
     def _notify_save_selected(self, view: ft.Control) -> None:
         current_save_path = self._deps.get_current_save_path()
+        if not current_save_path:
+            self._notify_save_cleared(view)
+            return
         callback = getattr(view, "on_save_selected", None)
-        if not current_save_path or not callable(callback):
+        if not callable(callback):
             return
         try:
             callback(current_save_path)
         except Exception as error:
             # View callbacks may raise UI/runtime errors; isolate them.
             self._deps.log(f"同步当前存档失败: {error}", "ERROR")
+
+    def _notify_save_cleared(self, view: ft.Control) -> None:
+        """Notify one view that no current world remains."""
+        callback = getattr(view, "on_save_cleared", None)
+        if not callable(callback):
+            return
+        try:
+            callback()
+        except Exception as error:
+            self._deps.log(f"清空视图存档上下文失败: {error}", "ERROR")
 
     def _handle_view_error(self, view_id: str, error: Exception) -> None:
         if self._host is None:
@@ -354,6 +367,11 @@ class ViewManager:
             callback(path)
         except Exception as error:
             self._deps.log(f"通知视图失败: {error}", "ERROR")
+
+    def notify_all_views_save_cleared(self) -> None:
+        """Clear world identity from every cached world-aware view."""
+        for view in tuple(self.views.values()):
+            self._notify_save_cleared(view)
 
     def remove_view(self, view_id: str) -> Optional[ft.Control]:
         """从缓存移除视图并释放其拥有的资源。

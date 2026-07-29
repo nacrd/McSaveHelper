@@ -109,6 +109,51 @@ def test_world_load_detaches_old_session_before_background_open() -> None:
     assert scope.submissions[0][2]["generation"] == 5
 
 
+def test_clear_save_cancels_world_tasks_and_resets_projection() -> None:
+    view = _bare_explorer(disposed=False, generation=7)
+    events: list[object] = []
+    scope = _DeferredScope()
+    view._detach_current_world = cast(Any, lambda: events.append("detach"))
+    view._invalidate_quick_backup_state = cast(
+        Any, lambda: events.append("quick")
+    )
+    view._invalidate_stats_analysis_state = cast(
+        Any, lambda: events.append("stats")
+    )
+    view._invalidate_player_async_state = cast(
+        Any, lambda: events.append("player")
+    )
+    view._set_map_marker_busy = cast(
+        Any, lambda busy: events.append(("marker", busy))
+    )
+    view._task_scope = cast(Any, scope)
+    view._world_label = cast(
+        Any,
+        SimpleNamespace(value="old", color=None, update=lambda: None),
+    )
+    view.app = cast(
+        Any,
+        SimpleNamespace(
+            hide_progress=lambda: events.append("hide"),
+            translate=lambda _key, default="": default,
+        ),
+    )
+
+    view.on_save_cleared()
+
+    assert view._world_load_generation == 8
+    assert scope.cancel_calls == 1
+    assert view._world_label.value == "未设置当前存档"
+    assert events == [
+        "detach",
+        "quick",
+        "stats",
+        "player",
+        ("marker", False),
+        "hide",
+    ]
+
+
 def test_cancelled_world_worker_does_not_open_or_post_result() -> None:
     view = _bare_explorer(disposed=False, generation=1)
     posted: list[object] = []

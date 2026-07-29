@@ -27,7 +27,11 @@ class SaveContextUiMixin:
                     context.name,
                     context.display_path,
                 )
-        if context is None or not hasattr(self, "gui_optimizer"):
+        if context is None:
+            if hasattr(self, "view_manager"):
+                self.view_manager.notify_all_views_save_cleared()
+            return
+        if not hasattr(self, "gui_optimizer"):
             return
         notification_manager = self.gui_optimizer.notification_manager
         if notification_manager:

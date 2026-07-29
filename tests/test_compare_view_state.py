@@ -3,6 +3,7 @@ from pathlib import Path
 from app.presenters.compare_view_state import (
     ComparePhase,
     begin_compare,
+    clear_compare_baseline,
     complete_compare,
     fail_compare,
     initial_compare_state,
@@ -67,3 +68,15 @@ def test_selecting_new_baseline_clears_old_projection() -> None:
     assert selected.left_path == Path("new")
     assert selected.right_path is None
     assert selected.groups == ()
+
+
+def test_clearing_baseline_rejects_pending_result_and_drops_paths() -> None:
+    running = begin_compare(initial_compare_state(), Path("old"), Path("target"))
+
+    cleared = clear_compare_baseline(running)
+
+    assert cleared.phase is ComparePhase.IDLE
+    assert cleared.generation == running.generation + 1
+    assert cleared.left_path is None
+    assert cleared.right_path is None
+    assert complete_compare(cleared, _result(), running.generation) is cleared

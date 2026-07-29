@@ -156,6 +156,25 @@ def select_compare_baseline(
     )
 
 
+def clear_compare_baseline(state: CompareViewState) -> CompareViewState:
+    """Clear the selected baseline and invalidate all pending callbacks.
+
+    Args:
+        state: Current immutable comparison state.
+
+    Returns:
+        An empty idle generation with no selected world paths.
+    """
+    return CompareViewState(
+        phase=ComparePhase.IDLE,
+        generation=state.generation + 1,
+        left_path=None,
+        right_path=None,
+        summary=_EMPTY_SUMMARY,
+        groups=(),
+    )
+
+
 def _build_group(
     title: str,
     items: Sequence[CompareItem],
@@ -178,6 +197,7 @@ __all__ = [
     "ComparePhase",
     "CompareViewState",
     "begin_compare",
+    "clear_compare_baseline",
     "complete_compare",
     "fail_compare",
     "initial_compare_state",

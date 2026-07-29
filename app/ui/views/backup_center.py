@@ -710,6 +710,16 @@ class BackupCenterView(ft.Column):
         self._world_path_field.value = path
         self._refresh()
 
+    def on_save_cleared(self) -> None:
+        """取消旧世界操作并清空备份列表投影。"""
+        self._task_scope.cancel_all()
+        self._operation_controller.invalidate()
+        self._refresh_generation += 1
+        self._world_path_field.value = ""
+        self._summary.value = self._t("no_save", "尚未选择存档")
+        self._show_empty_state()
+        safe_update(self)
+
     def dispose(self) -> None:
         """取消备份操作并释放页面任务作用域。"""
         self._operation_controller.close()

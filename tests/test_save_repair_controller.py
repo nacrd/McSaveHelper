@@ -148,6 +148,40 @@ def test_world_switch_discards_callbacks_already_queued_for_old_world(
         runtime.shutdown(wait=True)
 
 
+def test_clear_world_discards_callbacks_already_queued_for_old_world(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime()
+    service = _FakeRepairService()
+    ui = _UiRecorder()
+    queued_ui = _QueuedUi(expected=4)
+    scope = runtime.create_scope("test_save_repair_clear")
+    controller = SaveRepairController(
+        cast(SaveRepairService, service),
+        scope,
+        ui.ports(),
+        queued_ui.post,
+    )
+
+    try:
+        controller.start_detect(tmp_path / "world")
+        assert service.detect_started.wait(timeout=2)
+
+        controller.clear_world()
+        assert queued_ui.ready.wait(timeout=2)
+        queued_ui.drain()
+
+        assert service.cancel_calls == 1
+        assert ui.progress == []
+        assert ui.logs == []
+        assert ui.detect_reports == []
+        assert ui.finished == 1
+    finally:
+        controller.close()
+        scope.close()
+        runtime.shutdown(wait=True)
+
+
 def test_cancel_closes_domain_and_runtime_paths_before_queued_repair_runs(
     tmp_path: Path,
 ) -> None:

@@ -269,6 +269,15 @@ class SaveRepairView(ft.Column):
         safe_update(self._world_info_card)
         safe_update(self._detect_result_card)
 
+    def on_save_cleared(self) -> None:
+        """取消旧世界修复并清空路径及结果投影。"""
+        self._controller.clear_world()
+        self._world_path_field.value = ""
+        self._world_info_card.visible = False
+        self._detect_result_card.visible = False
+        self._result_text.value = ""
+        safe_update(self)
+
     def dispose(self) -> None:
         """取消检测/修复任务并释放页面作用域。"""
         self._controller.close()

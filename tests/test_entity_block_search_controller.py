@@ -304,6 +304,32 @@ def test_queued_success_is_dropped_after_world_switch(tmp_path: Path) -> None:
         runtime.shutdown(wait=True)
 
 
+def test_clear_world_cancels_search_and_rejects_old_world(tmp_path: Path) -> None:
+    runtime = _runtime()
+    service = _ControlledSearchService(block_search=True)
+    ui_queue = _UiQueue()
+    recorder = _UiRecorder()
+    controller, scope = _controller(runtime, service, ui_queue, recorder)
+    world = _world(tmp_path)
+    controller.select_world(world)
+    search = controller.start_search(_condition(world, "old"))
+    assert search is not None
+    assert service.search_started.wait(2)
+
+    try:
+        controller.clear_world()
+
+        assert search.cancel_requested is True
+        assert controller.is_searching is False
+        with pytest.raises(ValueError, match="当前存档"):
+            controller.start_search(_condition(world, "stale"))
+    finally:
+        service.search_release.set()
+        controller.close()
+        scope.close()
+        runtime.shutdown(wait=True)
+
+
 def test_close_drops_late_export_but_preserves_committed_success(
     tmp_path: Path,
 ) -> None:

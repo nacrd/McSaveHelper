@@ -616,6 +616,16 @@ class MigratorView(ft.Column):
             pass
         safe_update(self._src_field)
 
+    def on_save_cleared(self) -> None:
+        """清空迁移源世界，但不打断已由应用控制器持有的写流程。"""
+        try:
+            self._src_field.value = ""
+            self._sync_field_to_config()
+        except Exception:
+            # UI best-effort: field/config sync may fail during teardown.
+            pass
+        safe_update(self._src_field)
+
     def dispose(self) -> None:
         """释放视图自有任务；应用级迁移控制器由组合根关闭。"""
         self._scan_generation += 1

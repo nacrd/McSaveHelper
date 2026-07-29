@@ -390,8 +390,21 @@ class EntityBlockSearchView(ft.Column):
     # ==================== 功能方法 ====================
 
     def on_save_selected(self, path: str) -> None:
-        """当存档被选择时调用"""
+        """切换搜索世界并清空旧结果。
+
+        Args:
+            path: 新选中的世界路径。
+        """
         self._controller.select_world(Path(path))
+        self._reset_world_projection(path)
+
+    def on_save_cleared(self) -> None:
+        """取消搜索/导出并清空旧世界结果。"""
+        self._controller.clear_world()
+        self._reset_world_projection("")
+
+    def _reset_world_projection(self, path: str) -> None:
+        """Reset world-bound controls after selection or clearing."""
         self._world_path_field.value = path
         self._search_results = []
         self._results_list.controls.clear()

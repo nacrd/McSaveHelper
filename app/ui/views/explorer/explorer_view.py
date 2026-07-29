@@ -327,10 +327,33 @@ class ExplorerView(
             self._entity_block_search_view.on_save_selected(current_path)
 
     def on_save_selected(self, path: str) -> None:
-        """当存档被选择时调用（从侧边栏）"""
+        """从侧边栏切换 Explorer 世界。
+
+        Args:
+            path: 新选中的世界路径。
+        """
         self._load_world(path)
         if hasattr(self, "_entity_block_search_view"):
             self._entity_block_search_view.on_save_selected(path)
+
+    def on_save_cleared(self) -> None:
+        """取消旧世界任务并清空 Explorer 的会话身份。"""
+        self._world_load_generation += 1
+        self._detach_current_world()
+        self._invalidate_quick_backup_state()
+        self._invalidate_stats_analysis_state()
+        self._invalidate_player_async_state()
+        self._set_map_marker_busy(False)
+        self._task_scope.cancel_all()
+        self.app.hide_progress()
+        self._world_label.value = self._t(
+            "sidebar.no_current_save",
+            "未设置当前存档",
+        )
+        self._world_label.color = THEME.text_muted
+        safe_update(self._world_label)
+        if hasattr(self, "_entity_block_search_view"):
+            self._entity_block_search_view.on_save_cleared()
 
     def _start_entity_block_search(self, e: Any = None) -> None:
         """打开实体/方块搜索标签。"""

@@ -965,3 +965,20 @@ def test_region_tab_delegates_fullscreen_overlay_lifecycle() -> None:
     assert "page.overlay" not in region_tab_source
     assert "threading.Thread" not in region_tab_source
     assert "_dispose_region_tab()" in explorer_source
+
+
+def test_world_aware_views_handle_selection_and_clear_context() -> None:
+    for path in (PROJECT_ROOT / "app/ui/views").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            methods = {
+                item.name
+                for item in node.body
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            if "on_save_selected" in methods:
+                assert "on_save_cleared" in methods, path.relative_to(
+                    PROJECT_ROOT
+                )

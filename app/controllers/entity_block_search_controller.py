@@ -149,6 +149,15 @@ class EntityBlockSearchController:
             handles = self._invalidate_all_locked()
         self._cancel_handles(handles)
 
+    def clear_world(self) -> None:
+        """清空当前世界并取消搜索、导出及其迟到回调。"""
+        with self._lock:
+            if self._closed:
+                return
+            self._world_path = None
+            handles = self._invalidate_all_locked()
+        self._cancel_handles(handles)
+
     def start_search(
         self,
         condition: SearchCondition,
