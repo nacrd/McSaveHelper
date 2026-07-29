@@ -15,6 +15,7 @@ from app.ui.views.explorer.map.export_dialog import (
     MapExportDialog,
     MapExportSession,
 )
+from app.ui.views.explorer.explorer_view import ExplorerView
 from app.ui.views.explorer.region_tab import RegionTabMixin
 from core.omni.world_session import WorldSession
 
@@ -144,6 +145,57 @@ def test_dispose_cancels_export_and_closes_dialog(tmp_path: Path) -> None:
     assert dialog._export_state.is_running is False
     cancel.set.assert_called_once()
     assert dialog._dialog is None
+
+
+def test_world_switch_invalidates_export_session_but_allows_reopen(
+    tmp_path: Path,
+) -> None:
+    app = _App()
+    dialog = MapExportDialog(cast(FeatureContext, app))
+    first_world = tmp_path / "first"
+    second_world = tmp_path / "second"
+    first_world.mkdir()
+    second_world.mkdir()
+    dialog.open(MapExportSession(first_world, "overworld"))
+    cancel = MagicMock()
+    dialog._cancel_event = cancel
+    dialog._export_state = begin_map_export(dialog._export_state)
+    old_generation = dialog._export_state.generation
+    cancel_all = MagicMock()
+    dialog._task_scope = cast(Any, SimpleNamespace(cancel_all=cancel_all))
+
+    dialog.invalidate_session()
+
+    assert dialog._export_state.generation == old_generation + 1
+    assert dialog._export_state.is_running is False
+    assert dialog._export_state.is_disposed is False
+    assert dialog._session is None
+    assert dialog._dialog is None
+    cancel.set.assert_called_once()
+    cancel_all.assert_called_once()
+
+    dialog.open(MapExportSession(second_world, "nether"))
+
+    assert dialog._session is not None
+    assert dialog._session.world_path == second_world
+
+
+def test_explorer_detach_invalidates_open_map_export(tmp_path: Path) -> None:
+    view = ExplorerView.__new__(ExplorerView)
+    view.world_session = cast(
+        WorldSession,
+        SimpleNamespace(world_path=tmp_path / "old"),
+    )
+    view._selected_region_coord = (1, 2)
+    view._map_export_dialog = MagicMock()
+    view._map_controller = MagicMock()
+    view._map_service = MagicMock()
+    view._reset_player_selection = MagicMock()
+
+    view._detach_current_world()
+
+    view._map_export_dialog.invalidate_session.assert_called_once()
+    assert view.world_session is None
 
 
 def test_region_tab_open_export_uses_map_context(tmp_path: Path) -> None:

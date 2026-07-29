@@ -13,6 +13,7 @@ from app.presenters.map_export_state import (
     begin_map_export,
     dispose_map_export,
     finish_map_export,
+    invalidate_map_export,
     owns_map_export,
     request_map_export_cancel,
 )
@@ -123,6 +124,22 @@ class MapExportDialog:
             self._cancel_event.set()
         self._task_scope.close()
         self._close_dialog()
+
+    def invalidate_session(self) -> None:
+        """Cancel work and detach the dialog from the previous world."""
+        if self._export_state.is_disposed:
+            return
+        was_running = self._export_state.is_running
+        self._export_state = invalidate_map_export(self._export_state)
+        cancel_event = self._cancel_event
+        self._cancel_event = None
+        self._session = None
+        if cancel_event is not None:
+            cancel_event.set()
+        self._task_scope.cancel_all()
+        self._close_dialog()
+        if was_running:
+            self.app.hide_progress()
 
     def _show_missing_pillow(self) -> None:
         self.app.error_dialog(

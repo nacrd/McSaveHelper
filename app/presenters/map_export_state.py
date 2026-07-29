@@ -55,6 +55,20 @@ def dispose_map_export(state: MapExportState) -> MapExportState:
     )
 
 
+def invalidate_map_export(state: MapExportState) -> MapExportState:
+    """Invalidate one world session while keeping the dialog reusable.
+
+    Args:
+        state: Current export ownership state.
+
+    Returns:
+        An idle generation that rejects callbacks from the old world.
+    """
+    if state.is_disposed:
+        return state
+    return MapExportState(generation=state.generation + 1)
+
+
 def owns_map_export(state: MapExportState, generation: int) -> bool:
     """Return whether a callback belongs to the active export request."""
     return (
@@ -69,6 +83,7 @@ __all__ = [
     "begin_map_export",
     "dispose_map_export",
     "finish_map_export",
+    "invalidate_map_export",
     "owns_map_export",
     "request_map_export_cancel",
 ]

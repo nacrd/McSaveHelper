@@ -159,6 +159,12 @@ class RegionTabMixin(ExplorerMixinHost):
         if callable(dispose_map):
             dispose_map()
 
+    def _invalidate_map_export_session(self) -> None:
+        """Detach an open export dialog from the previous Explorer world."""
+        export_dialog = getattr(self, "_map_export_dialog", None)
+        if export_dialog is not None:
+            export_dialog.invalidate_session()
+
     def _open_map_export_dialog(self) -> None:
         """Open export dialog prefilled from the active map context."""
         if self.world_session is None:

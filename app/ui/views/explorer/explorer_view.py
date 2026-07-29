@@ -385,6 +385,7 @@ class ExplorerView(
         """新会话加载期间解除旧世界操作身份。"""
         self.world_session = None
         self._selected_region_coord = None
+        self._invalidate_map_export_session()
         self._map_controller.unbind_world()
         self._map_service.clear_data()
         self._reset_player_selection()

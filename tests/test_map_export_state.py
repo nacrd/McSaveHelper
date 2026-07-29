@@ -4,6 +4,7 @@ from app.presenters.map_export_state import (
     begin_map_export,
     dispose_map_export,
     finish_map_export,
+    invalidate_map_export,
     owns_map_export,
     request_map_export_cancel,
 )
@@ -33,3 +34,15 @@ def test_disposed_map_export_state_rejects_new_and_stale_requests() -> None:
     assert disposed.is_running is False
     assert owns_map_export(disposed, running.generation) is False
     assert begin_map_export(disposed) is disposed
+
+
+def test_invalidated_map_export_rejects_old_world_but_remains_reusable() -> None:
+    running = begin_map_export(MapExportState())
+
+    invalidated = invalidate_map_export(running)
+
+    assert invalidated.is_disposed is False
+    assert invalidated.is_running is False
+    assert invalidated.generation == running.generation + 1
+    assert owns_map_export(invalidated, running.generation) is False
+    assert begin_map_export(invalidated).is_running is True
