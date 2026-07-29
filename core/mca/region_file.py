@@ -515,7 +515,10 @@ class RegionFile:
         local_cz: int,
         root_fields: Collection[str],
         compound_list_fields: Optional[
-            Mapping[str, Collection[str]]
+            Mapping[
+                str,
+                Collection[str] | nbtlib.CompoundProjection,
+            ]
         ] = None,
     ) -> nbtlib.Compound:
         """Read one chunk while retaining only selected root NBT fields.

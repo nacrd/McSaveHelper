@@ -11,6 +11,7 @@ from typing import Any, BinaryIO, Collection, Mapping, Optional, Union, cast
 from core.nbt.tag import (
     BYTE,
     Compound,
+    CompoundProjection,
     parse_compound_fields,
     read_numeric,
     read_string,
@@ -134,7 +135,7 @@ class File(Compound):
         include_names: Collection[str],
         byteorder: ByteOrder = "big",
         compound_list_fields: Optional[
-            Mapping[str, Collection[str]]
+            Mapping[str, Collection[str] | CompoundProjection]
         ] = None,
     ) -> "File":
         """Parse only selected root compound fields.

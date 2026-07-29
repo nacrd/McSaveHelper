@@ -167,6 +167,17 @@ class List(Base, TypingList[T]):
     @classmethod
     def cast_item(cls, item: Any) -> Base: ...
 
+class CompoundProjection:
+    include_names: Collection[str]
+    compound_fields: Mapping[str, CompoundProjection]
+    compound_list_fields: Mapping[str, CompoundProjection]
+    def __init__(
+        self,
+        include_names: Collection[str],
+        compound_fields: Mapping[str, CompoundProjection] = ...,
+        compound_list_fields: Mapping[str, CompoundProjection] = ...,
+    ) -> None: ...
+
 class Compound(Base, Dict[str, Any]):
     tag_id: int
     end_tag: bytes
@@ -179,7 +190,7 @@ class Compound(Base, Dict[str, Any]):
         include_names: Collection[str],
         byteorder: ByteOrder = ...,
         compound_list_fields: Optional[
-            Mapping[str, Collection[str]]
+            Mapping[str, Collection[str] | CompoundProjection]
         ] = ...,
     ) -> Compound: ...
     def write(self, fileobj: BinaryIO, byteorder: ByteOrder = ...) -> None: ...
@@ -191,5 +202,7 @@ def parse_compound_fields(
     fileobj: BinaryIO,
     include_names: Collection[str],
     byteorder: ByteOrder = ...,
-    compound_list_fields: Optional[Mapping[str, Collection[str]]] = ...,
+    compound_list_fields: Optional[
+        Mapping[str, Collection[str] | CompoundProjection]
+    ] = ...,
 ) -> Compound: ...

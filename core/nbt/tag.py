@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from array import array as NativeArray
+from dataclasses import dataclass, field
 from struct import Struct
 from struct import error as StructError
 from sys import byteorder as native_byteorder
@@ -54,6 +55,7 @@ __all__ = [
     "OutOfRange",
     "IncompatibleItemType",
     "CastError",
+    "CompoundProjection",
     "get_format",
     "read_numeric",
     "write_numeric",
@@ -72,6 +74,25 @@ __all__ = [
 
 ByteOrder = str
 T = TypeVar("T", bound="Base")
+
+
+@dataclass(frozen=True)
+class CompoundProjection:
+    """Selected fields for one compound and its nested compound children.
+
+    Attributes:
+        include_names: Direct child names to retain.
+        compound_fields: Selected direct compounds and their projections.
+        compound_list_fields: Selected compound lists and element projections.
+    """
+
+    include_names: Collection[str]
+    compound_fields: Mapping[str, "CompoundProjection"] = field(
+        default_factory=dict
+    )
+    compound_list_fields: Mapping[str, "CompoundProjection"] = field(
+        default_factory=dict
+    )
 
 
 def get_format(fmt: Callable[[str], Struct], string: str) -> Dict[str, Struct]:
@@ -790,7 +811,7 @@ class Compound(Base, Dict[str, Any]):
         include_names: Collection[str],
         byteorder: ByteOrder = "big",
         compound_list_fields: Optional[
-            Mapping[str, Collection[str]]
+            Mapping[str, Collection[str] | CompoundProjection]
         ] = None,
     ) -> "Compound":
         """Parse selected direct children while validating skipped payloads.
@@ -822,7 +843,9 @@ class Compound(Base, Dict[str, Any]):
         fileobj: BinaryIO,
         include_names: Collection[str],
         byteorder: ByteOrder,
-        compound_list_fields: Optional[Mapping[str, Collection[str]]],
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str] | CompoundProjection]
+        ],
     ) -> "Compound":
         try:
             tag_struct = BYTE[byteorder]
@@ -839,15 +862,15 @@ class Compound(Base, Dict[str, Any]):
                 return self
             name = read_string(fileobj, byteorder)
             if name in selected:
-                nested_fields = list_projections.get(name)
-                if nested_fields is not None:
+                nested_projection = list_projections.get(name)
+                if nested_projection is not None:
                     if tag_id != List.tag_id:
                         raise ValueError(
                             f"Projected field {name!r} must be TAG_List"
                         )
                     self[name] = _parse_compound_list_fields(
                         fileobj,
-                        nested_fields,
+                        nested_projection,
                         byteorder,
                     )
                 else:
@@ -882,7 +905,9 @@ def parse_compound_fields(
     fileobj: BinaryIO,
     include_names: Collection[str],
     byteorder: ByteOrder = "big",
-    compound_list_fields: Optional[Mapping[str, Collection[str]]] = None,
+    compound_list_fields: Optional[
+        Mapping[str, Collection[str] | CompoundProjection]
+    ] = None,
 ) -> Compound:
     """Parse selected direct fields into the requested Compound subtype.
 
@@ -911,7 +936,7 @@ def parse_compound_fields(
 
 def _parse_compound_list_fields(
     fileobj: BinaryIO,
-    include_names: Collection[str],
+    projection: Collection[str] | CompoundProjection,
     byteorder: ByteOrder,
 ) -> List:
     element_id = _read_exact(fileobj, 1, "TAG_List subtype")[0]
@@ -922,12 +947,70 @@ def _parse_compound_list_fields(
         return List()
     if element_id != Compound.tag_id:
         raise ValueError("Projected TAG_List must contain TAG_Compound elements")
+    selected = (
+        projection
+        if isinstance(projection, CompoundProjection)
+        else CompoundProjection(projection)
+    )
     return List[Compound](
-        parse_compound_fields(
+        _parse_compound_projection(
             Compound,
             fileobj,
-            include_names,
+            selected,
             byteorder,
         )
         for _ in range(count)
     )
+
+
+def _parse_compound_projection(
+    compound_type: Type[Compound],
+    fileobj: BinaryIO,
+    projection: CompoundProjection,
+    byteorder: ByteOrder,
+) -> Compound:
+    """Parse one compound using a recursive projection specification."""
+    try:
+        tag_struct = BYTE[byteorder]
+    except KeyError as exc:
+        raise ValueError("Invalid byte order") from exc
+    selected = frozenset(projection.include_names)
+    self = compound_type()
+    while True:
+        tag_id = tag_struct.unpack(
+            _read_exact(fileobj, tag_struct.size, "TAG_Compound child id")
+        )[0]
+        if tag_id == End.tag_id:
+            return self
+        name = read_string(fileobj, byteorder)
+        if name not in selected:
+            _skip_payload(tag_id, fileobj, byteorder)
+            continue
+        compound_projection = projection.compound_fields.get(name)
+        list_projection = projection.compound_list_fields.get(name)
+        if compound_projection is not None:
+            if tag_id != Compound.tag_id:
+                raise ValueError(
+                    f"Projected field {name!r} must be TAG_Compound"
+                )
+            self[name] = _parse_compound_projection(
+                compound_type,
+                fileobj,
+                compound_projection,
+                byteorder,
+            )
+        elif list_projection is not None:
+            if tag_id != List.tag_id:
+                raise ValueError(
+                    f"Projected field {name!r} must be TAG_List"
+                )
+            self[name] = _parse_compound_list_fields(
+                fileobj,
+                list_projection,
+                byteorder,
+            )
+        else:
+            self[name] = compound_type.get_tag(tag_id).parse(
+                fileobj,
+                byteorder,
+            )

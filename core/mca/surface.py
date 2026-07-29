@@ -12,7 +12,19 @@ import os
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Collection,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+    cast,
+)
 
 from core.parallel import (
     ParallelCancelledError,
@@ -28,6 +40,7 @@ from core.mca.block_palette import (
 from core.mca.errors import McaError
 from core.mca.format import CHUNKS_PER_SIDE
 from core.mca.region_file import RegionFile
+from core.nbt import CompoundProjection
 
 PathLike = Union[str, Path]
 Color = Tuple[int, int, int]
@@ -60,8 +73,27 @@ _SURFACE_SECTION_FIELDS = frozenset({
     "biomes",
     "Biomes",
 })
-_SURFACE_COMPOUND_LIST_FIELDS = {
-    "sections": _SURFACE_SECTION_FIELDS,
+_PALETTE_ENTRY_PROJECTION = CompoundProjection({"Name", "name"})
+_BLOCK_STATES_PROJECTION = CompoundProjection(
+    {"palette", "Palette", "data", "Data"},
+    compound_list_fields={
+        "palette": _PALETTE_ENTRY_PROJECTION,
+        "Palette": _PALETTE_ENTRY_PROJECTION,
+    },
+)
+_BIOMES_PROJECTION = CompoundProjection({"palette", "Palette", "data", "Data"})
+_SECTION_PROJECTION = CompoundProjection(
+    _SURFACE_SECTION_FIELDS,
+    compound_fields={
+        "block_states": _BLOCK_STATES_PROJECTION,
+        "biomes": _BIOMES_PROJECTION,
+    },
+)
+_SURFACE_COMPOUND_LIST_FIELDS: Dict[
+    str,
+    Collection[str] | CompoundProjection,
+] = {
+    "sections": _SECTION_PROJECTION,
     "Sections": _SURFACE_SECTION_FIELDS,
 }
 _OVERLAY_ALPHA_BY_NAME = {

@@ -10,6 +10,7 @@ from core.nbt import (
     Byte,
     ByteArray,
     Compound,
+    CompoundProjection,
     Double,
     File,
     Float,
@@ -241,6 +242,77 @@ def test_root_field_projection_rejects_non_compound_projected_list() -> None:
             io.BytesIO(raw.getvalue()),
             {"sections"},
             compound_list_fields={"sections": {"Y"}},
+        )
+
+
+def test_root_field_projection_filters_nested_compounds_and_lists() -> None:
+    root = File({
+        "sections": List[Compound]([
+            Compound({
+                "Y": Byte(4),
+                "block_states": Compound({
+                    "palette": List[Compound]([
+                        Compound({
+                            "Name": String("minecraft:oak_log"),
+                            "Properties": Compound({
+                                "axis": String("y"),
+                            }),
+                        }),
+                    ]),
+                    "data": LongArray([1, 2]),
+                    "unused": String("skip"),
+                }),
+                "BlockLight": ByteArray([1, 2, 3]),
+            }),
+        ]),
+    })
+    raw = io.BytesIO()
+    root.write(raw)
+    palette_entry = CompoundProjection({"Name"})
+    block_states = CompoundProjection(
+        {"palette", "data"},
+        compound_list_fields={"palette": palette_entry},
+    )
+    section = CompoundProjection(
+        {"Y", "block_states"},
+        compound_fields={"block_states": block_states},
+    )
+
+    projected = File.parse_root_fields(
+        io.BytesIO(raw.getvalue()),
+        {"sections"},
+        compound_list_fields={"sections": section},
+    )
+
+    selected_section = projected["sections"][0]
+    selected_states = selected_section["block_states"]
+    assert set(selected_section) == {"Y", "block_states"}
+    assert set(selected_states) == {"palette", "data"}
+    assert set(selected_states["palette"][0]) == {"Name"}
+    assert selected_states["palette"][0]["Name"] == "minecraft:oak_log"
+    assert list(selected_states["data"]) == [1, 2]
+
+
+def test_nested_compound_projection_rejects_wrong_tag_type() -> None:
+    root = File({
+        "sections": List[Compound]([
+            Compound({"block_states": String("invalid")}),
+        ]),
+    })
+    raw = io.BytesIO()
+    root.write(raw)
+    section = CompoundProjection(
+        {"block_states"},
+        compound_fields={
+            "block_states": CompoundProjection({"palette"}),
+        },
+    )
+
+    with pytest.raises(ValueError, match="must be TAG_Compound"):
+        File.parse_root_fields(
+            io.BytesIO(raw.getvalue()),
+            {"sections"},
+            compound_list_fields={"sections": section},
         )
 
 
