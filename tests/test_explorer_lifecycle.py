@@ -73,6 +73,12 @@ def test_world_load_detaches_old_session_before_background_open() -> None:
             unbind_world=lambda: map_events.append("unbind"),
         ),
     )
+    view._map_service = cast(
+        Any,
+        SimpleNamespace(
+            clear_data=lambda: map_events.append("clear_data"),
+        ),
+    )
     view._world_label = cast(
         Any,
         SimpleNamespace(value="old", color=None, update=lambda: None),
@@ -97,7 +103,7 @@ def test_world_load_detaches_old_session_before_background_open() -> None:
     assert view.player_uuid_map == {}
     assert view._player_refs_cache == []
     assert view._selected_region_coord is None
-    assert map_events == ["unbind"]
+    assert map_events == ["unbind", "clear_data"]
     assert scope.cancel_calls == 1
     assert scope.submissions[0][0] == "load_world"
     assert scope.submissions[0][2]["generation"] == 5

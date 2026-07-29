@@ -386,6 +386,7 @@ class ExplorerView(
         self.world_session = None
         self._selected_region_coord = None
         self._map_controller.unbind_world()
+        self._map_service.clear_data()
         self._reset_player_selection()
         if hasattr(self, "_map_marker_list"):
             self._refresh_map_markers()
