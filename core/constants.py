@@ -16,6 +16,12 @@ class MinecraftConstants:
     MOJANG_API_BASE: str = "https://api.mojang.com"
     MOJANG_PROFILE_URL: str = f"{MOJANG_API_BASE}/users/profiles/minecraft/"
     MOJANG_SESSION_URL: str = f"{MOJANG_API_BASE}/session/minecraft/profile/"
+    # 官方会话服务器：获取玩家当前名称（UUID 不带连字符）。
+    MOJANG_SESSION_SERVER_URL: str = (
+        "https://sessionserver.mojang.com/session/minecraft/profile/"
+    )
+    # 姓名历史端点：获取玩家曾用名与当前名。
+    MOJANG_NAMES_URL: str = f"{MOJANG_API_BASE}/user/profiles/"
 
     # ==================== 版本映射 ====================
     VERSION_MAP: Dict[int, str] = {
@@ -64,6 +70,10 @@ class MinecraftConstants:
 # 导出常用别名
 MOJANG_PROFILE_URL: str = MinecraftConstants.MOJANG_PROFILE_URL
 MOJANG_SESSION_URL: str = MinecraftConstants.MOJANG_SESSION_URL
+MOJANG_SESSION_SERVER_URL: str = (
+    MinecraftConstants.MOJANG_SESSION_SERVER_URL
+)
+MOJANG_NAMES_URL: str = MinecraftConstants.MOJANG_NAMES_URL
 VERSION_MAP: Dict[int, str] = MinecraftConstants.VERSION_MAP
 CLEAN_PATTERNS: Set[str] = MinecraftConstants.CLEAN_PATTERNS
 CLEAN_EXTENSIONS: Set[str] = MinecraftConstants.CLEAN_EXTENSIONS

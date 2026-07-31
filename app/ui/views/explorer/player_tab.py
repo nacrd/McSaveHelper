@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import flet as ft
 
@@ -39,6 +39,7 @@ from app.ui.views.explorer.mixin_context import ExplorerMixinHost
 from app.ui.views.explorer.player_hud import PlayerHUDCard
 from app.ui.views.explorer.player_tab_operations import (
     AssetImportRequest as _AssetImportRequest,
+    NameLookupResult as _NameLookupResult,
     PlayerLoadResult as _PlayerLoadResult,
     PlayerTabOperations,
     export_player_summary as export_player_summary_operation,
@@ -182,6 +183,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         self._player_container_index = 0
         self._center_section_index = 0
         self._shulker_dialog: Optional[ft.AlertDialog] = None
+        self._name_lookup_pending = False
 
         left = self._build_player_left_column(t)
         center = self._build_player_center_column(t)
@@ -212,13 +214,29 @@ class PlayerTabMixin(ExplorerMixinHost):
             on_change=self._on_player_filter_changed,
         )
         left.controls.append(self._player_filter)
+        if not hasattr(self, "_name_lookup_status"):
+            self._name_lookup_status = ft.Text(
+                "", size=11, color=THEME.text_muted
+            )
+        self._lookup_names_btn = btn_ghost(
+            t("player.lookup_names", "在线查询名称"),
+            height=44,
+            on_click=self._lookup_player_names_online,
+        )
+        self._lookup_names_btn.expand = True
+        import_usercache_btn = btn_ghost(
+            t("explorer.import_usercache", "导入 usercache"),
+            height=44,
+            on_click=self._import_usercache,
+        )
+        import_usercache_btn.expand = True
         left.controls.append(
-            btn_ghost(
-                t("explorer.import_usercache", "导入 usercache"),
-                height=44,
-                on_click=self._import_usercache,
+            ft.Row(
+                [import_usercache_btn, self._lookup_names_btn],
+                spacing=8,
             )
         )
+        left.controls.append(self._name_lookup_status)
         self._player_list_column = ft.Column(
             spacing=4,
             scroll=ft.ScrollMode.AUTO,
@@ -820,6 +838,7 @@ class PlayerTabMixin(ExplorerMixinHost):
         if self._player_refs_cache and not self.current_uuid:
             first = self._player_refs_cache[0]
             self._load_player_data(first.uuid_hyphen)
+        self._auto_lookup_unknown_names()
 
     def _apply_player_list(self) -> None:
         if not hasattr(self, "_player_list_column"):
@@ -918,6 +937,12 @@ class PlayerTabMixin(ExplorerMixinHost):
             player_uuid_map.clear()
         self._player_refs_cache = []
         self._player_list_page = 0
+        self._name_lookup_pending = False
+        self._name_lookup_attempted = set()
+        status = getattr(self, "_name_lookup_status", None)
+        if status is not None:
+            status.value = ""
+            safe_update(status)
         self._apply_player_list()
         hud = getattr(self, "_player_hud", None)
         if hud is not None:
@@ -1649,6 +1674,138 @@ class PlayerTabMixin(ExplorerMixinHost):
                 "导入 usercache 失败",
             ),
         )
+
+    def _lookup_player_names_online(self, e: Any = None) -> None:
+        """手动重试查询当前世界内所有未知名玩家的当前名称。"""
+        del e
+        session = self.world_session
+        if session is None or getattr(self, "_name_lookup_pending", False):
+            return
+        unknown = tuple(
+            ref.uuid_norm
+            for ref in getattr(self, "_player_refs_cache", [])
+            if not ref.name
+        )
+        if not unknown:
+            self._set_name_lookup_status(
+                self._t("player.lookup_names_empty", "所有玩家都已有名称")
+            )
+            return
+        self._submit_name_lookup(session, unknown)
+
+    def _auto_lookup_unknown_names(self) -> None:
+        """打开玩家栏时自动查询未知名玩家；同一世界每个 UUID 只尝试一次。"""
+        session = self.world_session
+        if session is None or getattr(self, "_name_lookup_pending", False):
+            return
+        attempted = getattr(self, "_name_lookup_attempted", None)
+        if attempted is None:
+            attempted = set()
+            self._name_lookup_attempted = attempted
+        unknown = [
+            ref.uuid_norm
+            for ref in getattr(self, "_player_refs_cache", [])
+            if not ref.name and ref.uuid_norm not in attempted
+        ]
+        if not unknown:
+            return
+        attempted.update(unknown)
+        self._submit_name_lookup(session, unknown)
+
+    def _submit_name_lookup(self, session: Any, uuids: Sequence[str]) -> None:
+        """登记忙碌状态并提交在线名称查询。"""
+        self._set_name_lookup_pending(True)
+        self._set_name_lookup_status(
+            self._t(
+                "player.lookup_names_pending",
+                "正在查询 {count} 个玩家...",
+                count=len(uuids),
+            )
+        )
+        try:
+            self._player_tab_operations().submit_name_lookup(
+                self.app.execution_runtime,
+                session,
+                self.app.uuid,
+                uuids,
+                self._apply_name_lookup_success,
+                self._apply_name_lookup_error,
+            )
+        except Exception as ex:
+            self._set_name_lookup_pending(False)
+            self.app.handle_exception(
+                ex,
+                title=self._t(
+                    "player.error.lookup_names", "在线查询名称失败"
+                ),
+            )
+
+    def _apply_name_lookup_success(
+        self,
+        result: _NameLookupResult,
+    ) -> None:
+        """把在线解析到的名称写入会话缓存并刷新玩家列表。"""
+        self._set_name_lookup_pending(False)
+        session = self.world_session
+        if session is not None and result.resolved:
+            session.seed_player_names(dict(result.resolved))
+        if result.unresolved:
+            self._set_name_lookup_status(
+                self._t(
+                    "player.lookup_names_partial",
+                    "已解析 {resolved} 个，{failed} 个未找到（可能为离线账号）",
+                    resolved=len(result.resolved),
+                    failed=len(result.unresolved),
+                )
+            )
+        else:
+            self._set_name_lookup_status(
+                self._t(
+                    "player.lookup_names_done",
+                    "已解析 {resolved} 个玩家名称",
+                    resolved=len(result.resolved),
+                )
+            )
+        self._refresh_player_list()
+
+    def _apply_name_lookup_error(
+        self,
+        error: Exception,
+    ) -> None:
+        """查询失败时恢复按钮并提示。"""
+        self._set_name_lookup_pending(False)
+        self._set_name_lookup_status(
+            self._t("player.lookup_names_error", "名称查询失败，请稍后重试"),
+            is_error=True,
+        )
+        self.app.handle_exception(
+            error,
+            title=self._t(
+                "player.error.lookup_names", "在线查询名称失败"
+            ),
+        )
+
+    def _set_name_lookup_pending(self, pending: bool) -> None:
+        """切换名称查询按钮的忙碌状态。"""
+        self._name_lookup_pending = pending
+        button = getattr(self, "_lookup_names_btn", None)
+        if button is not None:
+            button.disabled = pending
+            safe_update(button)
+
+    def _set_name_lookup_status(
+        self,
+        text: str,
+        *,
+        is_error: bool = False,
+    ) -> None:
+        """更新名称查询状态行。"""
+        status = getattr(self, "_name_lookup_status", None)
+        if status is None:
+            return
+        status.value = text
+        status.color = THEME.warning if is_error else THEME.text_muted
+        safe_update(status)
 
     def _import_language_and_textures(self, e: Any = None) -> None:
         """Unified importer: language JSON/JAR and bulk jar textures."""

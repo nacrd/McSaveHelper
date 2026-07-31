@@ -397,13 +397,23 @@
     "assets_hint": "可多选语言 JSON 与客户端/模组 JAR；JAR 会同时导入 lang 与 textures。优先使用当前 UI 语言。",
     "import_assets_title": "选择语言 JSON / Minecraft 或模组 JAR（可多选）",
     "import_assets_empty": "未导入语言或贴图。可多选 JSON/JAR，或取消选择以尝试本机客户端。",
+    "uuid_query_title": "UUID 查询",
+    "uuid_query_description": "输入玩家 UUID，通过 Mojang 官方 API 查询当前名称与曾用名。",
+    "uuid_query_field": "玩家 UUID",
+    "uuid_query_hint": "32 位十六进制，可带连字符",
+    "uuid_query_button": "查询",
+    "uuid_query_placeholder": "在此显示查询结果",
+    "uuid_query_loading": "正在查询...",
+    "uuid_query_invalid": "UUID 格式无效，请输入 32 位十六进制字符（可带连字符）",
+    "uuid_query_error": "UUID 查询失败，请稍后重试",
     "error": {
       "import_assets": "导入语言/贴图失败",
       "import_json": "导入 JSON 映射失败",
       "export_json": "导出映射失败",
       "uuid_import": "导入 UUID 映射失败",
       "uuid_export": "导出 UUID 映射失败",
-      "uuid_save": "保存 UUID 映射失败"
+      "uuid_save": "保存 UUID 映射失败",
+      "uuid_query": "UUID 查询失败"
     }
   },
   "settings": {
@@ -727,20 +737,6 @@
       "equipment": "装备:",
       "ender": "末影箱:"
     },
-    "error": {
-      "filter": "过滤玩家失败",
-      "select": "选择玩家失败",
-      "load": "加载玩家数据失败",
-      "refresh_form": "刷新玩家编辑表单失败",
-      "stage": "暂存玩家数据失败",
-      "teleport": "暂存传送失败",
-      "export": "导出玩家摘要失败",
-      "import_usercache": "导入 usercache 失败",
-      "import_language": "导入语言文件失败",
-      "shulker": "打开潜影盒失败",
-      "import_mc_jar": "从 Minecraft jar 导入语言失败",
-      "import_assets": "导入语言/贴图失败"
-    },
     "list_empty": "没有匹配的玩家",
     "attributes": {
       "title": "属性 Attributes",
@@ -772,6 +768,27 @@
     "import_assets_empty": "未导入任何语言名称或贴图。\n\n支持：\n- 语言 JSON（item.minecraft.xxx）\n- 客户端/模组 JAR 内 lang 与 textures\n- 可一次多选多个 JAR 批量导入贴图",
     "import_assets_lang": "语言名称 {count} 个",
     "import_assets_tex": "贴图 {count} 张（来自 {jars} 个 JAR）",
-    "import_assets_ok": "导入完成：{detail}。\n物品栏名称与贴图将立即生效。"
+    "import_assets_ok": "导入完成：{detail}。\n物品栏名称与贴图将立即生效。",
+    "lookup_names": "在线查询名称",
+    "lookup_names_pending": "正在查询 {count} 个玩家...",
+    "lookup_names_done": "已解析 {resolved} 个玩家名称",
+    "lookup_names_partial": "已解析 {resolved} 个，{failed} 个未找到（可能为离线账号）",
+    "lookup_names_empty": "所有玩家都已有名称",
+    "lookup_names_error": "名称查询失败，请稍后重试",
+    "error": {
+      "filter": "过滤玩家失败",
+      "select": "选择玩家失败",
+      "load": "加载玩家数据失败",
+      "refresh_form": "刷新玩家编辑表单失败",
+      "stage": "暂存玩家数据失败",
+      "teleport": "暂存传送失败",
+      "export": "导出玩家摘要失败",
+      "import_usercache": "导入 usercache 失败",
+      "import_language": "导入语言文件失败",
+      "shulker": "打开潜影盒失败",
+      "import_mc_jar": "从 Minecraft jar 导入语言失败",
+      "import_assets": "导入语言/贴图失败",
+      "lookup_names": "在线查询名称失败"
+    }
   }
 }

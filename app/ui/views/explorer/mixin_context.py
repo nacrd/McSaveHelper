@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from app.services.item_service import ItemService
     from app.services.texture_service import TextureService
     from app.services.ui_delivery import UiDeliveryPort
+    from app.services.uuid_service import UUIDService
     from app.services.world_repository import WorldRepository
     from app.services.world_stats_service import WorldStatsService
     from app.services.world_transaction import WorldTransactionService
@@ -88,6 +89,11 @@ class ExplorerHost(
     @property
     def ui_delivery(self) -> UiDeliveryPort:
         """Return the guarded UI delivery port."""
+        ...
+
+    @property
+    def uuid(self) -> UUIDService:
+        """Return the UUID lookup service."""
         ...
 
     @property

@@ -1,7 +1,10 @@
 """UUID 服务 —— 封装 UUID 生成/查询逻辑"""
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from core.uuid_utils import (
+    NameHistoryEntry,
+    get_current_name,
+    get_name_history,
     get_offline_uuid_str,
     get_online_uuid,
 )
@@ -46,3 +49,38 @@ class UUIDService:
                 如果查询失败则返回(None, None)
         """
         return get_online_uuid(name, log_callback)
+
+    @staticmethod
+    def query_name_history(
+        uuid: str,
+        log_callback: Optional[LogCallback] = None,
+    ) -> Optional[List[NameHistoryEntry]]:
+        """联网查询玩家曾用名与当前名。
+
+        Args:
+            uuid: 玩家 UUID（带不带连字符均可）。
+            log_callback: 可选的日志回调函数。
+
+        Returns:
+            按时间从旧到新的姓名历史列表，最后一项为当前名；
+            请求失败或玩家不存在时返回 None。
+        """
+        return get_name_history(uuid, log_callback)
+
+    @staticmethod
+    def query_current_name(
+        uuid: str,
+        log_callback: Optional[LogCallback] = None,
+    ) -> Optional[str]:
+        """联网查询玩家当前名（单请求，优先命中本地缓存）。
+
+        适合玩家列表等只需要当前名的批量场景；缓存命中时不再联网。
+
+        Args:
+            uuid: 玩家 UUID（带不带连字符均可）。
+            log_callback: 可选的日志回调函数。
+
+        Returns:
+            当前玩家名；UUID 无效或查询失败时返回 None。
+        """
+        return get_current_name(uuid, log_callback)

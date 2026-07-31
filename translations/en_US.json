@@ -397,13 +397,23 @@
     "assets_hint": "Multi-select language JSON and client/mod JARs; JARs import both lang and textures. UI language is preferred.",
     "import_assets_title": "Select language JSON / Minecraft or mod JARs (multi-select)",
     "import_assets_empty": "No language or textures imported. Multi-select JSON/JAR, or cancel to try the local client.",
+    "uuid_query_title": "UUID Lookup",
+    "uuid_query_description": "Enter a player UUID to query the current name and name history via the official Mojang API.",
+    "uuid_query_field": "Player UUID",
+    "uuid_query_hint": "32 hex characters, hyphens allowed",
+    "uuid_query_button": "Lookup",
+    "uuid_query_placeholder": "Query results appear here",
+    "uuid_query_loading": "Querying...",
+    "uuid_query_invalid": "Invalid UUID format. Enter 32 hex characters (hyphens allowed).",
+    "uuid_query_error": "UUID lookup failed. Please try again later.",
     "error": {
       "import_assets": "Failed to import language/textures",
       "import_json": "Failed to import JSON mappings",
       "export_json": "Failed to export mappings",
       "uuid_import": "Failed to import UUID mappings",
       "uuid_export": "Failed to export UUID mappings",
-      "uuid_save": "Failed to save UUID mappings"
+      "uuid_save": "Failed to save UUID mappings",
+      "uuid_query": "Failed to query UUID"
     }
   },
   "settings": {
@@ -727,20 +737,6 @@
       "equipment": "Equipment:",
       "ender": "Ender chest:"
     },
-    "error": {
-      "filter": "Failed to filter players",
-      "select": "Failed to select player",
-      "load": "Failed to load player data",
-      "refresh_form": "Failed to refresh player form",
-      "stage": "Failed to stage player data",
-      "teleport": "Failed to stage teleport",
-      "export": "Failed to export player summary",
-      "import_usercache": "Failed to import usercache",
-      "import_language": "Failed to import language file",
-      "shulker": "Failed to open container",
-      "import_mc_jar": "Failed to import language from Minecraft jar",
-      "import_assets": "Failed to import language/textures"
-    },
     "list_empty": "No matching players",
     "attributes": {
       "title": "Attributes",
@@ -772,6 +768,27 @@
     "import_assets_empty": "No language names or textures imported.\n\nSupported:\n- Language JSON (item.minecraft.xxx)\n- Client/mod JAR lang + textures\n- Multi-select JARs for bulk textures",
     "import_assets_lang": "{count} language names",
     "import_assets_tex": "{count} textures from {jars} JAR(s)",
-    "import_assets_ok": "Import finished: {detail}.\nInventory names and textures apply immediately."
+    "import_assets_ok": "Import finished: {detail}.\nInventory names and textures apply immediately.",
+    "lookup_names": "Look Up Names Online",
+    "lookup_names_pending": "Querying {count} players...",
+    "lookup_names_done": "Resolved {resolved} player name(s)",
+    "lookup_names_partial": "Resolved {resolved}; {failed} not found (possibly offline accounts)",
+    "lookup_names_empty": "All players already have names",
+    "lookup_names_error": "Name lookup failed. Please try again later.",
+    "error": {
+      "filter": "Failed to filter players",
+      "select": "Failed to select player",
+      "load": "Failed to load player data",
+      "refresh_form": "Failed to refresh player form",
+      "stage": "Failed to stage player data",
+      "teleport": "Failed to stage teleport",
+      "export": "Failed to export player summary",
+      "import_usercache": "Failed to import usercache",
+      "import_language": "Failed to import language file",
+      "shulker": "Failed to open container",
+      "import_mc_jar": "Failed to import language from Minecraft jar",
+      "import_assets": "Failed to import language/textures",
+      "lookup_names": "Failed to look up names online"
+    }
   }
 }

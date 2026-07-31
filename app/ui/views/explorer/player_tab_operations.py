@@ -7,7 +7,7 @@ from enum import Enum
 import json
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Optional, TypeVar, cast
+from typing import Any, Callable, Optional, Sequence, TypeVar, cast
 
 import flet as ft
 
@@ -19,6 +19,7 @@ from app.services.asset_import import (
 from app.services.execution_runtime import (
     CancellationToken,
     ExecutionLane,
+    ExecutionRuntime,
     OperationCancelledError,
     OperationHandle,
     OperationScope,
@@ -26,6 +27,7 @@ from app.services.execution_runtime import (
 )
 from app.services.player.models import PlayerContainersView, PlayerSummary
 from app.services.player_service import PlayerService
+from app.services.runtime_map import map_items
 from app.ui.utils import run_on_ui
 from core.io_atomic import atomic_write_text
 from core.nbt import Compound
@@ -39,6 +41,10 @@ ResultCallback = Callable[[ResultT], None]
 ErrorCallback = Callable[[Exception], None]
 RequestGuard = Callable[[], bool]
 
+# 玩家名称解析的最大在途查询数：匹配共享 IO 通道的 worker 上限，
+# 同时远低于 Mojang 会话服务器的速率限制。
+_NAME_LOOKUP_MAX_WORKERS = 4
+
 
 @dataclass(frozen=True)
 class PlayerLoadResult:
@@ -49,6 +55,16 @@ class PlayerLoadResult:
     containers: Optional[PlayerContainersView]
     attributes: tuple[PlayerAttribute, ...]
     effects: tuple[PlayerEffect, ...]
+
+
+@dataclass(frozen=True)
+class NameLookupResult:
+    """批量在线名称解析结果。"""
+
+    resolved: dict[str, str]
+    """uuid_norm -> 当前玩家名。"""
+    unresolved: tuple[str, ...]
+    """未找到（离线账号或请求失败）的 uuid_norm。"""
 
 
 @dataclass(frozen=True)
@@ -120,6 +136,65 @@ def import_usercache(
     return imported
 
 
+def resolve_player_names_online(
+    runtime: ExecutionRuntime,
+    uuid_service: Any,
+    uuids: Sequence[str],
+    token: CancellationToken,
+) -> NameLookupResult:
+    """使用共享 IO 通道有界并发查询未知名玩家的当前名称。
+
+    每个玩家只请求一次会话服务器（配合共享连接池）；查询通过 ``map_items``
+    分片提交到运行时，取消后停止新提交并取消在途任务。结果按输入顺序输出。
+
+    Args:
+        runtime: 应用共享执行运行时（协调任务已占一个 IO worker）。
+        uuid_service: 提供 ``query_current_name`` 的 UUID 服务。
+        uuids: 需要解析的 uuid_norm 列表。
+        token: 协作取消令牌。
+
+    Returns:
+        NameLookupResult: 已解析名称与未解析 uuid 列表。
+
+    Raises:
+        OperationCancelledError: 处理期间观察到取消请求。
+    """
+    token.raise_if_cancelled()
+
+    def lookup(
+        worker_token: CancellationToken,
+        player_uuid: str,
+    ) -> Optional[str]:
+        worker_token.raise_if_cancelled()
+        return uuid_service.query_current_name(player_uuid)
+
+    names = map_items(
+        runtime,
+        "resolve_player_name",
+        list(uuids),
+        lookup,
+        lane=ExecutionLane.IO,
+        priority=TaskPriority.INTERACTIVE,
+        cancel_check=lambda: token.is_cancelled,
+        max_in_flight=_NAME_LOOKUP_MAX_WORKERS,
+        feature="explorer.player_name",
+    )
+    token.raise_if_cancelled()
+    resolved: dict[str, str] = {}
+    unresolved: list[str] = []
+    for player_uuid, name in zip(uuids, names):
+        if isinstance(name, BaseException):
+            unresolved.append(player_uuid)
+        elif name:
+            resolved[player_uuid] = name
+        else:
+            unresolved.append(player_uuid)
+    return NameLookupResult(
+        resolved=resolved,
+        unresolved=tuple(unresolved),
+    )
+
+
 def import_player_assets(
     request: AssetImportRequest,
     item_service: Any,
@@ -147,6 +222,7 @@ class _OperationKind(Enum):
     PLAYER_EXPORT = "player_export"
     USERCACHE_IMPORT = "usercache_import"
     ASSET_IMPORT = "asset_import"
+    NAME_LOOKUP = "name_lookup"
 
 
 @dataclass
@@ -269,6 +345,35 @@ class PlayerTabOperations:
             on_success,
             on_error,
             lane=ExecutionLane.IO,
+        )
+
+    def submit_name_lookup(
+        self,
+        runtime: ExecutionRuntime,
+        session: WorldSession,
+        uuid_service: Any,
+        uuids: Sequence[str],
+        on_success: ResultCallback[NameLookupResult],
+        on_error: ErrorCallback,
+    ) -> OperationHandle[NameLookupResult]:
+        """提交未知名玩家的有界并发名称解析；只投影当前会话结果。
+
+        协调任务占用一个 IO worker，内部通过 ``map_items`` 分片查询，
+        因此实际并发为 IO 通道 worker 数减一。
+        """
+        return self._submit(
+            _OperationKind.NAME_LOOKUP,
+            "resolve_player_names_online",
+            lambda token: resolve_player_names_online(
+                runtime,
+                uuid_service,
+                uuids,
+                token,
+            ),
+            on_success,
+            on_error,
+            lane=ExecutionLane.IO,
+            guard=lambda: self._get_world_session() is session,
         )
 
     def close(self) -> None:

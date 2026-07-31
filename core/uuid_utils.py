@@ -1,18 +1,25 @@
 import hashlib
 import json
 import struct
+import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from core.types import LogCallback, UUIDMapping
 from core.constants import MinecraftConstants
+from core.io_atomic import atomic_write_text
+from core.logger import logger
+from core.types import LogCallback, UUIDMapping
 
 # requests 延迟导入：仅联网查询 Mojang API 时需要（启动期不联网），
 # 避免启动时拉入 requests + urllib3 + idna 等重库。
 # （参照项目内 anvil/Pillow 已有的函数内延迟导入先例。）
 requests = None  # type: ignore
+
+_session = None
+_session_lock = threading.Lock()
 
 
 def _ensure_requests():
@@ -22,6 +29,20 @@ def _ensure_requests():
         import requests as _requests  # type: ignore
         requests = _requests
     return requests
+
+
+def _ensure_session() -> Any:
+    """返回进程级共享请求会话（keep-alive 连接复用）。
+
+    每次请求复用同一个 Session，避免重复 DNS + TCP + TLS 握手；
+    批量查询（如玩家列表名称解析）可显著降低延迟与 CPU。
+    """
+    global _session
+    if _session is None:
+        with _session_lock:
+            if _session is None:
+                _session = _ensure_requests().Session()
+    return _session
 
 
 def normalize_uuid(uuid_str: str) -> str:
@@ -120,7 +141,7 @@ def get_online_uuid(
         log_callback(f"正在查询正版UUID: {name} ...", "API")
     try:
         url = f"{MinecraftConstants.MOJANG_PROFILE_URL}{name}"
-        response = _ensure_requests().get(url, timeout=5)
+        response = _ensure_session().get(url, timeout=5)
         if response.status_code != 200:
             if log_callback:
                 log_callback(
@@ -151,11 +172,349 @@ def get_online_uuid(
     return None, None
 
 
+@dataclass(frozen=True)
+class NameHistoryEntry:
+    """Mojang 姓名历史中的一条记录。
+
+    Attributes:
+        name: 该时间段使用的玩家名。
+        changed_to_at: 改为该名字的 Unix 毫秒时间戳；当前名没有该字段。
+    """
+
+    name: str
+    changed_to_at: Optional[int] = None
+
+
+_NAME_CACHE_DIR = Path.home() / ".mc_save_helper"
+_NAME_CACHE_PATH = _NAME_CACHE_DIR / "uuid_name_cache.json"
+_CACHE_VERSION = 1
+
+
+@dataclass(frozen=True)
+class NameCacheEntry:
+    """一条 UUID 的本地缓存：姓名历史与缓存时刻。"""
+
+    history: Tuple[NameHistoryEntry, ...]
+    cached_at: float
+
+    @property
+    def current_name(self) -> Optional[str]:
+        """缓存中的当前玩家名（历史最后一项）。"""
+        if not self.history:
+            return None
+        return self.history[-1].name
+
+
+class UuidNameCache:
+    """UUID → 玩家名查询结果的本地磁盘缓存。
+
+    数据保存在 ``~/.mc_save_helper/uuid_name_cache.json``，写盘使用同目录
+    临时文件 + ``os.replace`` 原子替换；加载或写入失败只影响缓存本身，
+    不影响查询成功/失败语义。
+    """
+
+    def __init__(self, path: Optional[Path] = None) -> None:
+        """创建缓存；磁盘读取延迟到首次访问。
+
+        Args:
+            path: 缓存文件路径；缺省 ``~/.mc_save_helper/uuid_name_cache.json``。
+        """
+        self._path = path or _NAME_CACHE_PATH
+        self._lock = threading.Lock()
+        self._entries: Dict[str, NameCacheEntry] = {}
+        self._loaded = False
+
+    def get(self, uuid_norm: str) -> Optional[NameCacheEntry]:
+        """返回规范化 UUID 的缓存条目；缺失时为 None。"""
+        self._ensure_loaded()
+        with self._lock:
+            return self._entries.get(uuid_norm)
+
+    def remember(
+        self,
+        uuid_norm: str,
+        history: Sequence[NameHistoryEntry],
+    ) -> None:
+        """缓存一条查询结果并落盘；失败仅记录调试日志。"""
+        if not history:
+            return
+        entry = NameCacheEntry(history=tuple(history), cached_at=time.time())
+        with self._lock:
+            self._ensure_loaded_locked()
+            self._entries[uuid_norm] = entry
+            self._persist_locked()
+
+    def clear(self) -> None:
+        """清空内存缓存并删除磁盘文件。"""
+        with self._lock:
+            self._entries.clear()
+            try:
+                self._path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.debug(
+                    f"删除 UUID 名称缓存失败: {exc}",
+                    module="UuidNameCache",
+                )
+
+    def _ensure_loaded(self) -> None:
+        with self._lock:
+            self._ensure_loaded_locked()
+
+    def _ensure_loaded_locked(self) -> None:
+        """持锁时惰性读取磁盘缓存；损坏或缺失时按空缓存处理。"""
+        if self._loaded:
+            return
+        self._loaded = True
+        try:
+            with open(self._path, "r", encoding="utf-8") as stream:
+                data = json.load(stream)
+        except FileNotFoundError:
+            return
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            logger.debug(
+                f"UUID 名称缓存加载失败，将重新开始: {exc}",
+                module="UuidNameCache",
+            )
+            return
+        if not isinstance(data, dict):
+            return
+        entries = data.get("entries")
+        if not isinstance(entries, dict):
+            return
+        for raw_uuid, raw_entry in entries.items():
+            if not isinstance(raw_entry, dict):
+                continue
+            history = _parse_cached_history(raw_entry.get("history"))
+            if not history:
+                continue
+            cached_at = raw_entry.get("cached_at", 0.0)
+            try:
+                cached_at = float(cached_at)
+            except (TypeError, ValueError):
+                cached_at = 0.0
+            self._entries[str(raw_uuid)] = NameCacheEntry(
+                history=tuple(history),
+                cached_at=cached_at,
+            )
+
+    def _persist_locked(self) -> None:
+        """持锁时把内存缓存原子写入磁盘。"""
+        payload = {
+            "version": _CACHE_VERSION,
+            "entries": {
+                uuid_norm: {
+                    "cached_at": entry.cached_at,
+                    "history": [
+                        {"name": item.name, "changed_to_at": item.changed_to_at}
+                        for item in entry.history
+                    ],
+                }
+                for uuid_norm, entry in self._entries.items()
+            },
+        }
+        try:
+            content = json.dumps(payload, ensure_ascii=False, indent=2)
+            atomic_write_text(self._path, content)
+        except OSError as exc:
+            logger.debug(
+                f"UUID 名称缓存写入失败: {exc}",
+                module="UuidNameCache",
+            )
+
+
+def _parse_cached_history(raw_history: object) -> List[NameHistoryEntry]:
+    """解析持久化的历史数组；跳过畸形条目。"""
+    entries: List[NameHistoryEntry] = []
+    if not isinstance(raw_history, list):
+        return entries
+    for item in raw_history:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        changed: Optional[int] = None
+        raw = item.get("changed_to_at")
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            changed = raw
+        elif isinstance(raw, str) and raw.isdigit():
+            changed = int(raw)
+        entries.append(NameHistoryEntry(name=name, changed_to_at=changed))
+    return entries
+
+
+# 模块级共享缓存实例：磁盘访问惰性，不影响启动。
+_name_cache = UuidNameCache()
+
+
+def get_name_history(
+    uuid: str,
+    log_callback: Optional[LogCallback] = None,
+) -> Optional[List[NameHistoryEntry]]:
+    """通过 Mojang 官方 API 查询玩家的曾用名与当前名。
+
+    优先使用 ``https://api.mojang.com/user/profiles/{uuid}/names``，要求
+    UUID 不带连字符；返回数组按时间从旧到新排列，最后一项为当前名。
+    从未改名的玩家在该端点没有历史记录（返回 404），此时回退到会话服务器
+    （方法一）获取当前名，返回单条记录。
+
+    Args:
+        uuid: 玩家 UUID（带不带连字符均可）。
+        log_callback: 可选日志回调。
+
+    Returns:
+        姓名历史列表；UUID 无效、两次请求均失败或玩家不存在时返回 None。
+    """
+    clean = normalize_uuid(uuid)
+    if len(clean) != 32:
+        if log_callback:
+            log_callback(f"无效的 UUID: {uuid}", "WARN")
+        return None
+    cached = _name_cache.get(clean)
+    if cached is not None:
+        if log_callback:
+            log_callback(f"命中本地缓存: {cached.current_name}", "CACHE")
+        return list(cached.history) or None
+    if log_callback:
+        log_callback(f"正在查询姓名历史: {clean} ...", "API")
+    entries = _fetch_name_history(clean, log_callback)
+    if entries:
+        _name_cache.remember(clean, entries)
+        if log_callback:
+            current = entries[-1].name if entries else None
+            suffix = f"（当前名: {current}）" if current else ""
+            log_callback(
+                f"姓名历史查询成功: {len(entries)} 条{suffix}",
+                "API",
+            )
+        return entries
+    # 从未改名的玩家没有姓名历史记录，回退到会话服务器查询当前名。
+    current = _fetch_current_name(clean, log_callback)
+    if current:
+        _name_cache.remember(clean, [NameHistoryEntry(name=current)])
+        if log_callback:
+            log_callback(
+                f"姓名历史端点未找到记录，已从会话服务器获取当前名: {current}",
+                "API",
+            )
+        return [NameHistoryEntry(name=current)]
+    return None
+
+
+def _fetch_name_history(
+    clean: str,
+    log_callback: Optional[LogCallback],
+) -> Optional[List[NameHistoryEntry]]:
+    """请求 names 端点并解析为类型化记录。"""
+    try:
+        url = f"{MinecraftConstants.MOJANG_NAMES_URL}{clean}/names"
+        response = _ensure_session().get(url, timeout=5)
+        if response.status_code != 200:
+            if log_callback:
+                log_callback(
+                    f"API返回非200状态码: {response.status_code}",
+                    "WARN",
+                )
+            return None
+        data = response.json()
+        return _parse_name_history(data) or None
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
+    except Exception as exc:
+        # requests 可能抛出 RequestException 等网络错误。
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
+    return None
+
+
+def _fetch_current_name(
+    clean: str,
+    log_callback: Optional[LogCallback],
+) -> Optional[str]:
+    """通过会话服务器查询玩家当前名（方法一端点）。"""
+    try:
+        url = f"{MinecraftConstants.MOJANG_SESSION_SERVER_URL}{clean}"
+        response = _ensure_session().get(url, timeout=5)
+        if response.status_code != 200:
+            if log_callback:
+                log_callback(
+                    f"API返回非200状态码: {response.status_code}",
+                    "WARN",
+                )
+            return None
+        name = response.json().get("name")
+        return str(name) if name else None
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
+    except Exception as exc:
+        # requests 可能抛出 RequestException 等网络错误。
+        if log_callback:
+            log_callback(f"API请求失败: {exc}", "ERROR")
+    return None
+
+
+def _parse_name_history(data: object) -> List[NameHistoryEntry]:
+    """把 Mojang names API 的 JSON 数组解析为类型化记录。"""
+    entries: List[NameHistoryEntry] = []
+    if not isinstance(data, list):
+        return entries
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        changed: Optional[int] = None
+        raw = item.get("changedToAt")
+        if isinstance(raw, int) and not isinstance(raw, bool):
+            changed = raw
+        elif isinstance(raw, str) and raw.isdigit():
+            changed = int(raw)
+        entries.append(NameHistoryEntry(name=name, changed_to_at=changed))
+    return entries
+
+
+def get_current_name(
+    uuid: str,
+    log_callback: Optional[LogCallback] = None,
+) -> Optional[str]:
+    """通过会话服务器查询玩家当前名（单请求，带本地缓存）。
+
+    优先命中本地缓存；未命中时只发起一次会话服务器请求，适合玩家列表
+    这类只需要当前名的批量场景。
+
+    Args:
+        uuid: 玩家 UUID（带不带连字符均可）。
+        log_callback: 可选日志回调。
+
+    Returns:
+        当前玩家名；UUID 无效或查询失败时返回 None。
+    """
+    clean = normalize_uuid(uuid)
+    if len(clean) != 32:
+        if log_callback:
+            log_callback(f"无效的 UUID: {uuid}", "WARN")
+        return None
+    cached = _name_cache.get(clean)
+    if cached is not None and cached.current_name:
+        if log_callback:
+            log_callback(f"命中本地缓存: {cached.current_name}", "CACHE")
+        return cached.current_name
+    name = _fetch_current_name(clean, log_callback)
+    if name:
+        _name_cache.remember(clean, [NameHistoryEntry(name=name)])
+        if log_callback:
+            log_callback(f"查询到玩家名: {name}", "API")
+    return name
+
+
 def get_name_from_uuid(
     uuid: str,
     log_callback: Optional[LogCallback] = None
 ) -> Optional[str]:
-    """通过 UUID 查询官方玩家名。
+    """通过 UUID 查询官方玩家名（兼容入口，保留迁移扫描限速）。
 
     Args:
         uuid: UUID 字符串。
@@ -166,32 +525,15 @@ def get_name_from_uuid(
     """
     if log_callback:
         log_callback(f"正在通过UUID查询玩家名: {uuid} ...", "API")
-    try:
-        clean = uuid.replace("-", "")
-        url = (
-            "https://sessionserver.mojang.com/session/minecraft/profile/"
-            f"{clean}"
-        )
-        response = _ensure_requests().get(url, timeout=5)
-        time.sleep(0.3)
-        if response.status_code != 200:
-            if log_callback:
-                log_callback(
-                    f"API返回非200状态码: {response.status_code}",
-                    "WARN",
-                )
-            return None
-        name = response.json().get("name")
+    clean = normalize_uuid(uuid)
+    if len(clean) != 32:
         if log_callback:
-            log_callback(f"查询到玩家名: {name}", "API")
-        return name
-    except (OSError, ValueError, TypeError, KeyError) as exc:
-        if log_callback:
-            log_callback(f"API请求失败: {exc}", "ERROR")
-    except Exception as exc:
-        if log_callback:
-            log_callback(f"API请求失败: {exc}", "ERROR")
-    return None
+            log_callback(f"无效的 UUID: {uuid}", "WARN")
+        return None
+    name = get_current_name(clean, log_callback)
+    # 批量迁移扫描时保留原有的限速节奏。
+    time.sleep(0.3)
+    return name
 
 
 def load_usercache(world_path: Path) -> dict:

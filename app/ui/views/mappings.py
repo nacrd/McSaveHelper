@@ -24,6 +24,11 @@ from app.presenters.mappings_view_state import (
     dispose_mappings_state,
     set_item_busy,
 )
+from app.presenters.uuid_query_presenter import (
+    format_name_history_query,
+    normalize_query_uuid,
+)
+from core.uuid_utils import NameHistoryEntry
 from app.ui.components.buttons import btn_ghost, btn_primary, btn_success
 from app.ui.components.cards import card, placeholder, section_title
 from app.ui.components.fields import text_field
@@ -37,7 +42,7 @@ from app.ui.feature_context import (
     FeatureTranslationPort,
 )
 from app.ui.icons import IconSet
-from app.ui.theme import THEME
+from app.ui.theme import THEME, mc_border
 from app.ui.utils import run_on_ui, safe_update
 from app.ui.view_actions import ViewAction
 from app.ui.views.mappings_operations import (
@@ -49,6 +54,7 @@ if TYPE_CHECKING:
     from app.services.config_service import ConfigService
     from app.services.item_service import ItemService
     from app.services.texture_service import TextureService
+    from app.services.uuid_service import UUIDService
 
 
 class MappingsHost(
@@ -74,6 +80,11 @@ class MappingsHost(
     @property
     def texture(self) -> TextureService:
         """Return the texture service."""
+        ...
+
+    @property
+    def uuid(self) -> UUIDService:
+        """Return the UUID lookup service."""
         ...
 
 
@@ -143,7 +154,130 @@ class MappingsView(ft.Column):
         self.controls.append(self._page_header)
 
         self._build_uuid_section()
+        self._build_uuid_query_section()
         self._build_item_section()
+
+    def _build_uuid_query_section(self) -> None:
+        """构建 UUID → 玩家名查询工具卡片。"""
+        s = ft.Column(spacing=0)
+        s.controls.append(section_title(
+            self._t("mappings.uuid_query_title", "UUID 查询")))
+
+        s.controls.append(ft.Container(
+            content=ft.Text(
+                self._t(
+                    "mappings.uuid_query_description",
+                    "输入玩家 UUID，通过 Mojang 官方 API 查询当前名称与曾用名。",
+                ),
+                size=12,
+                color=THEME.text_muted,
+            ),
+            padding=ft.Padding(left=20, right=20, top=10, bottom=10),
+        ))
+
+        self._uuid_query_field = text_field(
+            label=self._t("mappings.uuid_query_field", "玩家 UUID"),
+            hint_text=self._t(
+                "mappings.uuid_query_hint",
+                "32 位十六进制，可带连字符",
+            ),
+            expand=True,
+        )
+        query_row = ft.Row(
+            [
+                self._uuid_query_field,
+                btn_primary(
+                    self._t("mappings.uuid_query_button", "查询"),
+                    width=90,
+                    height=44,
+                    on_click=lambda _e: self._on_uuid_query(),
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        s.controls.append(ft.Container(
+            content=query_row,
+            padding=ft.Padding(left=20, right=20, bottom=12),
+        ))
+
+        self._uuid_query_result = ft.Text(
+            self._t("mappings.uuid_query_placeholder", "在此显示查询结果"),
+            size=12,
+            color=THEME.text_muted,
+            selectable=True,
+        )
+        s.controls.append(ft.Container(
+            content=ft.Container(
+                content=self._uuid_query_result,
+                bgcolor=THEME.log_bg,
+                border=mc_border(2),
+                border_radius=6,
+                padding=12,
+            ),
+            padding=ft.Padding(left=20, right=20, bottom=20),
+        ))
+
+        c = card(ft.Column(spacing=0), padding=0)
+        c.content = s
+        self.controls.append(
+            ft.Container(
+                content=c,
+                padding=ft.Padding(bottom=16)))
+
+    def _on_uuid_query(self) -> None:
+        """在后台查询 UUID 的当前名与曾用名，只投递最新一次结果。"""
+        if self._state.is_disposed:
+            return
+        raw = (self._uuid_query_field.value or "").strip()
+        if not raw:
+            return
+        normalized = normalize_query_uuid(raw)
+        if normalized is None:
+            self._uuid_query_result.value = self._t(
+                "mappings.uuid_query_invalid",
+                "UUID 格式无效，请输入 32 位十六进制字符（可带连字符）",
+            )
+            safe_update(self._uuid_query_result)
+            return
+        self._uuid_query_result.value = self._t(
+            "mappings.uuid_query_loading", "正在查询..."
+        )
+        safe_update(self._uuid_query_result)
+        failure_title = self._t("mappings.error.uuid_query", "UUID 查询失败")
+        self._operations.submit(
+            "uuid_name_query",
+            lambda token: self._run_io(
+                token,
+                lambda: self.app.uuid.query_name_history(
+                    normalized,
+                    self.app.log,
+                ),
+            ),
+            lambda history: self._apply_uuid_query_success(raw, history),
+            lambda error: self._apply_uuid_query_error(error, failure_title),
+        )
+
+    def _apply_uuid_query_success(
+        self,
+        raw_uuid: str,
+        history: Optional[list[NameHistoryEntry]],
+    ) -> None:
+        """在 UI 线程投影姓名历史查询结果。"""
+        self._uuid_query_result.value = format_name_history_query(
+            raw_uuid,
+            history,
+        )
+        self._uuid_query_result.color = THEME.text_primary
+        safe_update(self._uuid_query_result)
+
+    def _apply_uuid_query_error(self, error: Exception, title: str) -> None:
+        """显示查询失败提示并交由应用异常处理。"""
+        self._uuid_query_result.value = self._t(
+            "mappings.uuid_query_error", "UUID 查询失败，请稍后重试"
+        )
+        safe_update(self._uuid_query_result)
+        self.app.handle_exception(error, title=title)
 
     def _build_uuid_section(self) -> None:
         s = ft.Column(spacing=0)
