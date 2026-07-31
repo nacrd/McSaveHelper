@@ -45,3 +45,17 @@ def run_on_ui(callback: Callable[..., object], *args: Any) -> None:
 def invoke_later(callback: Callable[..., object], *args: Any) -> None:
     """在当前线程稍后执行回调（立即排入事件队列）。"""
     _dispatcher.invoked.emit(callback, args)
+
+
+def format_size(size: int) -> str:
+    """格式化文件大小为人类可读字符串（与 Flet 版 app/ui/utils 对齐）。"""
+    kb = size / 1024
+    mb = kb / 1024
+    gb = mb / 1024
+    if gb >= 1:
+        return f"{gb:.2f} GB"
+    if mb >= 1:
+        return f"{mb:.1f} MB"
+    if kb >= 1:
+        return f"{kb:.1f} KB"
+    return f"{size} B"

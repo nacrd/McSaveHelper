@@ -73,6 +73,7 @@ def _default_registry() -> QtFeatureRegistry:
 
     仅包含已完成迁移的视图；后续阶段逐个追加，避免半成品标签进入侧边栏。
     """
+    from app.qtui.views.backup_center import BackupCenterView
     from app.qtui.views.compare import CompareView
     from app.qtui.views.save_repair import SaveRepairView
     from app.qtui.views.server_properties import ServerPropertiesView
@@ -85,6 +86,13 @@ def _default_registry() -> QtFeatureRegistry:
                 default_label="存档修复",
                 icon_glyph="🧱",
                 factory=lambda ctx: SaveRepairView(ctx),
+            ),
+            QtFeatureDescriptor(
+                view_id="backup_center",
+                translation_key="sidebar.backup_center",
+                default_label="备份与恢复",
+                icon_glyph="🕐",
+                factory=lambda ctx: BackupCenterView(ctx),
             ),
             QtFeatureDescriptor(
                 view_id="compare",

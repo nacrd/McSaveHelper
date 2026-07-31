@@ -17,6 +17,10 @@ NAV_GLYPHS: Final[dict[str, str]] = {
 # 通用动作字形
 ACTION_GLYPHS: Final[dict[str, str]] = {
     "EXPLORE": "🧭",
+    "HISTORY": "🕐",
+    "CLEANUP": "🧹",
+    "VERIFY": "✅",
+    "RESTORE": "♻️",
     "FOLDER": "📁",
     "FOLDER_OPEN": "📂",
     "SAVE": "💾",
