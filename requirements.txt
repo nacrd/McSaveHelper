@@ -1,5 +1,6 @@
 flet
 flet-desktop
+PySide6
 requests
 send2trash
 typing_extensions

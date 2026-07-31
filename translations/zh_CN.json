@@ -66,7 +66,8 @@
     "compare": "存档对比",
     "mappings": "映射管理",
     "server_properties": "服务器配置",
-    "settings": "设置"
+    "settings": "设置",
+    "import_save": "导入存档"
   },
   "world_info": {
     "yes": "是",
@@ -337,6 +338,14 @@
   "explorer": {
     "title": "存档浏览器",
     "index_loading": "正在建立索引 · 已发现 {count} 个文件",
+    "loading_world": "正在加载存档...",
+    "opening_world": "正在打开存档目录...",
+    "reading_world_info": "正在读取存档信息...",
+    "validating": "正在校验存档目录...",
+    "discovering": "正在发现文件 · {count} 个",
+    "probing": "正在读取文件属性 · {completed}/{total}",
+    "finalizing": "正在整理索引...",
+    "creating_session": "正在创建会话...",
     "no_world_loaded": "未加载存档",
     "load_world": "加载存档",
     "tab_players": "玩家",

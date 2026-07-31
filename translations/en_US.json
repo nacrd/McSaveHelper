@@ -66,7 +66,8 @@
     "map_export": "Map Export",
     "mappings": "Mapping Manager",
     "server_properties": "Server Config",
-    "settings": "Settings"
+    "settings": "Settings",
+    "import_save": "Import Save"
   },
   "world_info": {
     "yes": "Yes",
@@ -337,6 +338,14 @@
   "explorer": {
     "title": "Save Explorer",
     "index_loading": "Building index · {count} files discovered",
+    "loading_world": "Loading save...",
+    "opening_world": "Opening save directory...",
+    "reading_world_info": "Reading save info...",
+    "validating": "Validating save directory...",
+    "discovering": "Discovering files · {count}",
+    "probing": "Reading file attributes · {completed}/{total}",
+    "finalizing": "Finalizing index...",
+    "creating_session": "Creating session...",
     "no_world_loaded": "No Save Loaded",
     "load_world": "Load Save",
     "tab_players": "Players",

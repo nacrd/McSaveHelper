@@ -1,0 +1,47 @@
+"""Qt UI 线程工具：后台回调投递与线程判断。"""
+from __future__ import annotations
+
+from typing import Any, Callable
+
+from PySide6.QtCore import QObject, Qt, Signal
+
+
+class _UiDispatcher(QObject):
+    """跨线程投递回调到 GUI 线程的中转对象。
+
+    必须创建于主线程；工作线程通过 ``run_on_ui`` 发射信号，
+    经 ``QueuedConnection`` 在 GUI 线程执行回调。
+    """
+
+    invoked = Signal(object, object)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.invoked.connect(
+            self._dispatch,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+    def _dispatch(self, callback: object, args: object) -> None:
+        if not callable(callback):
+            return
+        arguments = args if isinstance(args, tuple) else (args,)
+        callback(*arguments)
+
+
+_dispatcher = _UiDispatcher()
+
+
+def run_on_ui(callback: Callable[..., object], *args: Any) -> None:
+    """将回调与参数投递到 GUI 线程执行（线程安全）。
+
+    Args:
+        callback: 在 GUI 线程执行的可调用对象。
+        *args: 回调参数。
+    """
+    _dispatcher.invoked.emit(callback, args)
+
+
+def invoke_later(callback: Callable[..., object], *args: Any) -> None:
+    """在当前线程稍后执行回调（立即排入事件队列）。"""
+    _dispatcher.invoked.emit(callback, args)

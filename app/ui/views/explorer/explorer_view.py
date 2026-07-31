@@ -1,7 +1,9 @@
 """Explorer View - 存档浏览器主视图"""
 import flet as ft
+import math
 from typing import Any, Callable, Optional, Dict, Tuple
 from pathlib import Path
+from os.path import normcase
 
 from app.ui.theme import THEME
 from app.ui.theme import TEXT_CAPTION_SIZE, TEXT_SECONDARY_SIZE
@@ -41,6 +43,33 @@ from app.services.world_repository import WorldReadContext
 from core.world_index import WorldIndexBuildPhase, WorldIndexProgressFrame
 
 
+def map_world_index_frame_progress(
+    frame: WorldIndexProgressFrame,
+) -> tuple[float, str]:
+    """将索引构建帧映射为单调递增的 (进度值, 阶段标识)。
+
+    Args:
+        frame: 渐进索引构建对外发布的进度帧。
+
+    Returns:
+        进度值 0.0–1.0 与稳定阶段标识（validating/discovering/probing/
+        finalizing/complete）。发现阶段总量未知，用渐近曲线逼近中段，
+        保证进度值始终单调不减。
+    """
+    if frame.phase is WorldIndexBuildPhase.VALIDATING:
+        return 0.2, "validating"
+    if frame.phase is WorldIndexBuildPhase.DISCOVERING:
+        ratio = 1.0 - math.exp(-frame.discovered_files / 800.0)
+        return 0.2 + 0.4 * ratio, "discovering"
+    if frame.phase is WorldIndexBuildPhase.PROBING:
+        total = frame.total if frame.total else frame.completed
+        fraction = frame.completed / total if total else 0.0
+        return 0.6 + 0.32 * fraction, "probing"
+    if frame.phase is WorldIndexBuildPhase.FINALIZING:
+        return 0.92, "finalizing"
+    return 0.95, "complete"
+
+
 class ExplorerView(
         WorldInfoTabMixin,
         PlayerTabMixin,
@@ -70,6 +99,7 @@ class ExplorerView(
             "explorer_view"
         )
         self._world_load_generation = 0
+        self._loaded_world_path: Optional[Path] = None
         self._disposed = False
         self._region_delete_controller = RegionDeleteController(
             self._task_scope,
@@ -329,16 +359,32 @@ class ExplorerView(
     def on_save_selected(self, path: str) -> None:
         """从侧边栏切换 Explorer 世界。
 
+        切换标签页回来时 ViewManager 会再次通知当前存档；若同一世界已在
+        加载或已加载完成，则跳过重复加载，避免每次返回都重扫目录。
+
         Args:
             path: 新选中的世界路径。
         """
+        if self._is_current_world(path):
+            return
         self._load_world(path)
         if hasattr(self, "_entity_block_search_view"):
             self._entity_block_search_view.on_save_selected(path)
 
+    def _is_current_world(self, path: str) -> bool:
+        """Return whether the view is already bound to this world path."""
+        if self._loaded_world_path is None:
+            return False
+        try:
+            incoming = normcase(str(Path(path).resolve()))
+        except (OSError, ValueError, RuntimeError):
+            return False
+        return incoming == normcase(str(self._loaded_world_path))
+
     def on_save_cleared(self) -> None:
         """取消旧世界任务并清空 Explorer 的会话身份。"""
         self._world_load_generation += 1
+        self._loaded_world_path = None
         self._detach_current_world()
         self._invalidate_quick_backup_state()
         self._invalidate_stats_analysis_state()
@@ -375,6 +421,8 @@ class ExplorerView(
                 self.app.warn_dialog("提示", "请先通过侧边栏设置当前存档。")
                 return
 
+            self._loaded_world_path = Path(str(path)).resolve()
+
             # 显示加载状态
             self._world_label.value = "⏳ 正在加载存档..."
             self._world_label.color = THEME.mc_gold
@@ -386,7 +434,9 @@ class ExplorerView(
             self._invalidate_stats_analysis_state()
             self._invalidate_player_async_state()
             self._set_map_marker_busy(False)
-            self.app.hide_progress()
+            self.app.show_progress(
+                self._t("explorer.loading_world", "正在加载存档...")
+            )
 
             self._task_scope.cancel_all()
             self._task_scope.submit(
@@ -425,6 +475,15 @@ class ExplorerView(
         try:
             context.report_progress(0, 3, "open_world")
             context.raise_if_cancelled()
+            self._post_world_ui(
+                context,
+                "progress",
+                lambda: self._apply_load_progress(
+                    0.05,
+                    self._t("explorer.opening_world", "正在打开存档目录..."),
+                    generation,
+                ),
+            )
             world = Path(path)
             repository = self.app.world_repository
             read_context: Optional[WorldReadContext] = None
@@ -444,6 +503,18 @@ class ExplorerView(
                 pass
             context.report_progress(1, 3, "shell_ready")
             context.raise_if_cancelled()
+            self._post_world_ui(
+                context,
+                "progress",
+                lambda: self._apply_load_progress(
+                    0.15,
+                    self._t(
+                        "explorer.reading_world_info",
+                        "正在读取存档信息...",
+                    ),
+                    generation,
+                ),
+            )
             if read_context is not None:
                 snapshot = read_context.get_index_progressive(
                     cancel_check=lambda: context.is_cancelled,
@@ -466,6 +537,15 @@ class ExplorerView(
                 )
             context.report_progress(2, 3, "session_ready")
             context.raise_if_cancelled()
+            self._post_world_ui(
+                context,
+                "progress",
+                lambda: self._apply_load_progress(
+                    0.95,
+                    self._t("explorer.creating_session", "正在创建会话..."),
+                    generation,
+                ),
+            )
             self._post_world_ui(
                 context,
                 "result",
@@ -545,17 +625,61 @@ class ExplorerView(
         frame: WorldIndexProgressFrame,
         generation: int,
     ) -> None:
-        """显示渐进索引状态；完整快照仍在最终帧后才发布。"""
+        """显示渐进索引进度；完整快照仍在最终帧后才发布。"""
         if not self._is_world_load_current(generation):
             return
         if frame.phase is WorldIndexBuildPhase.COMPLETE:
             return
-        self._world_label.value = self._t(
-            "explorer.index_loading",
-            "正在建立索引 · 已发现 {count} 个文件",
-        ).format(count=frame.discovered_files)
+        value, stage = map_world_index_frame_progress(frame)
+        label = self._format_index_frame_label(frame, stage)
+        self._apply_load_progress(value, label, generation)
+
+    def _apply_load_progress(
+        self,
+        value: float,
+        label: str,
+        generation: int,
+    ) -> None:
+        """将世界加载进度投影到全局进度条与页头标签。"""
+        if not self._is_world_load_current(generation):
+            return
+        percent = max(0, min(100, int(value * 100)))
+        self.app.update_progress_with_task(label, value)
+        self._world_label.value = f"⏳ {label} · {percent}%"
         self._world_label.color = THEME.mc_gold
         safe_update(self._world_label)
+
+    def _format_index_frame_label(
+        self,
+        frame: WorldIndexProgressFrame,
+        stage: str,
+    ) -> str:
+        """构建索引进度帧对应的用户可见标签。"""
+        if stage == "discovering":
+            return self._t(
+                "explorer.discovering",
+                "正在发现文件 · {count} 个",
+            ).format(count=frame.discovered_files)
+        if stage == "probing":
+            total = frame.total if frame.total else frame.completed
+            return self._t(
+                "explorer.probing",
+                "正在读取文件属性 · {completed}/{total}",
+            ).format(completed=frame.completed, total=total)
+        if stage == "validating":
+            return self._t(
+                "explorer.validating",
+                "正在校验存档目录...",
+            )
+        if stage == "finalizing":
+            return self._t(
+                "explorer.finalizing",
+                "正在整理索引...",
+            )
+        return self._t(
+            "explorer.loading_world",
+            "正在加载存档...",
+        )
 
     def _create_world_session(
         self,
@@ -583,6 +707,8 @@ class ExplorerView(
             self._populate_world(session)
         except Exception as exc:
             self.app.handle_exception(exc, title="更新存档界面失败")
+        finally:
+            self.app.hide_progress()
 
     def _show_world_load_error(
         self,
@@ -591,6 +717,9 @@ class ExplorerView(
     ) -> None:
         if not self._is_world_load_current(generation):
             return
+        # 加载失败时允许重新选择/重试同一世界。
+        self._loaded_world_path = None
+        self.app.hide_progress()
         if isinstance(error, FileNotFoundError):
             self._world_label.value = "存档无效"
             self._world_label.color = THEME.error
@@ -622,6 +751,7 @@ class ExplorerView(
             return
         self._disposed = True
         self._world_load_generation += 1
+        self._loaded_world_path = None
         self._invalidate_quick_backup_state()
         self._invalidate_stats_analysis_state()
         self._map_controller.close()

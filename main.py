@@ -1,7 +1,8 @@
 """MCSaveHelper —— Minecraft 存档管理工具
 
 启动入口：确保依赖已安装，然后直接运行。
-  python main.py
+  python main.py            # Flet 后端（默认）
+  python main.py --qt       # Qt (PySide6) 后端（迁移中）
 
 打包后命令行调试：
   MCSaveHelper.exe --console
@@ -12,6 +13,7 @@ from pathlib import Path
 
 
 CONSOLE_FLAG = "--console"
+QT_FLAG = "--qt"
 
 
 def _is_packaged() -> bool:
@@ -51,6 +53,15 @@ def _consume_console_flag(argv: list[str]) -> bool:
     return True
 
 
+def _consume_backend_flag(argv: list[str]) -> str:
+    """移除 ``--qt`` 并返回后端名（``flet`` 或 ``qt``）。"""
+    if QT_FLAG not in argv:
+        return "flet"
+
+    argv[:] = [argument for argument in argv if argument != QT_FLAG]
+    return "qt"
+
+
 def _get_log_path() -> Path:
     """获取启动错误日志路径"""
     if _is_packaged():
@@ -73,6 +84,24 @@ def _run_application() -> None:
     ft.run(Application)
 
 
+def _run_qt_application() -> int:
+    """Configure shared runtime policy and start the PySide6 application."""
+    from core.threading_runtime import configure_thread_fairness
+
+    configure_thread_fairness()
+
+    from PySide6.QtWidgets import QApplication
+
+    from app.qtui.application import QtApplication
+    from app.qtui.theme import apply_theme, get_theme_manager
+
+    qt_app = QApplication(sys.argv)
+    apply_theme(qt_app, get_theme_manager().mode)
+    window = QtApplication()
+    window.show()
+    return qt_app.exec()
+
+
 def _report_startup_failure(message: str) -> int:
     """Report one fatal startup failure and return the process exit code."""
     print(message)
@@ -83,7 +112,7 @@ def _report_startup_failure(message: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     """应用主入口。
 
-    解析 ``--console``、配置线程公平性并启动 Flet 应用。
+    解析 ``--console`` / ``--qt``、配置线程公平性并启动所选后端应用。
     启动失败时写入 ``startup_error.log`` 并以非零状态退出。
 
     Args:
@@ -95,8 +124,11 @@ def main(argv: list[str] | None = None) -> int:
     process_args = sys.argv if argv is None else argv
     if _consume_console_flag(process_args):
         _setup_console()
+    backend = _consume_backend_flag(process_args)
 
     try:
+        if backend == "qt":
+            return _run_qt_application()
         _run_application()
     except ImportError as exc:
         message = (
