@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional, cast
 
 import pytest
 from PySide6.QtWidgets import QApplication
@@ -153,7 +153,7 @@ def host(qt_app: object, tmp_path: Path) -> Iterator[FakeHost]:
 
 @pytest.fixture
 def view(host: FakeHost) -> Iterator[MappingsView]:
-    yield MappingsView(host)
+    yield MappingsView(cast(Any, host))
 
 
 def test_view_builds_with_top_action(view: MappingsView) -> None:
@@ -236,7 +236,9 @@ def test_item_search_filters_rows(view: MappingsView, host: FakeHost) -> None:
     view._on_item_search()
 
     assert view._item_table.rowCount() == 1
-    assert view._item_table.item(0, 0).text() == "mod:sword"
+    first_item = view._item_table.item(0, 0)
+    assert first_item is not None
+    assert first_item.text() == "mod:sword"
 
 
 def test_refresh_mappings_reloads_table(view: MappingsView, host: FakeHost) -> None:

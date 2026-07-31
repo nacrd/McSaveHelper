@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol
 from app.adapters.file_dialogs import FileType
 
 if TYPE_CHECKING:
+    from PySide6.QtWidgets import QWidget
+
     from app.core.save_context_manager import SaveContextManager
     from app.services.backup_service import BackupService
     from app.services.cache_registry import CacheRegistry
@@ -241,6 +243,10 @@ class QtHost(
         """视图管理器。"""
         ...
 
+    def create_settings_view(self) -> QWidget:
+        """构建设置视图（由组合根提供端口）。"""
+        ...
+
 
 @dataclass(frozen=True)
 class QtFeatureContext:
@@ -382,6 +388,10 @@ class QtFeatureContext:
 
     def create_region_map_service(self) -> RegionMapService:
         return self.host.create_region_map_service()
+
+    def create_settings_view(self) -> QWidget:
+        """构建设置视图。"""
+        return self.host.create_settings_view()
 
     def update_uuid_mappings(self, mappings: dict[str, str]) -> None:
         self.host.update_uuid_mappings(mappings)

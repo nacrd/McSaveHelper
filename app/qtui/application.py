@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices, create_app_services
@@ -23,6 +23,7 @@ from app.core.save_context_manager import SaveContextManager
 from app.services.region_map import RegionMapService
 
 if TYPE_CHECKING:
+    from app.models.config import ApplicationSettings
     from app.services.backup_service import BackupService
     from app.services.cache_registry import CacheRegistry
     from app.services.execution_runtime import ExecutionRuntime
@@ -127,6 +128,88 @@ class QtApplication(QMainWindow):
         self.setCentralWidget(self.shell)
         self.resize(1180, 760)
         self.setMinimumSize(860, 560)
+
+    def create_settings_view(self) -> QWidget:
+        """构建设置视图（显式注入应用端口）。"""
+        from app.qtui.views.settings import SettingsView, SettingsViewDependencies
+
+        return SettingsView(SettingsViewDependencies(
+            load_settings=self.config.get_settings,
+            save_settings=self.config.update_settings,
+            reset_settings=self._reset_settings,
+            translate=self.translate,
+            apply_theme=self._apply_theme,
+            apply_language=self._apply_language,
+            set_sidebar_mode=self._set_sidebar_mode,
+            set_log_panel_visible=self._set_log_panel_visible,
+            configure_performance_monitor=self._configure_performance_monitor,
+            set_performance_interval=self._set_performance_interval,
+            info_dialog=self.info_dialog,
+            error_dialog=self.error_dialog,
+            pick_directory=self.pick_directory,
+            save_file=self.save_file,
+            cache_snapshot=self.services.cache_registry.stats,
+            clear_caches=self._clear_application_caches,
+            cache_path=self._map_cache_path,
+            execution_runtime=self.services.execution_runtime,
+            runtime_snapshot=self.services.execution_runtime.snapshot,
+            ui_delivery_summary=self.services.operation_metrics.ui_delivery_summary,
+        ))
+
+    def _reset_settings(self) -> "ApplicationSettings":
+        """重置持久化设置并返回结果快照。"""
+        self.config.reset_config()
+        return self.config.get_settings()
+
+    def _apply_theme(self, theme: str) -> None:
+        """应用主题模式（QSS + 调色板）。"""
+        from app.qtui.theme import apply_theme
+
+        get_theme_manager().set_mode(theme)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, theme)
+
+    def _apply_language(self, language: str) -> None:
+        """应用语言选择。"""
+        self.i18n.set_language(language)
+
+    def _set_sidebar_mode(self, mode: str) -> None:
+        """侧边栏模式偏好；Qt 侧边栏暂为固定模式，仅持久化。"""
+        del mode
+
+    def _set_log_panel_visible(self, visible: bool) -> None:
+        """Qt 尚无悬浮日志面板；仅持久化。"""
+        del visible
+
+    def _configure_performance_monitor(self, enabled: bool, interval: float) -> None:
+        """性能监控尚未迁移；仅持久化。"""
+        del enabled, interval
+
+    def _set_performance_interval(self, seconds: float) -> None:
+        """性能监控尚未迁移；仅持久化。"""
+        del seconds
+
+    def _clear_application_caches(self) -> dict[str, int]:
+        """清空内存与持久化瓦片缓存。"""
+        from core.mca.tile_cache import clear_all_caches
+
+        self.services.cache_registry.clear_all()
+        result = clear_all_caches()
+        return {
+            "deleted_files": int(result.get("deleted_files", 0) or 0),
+            "freed_bytes": int(result.get("freed_bytes", 0) or 0),
+            "memory_chunks_cleared": int(
+                result.get("memory_chunks_cleared", 0) or 0
+            ),
+        }
+
+    @staticmethod
+    def _map_cache_path() -> str:
+        """返回持久化地图缓存路径。"""
+        from core.mca.tile_cache import cache_dir
+
+        return str(cache_dir())
 
     def _build_sidebar(self) -> QtSidebar:
         tab_defs = self.registry.sidebar_definitions(self.translate)

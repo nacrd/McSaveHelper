@@ -119,6 +119,9 @@ class QtViewManager:
         view = feature.factory(self._context)
         self._views[view_id] = view
         self._stack.addWidget(view)
+        did_mount = getattr(view, "did_mount", None)
+        if callable(did_mount):
+            did_mount()
         return view
 
     @staticmethod

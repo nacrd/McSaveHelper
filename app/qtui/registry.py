@@ -110,6 +110,13 @@ def _default_registry() -> QtFeatureRegistry:
                 factory=lambda ctx: MappingsView(ctx),
             ),
             QtFeatureDescriptor(
+                view_id="settings",
+                translation_key="sidebar.settings",
+                default_label="设置",
+                icon_glyph="⚙️",
+                factory=lambda ctx: ctx.create_settings_view(),
+            ),
+            QtFeatureDescriptor(
                 view_id="server_properties",
                 translation_key="sidebar.server_properties",
                 default_label="服务器配置",
