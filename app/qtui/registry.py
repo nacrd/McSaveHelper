@@ -75,6 +75,7 @@ def _default_registry() -> QtFeatureRegistry:
     """
     from app.qtui.views.backup_center import BackupCenterView
     from app.qtui.views.compare import CompareView
+    from app.qtui.views.mappings import MappingsView
     from app.qtui.views.save_repair import SaveRepairView
     from app.qtui.views.server_properties import ServerPropertiesView
 
@@ -100,6 +101,13 @@ def _default_registry() -> QtFeatureRegistry:
                 default_label="存档对比",
                 icon_glyph="⚖️",
                 factory=lambda ctx: CompareView(ctx),
+            ),
+            QtFeatureDescriptor(
+                view_id="mappings",
+                translation_key="sidebar.mappings",
+                default_label="映射管理",
+                icon_glyph="🔗",
+                factory=lambda ctx: MappingsView(ctx),
             ),
             QtFeatureDescriptor(
                 view_id="server_properties",
