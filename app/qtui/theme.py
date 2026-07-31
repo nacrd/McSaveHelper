@@ -45,6 +45,22 @@ class QtThemeColors:
     terminal_blue: str
     terminal_cyan: str
     terminal_purple: str
+
+    # Minecraft 方块色
+    mc_stone: str
+    mc_dirt: str
+    mc_grass: str
+    mc_wood: str
+    mc_diamond: str
+    mc_gold: str
+    mc_iron: str
+    mc_coal: str
+    mc_emerald: str
+    mc_redstone: str
+    mc_obsidian: str
+    mc_nether: str
+    mc_end: str
+
     log_bg: str
     log_border: str
 
@@ -79,6 +95,19 @@ DARK_THEME = QtThemeColors(
     terminal_blue="#72A7E5",
     terminal_cyan="#63D5E5",
     terminal_purple="#B19CD9",
+    mc_stone="#58635D",
+    mc_dirt="#715A45",
+    mc_grass="#63C174",
+    mc_wood="#202722",
+    mc_diamond="#63D5E5",
+    mc_gold="#E5B454",
+    mc_iron="#AEB8B2",
+    mc_coal="#171C19",
+    mc_emerald="#50B86A",
+    mc_redstone="#D75A64",
+    mc_obsidian="#0A0D0B",
+    mc_nether="#7F4148",
+    mc_end="#786A91",
     log_bg="#0D110F",
     log_border="#28312B",
 )
@@ -113,6 +142,19 @@ LIGHT_THEME = QtThemeColors(
     terminal_blue="#3366AA",
     terminal_cyan="#228888",
     terminal_purple="#7744AA",
+    mc_stone="#7D8981",
+    mc_dirt="#785D47",
+    mc_grass="#347A45",
+    mc_wood="#E9EEEB",
+    mc_diamond="#168FA3",
+    mc_gold="#A86F12",
+    mc_iron="#7D8981",
+    mc_coal="#D8E0DB",
+    mc_emerald="#2E8A4B",
+    mc_redstone="#B64049",
+    mc_obsidian="#172019",
+    mc_nether="#8F4650",
+    mc_end="#6F5A88",
     log_bg="#172019",
     log_border="#7D8C82",
 )

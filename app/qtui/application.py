@@ -182,9 +182,15 @@ class QtApplication(QMainWindow):
     def _on_recent_save_select(self, path: str) -> None:
         self.save_context_manager.on_recent_save_select(path)
 
-    def _on_current_save_changed(self, _context: object) -> None:
+    def _on_current_save_changed(self, context: object) -> None:
         if hasattr(self, "sidebar"):
             self.sidebar.set_current_save(self.current_save_path)
+        if context is None:
+            if hasattr(self, "view_manager"):
+                self.view_manager.notify_save_cleared()
+            return
+        if hasattr(self, "view_manager"):
+            self.view_manager.notify_save_selected(str(getattr(context, "display_path", "")))
 
     def _on_recent_saves_changed(self, _recent: object) -> None:
         if hasattr(self, "sidebar"):

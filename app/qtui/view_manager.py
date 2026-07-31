@@ -89,6 +89,20 @@ class QtViewManager:
         """应用响应式布局模式（Qt 骨架暂为无操作占位）。"""
         del layout
 
+    def notify_save_selected(self, path: str) -> None:
+        """通知全部已创建视图：当前存档已切换。"""
+        for view in tuple(self._views.values()):
+            handler = getattr(view, "on_save_selected", None)
+            if callable(handler):
+                handler(path)
+
+    def notify_save_cleared(self) -> None:
+        """通知全部已创建视图：当前存档已清空。"""
+        for view in tuple(self._views.values()):
+            handler = getattr(view, "on_save_cleared", None)
+            if callable(handler):
+                handler()
+
     def dispose_all(self) -> None:
         """释放全部视图（窗口关闭时调用）。"""
         for view_id, view in self._views.items():
