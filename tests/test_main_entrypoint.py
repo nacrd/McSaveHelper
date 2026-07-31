@@ -14,6 +14,45 @@ def test_consume_console_flag_removes_all_occurrences() -> None:
     assert argv == ["MCSaveHelper.exe", "world"]
 
 
+def test_consume_backend_flag_defaults_to_flet() -> None:
+    argv = ["MCSaveHelper.exe"]
+
+    backend = entrypoint._consume_backend_flag(argv)
+
+    assert backend == "flet"
+    assert argv == ["MCSaveHelper.exe"]
+
+
+def test_consume_backend_flag_selects_qt_and_removes_flag() -> None:
+    argv = ["MCSaveHelper.exe", "--qt", "--console"]
+
+    backend = entrypoint._consume_backend_flag(argv)
+
+    assert backend == "qt"
+    assert argv == ["MCSaveHelper.exe", "--console"]
+
+
+def test_main_routes_to_qt_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_qt_application",
+        lambda: calls.append("qt") or 0,
+    )
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_application",
+        lambda: calls.append("flet"),
+    )
+
+    exit_code = entrypoint.main(["MCSaveHelper.exe", "--qt"])
+
+    assert exit_code == 0
+    assert calls == ["qt"]
+
+
 def test_main_configures_console_before_running_application(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

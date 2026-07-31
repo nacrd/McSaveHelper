@@ -1,4 +1,8 @@
-"""Qt 应用壳层：顶栏动作 + 侧边栏 + 内容堆栈 + 状态栏。"""
+"""Qt 应用壳层：顶栏动作 + 侧边栏 + 内容堆栈 + 状态栏。
+
+壳层是普通 QWidget（由组合根设为 QMainWindow 的中央控件），
+状态栏以布局嵌入底部，而不是 QMainWindow 的 setStatusBar。
+"""
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -7,7 +11,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QMainWindow,
     QPushButton,
     QStackedWidget,
     QStatusBar,
@@ -22,8 +25,8 @@ from app.qtui.view_actions import QtViewAction
 Translate = Callable[..., str]
 
 
-class QtShell(QMainWindow):
-    """主窗口壳层。
+class QtShell(QWidget):
+    """主窗口壳层（可嵌入 QMainWindow 的中央区域）。
 
     结构：顶栏（标题 + 视图动作） / 主体（侧边栏 + QStackedWidget） / 状态栏。
     """
@@ -49,8 +52,7 @@ class QtShell(QMainWindow):
         self._on_view_action = on_view_action
         self._action_buttons: list[QPushButton] = []
 
-        central = QWidget()
-        root_layout = QVBoxLayout(central)
+        root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
@@ -79,13 +81,11 @@ class QtShell(QMainWindow):
         body_layout.addWidget(view_stack, 1)
         root_layout.addWidget(body, 1)
 
-        self.setCentralWidget(central)
-
-        # 状态栏 + 进度
+        # 状态栏 + 进度（以布局嵌入）
         status_bar = QStatusBar()
-        self.setStatusBar(status_bar)
-        self._progress = QtProgressHost(status_bar)
         status_bar.setSizeGripEnabled(False)
+        root_layout.addWidget(status_bar)
+        self._progress = QtProgressHost(status_bar)
 
     @property
     def progress(self) -> QtProgressHost:

@@ -122,8 +122,9 @@ class QtApplication(QMainWindow):
     # ════════════════════════════════════════════
 
     def _setup_window(self) -> None:
-        """设置窗口标题、尺寸与图标。"""
+        """设置窗口标题、尺寸与中央壳层。"""
         self.setWindowTitle("MCSaveHelper")
+        self.setCentralWidget(self.shell)
         self.resize(1180, 760)
         self.setMinimumSize(860, 560)
 
