@@ -218,6 +218,25 @@ QComboBox QAbstractItemView {{
     selection-background-color: {colors.accent};
     selection-color: {colors.text_invert};
 }}
+QTabWidget::pane {{
+    border: 1px solid {colors.border_subtle};
+    border-radius: 4px;
+    background: {colors.bg_secondary};
+}}
+QTabBar::tab {{
+    background: {colors.bg_secondary};
+    color: {colors.text_secondary};
+    border: 1px solid transparent;
+    padding: 8px 16px;
+}}
+QTabBar::tab:selected {{
+    background: {colors.bg_elevated};
+    color: {colors.text_primary};
+    border-color: {colors.border_standard};
+}}
+QTabBar::tab:disabled {{
+    color: {colors.text_disabled};
+}}
 QPushButton {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_standard};

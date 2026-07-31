@@ -1,6 +1,7 @@
 """Qt 组合根：装配服务、壳层与视图（对应 Flet 版 ``app/application.py``）。"""
 from __future__ import annotations
 
+from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from PySide6.QtGui import QCloseEvent
@@ -9,8 +10,9 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices, create_app_services
 from app.models.save_store import CurrentSaveStore
-from app.qtui.context import QtFeatureContext
+from app.qtui.context import QtFeatureContext, QtMigrationCommands
 from app.qtui.dialogs import QtFileDialogs, QtMessageDialogs
+from app.qtui.migration_coordinator import QtMigrationCoordinator
 from app.qtui.registry import create_qt_registry
 from app.qtui.shell import QtShell
 from app.qtui.sidebar import QtSidebar
@@ -109,6 +111,8 @@ class QtApplication(QMainWindow):
             on_view_action=self._on_view_action,
         )
         self._setup_window()
+        self._migration_coordinator = QtMigrationCoordinator(self)
+        self._shutdown_started = False
 
         # 壳层就绪后再加载持久化存档状态（回调需要侧边栏存在）。
         self.save_context_manager.initialize()
@@ -286,8 +290,7 @@ class QtApplication(QMainWindow):
         ]
 
     def _activate_current_save(self, path: str) -> None:
-        del path
-        # 首个迁移视图无存档绑定需求；资源浏览器迁移后在此刷新。
+        self.config.migration.src_path = path
 
     # ════════════════════════════════════════════
     #  翻译 / 日志
@@ -368,6 +371,41 @@ class QtApplication(QMainWindow):
     def update_progress_with_task(self, task_name: str, value: float) -> None:
         self.shell.progress.update_progress_with_task(task_name, value)
 
+    @property
+    def migration_commands(self) -> "QtMigrationCommands":
+        """返回迁移页面可用的应用级命令。"""
+        return self._migration_coordinator.commands
+
+    def get_migrator_view(self) -> Optional[QWidget]:
+        """返回已创建的迁移视图。"""
+        return self.view_manager.get_view("migrator")
+
+    def set_migration_start_enabled(self, enabled: bool) -> None:
+        """同步迁移页面和当前壳层的开始命令状态。"""
+        view = self.get_migrator_view()
+        setter = getattr(view, "set_start_enabled", None)
+        if callable(setter):
+            setter(enabled)
+        label = self.translate("top_bar.start_conversion", "开始转换")
+        self.shell.set_action_enabled(label, enabled)
+
+    def update_migration_progress(self, value: float) -> None:
+        """更新状态栏中的迁移进度。"""
+        self.shell.progress.update_progress(value)
+
+    def set_migration_progress_label(self, label: str) -> None:
+        """更新状态栏中的迁移任务说明。"""
+        self.shell.progress.set_progress_label(label)
+
+    def set_migration_progress_value(self, value: float) -> None:
+        """设置状态栏迁移进度值。"""
+        self.shell.progress.update_progress(value)
+
+    @staticmethod
+    def post_ui(callback: Callable[[], None]) -> None:
+        """把迁移控制器回调投递到 Qt 主线程。"""
+        run_on_ui(callback)
+
     # ─── 其他端口 ─────────────────────────────────
 
     @property
@@ -443,9 +481,18 @@ class QtApplication(QMainWindow):
 
     def _shutdown(self) -> None:
         """释放视图、运行时、缓存与服务（幂等）。"""
-        self.view_manager.dispose_all()
-        self.services.execution_runtime.shutdown(wait=True, timeout=5.0)
-        self.services.world_indexes.close()
-        self.services.cache_registry.close()
-        self.texture.close()
-        self.ui_delivery.close()
+        if self._shutdown_started:
+            return
+        self._shutdown_started = True
+        with ExitStack() as cleanup:
+            cleanup.callback(self.ui_delivery.close)
+            cleanup.callback(self.texture.close)
+            cleanup.callback(self.services.cache_registry.close)
+            cleanup.callback(self.services.world_indexes.close)
+            cleanup.callback(
+                self.services.execution_runtime.shutdown,
+                wait=True,
+                timeout=5.0,
+            )
+            cleanup.callback(self._migration_coordinator.close)
+            cleanup.callback(self.view_manager.dispose_all)

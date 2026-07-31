@@ -75,12 +75,28 @@ def _default_registry() -> QtFeatureRegistry:
     """
     from app.qtui.views.backup_center import BackupCenterView
     from app.qtui.views.compare import CompareView
+    from app.qtui.views.explorer import ExplorerView
     from app.qtui.views.mappings import MappingsView
+    from app.qtui.views.migrator import MigratorView
     from app.qtui.views.save_repair import SaveRepairView
     from app.qtui.views.server_properties import ServerPropertiesView
 
     return QtFeatureRegistry(
         (
+            QtFeatureDescriptor(
+                view_id="explorer",
+                translation_key="sidebar.explorer",
+                default_label="存档浏览器",
+                icon_glyph="⌕",
+                factory=lambda ctx: ExplorerView(ctx),
+            ),
+            QtFeatureDescriptor(
+                view_id="migrator",
+                translation_key="sidebar.migrator",
+                default_label="存档转换",
+                icon_glyph="⇄",
+                factory=lambda ctx: MigratorView(ctx),
+            ),
             QtFeatureDescriptor(
                 view_id="save_repair",
                 translation_key="sidebar.save_repair",

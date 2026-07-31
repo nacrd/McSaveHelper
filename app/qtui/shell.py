@@ -123,3 +123,9 @@ class QtShell(QWidget):
     def clear_view_actions(self) -> None:
         """清空顶栏动作。"""
         self.set_view_actions([])
+
+    def set_action_enabled(self, label: str, enabled: bool) -> None:
+        """按完整标签设置当前顶栏动作状态。"""
+        for button in self._action_buttons:
+            if button.text() == label:
+                button.setEnabled(enabled)

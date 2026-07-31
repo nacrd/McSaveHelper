@@ -135,6 +135,15 @@ class QtRuntimePort(Protocol):
         ...
 
 
+class QtMigrationPort(Protocol):
+    """迁移页面使用的窄命令端口。"""
+
+    @property
+    def migration_commands(self) -> "QtMigrationCommands":
+        """返回迁移命令集合。"""
+        ...
+
+
 class QtMapPort(Protocol):
     """地图服务工厂端口。"""
 
@@ -157,6 +166,7 @@ class QtHost(
     QtFileDialogPort,
     QtProgressPort,
     QtRuntimePort,
+    QtMigrationPort,
     QtMapPort,
     QtUuidMappingPort,
     Protocol,
@@ -322,6 +332,11 @@ class QtFeatureContext:
     def view_manager(self) -> "QtViewManager":
         return self.host.view_manager
 
+    @property
+    def migration_commands(self) -> "QtMigrationCommands":
+        """返回迁移页面可用的应用级命令。"""
+        return self.host.migration_commands
+
     def translate(self, key: str, default: str = "", **kwargs: Any) -> str:
         return self.host.translate(key, default, **kwargs)
 
@@ -406,12 +421,24 @@ class QtFeatureContext:
         return self.world_repository.open_session(world_path, log=log or self.log)
 
 
+@dataclass(frozen=True)
+class QtMigrationCommands:
+    """由 Qt 组合根拥有的迁移命令集合。"""
+
+    start: Callable[[], None]
+    cancel: Callable[[], bool]
+    choose_destination: Callable[[], None]
+    choose_batch_directory: Callable[[], None]
+
+
 __all__ = [
     "QtDialogPort",
     "QtFeatureContext",
     "QtFileDialogPort",
     "QtHost",
     "QtMapPort",
+    "QtMigrationCommands",
+    "QtMigrationPort",
     "QtProgressPort",
     "QtRuntimePort",
     "QtTranslationPort",
