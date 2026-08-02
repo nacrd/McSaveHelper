@@ -507,6 +507,67 @@ def test_region_map_scan_projects_regions_and_search(
     assert panel.canvas.selected_region == (1, 0)
 
 
+def test_region_map_markers_add_and_delete(
+    view: ExplorerView,
+    host: FakeHost,
+    tmp_path: Path,
+) -> None:
+    from app.services.map_marker_service import MapMarkerService
+
+    world = tmp_path / "world"
+    world.mkdir()
+    region_dir = world / "region"
+    region_dir.mkdir(parents=True, exist_ok=True)
+    (region_dir / "r.0.0.mca").write_bytes(b"0" * 1024)
+    # 标记仓库必须在存档目录之外。
+    marker_root = tmp_path / "marker_store"
+    marker_root.mkdir()
+    # 用临时根目录替换控制器里的标记服务，避免写用户主目录。
+    view._region_map._map_controller.close()
+    view._region_map._marker_scope.close()
+    view._region_map._marker_scope = host.runtime.create_scope(
+        "qt_region_map_markers_test"
+    )
+    from app.controllers.map_controller import MapController
+    from app.qtui.utils import run_on_ui
+
+    view._region_map._map_controller = MapController(
+        MapMarkerService(root=marker_root),
+        task_scope=view._region_map._marker_scope,
+        post_to_ui=lambda callback: run_on_ui(callback),
+        get_generation=lambda: view._region_map._host_generation,
+    )
+
+    view.on_save_selected(str(world))
+    assert _wait_until(lambda: view.world_session is not None)
+    assert _wait_until(
+        lambda: view._region_map.map_controller.world_path is not None
+    )
+
+    coordinator = view._region_map
+    coordinator._add_marker("Camp", 64, -32)
+    assert _wait_until(lambda: len(coordinator.map_controller.markers()) == 1)
+    markers = coordinator.map_controller.markers()
+    assert markers[0].name == "Camp"
+    assert panel_has_marker(coordinator.panel, "Camp")
+
+    coordinator._on_search("Camp")
+    assert coordinator.panel.selected_marker_id == markers[0].id
+
+    coordinator.panel._selected_marker_id = markers[0].id
+    coordinator._delete_selected_marker()
+    assert _wait_until(lambda: len(coordinator.map_controller.markers()) == 0)
+
+
+def panel_has_marker(panel: object, name: str) -> bool:
+    list_widget = getattr(panel, "_marker_list")
+    for row in range(list_widget.count()):
+        item = list_widget.item(row)
+        if item is not None and name in item.text():
+            return True
+    return False
+
+
 def test_chunk_nbt_load_and_stage_from_map_selection(
     view: ExplorerView,
     tmp_path: Path,

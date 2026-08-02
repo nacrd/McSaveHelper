@@ -1,18 +1,26 @@
 """Qt 区域活动热力地图画布（区域级，不含俯视瓦片）。"""
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional
+from typing import Callable, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPaintEvent, QPen, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import QWidget
 
-from core.mca.map_models import BLOCKS_PER_REGION
+from core.mca.map_models import BLOCKS_PER_REGION, MapMarker
 
 
 RegionCoord = tuple[int, int]
 RegionSelected = Callable[[Optional[RegionCoord], Optional[int]], None]
 CameraChanged = Callable[[float, float, float], None]
+MarkerSelected = Callable[[Optional[MapMarker]], None]
 
 
 class QtRegionMapCanvas(QWidget):
@@ -26,18 +34,23 @@ class QtRegionMapCanvas(QWidget):
         self,
         on_region_selected: RegionSelected,
         on_camera_changed: Optional[CameraChanged] = None,
+        on_marker_selected: Optional[MarkerSelected] = None,
     ) -> None:
         """构建画布。
 
         Args:
             on_region_selected: ``(coord, size_bytes)`` 选择回调；清空时为 None。
             on_camera_changed: 可选 ``(center_x, center_z, scale)`` 镜头回调。
+            on_marker_selected: 可选标记选择回调。
         """
         super().__init__()
         self._on_region_selected = on_region_selected
         self._on_camera_changed = on_camera_changed
+        self._on_marker_selected = on_marker_selected
         self._regions: dict[RegionCoord, int] = {}
+        self._markers: tuple[MapMarker, ...] = ()
         self._selected: Optional[RegionCoord] = None
+        self._selected_marker_id: Optional[str] = None
         self._center_x = 0.0
         self._center_z = 0.0
         self._scale = self._DEFAULT_SCALE
@@ -80,8 +93,23 @@ class QtRegionMapCanvas(QWidget):
     def clear(self) -> None:
         """清空区域数据与选择。"""
         self._regions = {}
+        self._markers = ()
         self._selected = None
+        self._selected_marker_id = None
         self._max_size = 1
+        self.update()
+
+    def set_markers(self, markers: Sequence[MapMarker]) -> None:
+        """替换当前维度标记并尽量保持选择。"""
+        self._markers = tuple(markers)
+        ids = {marker.id for marker in self._markers}
+        if self._selected_marker_id not in ids:
+            self._selected_marker_id = None
+        self.update()
+
+    def select_marker(self, marker_id: Optional[str]) -> None:
+        """程序化选中标记。"""
+        self._selected_marker_id = marker_id
         self.update()
 
     def set_camera(self, center_x: float, center_z: float, scale: float) -> None:
@@ -163,7 +191,32 @@ class QtRegionMapCanvas(QWidget):
             )
             painter.setPen(QPen(QColor("#FFD54F"), 2))
             painter.drawRect(rect.adjusted(1, 1, -1, -1))
+        self._paint_markers(painter)
         painter.end()
+
+    def _paint_markers(self, painter: QPainter) -> None:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for marker in self._markers:
+            screen_x, screen_z = self._block_to_screen(
+                float(marker.x), float(marker.z)
+            )
+            if not self.rect().adjusted(-12, -12, 12, 12).contains(
+                int(screen_x), int(screen_z)
+            ):
+                continue
+            color = QColor(marker.color)
+            if not color.isValid():
+                color = QColor("#FFD54F")
+            selected = marker.id == self._selected_marker_id
+            radius = 7 if selected else 5
+            painter.setBrush(color)
+            painter.setPen(QPen(QColor("#101810"), 2 if selected else 1))
+            painter.drawEllipse(
+                int(screen_x - radius),
+                int(screen_z - radius),
+                radius * 2,
+                radius * 2,
+            )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -196,9 +249,20 @@ class QtRegionMapCanvas(QWidget):
             release = event.position().toPoint()
             moved = (release - self._press_pos).manhattanLength()
             if not self._dragged and moved < 6:
-                coord = self._region_at(event.position().x(), event.position().y())
-                if coord is not None:
-                    self.select_region(coord)
+                marker = self._marker_at(
+                    event.position().x(), event.position().y()
+                )
+                if marker is not None:
+                    self._selected_marker_id = marker.id
+                    self.update()
+                    if self._on_marker_selected is not None:
+                        self._on_marker_selected(marker)
+                else:
+                    coord = self._region_at(
+                        event.position().x(), event.position().y()
+                    )
+                    if coord is not None:
+                        self.select_region(coord)
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
@@ -248,6 +312,22 @@ class QtRegionMapCanvas(QWidget):
         if coord in self._regions:
             return coord
         return None
+
+    def _marker_at(
+        self,
+        screen_x: float,
+        screen_z: float,
+    ) -> Optional[MapMarker]:
+        hit_radius = 10.0
+        best: Optional[MapMarker] = None
+        best_dist = hit_radius * hit_radius
+        for marker in self._markers:
+            mx, mz = self._block_to_screen(float(marker.x), float(marker.z))
+            dist = (mx - screen_x) ** 2 + (mz - screen_z) ** 2
+            if dist <= best_dist:
+                best = marker
+                best_dist = dist
+        return best
 
     def _heat_color(self, size: int) -> QColor:
         ratio = 0.0 if self._max_size <= 0 else min(1.0, size / self._max_size)

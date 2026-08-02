@@ -1,4 +1,4 @@
-"""Qt 区域地图面板与后台扫描、MapController 的协调器。"""
+"""Qt 区域地图面板与后台扫描、MapController、标记任务的协调器。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,14 +10,19 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.utils import run_on_ui
 from app.qtui.views.region_map import QtRegionMapPanel
 from app.qtui.views.region_map_tasks import (
     RegionMapTaskCallbacks,
     RegionMapTasks,
     RegionScanResult,
 )
+from app.services.execution_runtime import (
+    RuntimeClosedError,
+    TaskQueueFullError,
+)
 from app.services.map_marker_service import MapMarkerService
-from core.mca.map_models import BLOCKS_PER_REGION
+from core.mca.map_models import BLOCKS_PER_REGION, MapMarker
 from core.mca.map_search import MapSearchError
 from core.omni.world_session import WorldSession
 from core.region_utils import DimensionInfo
@@ -33,21 +38,23 @@ class QtRegionMapHost(
 
 
 class QtRegionMapCoordinator:
-    """连接区域地图面板、维度会话与扫描任务。"""
+    """连接区域地图面板、维度会话、扫描任务与标记操作。"""
 
     def __init__(
         self,
         app: QtRegionMapHost,
         on_open_region_nbt: Callable[[int, int, str], None] | None = None,
         on_dimension_synced: Callable[[str], None] | None = None,
+        *,
+        marker_service: MapMarkerService | None = None,
     ) -> None:
         """创建协调器与面板。
 
         Args:
             app: 翻译、对话框与执行运行时端口。
-            on_open_region_nbt: 打开选中区域 NBT 的回调
-                ``(region_x, region_z, dimension_id)``。
+            on_open_region_nbt: 打开选中区域 NBT 的回调。
             on_dimension_synced: 维度切换后同步给 NBT 等模块。
+            marker_service: 可选标记持久化服务（测试可注入临时根目录）。
         """
         self._app = app
         self._on_open_region_nbt = on_open_region_nbt
@@ -56,7 +63,16 @@ class QtRegionMapCoordinator:
         self._dimension_dirs: dict[str, Path] = {}
         self._current_dimension = ""
         self._selected_region: tuple[int, int] | None = None
-        self._map_controller = MapController(MapMarkerService())
+        self._host_generation = 0
+        self._marker_scope = app.execution_runtime.create_scope(
+            "qt_region_map_markers"
+        )
+        self._map_controller = MapController(
+            marker_service or MapMarkerService(),
+            task_scope=self._marker_scope,
+            post_to_ui=lambda callback: run_on_ui(callback),
+            get_generation=lambda: self._host_generation,
+        )
         self.panel = QtRegionMapPanel(
             app.translate,
             self._on_dimension_changed,
@@ -65,6 +81,9 @@ class QtRegionMapCoordinator:
             self._on_region_selected,
             self._on_camera_changed,
             self._open_selected_nbt,
+            self._on_marker_selected,
+            self._add_marker,
+            self._delete_selected_marker,
         )
         self._tasks = RegionMapTasks(
             app.execution_runtime,
@@ -85,8 +104,14 @@ class QtRegionMapCoordinator:
         """返回当前维度 id。"""
         return self._current_dimension
 
+    @property
+    def map_controller(self) -> MapController:
+        """返回地图会话控制器（测试用）。"""
+        return self._map_controller
+
     def set_world(self, session: WorldSession) -> None:
         """绑定世界、刷新维度列表并扫描当前维度。"""
+        self._host_generation += 1
         self._session = session
         self._selected_region = None
         dimensions = self._read_dimensions(session)
@@ -109,9 +134,11 @@ class QtRegionMapCoordinator:
             ))
             return
         self.refresh()
+        self._request_marker_load()
 
     def clear_world(self) -> None:
         """取消扫描并恢复空状态。"""
+        self._host_generation += 1
         self._tasks.clear()
         self._map_controller.unbind_world()
         self._session = None
@@ -183,6 +210,7 @@ class QtRegionMapCoordinator:
         state = self._map_controller.snapshot
         self.refresh()
         self.panel.set_camera(state.center_x, state.center_z, state.scale)
+        self._request_marker_load()
         if self._on_dimension_synced is not None:
             self._on_dimension_synced(dimension_id)
 
@@ -206,7 +234,17 @@ class QtRegionMapCoordinator:
             return
         hit = results[0]
         self.panel.focus_block(float(hit.x), float(hit.z))
-        if hit.kind in {"region", "chunk", "block"}:
+        if hit.kind == "marker" and hit.marker_id:
+            marker = next(
+                (
+                    item for item in self._map_controller.markers()
+                    if item.id == hit.marker_id
+                ),
+                None,
+            )
+            if marker is not None:
+                self.panel.show_marker_details(marker)
+        elif hit.kind in {"region", "chunk", "block"}:
             region = (
                 int(hit.x // BLOCKS_PER_REGION),
                 int(hit.z // BLOCKS_PER_REGION),
@@ -224,6 +262,112 @@ class QtRegionMapCoordinator:
     ) -> None:
         del size
         self._selected_region = coord
+
+    def _on_marker_selected(self, marker: Optional[MapMarker]) -> None:
+        if marker is None:
+            return
+        full = next(
+            (
+                item for item in self._map_controller.markers()
+                if item.id == marker.id
+            ),
+            marker,
+        )
+        self.panel.show_marker_details(full)
+        self.panel.focus_block(float(full.x), float(full.z), scale=max(
+            self.panel.canvas.scale, 0.12
+        ))
+
+    def _add_marker(self, name: str, x: int, z: int) -> None:
+        if self._session is None:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.select_save_first", "请先设置当前存档。"),
+            )
+            return
+        self.panel.set_marker_busy(True)
+        try:
+            self._map_controller.submit_upsert_marker(
+                name,
+                x,
+                z,
+                on_complete=self._finish_marker_upsert,
+                on_error=self._handle_marker_error,
+            )
+        except (
+            KeyError,
+            RuntimeClosedError,
+            RuntimeError,
+            TaskQueueFullError,
+            ValueError,
+        ) as error:
+            self._handle_marker_error(error)
+
+    def _delete_selected_marker(self) -> None:
+        marker_id = self.panel.selected_marker_id
+        if not marker_id:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.select_marker_first", "请先选择一个标记。"),
+            )
+            return
+        self.panel.set_marker_busy(True)
+        try:
+            self._map_controller.submit_delete_marker(
+                marker_id,
+                on_complete=self._finish_marker_delete,
+                on_error=self._handle_marker_error,
+            )
+        except (
+            KeyError,
+            RuntimeClosedError,
+            RuntimeError,
+            TaskQueueFullError,
+            ValueError,
+        ) as error:
+            self._handle_marker_error(error)
+
+    def _request_marker_load(self) -> None:
+        if self._session is None or self._map_controller.world_path is None:
+            self.panel.show_markers(())
+            return
+        self.panel.set_marker_busy(True)
+        try:
+            self._map_controller.submit_load_markers(
+                self._finish_marker_load,
+                self._handle_marker_error,
+            )
+        except (
+            RuntimeClosedError,
+            RuntimeError,
+            TaskQueueFullError,
+            ValueError,
+        ) as error:
+            self._handle_marker_error(error)
+
+    def _finish_marker_load(self) -> None:
+        self.panel.set_marker_busy(False)
+        self.panel.show_markers(self._map_controller.markers())
+
+    def _finish_marker_upsert(self, marker: MapMarker) -> None:
+        self.panel.set_marker_busy(False)
+        self.panel.show_markers(self._map_controller.markers())
+        self.panel.show_marker_details(marker)
+        self.panel.focus_block(float(marker.x), float(marker.z))
+        self._app.log(f"已添加地图标记: {marker.name}", "INFO")
+
+    def _finish_marker_delete(self, deleted: bool) -> None:
+        self.panel.set_marker_busy(False)
+        self.panel.show_markers(self._map_controller.markers())
+        if deleted:
+            self._app.log("已删除地图标记", "INFO")
+
+    def _handle_marker_error(self, error: Exception) -> None:
+        self.panel.set_marker_busy(False)
+        self._app.handle_exception(
+            error,
+            title=self._t("map.marker_operation_failed", "地图标记操作失败"),
+        )
 
     def _open_selected_nbt(self) -> None:
         if self._selected_region is None:
@@ -278,9 +422,11 @@ class QtRegionMapCoordinator:
         return self._app.translate(key, default, **kwargs)
 
     def close(self) -> None:
-        """幂等关闭扫描任务与地图控制器。"""
+        """幂等关闭扫描任务、标记作用域与地图控制器。"""
+        self._host_generation += 1
         self._tasks.close()
         self._map_controller.close()
+        self._marker_scope.close()
         self._session = None
         self._dimension_dirs.clear()
 

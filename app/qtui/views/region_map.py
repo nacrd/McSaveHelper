@@ -1,4 +1,4 @@
-"""Qt Explorer 区域地图面板：工具栏、画布与状态。"""
+"""Qt Explorer 区域地图面板：工具栏、画布、标记列表与状态。"""
 from __future__ import annotations
 
 from typing import Callable, Mapping, Optional, Sequence
@@ -6,9 +6,15 @@ from typing import Callable, Mapping, Optional, Sequence
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -16,6 +22,7 @@ from PySide6.QtWidgets import (
 from app.qtui.components.buttons import btn_ghost, btn_primary
 from app.qtui.components.cards import muted_label, section_title
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
+from core.mca.map_models import MapMarker
 from core.mca.region_selection import format_region_selection
 
 
@@ -25,14 +32,17 @@ DimensionChanged = Callable[[str], None]
 SearchSubmitted = Callable[[str], None]
 RegionSelected = Callable[[Optional[tuple[int, int]], Optional[int]], None]
 CameraChanged = Callable[[float, float, float], None]
+MarkerSelected = Callable[[Optional[MapMarker]], None]
+MarkerAddRequest = Callable[[str, int, int], None]
 
 _STYLE_OPTIONS = (
     ("activity", "map.style_region", "区域"),
 )
+_MARKER_ID_ROLE = int(Qt.ItemDataRole.UserRole)
 
 
 class QtRegionMapPanel(QWidget):
-    """区域地图壳层：维度、搜索、缩放与热力画布。"""
+    """区域地图壳层：维度、搜索、热力画布与标记侧栏。"""
 
     def __init__(
         self,
@@ -43,25 +53,24 @@ class QtRegionMapPanel(QWidget):
         on_region_selected: RegionSelected,
         on_camera_changed: CameraChanged,
         on_open_nbt: Command,
+        on_marker_selected: MarkerSelected,
+        on_add_marker: MarkerAddRequest,
+        on_delete_marker: Command,
     ) -> None:
-        """构建区域地图面板。
-
-        Args:
-            translate: UI 翻译回调。
-            on_dimension_changed: 维度 id 变更回调。
-            on_search: 搜索提交回调。
-            on_refresh: 重新扫描当前维度。
-            on_region_selected: 画布区域选择回调。
-            on_camera_changed: 镜头变化回调。
-            on_open_nbt: 打开选中区域的区块 NBT。
-        """
+        """构建区域地图面板。"""
         super().__init__()
         self._translate = translate
         self._on_dimension_changed = on_dimension_changed
         self._on_search = on_search
         self._on_refresh = on_refresh
         self._on_open_nbt = on_open_nbt
+        self._on_marker_selected = on_marker_selected
+        self._on_add_marker = on_add_marker
+        self._on_delete_marker = on_delete_marker
         self._external_region_selected = on_region_selected
+        self._selected_marker_id: Optional[str] = None
+        self._markers: tuple[MapMarker, ...] = ()
+        self._marker_busy = False
         self._build(on_region_selected, on_camera_changed)
         self.show_empty()
 
@@ -78,11 +87,19 @@ class QtRegionMapPanel(QWidget):
         layout.setSpacing(8)
         layout.addWidget(section_title(self._t("explorer.tab_map", "地图")))
         layout.addLayout(self._build_toolbar())
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
         self._canvas = QtRegionMapCanvas(
             self._handle_region_selected,
             on_camera_changed,
+            self._handle_canvas_marker,
         )
-        layout.addWidget(self._canvas, 1)
+        splitter.addWidget(self._canvas)
+        splitter.addWidget(self._build_marker_side())
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setSizes((760, 240))
+        layout.addWidget(splitter, 1)
         self._stats = muted_label("")
         layout.addWidget(self._stats)
         self._status = QLabel("")
@@ -91,7 +108,7 @@ class QtRegionMapPanel(QWidget):
         layout.addWidget(self._status)
         self._help = muted_label(self._t(
             "map.region_help",
-            "拖拽平移，滚轮缩放；点击区域查看详情。首批为区域活动热力图。",
+            "拖拽平移，滚轮缩放；点击区域或标记查看详情。",
         ))
         layout.addWidget(self._help)
         del on_region_selected
@@ -111,7 +128,7 @@ class QtRegionMapPanel(QWidget):
         self._search = QLineEdit()
         self._search.setPlaceholderText(self._t(
             "map.search_hint",
-            "坐标 x,z / x y z / r.x.z / c.x.z",
+            "坐标 x,z / x y z / r.x.z / c.x.z / 标记名",
         ))
         self._search.returnPressed.connect(self._submit_search)
         row.addWidget(self._search, 1)
@@ -143,6 +160,35 @@ class QtRegionMapPanel(QWidget):
         row.addWidget(self._open_nbt)
         return row
 
+    def _build_marker_side(self) -> QWidget:
+        host = QWidget()
+        host.setMinimumWidth(200)
+        host.setMaximumWidth(320)
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(8, 0, 0, 0)
+        layout.setSpacing(6)
+        self._marker_count = muted_label(self._t(
+            "map.marker_count", "{count} 个标记", count=0
+        ))
+        layout.addWidget(self._marker_count)
+        self._marker_list = QListWidget()
+        self._marker_list.currentItemChanged.connect(self._marker_item_changed)
+        layout.addWidget(self._marker_list, 1)
+        actions = QHBoxLayout()
+        self._add_marker = btn_primary(
+            self._t("map.add_marker", "添加"),
+            on_click=self._prompt_add_marker,
+        )
+        actions.addWidget(self._add_marker)
+        self._delete_marker = btn_ghost(
+            self._t("map.delete_marker", "删除"),
+            on_click=self._on_delete_marker,
+        )
+        self._delete_marker.setEnabled(False)
+        actions.addWidget(self._delete_marker)
+        layout.addLayout(actions)
+        return host
+
     @property
     def canvas(self) -> QtRegionMapCanvas:
         """返回内部画布。"""
@@ -152,6 +198,11 @@ class QtRegionMapPanel(QWidget):
     def selected_region(self) -> Optional[tuple[int, int]]:
         """返回当前选中区域。"""
         return self._canvas.selected_region
+
+    @property
+    def selected_marker_id(self) -> Optional[str]:
+        """返回当前选中标记 id。"""
+        return self._selected_marker_id
 
     @property
     def current_dimension_id(self) -> str:
@@ -164,6 +215,7 @@ class QtRegionMapPanel(QWidget):
         self._dimension.clear()
         self._dimension.blockSignals(False)
         self._canvas.clear()
+        self.show_markers(())
         self._stats.setText(self._t("map.no_world", "加载存档后可浏览区域地图"))
         self._status.setText("")
         self._set_controls_enabled(False)
@@ -179,12 +231,7 @@ class QtRegionMapPanel(QWidget):
         dimensions: Sequence[tuple[str, str]],
         current_id: str,
     ) -> None:
-        """填充维度下拉并选中当前维度。
-
-        Args:
-            dimensions: ``(id, display_name)`` 序列。
-            current_id: 当前维度 id。
-        """
+        """填充维度下拉并选中当前维度。"""
         self._dimension.blockSignals(True)
         self._dimension.clear()
         selected = 0
@@ -249,6 +296,61 @@ class QtRegionMapPanel(QWidget):
             text = f"{text}\n大小 {size / 1024:.1f} KB"
         self._status.setText(text)
 
+    def show_markers(self, markers: Sequence[MapMarker]) -> None:
+        """投影标记列表与画布针点。"""
+        self._markers = tuple(markers)
+        self._canvas.set_markers(markers)
+        self._marker_list.blockSignals(True)
+        self._marker_list.clear()
+        selected_row = -1
+        for index, marker in enumerate(markers):
+            item = QListWidgetItem(
+                f"{marker.name}\nX {marker.x} · Z {marker.z}"
+            )
+            item.setData(_MARKER_ID_ROLE, marker.id)
+            item.setToolTip(
+                f"{marker.name}\nX {marker.x}, Y {marker.y}, Z {marker.z}"
+            )
+            self._marker_list.addItem(item)
+            if marker.id == self._selected_marker_id:
+                selected_row = index
+        self._marker_list.blockSignals(False)
+        self._marker_count.setText(self._t(
+            "map.marker_count", "{count} 个标记", count=len(markers)
+        ))
+        if selected_row >= 0:
+            self._marker_list.setCurrentRow(selected_row)
+        elif self._selected_marker_id is not None:
+            self._selected_marker_id = None
+            self._canvas.select_marker(None)
+        self._update_marker_actions()
+
+    def show_marker_details(self, marker: MapMarker) -> None:
+        """在状态栏显示选中标记详情。"""
+        self._selected_marker_id = marker.id
+        self._canvas.select_marker(marker.id)
+        self._status.setText(self._t(
+            "map.marker_details",
+            "标记 {name}\nX {x}, Y {y}, Z {z}",
+            name=marker.name,
+            x=marker.x,
+            y=marker.y,
+            z=marker.z,
+        ))
+        self._update_marker_actions()
+        for row in range(self._marker_list.count()):
+            item = self._marker_list.item(row)
+            if item is not None and item.data(_MARKER_ID_ROLE) == marker.id:
+                self._marker_list.blockSignals(True)
+                self._marker_list.setCurrentRow(row)
+                self._marker_list.blockSignals(False)
+                break
+
+    def set_marker_busy(self, busy: bool) -> None:
+        """锁定标记增删按钮。"""
+        self._marker_busy = busy
+        self._update_marker_actions()
+
     def focus_block(
         self,
         block_x: float,
@@ -268,9 +370,68 @@ class QtRegionMapPanel(QWidget):
         coord: Optional[tuple[int, int]],
         size: Optional[int],
     ) -> None:
+        self._selected_marker_id = None
+        self._canvas.select_marker(None)
+        self._marker_list.clearSelection()
         self.show_selection(coord, size)
         self._open_nbt.setEnabled(coord is not None)
+        self._update_marker_actions()
         self._external_region_selected(coord, size)
+
+    def _handle_canvas_marker(self, marker: Optional[MapMarker]) -> None:
+        if marker is None:
+            return
+        self.show_marker_details(marker)
+        self._on_marker_selected(marker)
+
+    def _marker_item_changed(
+        self,
+        current: QListWidgetItem | None,
+        _previous: QListWidgetItem | None,
+    ) -> None:
+        if current is None:
+            return
+        marker_id = current.data(_MARKER_ID_ROLE)
+        if not isinstance(marker_id, str):
+            return
+        marker = next(
+            (item for item in self._markers if item.id == marker_id),
+            None,
+        )
+        if marker is None:
+            return
+        self.show_marker_details(marker)
+        self._on_marker_selected(marker)
+
+    def _prompt_add_marker(self) -> None:
+        center_x, center_z = self._canvas.center_block
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self._t("map.add_marker_title", "添加地图标记"))
+        form = QFormLayout(dialog)
+        name_field = QLineEdit(self._t("map.default_marker_name", "新标记"))
+        x_field = QLineEdit(str(int(center_x)))
+        z_field = QLineEdit(str(int(center_z)))
+        form.addRow(self._t("map.marker_name", "名称"), name_field)
+        form.addRow("X", x_field)
+        form.addRow("Z", z_field)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        name = name_field.text().strip()
+        if not name:
+            return
+        try:
+            x = int(float(x_field.text().strip()))
+            z = int(float(z_field.text().strip()))
+        except ValueError:
+            return
+        self._on_add_marker(name, x, z)
 
     def _dimension_index_changed(self, _index: int) -> None:
         dimension_id = self.current_dimension_id
@@ -295,14 +456,24 @@ class QtRegionMapPanel(QWidget):
     def _reset_view(self) -> None:
         self._canvas.fit_to_regions()
 
+    def _update_marker_actions(self) -> None:
+        enabled = self._dimension.isEnabled() and not self._marker_busy
+        self._add_marker.setEnabled(enabled)
+        self._delete_marker.setEnabled(
+            enabled and self._selected_marker_id is not None
+        )
+
     def _set_controls_enabled(self, enabled: bool) -> None:
         self._dimension.setEnabled(enabled)
         self._search.setEnabled(enabled)
         self._canvas.setEnabled(enabled)
+        self._marker_list.setEnabled(enabled)
         if not enabled:
             self._open_nbt.setEnabled(False)
+            self._selected_marker_id = None
         else:
             self._open_nbt.setEnabled(self._canvas.selected_region is not None)
+        self._update_marker_actions()
 
 
 __all__ = ["QtRegionMapPanel"]
