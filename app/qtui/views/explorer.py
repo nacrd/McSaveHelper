@@ -137,10 +137,14 @@ class ExplorerView(QWidget):
         self._disposed = False
         self._stats_coordinator = QtStatsCoordinator(app)
         self._search_coordinator = QtEntitySearchCoordinator(app)
-        self._region_map = QtRegionMapCoordinator(app)
         self._nbt_coordinator = QtNbtCoordinator(
             app,
             self._reload_after_nbt_commit,
+        )
+        self._region_map = QtRegionMapCoordinator(
+            app,
+            on_open_region_nbt=self._open_region_nbt,
+            on_dimension_synced=self._nbt_coordinator.set_dimension,
         )
         self._build()
         self._tasks = ExplorerTasks(
@@ -359,7 +363,10 @@ class ExplorerView(QWidget):
         self._region_map.set_world(snapshot.session)
         self._stats_coordinator.set_world(snapshot.session)
         self._search_coordinator.set_world(snapshot.session)
-        self._nbt_coordinator.set_world(snapshot.session)
+        self._nbt_coordinator.set_world(
+            snapshot.session,
+            dimension_id=self._region_map.current_dimension or "overworld",
+        )
         self.app.hide_progress()
 
     def _apply_load_error(self, error: Exception, generation: int) -> None:
@@ -721,6 +728,21 @@ class ExplorerView(QWidget):
 
     def _open_backup_center(self) -> None:
         self.app.view_manager.switch_view("backup_center")
+
+    def _open_region_nbt(
+        self,
+        region_x: int,
+        region_z: int,
+        dimension_id: str,
+    ) -> None:
+        """从地图选区打开区块 NBT 标签页。"""
+        self._nbt_coordinator.set_dimension(dimension_id)
+        self._nbt_coordinator.open_region_chunk(
+            region_x,
+            region_z,
+            dimension_id=dimension_id,
+        )
+        self._tabs.setCurrentIndex(5)
 
     def _reload_after_nbt_commit(self, world_path: Path) -> None:
         """提交发布后强制重建 Explorer 的不可变世界读会话。"""

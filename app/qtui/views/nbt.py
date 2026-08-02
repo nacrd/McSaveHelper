@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.models.nbt_edit import NbtChange, NbtPath
+from app.models.nbt_edit import ChunkNbtTarget, NbtChange, NbtPath
 from app.presenters.nbt_tree import format_nbt_value
 from app.qtui.views.nbt_tree import QtNbtTree
 from app.services.nbt_document_service import (
@@ -49,6 +49,8 @@ class QtNbtPanel(QWidget):
         on_remove: Command,
         on_discard: Command,
         on_commit: Command,
+        on_load_chunk: Command,
+        on_fill_world_coords: Command,
     ) -> None:
         """构建 NBT 工作区并绑定命令。
 
@@ -60,12 +62,23 @@ class QtNbtPanel(QWidget):
             on_remove: 撤销选中暂存项命令。
             on_discard: 丢弃全部暂存项命令。
             on_commit: 提交全部暂存项命令。
+            on_load_chunk: 按区域路径加载区块 NBT。
+            on_fill_world_coords: 用世界坐标填充区域/区块字段。
         """
         super().__init__()
         self._translate = translate
         self._has_world = False
         self._busy = False
-        self._build(on_load, on_reload, on_stage, on_remove, on_discard, on_commit)
+        self._build(
+            on_load,
+            on_reload,
+            on_stage,
+            on_remove,
+            on_discard,
+            on_commit,
+            on_load_chunk,
+            on_fill_world_coords,
+        )
         self.show_world(False)
 
     def _t(self, key: str, default: str = "", **kwargs: object) -> str:
@@ -79,12 +92,17 @@ class QtNbtPanel(QWidget):
         on_remove: Command,
         on_discard: Command,
         on_commit: Command,
+        on_load_chunk: Command,
+        on_fill_world_coords: Command,
     ) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
         self._tree = QtNbtTree(self._translate, on_stage)
         layout.addLayout(self._build_toolbar(on_load, on_reload))
+        layout.addLayout(
+            self._build_chunk_row(on_load_chunk, on_fill_world_coords)
+        )
         self._status = QLabel()
         self._status.setProperty("role", "muted")
         layout.addWidget(self._status)
@@ -116,6 +134,48 @@ class QtNbtPanel(QWidget):
         ))
         self._filter.textChanged.connect(self._tree.filter_items)
         row.addWidget(self._filter, 1)
+        return row
+
+    def _build_chunk_row(
+        self,
+        on_load_chunk: Command,
+        on_fill_world_coords: Command,
+    ) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(QLabel(self._t("nbt_editor.region_file", "区域")))
+        self._region_file = QLineEdit()
+        self._region_file.setPlaceholderText("region/r.0.0.mca")
+        row.addWidget(self._region_file, 2)
+        row.addWidget(QLabel(self._t("nbt_editor.chunk_x", "区块 X")))
+        self._chunk_x = QLineEdit("0")
+        self._chunk_x.setFixedWidth(56)
+        row.addWidget(self._chunk_x)
+        row.addWidget(QLabel(self._t("nbt_editor.chunk_z", "区块 Z")))
+        self._chunk_z = QLineEdit("0")
+        self._chunk_z.setFixedWidth(56)
+        row.addWidget(self._chunk_z)
+        row.addWidget(QLabel(self._t("nbt_editor.world_x", "世界 X")))
+        self._world_x = QLineEdit("0")
+        self._world_x.setFixedWidth(72)
+        row.addWidget(self._world_x)
+        row.addWidget(QLabel(self._t("nbt_editor.world_z", "世界 Z")))
+        self._world_z = QLineEdit("0")
+        self._world_z.setFixedWidth(72)
+        row.addWidget(self._world_z)
+        self._fill_coords = QPushButton(self._t(
+            "nbt_editor.fill_coords", "填入坐标"
+        ))
+        self._fill_coords.clicked.connect(
+            lambda _checked: on_fill_world_coords()
+        )
+        row.addWidget(self._fill_coords)
+        self._load_chunk = QPushButton(self._t(
+            "nbt_editor.load_chunk", "加载区块"
+        ))
+        self._load_chunk.setProperty("role", "primary")
+        self._load_chunk.clicked.connect(lambda _checked: on_load_chunk())
+        row.addWidget(self._load_chunk)
         return row
 
     def _build_stage_panel(
@@ -195,6 +255,11 @@ class QtNbtPanel(QWidget):
         self._tree.clear()
         self._stages.setRowCount(0)
         self._filter.clear()
+        self._region_file.clear()
+        self._chunk_x.setText("0")
+        self._chunk_z.setText("0")
+        self._world_x.setText("0")
+        self._world_z.setText("0")
         self._status.setText(self._t(
             "nbt_editor.scanning" if has_world else "nbt_editor.no_world",
             "正在扫描 NBT 文档..." if has_world else "未加载存档",
@@ -203,6 +268,39 @@ class QtNbtPanel(QWidget):
             "nbt_editor.stage_count", "暂存区: {count} 个变更", count=0
         ))
         self._update_actions()
+
+    @property
+    def region_file_text(self) -> str:
+        """返回区域文件相对路径输入。"""
+        return self._region_file.text().strip().replace("\\", "/")
+
+    @property
+    def chunk_coords(self) -> tuple[int, int]:
+        """返回区块局部坐标；非法时抛出 ValueError。"""
+        return int(self._chunk_x.text().strip()), int(self._chunk_z.text().strip())
+
+    @property
+    def world_coords(self) -> tuple[float, float]:
+        """返回世界 X/Z 输入；非法时抛出 ValueError。"""
+        return float(self._world_x.text().strip()), float(self._world_z.text().strip())
+
+    def set_chunk_fields(
+        self,
+        region_file: str,
+        chunk_x: int,
+        chunk_z: int,
+        *,
+        world_x: int | None = None,
+        world_z: int | None = None,
+    ) -> None:
+        """写入区块加载表单字段。"""
+        self._region_file.setText(region_file)
+        self._chunk_x.setText(str(chunk_x))
+        self._chunk_z.setText(str(chunk_z))
+        if world_x is not None:
+            self._world_x.setText(str(world_x))
+        if world_z is not None:
+            self._world_z.setText(str(world_z))
 
     def show_targets(self, targets: Sequence[NbtDocumentTarget]) -> None:
         """显示扫描出的文档目标。"""
@@ -234,6 +332,24 @@ class QtNbtPanel(QWidget):
         self._tree.load_document(document.data, matching)
         self._status.setText(self._t(
             "nbt_editor.loaded", "已加载: {target}", target=document.target.label
+        ))
+        self.set_busy(False)
+
+    def show_chunk(
+        self,
+        target: ChunkNbtTarget,
+        label: str,
+        changes: Sequence[NbtChange],
+    ) -> None:
+        """投影已加载区块以及该区块目标的暂存覆盖值。"""
+        matching = tuple(
+            change for change in changes
+            if isinstance(change.target, ChunkNbtTarget)
+            and change.target.key == target.key
+        )
+        self._tree.load_document(target.data, matching)
+        self._status.setText(self._t(
+            "nbt_editor.loaded", "已加载: {target}", target=label
         ))
         self.set_busy(False)
 
@@ -313,10 +429,18 @@ class QtNbtPanel(QWidget):
     def _update_actions(self) -> None:
         has_target = self.selected_target is not None
         has_stages = self._stages.rowCount() > 0
-        self._targets.setEnabled(self._has_world and not self._busy)
+        enabled = self._has_world and not self._busy
+        self._targets.setEnabled(enabled)
         self._reload.setEnabled(has_target and not self._busy)
-        self._filter.setEnabled(self._has_world and not self._busy)
-        self._tree.setEnabled(self._has_world and not self._busy)
+        self._filter.setEnabled(enabled)
+        self._tree.setEnabled(enabled)
+        self._region_file.setEnabled(enabled)
+        self._chunk_x.setEnabled(enabled)
+        self._chunk_z.setEnabled(enabled)
+        self._world_x.setEnabled(enabled)
+        self._world_z.setEnabled(enabled)
+        self._fill_coords.setEnabled(enabled)
+        self._load_chunk.setEnabled(enabled)
         self._remove.setEnabled(
             self.selected_stage_index is not None and not self._busy
         )

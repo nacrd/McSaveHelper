@@ -107,6 +107,23 @@ class _Session:
     def load_player_data(self, uuid: str) -> Compound:
         return self.get_player_data(uuid)
 
+    def load_chunk_nbt(
+        self,
+        region_path: Path,
+        chunk_x: int,
+        chunk_z: int,
+    ) -> tuple[Compound, Path] | None:
+        absolute = self.world_path / region_path
+        if not absolute.is_file():
+            return None
+        from core.mca import RegionFile
+
+        with RegionFile.open(absolute) as region:
+            if not region.has_chunk(chunk_x, chunk_z):
+                return None
+            data = region.read_chunk(chunk_x, chunk_z)
+        return data, absolute
+
     @staticmethod
     def get_world_info() -> WorldInfo:
         return WorldInfo(
@@ -488,6 +505,55 @@ def test_region_map_scan_projects_regions_and_search(
 
     coordinator._on_search("r.1.0")
     assert panel.canvas.selected_region == (1, 0)
+
+
+def test_chunk_nbt_load_and_stage_from_map_selection(
+    view: ExplorerView,
+    tmp_path: Path,
+) -> None:
+    from core.mca import WritableRegion
+    import core.nbt as nbtlib
+
+    region_dir = tmp_path / "region"
+    region_dir.mkdir(parents=True, exist_ok=True)
+    path = region_dir / "r.0.0.mca"
+    writer = WritableRegion.empty(path)
+    writer.set_chunk(0, 0, nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "xPos": nbtlib.Int(0),
+        "zPos": nbtlib.Int(0),
+        "Status": nbtlib.String("full"),
+    }))
+    writer.save(path, backup=False)
+
+    view.on_save_selected(str(tmp_path))
+    assert _wait_until(lambda: view.world_session is not None)
+
+    view._open_region_nbt(0, 0, "overworld")
+    coordinator = view._nbt_coordinator
+    panel = coordinator.panel
+
+    assert _wait_until(lambda: coordinator.chunk_target is not None)
+    assert view._tabs.currentIndex() == 5
+    assert panel.region_file_text == "region/r.0.0.mca"
+    assert panel._status.text().startswith("已加载:")
+    assert coordinator.chunk_target is not None
+    assert coordinator.chunk_target.chunk_x == 0
+
+    tree = panel._tree
+    assert tree.topLevelItemCount() > 0
+    status_item = None
+    for index in range(tree.topLevelItemCount()):
+        item = tree.topLevelItem(index)
+        if item is not None and item.text(0) == "Status":
+            status_item = item
+            break
+    assert status_item is not None
+    assert tree.stage_item_value(status_item, "edited")
+    assert len(coordinator.staged_changes) == 1
+    change = coordinator.staged_changes[0]
+    assert change.format == "chunk"
+    assert change.display_path.endswith("Status")
 
 
 def test_player_form_stage_goes_to_shared_nbt_store(

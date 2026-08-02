@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from concurrent.futures import CancelledError
 from dataclasses import dataclass
-from typing import Callable, Optional
+from pathlib import Path
+from typing import Any, Callable, Optional
 
 from app.models.nbt_edit import NbtChange
 from app.qtui.utils import run_on_ui
@@ -13,6 +14,7 @@ from app.services.execution_runtime import (
     OperationHandle,
     TaskPriority,
 )
+from app.services.nbt_chunk_service import ChunkLoadResult, load_chunk_payload
 from app.services.nbt_commit_service import NbtCommitResult, commit_nbt_changes
 from app.services.nbt_document_service import (
     LoadedNbtDocument,
@@ -39,6 +41,8 @@ class NbtTaskCallbacks:
     targets_error: Callable[[Exception, int], None]
     document_ready: Callable[[LoadedNbtDocument, int, int], None]
     document_error: Callable[[Exception, int, int], None]
+    chunk_ready: Callable[[ChunkLoadResult, int, int], None]
+    chunk_error: Callable[[Exception, int, int], None]
     commit_success: Callable[[NbtCommitCompletion, int], None]
     commit_error: Callable[[Exception, int], None]
     commit_cancelled: Callable[[int], None]
@@ -64,9 +68,7 @@ class NbtTasks:
         self._session: Optional[WorldSession] = None
         self._world_generation = 0
         self._document_generation = 0
-        self._document_handle: Optional[
-            OperationHandle[LoadedNbtDocument]
-        ] = None
+        self._document_handle: Optional[OperationHandle[Any]] = None
         self._commit_handle: Optional[OperationHandle[NbtCommitResult]] = None
         self._disposed = False
 
@@ -123,6 +125,48 @@ class NbtTasks:
         self._document_handle = handle
         handle.add_done_callback(
             lambda completed: self._finish_document(
+                completed, world_generation, document_generation
+            )
+        )
+        return True
+
+    def load_chunk(
+        self,
+        relative_path: Path,
+        relative_text: str,
+        chunk_x: int,
+        chunk_z: int,
+    ) -> bool:
+        """异步读取当前世界内指定区域文件的区块 NBT。"""
+        session = self._session
+        if self._disposed or session is None:
+            return False
+        self._document_generation += 1
+        document_generation = self._document_generation
+        self._cancel_document()
+        world_generation = self._world_generation
+        handle = self._scope.submit(
+            "load_chunk",
+            lambda context: load_chunk_payload(
+                session,
+                relative_path,
+                relative_text,
+                chunk_x,
+                chunk_z,
+                context,
+            ),
+            priority=TaskPriority.INTERACTIVE,
+            feature="explorer.nbt",
+            world_id=str(session.world_path),
+            generation=world_generation,
+            metadata={
+                "region": relative_text,
+                "chunk": f"{chunk_x},{chunk_z}",
+            },
+        )
+        self._document_handle = handle
+        handle.add_done_callback(
+            lambda completed: self._finish_chunk(
                 completed, world_generation, document_generation
             )
         )
@@ -199,6 +243,33 @@ class NbtTasks:
             document_generation,
         )
 
+    def _finish_chunk(
+        self,
+        handle: OperationHandle[ChunkLoadResult],
+        world_generation: int,
+        document_generation: int,
+    ) -> None:
+        if handle.cancelled:
+            return
+        try:
+            result = handle.result()
+        except (CancelledError, OperationCancelledError):
+            return
+        except Exception as error:
+            run_on_ui(
+                self._deliver_chunk_error,
+                error,
+                world_generation,
+                document_generation,
+            )
+            return
+        run_on_ui(
+            self._deliver_chunk,
+            result,
+            world_generation,
+            document_generation,
+        )
+
     def _finish_commit(
         self,
         handle: OperationHandle[NbtCommitResult],
@@ -253,6 +324,30 @@ class NbtTasks:
         if self.is_current_document(world_generation, document_generation):
             self._document_handle = None
             self._callbacks.document_error(
+                error, world_generation, document_generation
+            )
+
+    def _deliver_chunk(
+        self,
+        result: ChunkLoadResult,
+        world_generation: int,
+        document_generation: int,
+    ) -> None:
+        if self.is_current_document(world_generation, document_generation):
+            self._document_handle = None
+            self._callbacks.chunk_ready(
+                result, world_generation, document_generation
+            )
+
+    def _deliver_chunk_error(
+        self,
+        error: Exception,
+        world_generation: int,
+        document_generation: int,
+    ) -> None:
+        if self.is_current_document(world_generation, document_generation):
+            self._document_handle = None
+            self._callbacks.chunk_error(
                 error, world_generation, document_generation
             )
 

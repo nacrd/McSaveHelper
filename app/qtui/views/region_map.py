@@ -42,6 +42,7 @@ class QtRegionMapPanel(QWidget):
         on_refresh: Command,
         on_region_selected: RegionSelected,
         on_camera_changed: CameraChanged,
+        on_open_nbt: Command,
     ) -> None:
         """构建区域地图面板。
 
@@ -52,12 +53,14 @@ class QtRegionMapPanel(QWidget):
             on_refresh: 重新扫描当前维度。
             on_region_selected: 画布区域选择回调。
             on_camera_changed: 镜头变化回调。
+            on_open_nbt: 打开选中区域的区块 NBT。
         """
         super().__init__()
         self._translate = translate
         self._on_dimension_changed = on_dimension_changed
         self._on_search = on_search
         self._on_refresh = on_refresh
+        self._on_open_nbt = on_open_nbt
         self._external_region_selected = on_region_selected
         self._build(on_region_selected, on_camera_changed)
         self.show_empty()
@@ -132,6 +135,12 @@ class QtRegionMapPanel(QWidget):
             self._t("map.refresh", "刷新"),
             on_click=self._on_refresh,
         ))
+        self._open_nbt = btn_ghost(
+            self._t("map.open_nbt", "打开 NBT"),
+            on_click=self._on_open_nbt,
+        )
+        self._open_nbt.setEnabled(False)
+        row.addWidget(self._open_nbt)
         return row
 
     @property
@@ -260,6 +269,7 @@ class QtRegionMapPanel(QWidget):
         size: Optional[int],
     ) -> None:
         self.show_selection(coord, size)
+        self._open_nbt.setEnabled(coord is not None)
         self._external_region_selected(coord, size)
 
     def _dimension_index_changed(self, _index: int) -> None:
@@ -289,6 +299,10 @@ class QtRegionMapPanel(QWidget):
         self._dimension.setEnabled(enabled)
         self._search.setEnabled(enabled)
         self._canvas.setEnabled(enabled)
+        if not enabled:
+            self._open_nbt.setEnabled(False)
+        else:
+            self._open_nbt.setEnabled(self._canvas.selected_region is not None)
 
 
 __all__ = ["QtRegionMapPanel"]

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
 from app.controllers.map_controller import MapController
 from app.qtui.context import (
@@ -35,13 +35,23 @@ class QtRegionMapHost(
 class QtRegionMapCoordinator:
     """连接区域地图面板、维度会话与扫描任务。"""
 
-    def __init__(self, app: QtRegionMapHost) -> None:
+    def __init__(
+        self,
+        app: QtRegionMapHost,
+        on_open_region_nbt: Callable[[int, int, str], None] | None = None,
+        on_dimension_synced: Callable[[str], None] | None = None,
+    ) -> None:
         """创建协调器与面板。
 
         Args:
             app: 翻译、对话框与执行运行时端口。
+            on_open_region_nbt: 打开选中区域 NBT 的回调
+                ``(region_x, region_z, dimension_id)``。
+            on_dimension_synced: 维度切换后同步给 NBT 等模块。
         """
         self._app = app
+        self._on_open_region_nbt = on_open_region_nbt
+        self._on_dimension_synced = on_dimension_synced
         self._session: WorldSession | None = None
         self._dimension_dirs: dict[str, Path] = {}
         self._current_dimension = ""
@@ -54,6 +64,7 @@ class QtRegionMapCoordinator:
             self.refresh,
             self._on_region_selected,
             self._on_camera_changed,
+            self._open_selected_nbt,
         )
         self._tasks = RegionMapTasks(
             app.execution_runtime,
@@ -172,6 +183,8 @@ class QtRegionMapCoordinator:
         state = self._map_controller.snapshot
         self.refresh()
         self.panel.set_camera(state.center_x, state.center_z, state.scale)
+        if self._on_dimension_synced is not None:
+            self._on_dimension_synced(dimension_id)
 
     def _on_search(self, query: str) -> None:
         text = query.strip()
@@ -211,6 +224,22 @@ class QtRegionMapCoordinator:
     ) -> None:
         del size
         self._selected_region = coord
+
+    def _open_selected_nbt(self) -> None:
+        if self._selected_region is None:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.select_region_first", "请先在地图中选择一个区域。"),
+            )
+            return
+        if self._on_open_region_nbt is None:
+            return
+        region_x, region_z = self._selected_region
+        self._on_open_region_nbt(
+            region_x,
+            region_z,
+            self._current_dimension or "overworld",
+        )
 
     def _on_camera_changed(
         self,
