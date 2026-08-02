@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, Sequence
 
 from app.models.nbt_edit import NbtChange, NbtPath, NbtStageStore
 from app.qtui.context import (
@@ -146,6 +146,29 @@ class QtNbtCoordinator:
         self._store.add(change)
         self.panel.show_stages(self._store.changes)
         self._app.log(f"已暂存 NBT 修改: {display_path}", "QUEUE")
+
+    def stage_external_changes(
+        self,
+        changes: Sequence[NbtChange],
+    ) -> int:
+        """把玩家表单等外部来源的变更并入共享暂存区。
+
+        Args:
+            changes: 已校验的不可变变更序列。
+
+        Returns:
+            实际写入暂存区的变更数量。
+        """
+        if self._tasks.is_committing or not changes:
+            return 0
+        for change in changes:
+            self._store.add(change)
+        self.panel.show_stages(self._store.changes)
+        self._app.log(
+            f"已暂存外部 NBT 修改: {len(changes)} 个",
+            "QUEUE",
+        )
+        return len(changes)
 
     def remove_selected(self) -> None:
         """撤销暂存表选中的单条变更。"""

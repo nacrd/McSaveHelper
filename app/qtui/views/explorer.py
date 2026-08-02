@@ -32,11 +32,16 @@ from app.qtui.views.entity_search_coordinator import (
 )
 from app.qtui.views.nbt_coordinator import QtNbtCoordinator
 from app.qtui.views.player import QtPlayerPanel
-from app.qtui.views.player_tasks import PlayerTaskCallbacks, PlayerTasks
+from app.qtui.views.player_tasks import (
+    PlayerDetailResult,
+    PlayerTaskCallbacks,
+    PlayerTasks,
+)
+from app.qtui.views.region_map_coordinator import QtRegionMapCoordinator
 from app.qtui.views.stats_coordinator import QtStatsCoordinator
 from app.qtui.views.world_info import QtWorldInfoPanel
 from app.services.backup_service import BackupRecord, BackupService
-from app.services.player.models import PlayerRef, PlayerSummary
+from app.services.player.models import PlayerEditResult, PlayerRef
 from app.services.player_service import PlayerService
 from app.services.world_repository import WorldRepository
 from app.services.world_stats_service import WorldStatsService
@@ -108,7 +113,7 @@ def map_index_progress(frame: WorldIndexProgressFrame) -> tuple[float, str]:
 
 
 class ExplorerView(QWidget):
-    """存档浏览器壳层、存档信息与只读玩家标签。"""
+    """存档浏览器壳层：信息、玩家、区域地图、统计、搜索与 NBT。"""
 
     _TAB_KEYS = (
         ("explorer.tab_world_info", "存档信息"),
@@ -132,6 +137,7 @@ class ExplorerView(QWidget):
         self._disposed = False
         self._stats_coordinator = QtStatsCoordinator(app)
         self._search_coordinator = QtEntitySearchCoordinator(app)
+        self._region_map = QtRegionMapCoordinator(app)
         self._nbt_coordinator = QtNbtCoordinator(
             app,
             self._reload_after_nbt_commit,
@@ -155,12 +161,14 @@ class ExplorerView(QWidget):
         )
         self._player_tasks = PlayerTasks(
             app.execution_runtime,
-            PlayerService(log=app.log),
+            self._player_service,
             PlayerTaskCallbacks(
                 players_ready=self._apply_players,
                 players_error=self._apply_players_error,
-                summary_ready=self._apply_player_summary,
-                summary_error=self._apply_player_summary_error,
+                detail_ready=self._apply_player_detail,
+                detail_error=self._apply_player_detail_error,
+                export_success=self._apply_player_export_success,
+                export_error=self._apply_player_export_error,
             ),
         )
 
@@ -187,13 +195,20 @@ class ExplorerView(QWidget):
         self._players = QtPlayerPanel(
             self.app.translate,
             self._select_player,
+            self._refresh_player_form,
+            self._stage_player_form,
+            self._stage_player_teleport,
+            self._export_player_summary,
         )
+        self._player_service = PlayerService(log=self.app.log)
         self._tabs.addTab(
             self._players,
             self._t("explorer.tab_players", "玩家"),
         )
-        self._tabs.addTab(QWidget(), self._t("explorer.tab_map", "地图"))
-        self._tabs.setTabEnabled(2, False)
+        self._tabs.addTab(
+            self._region_map.panel,
+            self._t("explorer.tab_map", "地图"),
+        )
         self._tabs.addTab(
             self._stats_coordinator.panel,
             self._t("explorer.tab_stats", "统计"),
@@ -241,6 +256,7 @@ class ExplorerView(QWidget):
             self._loaded_world_path = world_path
             self.world_session = None
             self._player_tasks.clear_world()
+            self._region_map.clear_world()
             self._stats_coordinator.clear_world()
             self._search_coordinator.clear_world()
             self._nbt_coordinator.clear_world()
@@ -340,6 +356,7 @@ class ExplorerView(QWidget):
         self._world_info.show_info(snapshot.world_info, snapshot.stats)
         self._players.show_loading()
         self._player_tasks.load_players(snapshot.session)
+        self._region_map.set_world(snapshot.session)
         self._stats_coordinator.set_world(snapshot.session)
         self._search_coordinator.set_world(snapshot.session)
         self._nbt_coordinator.set_world(snapshot.session)
@@ -351,6 +368,7 @@ class ExplorerView(QWidget):
         self.world_session = None
         self._loaded_world_path = None
         self._player_tasks.clear_world()
+        self._region_map.clear_world()
         self._stats_coordinator.clear_world()
         self._search_coordinator.clear_world()
         self._nbt_coordinator.clear_world()
@@ -378,6 +396,7 @@ class ExplorerView(QWidget):
             return
         self._tasks.clear_world()
         self._player_tasks.clear_world()
+        self._region_map.clear_world()
         self._stats_coordinator.clear_world()
         self._search_coordinator.clear_world()
         self._nbt_coordinator.clear_world()
@@ -415,40 +434,228 @@ class ExplorerView(QWidget):
         session = self.world_session
         if session is None:
             return
-        self._players.show_summary_loading(uuid)
-        self._player_tasks.load_summary(session, uuid)
+        self._players.show_detail_loading(uuid)
+        self._player_tasks.load_detail(session, uuid)
 
-    def _apply_player_summary(
+    def _apply_player_detail(
         self,
-        summary: PlayerSummary | None,
+        detail: PlayerDetailResult,
         uuid: str,
         world_generation: int,
-        summary_generation: int,
+        detail_generation: int,
     ) -> None:
-        if not self._player_tasks.is_current_summary(
-            uuid, world_generation, summary_generation
+        if not self._player_tasks.is_current_detail(
+            uuid, world_generation, detail_generation
         ):
             return
-        if summary is None:
-            self._players.show_summary_unavailable(uuid)
+        if detail.summary is None and detail.player_data is None:
+            self._players.show_detail_unavailable(uuid)
             return
-        self._players.show_summary(summary)
+        self._players.show_detail(detail)
 
-    def _apply_player_summary_error(
+    def _apply_player_detail_error(
         self,
         error: Exception,
         uuid: str,
         world_generation: int,
-        summary_generation: int,
+        detail_generation: int,
     ) -> None:
-        if not self._player_tasks.is_current_summary(
-            uuid, world_generation, summary_generation
+        if not self._player_tasks.is_current_detail(
+            uuid, world_generation, detail_generation
         ):
             return
-        self._players.show_summary_unavailable(uuid)
+        self._players.show_detail_unavailable(uuid)
         self.app.handle_exception(
             error,
             title=self._t("player.error.load", "加载玩家数据失败"),
+        )
+
+    def _refresh_player_form(self) -> None:
+        """从当前玩家 NBT 回填编辑表单。"""
+        editor = self._players.editor
+        if editor.player_data is None:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t("player.need_select", "请先选择玩家。"),
+            )
+            return
+        try:
+            editor.refresh_form_from_data()
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            self.app.handle_exception(
+                error,
+                title=self._t(
+                    "player.error.refresh_form", "刷新玩家编辑表单失败"
+                ),
+            )
+
+    def _stage_player_form(self) -> None:
+        """把玩家表单差异暂存到共享 NBT 暂存区。"""
+        uuid = self._players.current_uuid
+        editor = self._players.editor
+        player_data = editor.player_data
+        if not uuid or player_data is None:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t("player.need_select", "请先选择玩家。"),
+            )
+            return
+        try:
+            result = self._player_service.build_edit_changes(
+                uuid,
+                player_data,
+                editor.collect_field_values(),
+                specs=editor.active_specs(),
+                target_label=(
+                    f"{self._t('player.nbt_label', '玩家 NBT')}: {uuid}"
+                ),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            self.app.handle_exception(
+                error,
+                title=self._t("player.error.stage", "暂存玩家数据失败"),
+            )
+            return
+        self._apply_player_stage_result(result)
+
+    def _stage_player_teleport(self) -> None:
+        """根据死亡位置暂存坐标传送变更。"""
+        uuid = self._players.current_uuid
+        editor = self._players.editor
+        player_data = editor.player_data
+        if not uuid or player_data is None:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t("player.need_select", "请先选择玩家。"),
+            )
+            return
+        try:
+            result = self._player_service.build_teleport_to_death_changes(
+                uuid,
+                player_data,
+                target_label=(
+                    f"{self._t('player.nbt_label', '玩家 NBT')}: {uuid}"
+                ),
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            self.app.handle_exception(
+                error,
+                title=self._t("player.error.teleport", "暂存传送失败"),
+            )
+            return
+        if result.errors:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t(
+                    "player.no_death_location",
+                    "当前玩家没有可用的死亡位置。",
+                ),
+            )
+            return
+        staged = self._nbt_coordinator.stage_external_changes(result.changes)
+        if staged:
+            self.app.info_dialog(
+                self._t("player.edit.staged_title", "已暂存"),
+                self._t(
+                    "player.teleport_death_staged",
+                    "已暂存传送到死亡点的坐标修改。",
+                ),
+            )
+            self._tabs.setCurrentIndex(5)
+
+    def _apply_player_stage_result(self, result: PlayerEditResult) -> None:
+        if result.errors:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t(
+                    "player.edit.validation_errors",
+                    "部分字段未暂存：{errors}",
+                    errors=", ".join(result.errors),
+                ),
+            )
+        if result.changes:
+            self._nbt_coordinator.stage_external_changes(result.changes)
+        if result.staged_count:
+            self.app.info_dialog(
+                self._t("player.edit.staged_title", "已暂存"),
+                self._t(
+                    "player.edit.staged_body",
+                    "已暂存 {count} 个玩家数据修改，可到 NBT 页查看并提交。",
+                    count=result.staged_count,
+                ),
+            )
+            self._tabs.setCurrentIndex(5)
+            return
+        if not result.errors:
+            self.app.info_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t(
+                    "player.edit.no_changes",
+                    "没有检测到需要暂存的玩家数据修改。",
+                ),
+            )
+
+    def _export_player_summary(self) -> None:
+        """弹出保存对话框并异步导出玩家摘要。"""
+        session = self.world_session
+        uuid = self._players.current_uuid
+        if session is None or not uuid:
+            self.app.warn_dialog(
+                self._t("dialogs.hint", "提示"),
+                self._t("player.need_select", "请先选择玩家。"),
+            )
+            return
+        path = self.app.save_file(
+            title=self._t("player.export_dialog", "导出玩家摘要"),
+            default_ext=".json",
+            file_types=[
+                ("JSON", "*.json"),
+                ("Text", "*.txt"),
+            ],
+        )
+        if not path:
+            return
+        try:
+            if not self._player_tasks.export_summary(
+                session,
+                uuid,
+                Path(path),
+                self.app.translate,
+            ):
+                self.app.warn_dialog(
+                    self._t("dialogs.hint", "提示"),
+                    self._t("player.need_select", "请先选择玩家。"),
+                )
+        except (OSError, RuntimeError, ValueError) as error:
+            self.app.handle_exception(
+                error,
+                title=self._t("player.error.export", "导出玩家摘要失败"),
+            )
+
+    def _apply_player_export_success(
+        self,
+        output_path: Path,
+        generation: int,
+    ) -> None:
+        del generation
+        self.app.info_dialog(
+            self._t("player.export_ok_title", "导出成功"),
+            self._t(
+                "player.export_ok_body",
+                "已导出玩家摘要到：\n{path}",
+                path=str(output_path),
+            ),
+        )
+
+    def _apply_player_export_error(
+        self,
+        error: Exception,
+        generation: int,
+    ) -> None:
+        del generation
+        self.app.handle_exception(
+            error,
+            title=self._t("player.error.export", "导出玩家摘要失败"),
         )
 
     def _create_backup(self) -> None:
@@ -531,6 +738,7 @@ class ExplorerView(QWidget):
         self.world_session = None
         self._nbt_coordinator.close()
         self._search_coordinator.close()
+        self._region_map.close()
         self._stats_coordinator.close()
         self._player_tasks.close()
         self._tasks.close()

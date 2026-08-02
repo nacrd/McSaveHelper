@@ -18,6 +18,7 @@ from app.qtui.views.explorer import (
     map_index_progress,
 )
 from app.qtui.views.explorer_tasks import ExplorerWorldSnapshot
+from app.qtui.views.player_tasks import PlayerDetailResult
 from app.services.backup_service import BackupRecord
 from app.services.execution_runtime import ExecutionRuntime, LaneLimits
 from app.services.nbt_commit_service import NbtCommitResult
@@ -77,9 +78,15 @@ class _Session:
             "Pos": NbtList[Double]([10.0, 64.0, -3.0]),
         })
 
-    @staticmethod
-    def get_dimensions() -> list[dict[str, object]]:
-        return [{"id": "overworld"}]
+    def get_dimensions(self) -> list[dict[str, object]]:
+        region_dir = self.world_path / "region"
+        region_dir.mkdir(parents=True, exist_ok=True)
+        return [{
+            "id": "overworld",
+            "name": "主世界",
+            "region_dir": str(region_dir),
+            "coordinate_scale": 1.0,
+        }]
 
     def get_player_uuids(self) -> list[str]:
         return [self.player_uuid]
@@ -96,6 +103,9 @@ class _Session:
 
     def get_player_data(self, _uuid: str) -> Compound:
         return self.player_data
+
+    def load_player_data(self, uuid: str) -> Compound:
+        return self.get_player_data(uuid)
 
     @staticmethod
     def get_world_info() -> WorldInfo:
@@ -404,7 +414,7 @@ def test_explorer_enables_migrated_tabs(
     assert view._tabs.count() == 6
     assert view._tabs.isTabEnabled(0)
     assert view._tabs.isTabEnabled(1)
-    assert not view._tabs.isTabEnabled(2)
+    assert view._tabs.isTabEnabled(2)
     assert view._tabs.isTabEnabled(3)
     assert view._tabs.isTabEnabled(4)
     assert view._tabs.isTabEnabled(5)
@@ -436,18 +446,85 @@ def test_world_load_projects_player_list_and_summary(
     view.on_save_selected(str(tmp_path))
 
     assert _wait_until(lambda: view._players.list_state.total_count == 1)
-    assert _wait_until(lambda: "Alex" in view._players._summary.toPlainText())
+    assert _wait_until(
+        lambda: "Alex" in view._players.editor.summary_text()
+    )
     assert view._players.current_uuid == (
         "11111111222233334444555555555555"
     )
-    summary = view._players._summary.toPlainText()
+    summary = view._players.editor.summary_text()
     assert "18" in summary
     assert "minecraft:overworld" in summary
+    assert view._players.editor.player_data is not None
+    assert view._players.editor._fields["Health"].text() != ""
 
     view._players._filter.setText("missing")
     assert view._players.list_state.total_count == 0
     view._players._filter.setText("Alex")
     assert view._players.list_state.total_count == 1
+
+
+def test_region_map_scan_projects_regions_and_search(
+    view: ExplorerView,
+    tmp_path: Path,
+) -> None:
+    region_dir = tmp_path / "region"
+    region_dir.mkdir(parents=True, exist_ok=True)
+    (region_dir / "r.0.0.mca").write_bytes(b"0" * 2048)
+    (region_dir / "r.1.0.mca").write_bytes(b"1" * 4096)
+
+    view.on_save_selected(str(tmp_path))
+    assert _wait_until(lambda: view.world_session is not None)
+    coordinator = view._region_map
+    panel = coordinator.panel
+
+    assert _wait_until(lambda: len(panel.canvas._regions) == 2)
+    assert panel.current_dimension_id == "overworld"
+    assert "2" in panel._stats.text()
+
+    panel.canvas.select_region((0, 0))
+    assert coordinator.selected_region == (0, 0)
+    assert "r.0.0.mca" in panel._status.text()
+
+    coordinator._on_search("r.1.0")
+    assert panel.canvas.selected_region == (1, 0)
+
+
+def test_player_form_stage_goes_to_shared_nbt_store(
+    view: ExplorerView,
+    host: FakeHost,
+    tmp_path: Path,
+) -> None:
+    view.on_save_selected(str(tmp_path))
+    assert _wait_until(lambda: view._players.editor.player_data is not None)
+
+    editor = view._players.editor
+    editor._fields["Health"].setText("20")
+    view._stage_player_form()
+
+    assert len(view._nbt_coordinator.staged_changes) >= 1
+    change = view._nbt_coordinator.staged_changes[0]
+    assert change.path == ("Health",)
+    assert view._tabs.currentIndex() == 5
+    assert any("已暂存" in title for title, _message in host.infos)
+
+
+def test_player_export_writes_summary_file(
+    view: ExplorerView,
+    host: FakeHost,
+    tmp_path: Path,
+) -> None:
+    view.on_save_selected(str(tmp_path))
+    assert _wait_until(lambda: view._players.editor.player_data is not None)
+
+    output = tmp_path / "alex.json"
+    host.save_path = str(output)
+    view._export_player_summary()
+
+    assert _wait_until(lambda: output.exists())
+    payload = output.read_text(encoding="utf-8")
+    assert "Alex" in payload
+    assert any("导出成功" in title for title, _message in host.infos)
 
 
 def test_nbt_document_load_and_leaf_edit_are_staged(
@@ -549,30 +626,38 @@ def test_nbt_commit_failure_keeps_staged_snapshot(
     assert host.errors[-1][0] == "提交失败"
 
 
-def test_clear_world_rejects_stale_player_summary(
+def test_clear_world_rejects_stale_player_detail(
     view: ExplorerView,
     tmp_path: Path,
 ) -> None:
     view.on_save_selected(str(tmp_path))
     assert _wait_until(lambda: view._players.current_uuid is not None)
     session = cast(_Session, view.world_session)
-    summary = PlayerService().load_summary(
-        cast(Any, session), session.player_uuid
-    )
+    service = PlayerService()
+    summary = service.load_summary(cast(Any, session), session.player_uuid)
     assert summary is not None
+    detail = PlayerDetailResult(
+        player_data=session.player_data,
+        summary=summary,
+        containers=service.load_containers(
+            cast(Any, session), session.player_uuid
+        ),
+        attributes=(),
+        effects=(),
+    )
     world_generation = view._player_tasks._world_generation
-    summary_generation = view._player_tasks._summary_generation
+    detail_generation = view._player_tasks._detail_generation
 
     view.on_save_cleared()
-    view._apply_player_summary(
-        summary,
+    view._apply_player_detail(
+        detail,
         session.player_uuid,
         world_generation,
-        summary_generation,
+        detail_generation,
     )
 
     assert view._players.current_uuid is None
-    assert "Alex" not in view._players._summary.toPlainText()
+    assert "Alex" not in view._players.editor.summary_text()
 
 
 def test_stats_analysis_reuses_index_and_projects_tables(

@@ -1,16 +1,14 @@
-"""Qt Explorer 只读玩家列表与摘要面板。"""
+"""Qt Explorer 玩家列表与编辑面板。"""
 from __future__ import annotations
 
-from typing import Callable, Sequence
+from typing import Callable, Optional, Sequence
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QTextOption
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -21,17 +19,19 @@ from app.presenters.player_list_state import (
     PlayerListViewState,
     build_player_list_state,
 )
-from app.presenters.player_presenter import format_player_summary_text
 from app.qtui.components.cards import muted_label, section_title
-from app.services.player.models import PlayerRef, PlayerSummary
+from app.qtui.views.player_editor import QtPlayerEditor
+from app.qtui.views.player_tasks import PlayerDetailResult
+from app.services.player.models import PlayerRef
 
 
 Translate = Callable[..., str]
 PlayerSelected = Callable[[str], None]
+Command = Callable[[], None]
 
 
 class QtPlayerPanel(QWidget):
-    """提供玩家筛选、分页、选择和只读摘要。"""
+    """提供玩家筛选、分页、选择与详情编辑。"""
 
     _PAGE_SIZE = 40
 
@@ -39,25 +39,40 @@ class QtPlayerPanel(QWidget):
         self,
         translate: Translate,
         on_player_selected: PlayerSelected,
+        on_refresh: Command,
+        on_stage: Command,
+        on_teleport: Command,
+        on_export: Command,
     ) -> None:
         """构建玩家面板。
 
         Args:
             translate: UI 翻译回调。
             on_player_selected: 玩家 UUID 选择回调。
+            on_refresh: 刷新表单命令。
+            on_stage: 暂存表单修改命令。
+            on_teleport: 暂存传送到死亡点命令。
+            on_export: 导出玩家摘要命令。
         """
         super().__init__()
         self._translate = translate
         self._on_player_selected = on_player_selected
         self._refs: tuple[PlayerRef, ...] = ()
         self._page_index = 0
-        self._current_uuid: str | None = None
+        self._current_uuid: Optional[str] = None
         self._list_state = build_player_list_state(())
+        self._editor = QtPlayerEditor(
+            translate,
+            on_refresh,
+            on_stage,
+            on_teleport,
+            on_export,
+        )
         self._build()
         self.show_empty()
 
     @property
-    def current_uuid(self) -> str | None:
+    def current_uuid(self) -> Optional[str]:
         """返回当前选中玩家的规范化 UUID。"""
         return self._current_uuid
 
@@ -65,6 +80,11 @@ class QtPlayerPanel(QWidget):
     def list_state(self) -> PlayerListViewState:
         """返回当前筛选与分页投影，供测试和状态检查。"""
         return self._list_state
+
+    @property
+    def editor(self) -> QtPlayerEditor:
+        """返回右侧玩家编辑器。"""
+        return self._editor
 
     def _t(self, key: str, default: str = "", **kwargs: object) -> str:
         return self._translate(key, default, **kwargs)
@@ -76,8 +96,8 @@ class QtPlayerPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_player_list())
-        splitter.addWidget(self._build_summary())
-        splitter.setSizes([300, 680])
+        splitter.addWidget(self._editor)
+        splitter.setSizes([300, 780])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
@@ -120,25 +140,6 @@ class QtPlayerPanel(QWidget):
         layout.addLayout(pager)
         return host
 
-    def _build_summary(self) -> QWidget:
-        host = QWidget()
-        layout = QVBoxLayout(host)
-        layout.setContentsMargins(10, 0, 0, 0)
-        layout.setSpacing(8)
-        self._summary_title = section_title(self._t(
-            "player.export.title", "玩家摘要"
-        ))
-        layout.addWidget(self._summary_title)
-        self._summary_status = muted_label("")
-        layout.addWidget(self._summary_status)
-        self._summary = QPlainTextEdit()
-        self._summary.setReadOnly(True)
-        self._summary.setWordWrapMode(
-            QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
-        )
-        layout.addWidget(self._summary, 1)
-        return host
-
     def show_loading(self) -> None:
         """清除旧世界并显示玩家列表加载状态。"""
         self._refs = ()
@@ -151,9 +152,7 @@ class QtPlayerPanel(QWidget):
         ))
         self._previous.setEnabled(False)
         self._next.setEnabled(False)
-        self._show_summary_message(self._t(
-            "player.summary_placeholder", "选择玩家后显示摘要"
-        ))
+        self._editor.show_empty()
 
     def show_players(self, refs: Sequence[PlayerRef]) -> None:
         """投影玩家列表并在有数据时选择首项。"""
@@ -165,7 +164,8 @@ class QtPlayerPanel(QWidget):
             self._list.setCurrentRow(0)
         else:
             self._current_uuid = None
-            self._show_summary_message(self._t(
+            self._editor.show_empty()
+            self._editor.show_message(self._t(
                 "player.no_players", "当前存档没有玩家数据"
             ))
 
@@ -182,9 +182,7 @@ class QtPlayerPanel(QWidget):
         ))
         self._previous.setEnabled(False)
         self._next.setEnabled(False)
-        self._show_summary_message(self._t(
-            "player.summary_placeholder", "选择玩家后显示摘要"
-        ))
+        self._editor.show_empty()
 
     def show_list_error(self) -> None:
         """显示玩家列表读取失败状态。"""
@@ -197,36 +195,17 @@ class QtPlayerPanel(QWidget):
         self._previous.setEnabled(False)
         self._next.setEnabled(False)
 
-    def show_summary_loading(self, uuid: str) -> None:
-        """显示选中玩家摘要加载状态。"""
-        self._summary_status.setText(uuid)
-        self._summary.setPlainText(self._t(
-            "player.loading_summary", "正在加载玩家摘要..."
-        ))
+    def show_detail_loading(self, uuid: str) -> None:
+        """显示选中玩家详情加载状态。"""
+        self._editor.show_loading(uuid)
 
-    def show_summary(self, summary: PlayerSummary) -> None:
-        """使用框架中立 presenter 投影玩家摘要。"""
-        self._summary_title.setText(summary.ref.display_name)
-        self._summary_status.setText(
-            summary.ref.uuid_hyphen or summary.ref.uuid_norm
-        )
-        self._summary.setPlainText(format_player_summary_text(
-            summary, translate=self._translate
-        ))
+    def show_detail(self, detail: PlayerDetailResult) -> None:
+        """投影玩家详情到编辑器。"""
+        self._editor.show_detail(detail)
 
-    def show_summary_unavailable(self, uuid: str) -> None:
-        """显示玩家文件已消失或无法读取的状态。"""
-        self._summary_status.setText(uuid)
-        self._summary.setPlainText(self._t(
-            "player.summary_unavailable", "无法读取该玩家的摘要"
-        ))
-
-    def _show_summary_message(self, message: str) -> None:
-        self._summary_title.setText(self._t(
-            "player.export.title", "玩家摘要"
-        ))
-        self._summary_status.clear()
-        self._summary.setPlainText(message)
+    def show_detail_unavailable(self, uuid: str) -> None:
+        """显示玩家详情不可用状态。"""
+        self._editor.show_unavailable(uuid)
 
     def _on_filter_changed(self, _query: str) -> None:
         self._page_index = 0
