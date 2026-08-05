@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from app.qtui.components.buttons import btn_ghost, btn_primary
+from app.qtui.components.buttons import btn_danger, btn_ghost, btn_primary
 from app.qtui.components.cards import muted_label, section_title
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
 from core.mca.map_models import MapMarker
@@ -56,6 +57,8 @@ class QtRegionMapPanel(QWidget):
         on_marker_selected: MarkerSelected,
         on_add_marker: MarkerAddRequest,
         on_delete_marker: Command,
+        on_delete_region: Command,
+        on_export: Command,
     ) -> None:
         """构建区域地图面板。"""
         super().__init__()
@@ -67,10 +70,13 @@ class QtRegionMapPanel(QWidget):
         self._on_marker_selected = on_marker_selected
         self._on_add_marker = on_add_marker
         self._on_delete_marker = on_delete_marker
+        self._on_delete_region = on_delete_region
+        self._on_export = on_export
         self._external_region_selected = on_region_selected
         self._selected_marker_id: Optional[str] = None
         self._markers: tuple[MapMarker, ...] = ()
         self._marker_busy = False
+        self._region_delete_busy = False
         self._build(on_region_selected, on_camera_changed)
         self.show_empty()
 
@@ -158,6 +164,18 @@ class QtRegionMapPanel(QWidget):
         )
         self._open_nbt.setEnabled(False)
         row.addWidget(self._open_nbt)
+        self._delete_region = btn_danger(
+            self._t("map.delete_region", "删除区域"),
+            on_click=self._on_delete_region,
+        )
+        self._delete_region.setEnabled(False)
+        row.addWidget(self._delete_region)
+        self._export = btn_ghost(
+            self._t("map.export", "导出地图"),
+            on_click=self._on_export,
+        )
+        self._export.setEnabled(False)
+        row.addWidget(self._export)
         return row
 
     def _build_marker_side(self) -> QWidget:
@@ -365,6 +383,28 @@ class QtRegionMapPanel(QWidget):
         """写入画布镜头。"""
         self._canvas.set_camera(center_x, center_z, scale)
 
+    def confirm_delete_region(self, coord: tuple[int, int]) -> bool:
+        """确认删除选中区域文件。"""
+        answer = QMessageBox.warning(
+            self,
+            self._t("map.delete_region_title", "删除区域"),
+            self._t(
+                "map.delete_region_message",
+                "确定删除区域 r.{x}.{z}.mca？\n"
+                "删除前会自动备份；游戏下次进入该区域会重新生成。",
+                x=coord[0],
+                z=coord[1],
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def set_region_delete_busy(self, busy: bool) -> None:
+        """锁定区域删除相关按钮。"""
+        self._region_delete_busy = busy
+        self._update_region_actions()
+
     def _handle_region_selected(
         self,
         coord: Optional[tuple[int, int]],
@@ -374,7 +414,7 @@ class QtRegionMapPanel(QWidget):
         self._canvas.select_marker(None)
         self._marker_list.clearSelection()
         self.show_selection(coord, size)
-        self._open_nbt.setEnabled(coord is not None)
+        self._update_region_actions()
         self._update_marker_actions()
         self._external_region_selected(coord, size)
 
@@ -463,16 +503,21 @@ class QtRegionMapPanel(QWidget):
             enabled and self._selected_marker_id is not None
         )
 
+    def _update_region_actions(self) -> None:
+        has_region = self._canvas.selected_region is not None
+        base = self._dimension.isEnabled() and not self._region_delete_busy
+        self._open_nbt.setEnabled(base and has_region)
+        self._delete_region.setEnabled(base and has_region)
+        self._export.setEnabled(self._dimension.isEnabled())
+
     def _set_controls_enabled(self, enabled: bool) -> None:
         self._dimension.setEnabled(enabled)
         self._search.setEnabled(enabled)
         self._canvas.setEnabled(enabled)
         self._marker_list.setEnabled(enabled)
         if not enabled:
-            self._open_nbt.setEnabled(False)
             self._selected_marker_id = None
-        else:
-            self._open_nbt.setEnabled(self._canvas.selected_region is not None)
+        self._update_region_actions()
         self._update_marker_actions()
 
 

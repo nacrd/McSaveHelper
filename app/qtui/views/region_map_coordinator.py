@@ -5,12 +5,25 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 from app.controllers.map_controller import MapController
+from app.controllers.region_delete_controller import (
+    RegionDeleteBusyError,
+    RegionDeleteController,
+    RegionDeleteOutcome,
+    RegionDeleteRequest,
+    RegionDeleteStatus,
+)
 from app.qtui.context import (
     QtDialogPort,
+    QtFileDialogPort,
+    QtProgressPort,
     QtRuntimePort,
     QtTranslationPort,
 )
 from app.qtui.utils import run_on_ui
+from app.qtui.views.map_export_dialog import (
+    MapExportSession,
+    QtMapExportDialog,
+)
 from app.qtui.views.region_map import QtRegionMapPanel
 from app.qtui.views.region_map_tasks import (
     RegionMapTaskCallbacks,
@@ -22,6 +35,7 @@ from app.services.execution_runtime import (
     TaskQueueFullError,
 )
 from app.services.map_marker_service import MapMarkerService
+from app.services.world_transaction import WorldTransactionService
 from core.mca.map_models import BLOCKS_PER_REGION, MapMarker
 from core.mca.map_search import MapSearchError
 from core.omni.world_session import WorldSession
@@ -31,10 +45,17 @@ from core.region_utils import DimensionInfo
 class QtRegionMapHost(
     QtTranslationPort,
     QtDialogPort,
+    QtFileDialogPort,
+    QtProgressPort,
     QtRuntimePort,
     Protocol,
 ):
     """区域地图所需的应用端口。"""
+
+    @property
+    def world_transactions(self) -> WorldTransactionService:
+        """世界事务服务（框架中立端口）。"""
+        ...
 
 
 class QtRegionMapCoordinator:
@@ -73,6 +94,14 @@ class QtRegionMapCoordinator:
             post_to_ui=lambda callback: run_on_ui(callback),
             get_generation=lambda: self._host_generation,
         )
+        self._region_delete_scope = app.execution_runtime.create_scope(
+            "qt_region_map_delete"
+        )
+        self._region_delete_controller = RegionDeleteController(
+            self._region_delete_scope,
+            app.world_transactions,
+        )
+        self._map_export_dialog = QtMapExportDialog(app)
         self.panel = QtRegionMapPanel(
             app.translate,
             self._on_dimension_changed,
@@ -84,6 +113,8 @@ class QtRegionMapCoordinator:
             self._on_marker_selected,
             self._add_marker,
             self._delete_selected_marker,
+            on_delete_region=self._delete_selected_region,
+            on_export=self._open_map_export_dialog,
         )
         self._tasks = RegionMapTasks(
             app.execution_runtime,
@@ -112,6 +143,7 @@ class QtRegionMapCoordinator:
     def set_world(self, session: WorldSession) -> None:
         """绑定世界、刷新维度列表并扫描当前维度。"""
         self._host_generation += 1
+        self._map_export_dialog.invalidate_session()
         self._session = session
         self._selected_region = None
         dimensions = self._read_dimensions(session)
@@ -137,8 +169,11 @@ class QtRegionMapCoordinator:
         self._request_marker_load()
 
     def clear_world(self) -> None:
-        """取消扫描并恢复空状态。"""
+        """取消扫描/删除并恢复空状态。"""
         self._host_generation += 1
+        self._map_export_dialog.invalidate_session()
+        self._region_delete_controller.cancel()
+        self.panel.set_region_delete_busy(False)
         self._tasks.clear()
         self._map_controller.unbind_world()
         self._session = None
@@ -278,6 +313,123 @@ class QtRegionMapCoordinator:
             self.panel.canvas.scale, 0.12
         ))
 
+    def _delete_selected_region(self) -> None:
+        """校验内存选择，并把区域删除提交到共享 I/O 通道。"""
+        session = self._session
+        coord = self._selected_region
+        if session is None or coord is None:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.select_region_first", "请先在地图中选择一个区域。"),
+            )
+            return
+        if not self.panel.confirm_delete_region(coord):
+            return
+        region_dir = self._dimension_dirs.get(self._current_dimension)
+        if region_dir is None:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.missing_region_dir", "未找到当前维度的 region 目录"),
+            )
+            return
+        region_path = region_dir / f"r.{coord[0]}.{coord[1]}.mca"
+        world_path = session.world_path
+        request = RegionDeleteRequest(
+            world_path=world_path,
+            region_path=region_path,
+            coord=coord,
+            generation=self._host_generation,
+        )
+        self.panel.set_region_delete_busy(True)
+        try:
+            self._region_delete_controller.start(
+                request,
+                lambda outcome: run_on_ui(
+                    self._apply_region_delete_outcome,
+                    outcome,
+                ),
+            )
+        except RegionDeleteBusyError:
+            self.panel.set_region_delete_busy(False)
+            self._app.warn_dialog(
+                self._t("region_delete.busy_title", "删除进行中"),
+                self._t(
+                    "region_delete.busy_message",
+                    "已有区域删除正在执行，请等待当前操作完成。",
+                ),
+            )
+        except (TaskQueueFullError, RuntimeClosedError):
+            self.panel.set_region_delete_busy(False)
+            self._app.warn_dialog(
+                self._t("region_delete.queue_full_title", "后台任务繁忙"),
+                self._t(
+                    "region_delete.queue_full_message",
+                    "后台 I/O 队列已满，请稍后重试。",
+                ),
+            )
+        except Exception as error:
+            self.panel.set_region_delete_busy(False)
+            self._app.handle_exception(
+                error,
+                title=self._t("map.delete_region_failed", "删除区域失败"),
+            )
+
+    def _apply_region_delete_outcome(
+        self,
+        outcome: RegionDeleteOutcome,
+    ) -> None:
+        """在 UI 线程投影区域删除终态，并拒绝过期结果。"""
+        self.panel.set_region_delete_busy(False)
+        request = outcome.request
+        session = self._session
+        if (
+            request.generation != self._host_generation
+            or session is None
+            or session.world_path.resolve() != request.world_path.resolve()
+        ):
+            self._app.log(
+                f"丢弃过期区域删除回调: {request.region_path}",
+                "INFO",
+            )
+            return
+        if outcome.status is RegionDeleteStatus.CANCELLED:
+            self._app.warn_dialog(
+                self._t("region_delete.cancelled_title", "删除已取消"),
+                self._t(
+                    "region_delete.cancelled_message",
+                    "区域删除已在安全检查点取消，原存档保持不变。",
+                ),
+            )
+            return
+        if outcome.status is RegionDeleteStatus.FAILED:
+            error = outcome.error or RuntimeError("区域删除失败")
+            self._app.handle_exception(
+                error,
+                title=self._t("map.delete_region_failed", "删除区域失败"),
+            )
+            return
+        result = outcome.result
+        if result is None or not result.value:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.delete_region_failed", "删除区域失败"),
+            )
+            return
+        backup_name = result.backup.backup_path.name
+        self._app.info_dialog(
+            self._t("map.notice", "提示"),
+            self._t(
+                "map.delete_region_success",
+                "已删除区域 r.{x}.{z}.mca，游戏下次进入会重新生成。"
+                "安全备份: {backup}",
+                x=request.coord[0],
+                z=request.coord[1],
+                backup=backup_name,
+            ),
+        )
+        self._selected_region = None
+        self.refresh()
+
     def _add_marker(self, name: str, x: int, z: int) -> None:
         if self._session is None:
             self._app.warn_dialog(
@@ -385,6 +537,21 @@ class QtRegionMapCoordinator:
             self._current_dimension or "overworld",
         )
 
+    def _open_map_export_dialog(self) -> None:
+        """打开导出对话框，预填当前世界/维度/选区。"""
+        session = self._session
+        if session is None:
+            self._app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.select_save_first", "请先设置当前存档。"),
+            )
+            return
+        self._map_export_dialog.open(MapExportSession(
+            world_path=session.world_path,
+            dimension_id=self._current_dimension or "overworld",
+            selected_region=self._selected_region,
+        ))
+
     def _on_camera_changed(
         self,
         center_x: float,
@@ -422,11 +589,15 @@ class QtRegionMapCoordinator:
         return self._app.translate(key, default, **kwargs)
 
     def close(self) -> None:
-        """幂等关闭扫描任务、标记作用域与地图控制器。"""
+        """幂等关闭扫描任务、导出/删除/标记作用域与地图控制器。"""
         self._host_generation += 1
+        self._map_export_dialog.dispose()
+        self._region_delete_controller.cancel()
+        self.panel.set_region_delete_busy(False)
         self._tasks.close()
         self._map_controller.close()
         self._marker_scope.close()
+        self._region_delete_scope.close()
         self._session = None
         self._dimension_dirs.clear()
 

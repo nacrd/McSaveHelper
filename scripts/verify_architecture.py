@@ -172,12 +172,16 @@ def check_no_private_execution_runtime_fallback() -> CheckResult:
 
 
 def check_region_delete_uses_transaction() -> CheckResult:
-    """区域删除必须走统一世界事务端口。"""
+    """区域删除必须走统一世界事务端口（Flet 与 Qt 双路径）。"""
     region_tab = APP_ROOT / "ui" / "views" / "explorer" / "region_tab.py"
+    qt_coordinator = (
+        APP_ROOT / "qtui" / "views" / "region_map_coordinator.py"
+    )
     controller = APP_ROOT / "controllers" / "region_delete_controller.py"
     editor = APP_ROOT / "services" / "region_editor_service.py"
     if (
         not region_tab.is_file()
+        or not qt_coordinator.is_file()
         or not controller.is_file()
         or not editor.is_file()
     ):
@@ -186,6 +190,7 @@ def check_region_delete_uses_transaction() -> CheckResult:
             False, "missing region delete modules",
         )
     tab_source = region_tab.read_text(encoding="utf-8-sig")
+    qt_source = qt_coordinator.read_text(encoding="utf-8-sig")
     controller_source = controller.read_text(encoding="utf-8-sig")
     editor_source = editor.read_text(encoding="utf-8-sig")
     uses_controller = (
@@ -196,6 +201,17 @@ def check_region_delete_uses_transaction() -> CheckResult:
         return CheckResult(
             "region_delete_transaction",
             False, "region_tab does not route delete through controller",
+        )
+    qt_uses_controller = (
+        "RegionDeleteRequest" in qt_source
+        and "_region_delete_controller.start" in qt_source
+        and "world_transactions" in qt_source
+    )
+    if not qt_uses_controller:
+        return CheckResult(
+            "region_delete_transaction",
+            False,
+            "qt region map does not route delete through controller",
         )
     if (
         "scope.submit" not in controller_source
@@ -215,6 +231,12 @@ def check_region_delete_uses_transaction() -> CheckResult:
             "region_delete_transaction",
             False,
             "region_tab still uses direct reset_region backup path",
+        )
+    if "reset_region(region_path, backup=True)" in qt_source:
+        return CheckResult(
+            "region_delete_transaction",
+            False,
+            "qt region map still uses direct reset_region backup path",
         )
     return CheckResult(
         "region_delete_transaction",

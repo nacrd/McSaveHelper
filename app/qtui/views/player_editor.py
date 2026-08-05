@@ -1,14 +1,15 @@
-"""Qt Explorer 玩家 HUD、编辑表单与容器只读投影。"""
+"""Qt Explorer 玩家 HUD、编辑表单与物品格子投影。"""
 from __future__ import annotations
 
-from typing import Callable, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
-    QHBoxLayout,
     QLabel,
+    QHBoxLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -21,7 +22,10 @@ from PySide6.QtWidgets import (
 from app.presenters.player_presenter import format_player_summary_text
 from app.qtui.components.buttons import btn_ghost, btn_primary
 from app.qtui.components.cards import muted_label, section_title
+from app.qtui.views.equipment_preview import QtEquipmentPreview
+from app.qtui.views.inventory_grid import QtInventoryGrid
 from app.qtui.views.player_tasks import PlayerDetailResult
+from app.services.item_service import ItemService
 from app.services.player.models import (
     PLAYER_EDIT_SPECS,
     PlayerContainersView,
@@ -29,6 +33,7 @@ from app.services.player.models import (
     PlayerSummary,
 )
 from app.services.player_service import PlayerService
+from app.services.texture_service import TextureService
 from core.nbt import Compound
 from core.omni.player_manager import PlayerAttribute, PlayerEffect
 
@@ -105,7 +110,7 @@ _SECTION_DEFS = (
 
 
 class QtPlayerEditor(QWidget):
-    """玩家 HUD、分类编辑表单与只读容器投影。"""
+    """玩家 HUD、分类编辑表单与物品格子投影。"""
 
     def __init__(
         self,
@@ -114,6 +119,10 @@ class QtPlayerEditor(QWidget):
         on_stage: Command,
         on_teleport: Command,
         on_export: Command,
+        *,
+        item_service: ItemService | None = None,
+        texture_service: TextureService | None = None,
+        player_service: PlayerService | None = None,
     ) -> None:
         """构建玩家编辑区。
 
@@ -123,6 +132,9 @@ class QtPlayerEditor(QWidget):
             on_stage: 把表单差异暂存到 NBT 区。
             on_teleport: 暂存传送到死亡点。
             on_export: 导出玩家摘要。
+            item_service: 物品解析服务（格子投影）。
+            texture_service: 可选贴图服务。
+            player_service: 潜影盒等嵌套容器解析。
         """
         super().__init__()
         self._translate = translate
@@ -130,10 +142,14 @@ class QtPlayerEditor(QWidget):
         self._on_stage = on_stage
         self._on_teleport = on_teleport
         self._on_export = on_export
+        self._item_service = item_service or ItemService()
+        self._texture_service = texture_service
+        self._player_service = player_service or PlayerService()
         self._player_data: Optional[Compound] = None
         self._summary: Optional[PlayerSummary] = None
         self._fields: dict[str, QLineEdit] = {}
         self._section_buttons: list = []
+        self._container_tab = 0
         self._build()
         self.show_empty()
 
@@ -154,10 +170,23 @@ class QtPlayerEditor(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 0, 0, 0)
         layout.setSpacing(8)
+        identity = QHBoxLayout()
+        identity.setSpacing(10)
+        self._avatar = QLabel("?")
+        self._avatar.setFixedSize(48, 48)
+        self._avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._avatar.setStyleSheet(
+            "QLabel { background:#2a2a2e; border-radius:24px; font-size:18px; }"
+        )
+        identity.addWidget(self._avatar)
+        name_col = QVBoxLayout()
+        name_col.setSpacing(2)
         self._title = section_title(self._t("player.export.title", "玩家摘要"))
-        layout.addWidget(self._title)
+        name_col.addWidget(self._title)
         self._uuid_label = muted_label("")
-        layout.addWidget(self._uuid_label)
+        name_col.addWidget(self._uuid_label)
+        identity.addLayout(name_col, 1)
+        layout.addLayout(identity)
         self._hud = muted_label("")
         self._hud.setWordWrap(True)
         layout.addWidget(self._hud)
@@ -280,27 +309,69 @@ class QtPlayerEditor(QWidget):
 
     def _build_containers_section(self) -> QWidget:
         host = QWidget()
-        layout = QVBoxLayout(host)
+        outer = QVBoxLayout(host)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        body = QWidget()
+        layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 4, 0, 4)
-        layout.setSpacing(6)
-        self._inventory_title = section_title(self._t(
-            "player.export.inventory", "背包:"
-        ))
-        layout.addWidget(self._inventory_title)
-        self._inventory = QListWidget()
-        layout.addWidget(self._inventory, 1)
-        self._equipment_title = section_title(self._t(
-            "player.export.equipment", "装备:"
-        ))
-        layout.addWidget(self._equipment_title)
-        self._equipment = QListWidget()
-        layout.addWidget(self._equipment, 1)
-        self._ender_title = section_title(self._t(
-            "player.export.ender", "末影箱:"
-        ))
-        layout.addWidget(self._ender_title)
-        self._ender = QListWidget()
-        layout.addWidget(self._ender, 1)
+        layout.setSpacing(8)
+        self._equipment = QtEquipmentPreview(
+            self._item_service,
+            self._texture_service,
+            slot_size=40,
+            translate=self._translate,
+        )
+        layout.addWidget(self._equipment)
+        tabs = QHBoxLayout()
+        tabs.setSpacing(6)
+        self._inv_tab_btn = btn_ghost(
+            self._t("player.tab.inventory", "主背包"),
+            on_click=lambda: self._switch_container_tab(0),
+        )
+        self._ender_tab_btn = btn_ghost(
+            self._t("player.tab.ender", "末影箱"),
+            on_click=lambda: self._switch_container_tab(1),
+        )
+        tabs.addWidget(self._inv_tab_btn)
+        tabs.addWidget(self._ender_tab_btn)
+        tabs.addStretch(1)
+        layout.addLayout(tabs)
+        self._inventory = QtInventoryGrid(
+            self._item_service,
+            self._texture_service,
+            layout="main",
+            slot_size=40,
+            translate=self._translate,
+            on_slot_click=self._on_inventory_slot_click,
+        )
+        layout.addWidget(self._inventory)
+        self._ender = QtInventoryGrid(
+            self._item_service,
+            self._texture_service,
+            layout="ender",
+            slot_size=40,
+            translate=self._translate,
+            on_slot_click=self._on_inventory_slot_click,
+        )
+        layout.addWidget(self._ender)
+        self._container_preview = QtInventoryGrid(
+            self._item_service,
+            self._texture_service,
+            layout="shulker",
+            slot_size=36,
+            translate=self._translate,
+            title=self._t("player.container.preview_title", "容器内容"),
+        )
+        self._container_preview.hide()
+        layout.addWidget(self._container_preview)
+        layout.addStretch(1)
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+        self._switch_container_tab(0)
         return host
 
     def show_empty(self) -> None:
@@ -309,15 +380,14 @@ class QtPlayerEditor(QWidget):
         self._summary = None
         self._title.setText(self._t("player.export.title", "玩家摘要"))
         self._uuid_label.clear()
+        self.set_avatar_path(None)
         self.show_message(self._t(
             "player.summary_placeholder", "选择玩家后显示摘要"
         ))
         self._clear_fields()
         self._attributes.clear()
         self._effects.clear()
-        self._inventory.clear()
-        self._equipment.clear()
-        self._ender.clear()
+        self._clear_containers()
         self._set_enabled(False)
 
     def show_message(self, message: str) -> None:
@@ -329,15 +399,14 @@ class QtPlayerEditor(QWidget):
         self._player_data = None
         self._summary = None
         self._uuid_label.setText(uuid)
+        self.set_avatar_path(None, initial=(uuid or "?")[:1])
         self._hud.setText(self._t(
             "player.loading_summary", "正在加载玩家摘要..."
         ))
         self._clear_fields()
         self._attributes.clear()
         self._effects.clear()
-        self._inventory.clear()
-        self._equipment.clear()
-        self._ender.clear()
+        self._clear_containers()
         self._set_enabled(False)
 
     def show_unavailable(self, uuid: str) -> None:
@@ -362,6 +431,10 @@ class QtPlayerEditor(QWidget):
         self._title.setText(summary.ref.display_name)
         self._uuid_label.setText(
             summary.ref.uuid_hyphen or summary.ref.uuid_norm
+        )
+        self.set_avatar_path(
+            None,
+            initial=(summary.ref.name or summary.ref.uuid_norm or "?")[:1],
         )
         self._hud.setText(self._format_hud(summary))
         self.refresh_form_from_data()
@@ -483,50 +556,89 @@ class QtPlayerEditor(QWidget):
         self,
         containers: Optional[PlayerContainersView],
     ) -> None:
-        self._fill_item_list(
-            self._inventory,
-            () if containers is None else containers.inventory,
-            empty_key=("player.inventory.empty", "背包为空"),
-        )
-        self._fill_item_list(
-            self._equipment,
-            () if containers is None else containers.equipment,
-            empty_key=("player.equipment.empty", "无装备"),
-        )
-        self._fill_item_list(
-            self._ender,
-            () if containers is None else containers.ender_items,
-            empty_key=("player.ender.empty", "末影箱为空"),
-        )
-        inv = 0 if containers is None else len(containers.inventory)
-        eq = 0 if containers is None else len(containers.equipment)
-        ender = 0 if containers is None else len(containers.ender_items)
-        self._inventory_title.setText(
-            f"{self._t('player.export.inventory', '背包:')} ({inv})"
-        )
-        self._equipment_title.setText(
-            f"{self._t('player.export.equipment', '装备:')} ({eq})"
-        )
-        self._ender_title.setText(
-            f"{self._t('player.export.ender', '末影箱:')} ({ender})"
-        )
+        inv = () if containers is None else containers.inventory
+        equipment = () if containers is None else containers.equipment
+        ender = () if containers is None else containers.ender_items
+        selected = None if containers is None else containers.selected_slot
+        # 装备栏同时接受装备槽与背包中的装备条目，兼容旧投影。
+        equip_source = list(equipment) + list(inv)
+        self._equipment.set_equipment(equip_source)
+        self._inventory.set_inventory(list(inv), selected_slot=selected)
+        self._ender.set_inventory(list(ender))
+        self._container_preview.clear()
+        self._container_preview.hide()
 
-    def _fill_item_list(
+    def _clear_containers(self) -> None:
+        self._equipment.clear()
+        self._inventory.clear()
+        self._ender.clear()
+        self._container_preview.clear()
+        self._container_preview.hide()
+
+    def _switch_container_tab(self, index: int) -> None:
+        self._container_tab = index
+        show_inv = index == 0
+        self._inventory.setVisible(show_inv)
+        self._ender.setVisible(not show_inv)
+        for position, button in enumerate(
+            (self._inv_tab_btn, self._ender_tab_btn)
+        ):
+            button.setProperty(
+                "role",
+                "primary" if position == index else "ghost",
+            )
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def _on_inventory_slot_click(
         self,
-        widget: QListWidget,
-        items: Sequence[Mapping[str, object]],
-        *,
-        empty_key: tuple[str, str],
+        slot: int,
+        item: Optional[dict[str, Any]],
     ) -> None:
-        widget.clear()
-        if not items:
-            widget.addItem(self._t(empty_key[0], empty_key[1]))
+        del slot
+        if not item:
             return
-        for item in items:
-            slot = item.get("slot", "?")
-            item_id = item.get("id", "?")
-            count = item.get("count", 1)
-            widget.addItem(QListWidgetItem(f"[{slot}] {item_id} x{count}"))
+        nested = self._player_service.open_nested_container(item)
+        if nested is None:
+            return
+        item_id = str(item.get("id", "") or "")
+        title = (
+            f"{self._t('player.container.preview_title', '容器内容')}: "
+            f"{item_id or self._t('player.inventory.shulker', '潜影盒内容')}"
+        )
+        self._container_preview.set_title(title)
+        self._container_preview.set_inventory(nested)
+        self._container_preview.show()
+
+    def set_avatar_path(
+        self,
+        path: str | None,
+        *,
+        initial: str = "?",
+    ) -> None:
+        """更新详情区圆形头像；无路径时显示首字母占位。"""
+        if path:
+            pixmap = QPixmap(path)
+            if not pixmap.isNull():
+                scaled = pixmap.scaled(
+                    48,
+                    48,
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self._avatar.setPixmap(scaled)
+                self._avatar.setText("")
+                return
+        self._avatar.setPixmap(QPixmap())
+        letter = (initial or "?")[:1].upper()
+        self._avatar.setText(letter or "?")
+
+    def dispose(self) -> None:
+        """释放格子贴图回调。"""
+        self._equipment.dispose()
+        self._inventory.dispose()
+        self._ender.dispose()
+        self._container_preview.dispose()
 
     def _clear_fields(self) -> None:
         for field in self._fields.values():

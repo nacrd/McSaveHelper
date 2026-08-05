@@ -33,6 +33,7 @@ from app.qtui.views.entity_search_coordinator import (
 from app.qtui.views.nbt_coordinator import QtNbtCoordinator
 from app.qtui.views.player import QtPlayerPanel
 from app.qtui.views.player_tasks import (
+    NameLookupResult,
     PlayerDetailResult,
     PlayerTaskCallbacks,
     PlayerTasks,
@@ -41,10 +42,16 @@ from app.qtui.views.region_map_coordinator import QtRegionMapCoordinator
 from app.qtui.views.stats_coordinator import QtStatsCoordinator
 from app.qtui.views.world_info import QtWorldInfoPanel
 from app.services.backup_service import BackupRecord, BackupService
+from app.services.cache_registry import CacheRegistry
+from app.services.item_service import ItemService
+from app.services.player_avatar_service import PlayerAvatarService
 from app.services.player.models import PlayerEditResult, PlayerRef
 from app.services.player_service import PlayerService
+from app.services.texture_service import TextureService
+from app.services.uuid_service import UUIDService
 from app.services.world_repository import WorldRepository
 from app.services.world_stats_service import WorldStatsService
+from app.services.world_transaction import WorldTransactionService
 from app.core.save_context_manager import SaveContextManager
 from app.qtui.view_manager import QtViewManager
 from core.omni.world_session import WorldSession
@@ -78,6 +85,31 @@ class ExplorerHost(
     @property
     def world_stats(self) -> WorldStatsService:
         """返回应用共享世界统计服务。"""
+        ...
+
+    @property
+    def world_transactions(self) -> WorldTransactionService:
+        """返回应用共享世界事务服务（区域删除等写入路径）。"""
+        ...
+
+    @property
+    def item(self) -> ItemService:
+        """返回物品解析服务。"""
+        ...
+
+    @property
+    def texture(self) -> TextureService:
+        """返回贴图服务。"""
+        ...
+
+    @property
+    def uuid(self) -> UUIDService:
+        """返回 UUID / 在线名称服务。"""
+        ...
+
+    @property
+    def cache_registry(self) -> CacheRegistry:
+        """返回共享缓存注册表。"""
         ...
 
     @property
@@ -173,6 +205,10 @@ class ExplorerView(QWidget):
                 detail_error=self._apply_player_detail_error,
                 export_success=self._apply_player_export_success,
                 export_error=self._apply_player_export_error,
+                usercache_success=self._apply_usercache_success,
+                usercache_error=self._apply_usercache_error,
+                name_lookup_success=self._apply_name_lookup_success,
+                name_lookup_error=self._apply_name_lookup_error,
             ),
         )
 
@@ -196,6 +232,12 @@ class ExplorerView(QWidget):
             self._world_info,
             self._t("explorer.tab_world_info", "存档信息"),
         )
+        self._player_service = PlayerService(log=self.app.log)
+        self._avatar_service = PlayerAvatarService(
+            self.app.execution_runtime,
+            enabled=True,
+            cache_registry=self.app.cache_registry,
+        )
         self._players = QtPlayerPanel(
             self.app.translate,
             self._select_player,
@@ -203,8 +245,13 @@ class ExplorerView(QWidget):
             self._stage_player_form,
             self._stage_player_teleport,
             self._export_player_summary,
+            on_import_usercache=self._import_usercache,
+            on_lookup_names=self._lookup_player_names_online,
+            item_service=self.app.item,
+            texture_service=self.app.texture,
+            player_service=self._player_service,
+            avatar_service=self._avatar_service,
         )
-        self._player_service = PlayerService(log=self.app.log)
         self._tabs.addTab(
             self._players,
             self._t("explorer.tab_players", "玩家"),
@@ -423,6 +470,7 @@ class ExplorerView(QWidget):
     ) -> None:
         if self._player_tasks.is_current_world(generation):
             self._players.show_players(players)
+            self._auto_lookup_unknown_names()
 
     def _apply_players_error(
         self,
@@ -751,6 +799,176 @@ class ExplorerView(QWidget):
         self._loaded_world_path = None
         self.on_save_selected(str(world_path))
 
+    def _import_usercache(self) -> None:
+        """选择 usercache.json 并提交合并。"""
+        session = self.world_session
+        if session is None:
+            self.app.warn_dialog(
+                self._t("map.notice", "提示"),
+                self._t("map.select_save_first", "请先设置当前存档。"),
+            )
+            return
+        path = self.app.pick_file(
+            title=self._t(
+                "player.import_usercache_title",
+                "选择 usercache.json",
+            ),
+            file_types=[("JSON (*.json)", "*.json")],
+        )
+        if not path:
+            return
+        try:
+            self._player_tasks.import_usercache(session, Path(path))
+        except Exception as error:
+            self.app.handle_exception(
+                error,
+                title=self._t(
+                    "player.error.import_usercache",
+                    "导入 usercache 失败",
+                ),
+            )
+
+    def _apply_usercache_success(self, imported: int, generation: int) -> None:
+        del generation
+        session = self.world_session
+        if session is None:
+            return
+        if imported > 0:
+            self._player_tasks.load_players(session)
+            self.app.info_dialog(
+                self._t("dialogs.success", "成功"),
+                self._t(
+                    "explorer.imported_cache",
+                    "成功导入 {count} 个玩家名称。",
+                    count=imported,
+                ),
+            )
+            return
+        self.app.info_dialog(
+            self._t("dialogs.hint", "提示"),
+            self._t(
+                "player.import_empty",
+                "未能导入任何玩家名称。",
+            ),
+        )
+
+    def _apply_usercache_error(self, error: Exception, generation: int) -> None:
+        del generation
+        self.app.handle_exception(
+            error,
+            title=self._t(
+                "player.error.import_usercache",
+                "导入 usercache 失败",
+            ),
+        )
+
+    def _lookup_player_names_online(self) -> None:
+        """手动查询当前世界内未知名玩家。"""
+        session = self.world_session
+        if session is None or self._players.name_lookup_pending:
+            return
+        unknown = self._players.unknown_name_uuids()
+        if not unknown:
+            self._players.set_name_lookup_status(
+                self._t("player.lookup_names_empty", "所有玩家都已有名称")
+            )
+            return
+        self._submit_name_lookup(session, unknown)
+
+    def _auto_lookup_unknown_names(self) -> None:
+        """打开玩家列表后自动查询未尝试过的未知名玩家。"""
+        session = self.world_session
+        if session is None or self._players.name_lookup_pending:
+            return
+        unknown = self._players.unknown_name_uuids(only_unattempted=True)
+        if not unknown:
+            return
+        self._players.mark_name_lookup_attempted(unknown)
+        self._submit_name_lookup(session, unknown)
+
+    def _submit_name_lookup(
+        self,
+        session: WorldSession,
+        uuids: tuple[str, ...],
+    ) -> None:
+        self._players.set_name_lookup_busy(True)
+        self._players.set_name_lookup_status(
+            self._t(
+                "player.lookup_names_pending",
+                "正在查询 {count} 个玩家...",
+                count=len(uuids),
+            )
+        )
+        try:
+            started = self._player_tasks.lookup_names(
+                session,
+                self.app.uuid,
+                uuids,
+            )
+        except Exception as error:
+            self._players.set_name_lookup_busy(False)
+            self.app.handle_exception(
+                error,
+                title=self._t(
+                    "player.error.lookup_names",
+                    "在线查询名称失败",
+                ),
+            )
+            return
+        if not started:
+            self._players.set_name_lookup_busy(False)
+
+    def _apply_name_lookup_success(
+        self,
+        result: NameLookupResult,
+        generation: int,
+    ) -> None:
+        del generation
+        self._players.set_name_lookup_busy(False)
+        session = self.world_session
+        if session is not None and result.resolved:
+            session.seed_player_names(dict(result.resolved))
+            self._players.apply_resolved_names(result.resolved)
+        if result.unresolved:
+            self._players.set_name_lookup_status(
+                self._t(
+                    "player.lookup_names_partial",
+                    "已解析 {resolved} 个，{failed} 个未找到（可能为离线账号）",
+                    resolved=len(result.resolved),
+                    failed=len(result.unresolved),
+                )
+            )
+        else:
+            self._players.set_name_lookup_status(
+                self._t(
+                    "player.lookup_names_done",
+                    "已解析 {resolved} 个玩家名称",
+                    resolved=len(result.resolved),
+                )
+            )
+
+    def _apply_name_lookup_error(
+        self,
+        error: Exception,
+        generation: int,
+    ) -> None:
+        del generation
+        self._players.set_name_lookup_busy(False)
+        self._players.set_name_lookup_status(
+            self._t(
+                "player.lookup_names_error",
+                "名称查询失败，请稍后重试",
+            ),
+            is_error=True,
+        )
+        self.app.handle_exception(
+            error,
+            title=self._t(
+                "player.error.lookup_names",
+                "在线查询名称失败",
+            ),
+        )
+
     def dispose(self) -> None:
         """取消 Explorer 页面任务；可重复调用。"""
         if self._disposed:
@@ -762,6 +980,7 @@ class ExplorerView(QWidget):
         self._search_coordinator.close()
         self._region_map.close()
         self._stats_coordinator.close()
+        self._players.dispose()
         self._player_tasks.close()
         self._tasks.close()
 

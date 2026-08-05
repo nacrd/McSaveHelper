@@ -10,6 +10,9 @@ from typing import Any, Callable, Iterator, cast
 import pytest
 from PySide6.QtWidgets import QApplication, QLabel
 
+from app.services.item_service import ItemService
+from app.services.cache_registry import CacheRegistry
+from app.services.uuid_service import UUIDService
 from app.services.player_service import PlayerService
 from app.services.entity_block_search.models import SearchResult
 from app.qtui.views.explorer import (
@@ -29,6 +32,10 @@ from app.services.world_stats_service import (
     PlayerPlaytimeStats,
     WorldStatistics,
     WorldStatsCancelledError,
+)
+from app.services.world_transaction import (
+    WorldTransactionCancelledError,
+    WorldTransactionResult,
 )
 from core.omni.models import WorldInfo
 from core.nbt import (
@@ -293,6 +300,43 @@ class _Backup:
         )
 
 
+class _WorldTransactions:
+    """在原世界上直接执行 mutation，避免真实暂存/备份 I/O。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[Path, str]] = []
+
+    def mutate(
+        self,
+        world_path: Path | str,
+        mutation: Callable[[Path], bool],
+        *,
+        backup_label: str,
+        cancel_check: Callable[[], bool] | None = None,
+        validator: object = None,
+    ) -> WorldTransactionResult[bool]:
+        del validator
+        world = Path(world_path)
+        self.calls.append((world, backup_label))
+        if cancel_check is not None and cancel_check():
+            raise WorldTransactionCancelledError("cancelled")
+        value = mutation(world)
+        return WorldTransactionResult(
+            value=value,
+            world_path=world,
+            backup=BackupRecord(
+                backup_id="20260805T000000Z-region",
+                label=backup_label,
+                world_name=world.name,
+                source_path=str(world),
+                created_at=datetime.now(timezone.utc),
+                size_bytes=1,
+                file_count=1,
+                backup_path=world.parent / "region-delete-backup.zip",
+            ),
+        )
+
+
 class _SaveContext:
     def __init__(self) -> None:
         self.pick_calls = 0
@@ -318,6 +362,11 @@ class FakeHost:
         self.repository = _Repository()
         self.stats_service = _WorldStats()
         self.backup_service = _Backup()
+        self.transactions = _WorldTransactions()
+        self.item_service = ItemService()
+        self.texture_service = None
+        self.uuid_service = UUIDService()
+        self.cache_reg = CacheRegistry()
         self.save_context = _SaveContext()
         self.views = _ViewManager()
         self.current_path: str | None = None
@@ -395,6 +444,34 @@ class FakeHost:
         return self.backup_service
 
     @property
+    def world_transactions(self) -> object:
+        return self.transactions
+
+    @property
+    def item(self) -> object:
+        return self.item_service
+
+    @property
+    def texture(self) -> object:
+        return self.texture_service
+
+    @property
+    def uuid(self) -> object:
+        return self.uuid_service
+
+    @property
+    def cache_registry(self) -> object:
+        return self.cache_reg
+
+    def pick_file(
+        self,
+        title: str = "",
+        file_types: list[tuple[str, str]] | None = None,
+    ) -> str | None:
+        del title, file_types
+        return getattr(self, "picked_file", None)
+
+    @property
     def save_context_manager(self) -> object:
         return self.save_context
 
@@ -407,6 +484,7 @@ class FakeHost:
         return self.current_path
 
     def close(self) -> None:
+        self.cache_reg.close()
         self.runtime.shutdown(wait=True, timeout=5.0)
 
 
@@ -566,6 +644,43 @@ def panel_has_marker(panel: object, name: str) -> bool:
         if item is not None and name in item.text():
             return True
     return False
+
+
+def test_region_map_delete_selected_region(
+    view: ExplorerView,
+    host: FakeHost,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    region_dir = tmp_path / "region"
+    region_dir.mkdir(parents=True, exist_ok=True)
+    keep = region_dir / "r.1.0.mca"
+    target = region_dir / "r.0.0.mca"
+    keep.write_bytes(b"1" * 2048)
+    target.write_bytes(b"0" * 4096)
+
+    view.on_save_selected(str(tmp_path))
+    assert _wait_until(lambda: view.world_session is not None)
+    coordinator = view._region_map
+    panel = coordinator.panel
+    assert _wait_until(lambda: len(panel.canvas._regions) == 2)
+
+    panel.canvas.select_region((0, 0))
+    assert coordinator.selected_region == (0, 0)
+    monkeypatch.setattr(panel, "confirm_delete_region", lambda _coord: True)
+
+    coordinator._delete_selected_region()
+    assert _wait_until(lambda: not target.exists())
+    assert keep.exists()
+    assert _wait_until(lambda: any(
+        "r.0.0.mca" in message for _title, message in host.infos
+    ))
+    assert host.transactions.calls
+    assert host.transactions.calls[0][1] == "删除区域前自动备份"
+    assert _wait_until(lambda: len(panel.canvas._regions) == 1)
+    assert (1, 0) in panel.canvas._regions
+    assert coordinator.selected_region is None
+    assert panel._delete_region.isEnabled() is False
 
 
 def test_chunk_nbt_load_and_stage_from_map_selection(
