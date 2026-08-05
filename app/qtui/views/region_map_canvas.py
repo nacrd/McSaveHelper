@@ -1,4 +1,4 @@
-"""Qt 区域活动热力地图画布（区域级，不含俯视瓦片）。"""
+"""Qt 区域地图画布：活动热力 + 俯视瓦片。"""
 from __future__ import annotations
 
 from typing import Callable, Mapping, Optional, Sequence
@@ -10,11 +10,16 @@ from PySide6.QtGui import (
     QPainter,
     QPaintEvent,
     QPen,
+    QPixmap,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QWidget
 
-from core.mca.map_models import BLOCKS_PER_REGION, MapMarker
+from core.mca.map_models import (
+    BLOCKS_PER_REGION,
+    CHUNKS_PER_REGION,
+    MapMarker,
+)
 
 
 RegionCoord = tuple[int, int]
@@ -27,8 +32,10 @@ class QtRegionMapCanvas(QWidget):
     """用区域文件大小绘制热力格子，并支持平移、缩放与选择。"""
 
     _MIN_SCALE = 0.01
-    _MAX_SCALE = 2.0
+    _MAX_SCALE = 4.0
     _DEFAULT_SCALE = 0.08
+    _CHUNK_GRID_TILE_SCALE = 6.5
+    _BLOCK_GRID_TILE_SCALE = 20.0
 
     def __init__(
         self,
@@ -59,6 +66,8 @@ class QtRegionMapCanvas(QWidget):
         self._last_pos = QPoint()
         self._press_pos = QPoint()
         self._max_size = 1
+        self._display_mode = "activity"
+        self._tiles: dict[RegionCoord, QPixmap] = {}
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -79,6 +88,12 @@ class QtRegionMapCanvas(QWidget):
         """返回当前像素/方块缩放。"""
         return self._scale
 
+    @property
+    def tile_scale(self) -> float:
+        """映射到 Flet/瓦片协调器使用的区域相对缩放。"""
+        region_px = max(1.0, BLOCKS_PER_REGION * self._scale)
+        return region_px / 32.0
+
     def set_regions(self, regions: Mapping[RegionCoord, int]) -> None:
         """替换区域大小数据并尽量保持选择。"""
         self._regions = dict(regions)
@@ -94,6 +109,7 @@ class QtRegionMapCanvas(QWidget):
         """清空区域数据与选择。"""
         self._regions = {}
         self._markers = ()
+        self._tiles.clear()
         self._selected = None
         self._selected_marker_id = None
         self._max_size = 1
@@ -167,8 +183,53 @@ class QtRegionMapCanvas(QWidget):
         self._on_region_selected(coord, size)
         self.update()
 
+    def set_display_mode(self, mode: str) -> None:
+        """切换 activity / topview 显示模式。"""
+        if mode not in {"activity", "topview"}:
+            mode = "activity"
+        if mode == self._display_mode:
+            return
+        self._display_mode = mode
+        self.update()
+
+    @property
+    def display_mode(self) -> str:
+        """返回当前显示模式。"""
+        return self._display_mode
+
+    def set_tile(self, coord: RegionCoord, png_bytes: bytes) -> None:
+        """写入或替换一个区域的俯视 PNG 瓦片。"""
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(png_bytes):
+            return
+        self._tiles[coord] = pixmap
+        self.update()
+
+    def clear_tiles(self) -> None:
+        """清空俯视瓦片缓存。"""
+        self._tiles.clear()
+        self.update()
+
+    def visible_regions(self) -> list[RegionCoord]:
+        """返回当前视口相交的区域坐标（按中心距离排序）。"""
+        cell = max(2.0, BLOCKS_PER_REGION * self._scale)
+        visible: list[tuple[float, RegionCoord]] = []
+        center = (
+            int(self._center_x // BLOCKS_PER_REGION),
+            int(self._center_z // BLOCKS_PER_REGION),
+        )
+        view = self.rect()
+        for coord in self._regions:
+            rect = self._region_screen_rect(coord[0], coord[1], cell)
+            if not rect.intersects(view):
+                continue
+            dist = abs(coord[0] - center[0]) + abs(coord[1] - center[1])
+            visible.append((float(dist), coord))
+        visible.sort(key=lambda item: item[0])
+        return [coord for _dist, coord in visible]
+
     def paintEvent(self, event: QPaintEvent) -> None:
-        """绘制背景、区域热力格与选中边框。"""
+        """绘制背景、热力/俯视瓦片、网格与选中边框。"""
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
@@ -177,11 +238,16 @@ class QtRegionMapCanvas(QWidget):
         if cell < 2.0:
             painter.end()
             return
+        use_tiles = self._display_mode == "topview"
         for coord, size in self._regions.items():
             rect = self._region_screen_rect(coord[0], coord[1], cell)
             if not rect.intersects(self.rect()):
                 continue
-            painter.fillRect(rect, self._heat_color(size))
+            tile = self._tiles.get(coord) if use_tiles else None
+            if tile is not None and not tile.isNull():
+                painter.drawPixmap(rect, tile)
+            else:
+                painter.fillRect(rect, self._heat_color(size))
             if cell >= 8:
                 painter.setPen(QPen(QColor("#1A221C"), 1))
                 painter.drawRect(rect)
@@ -191,8 +257,54 @@ class QtRegionMapCanvas(QWidget):
             )
             painter.setPen(QPen(QColor("#FFD54F"), 2))
             painter.drawRect(rect.adjusted(1, 1, -1, -1))
+        self._paint_detail_grids(painter, cell)
         self._paint_markers(painter)
         painter.end()
+
+    def _paint_detail_grids(self, painter: QPainter, cell: float) -> None:
+        """高缩放时绘制区块/方块网格，便于检查俯视细节。"""
+        del cell
+        tile_scale = self.tile_scale
+        show_chunk = tile_scale >= self._CHUNK_GRID_TILE_SCALE
+        show_block = tile_scale >= self._BLOCK_GRID_TILE_SCALE
+        if not show_chunk:
+            return
+        view = self.rect()
+        chunk_pen = QPen(QColor(255, 255, 255, 40), 1)
+        block_pen = QPen(QColor(255, 255, 255, 28), 1)
+        for coord in self._regions:
+            cell_px = max(2.0, BLOCKS_PER_REGION * self._scale)
+            rect = self._region_screen_rect(
+                coord[0], coord[1], cell_px
+            )
+            if not rect.intersects(view):
+                continue
+            painter.setPen(chunk_pen)
+            for i in range(1, CHUNKS_PER_REGION):
+                x = rect.left() + (i / CHUNKS_PER_REGION) * rect.width()
+                z = rect.top() + (i / CHUNKS_PER_REGION) * rect.height()
+                painter.drawLine(int(x), rect.top(), int(x), rect.bottom())
+                painter.drawLine(rect.left(), int(z), rect.right(), int(z))
+            if not show_block:
+                continue
+            focus = self._selected
+            if focus is None:
+                focus = (
+                    int(self._center_x // BLOCKS_PER_REGION),
+                    int(self._center_z // BLOCKS_PER_REGION),
+                )
+            if coord != focus:
+                continue
+            painter.setPen(block_pen)
+            step = max(1, rect.width() // BLOCKS_PER_REGION)
+            if step < 2:
+                continue
+            stride = 1 if step >= 4 else 4
+            for i in range(stride, BLOCKS_PER_REGION, stride):
+                x = rect.left() + (i / BLOCKS_PER_REGION) * rect.width()
+                z = rect.top() + (i / BLOCKS_PER_REGION) * rect.height()
+                painter.drawLine(int(x), rect.top(), int(x), rect.bottom())
+                painter.drawLine(rect.left(), int(z), rect.right(), int(z))
 
     def _paint_markers(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)

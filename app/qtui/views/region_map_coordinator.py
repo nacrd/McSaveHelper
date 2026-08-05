@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Callable, Optional, Protocol
 
 from app.controllers.map_controller import MapController
+from app.controllers.topview_tile_requests import (
+    TopviewTileRequestCoordinator,
+)
 from app.controllers.region_delete_controller import (
     RegionDeleteBusyError,
     RegionDeleteController,
@@ -35,6 +38,7 @@ from app.services.execution_runtime import (
     TaskQueueFullError,
 )
 from app.services.map_marker_service import MapMarkerService
+from app.services.region_map import RegionMapService
 from app.services.world_transaction import WorldTransactionService
 from core.mca.map_models import BLOCKS_PER_REGION, MapMarker
 from core.mca.map_search import MapSearchError
@@ -101,6 +105,14 @@ class QtRegionMapCoordinator:
             self._region_delete_scope,
             app.world_transactions,
         )
+        create_map = getattr(app, "create_region_map_service", None)
+        if callable(create_map):
+            self._map_service = create_map()
+        else:
+            self._map_service = RegionMapService(app.execution_runtime)
+        self._map_service.set_tile_ready_callback(self._on_topview_tile_ready)
+        self._tile_requests = TopviewTileRequestCoordinator(self._map_service)
+        self._style_id = "topview"
         self._map_export_dialog = QtMapExportDialog(app)
         self.panel = QtRegionMapPanel(
             app.translate,
@@ -115,7 +127,9 @@ class QtRegionMapCoordinator:
             self._delete_selected_marker,
             on_delete_region=self._delete_selected_region,
             on_export=self._open_map_export_dialog,
+            on_style_changed=self._on_style_changed,
         )
+        self.panel.set_style("topview")
         self._tasks = RegionMapTasks(
             app.execution_runtime,
             RegionMapTaskCallbacks(
@@ -175,6 +189,9 @@ class QtRegionMapCoordinator:
         self._region_delete_controller.cancel()
         self.panel.set_region_delete_busy(False)
         self._tasks.clear()
+        self._tile_requests.reset()
+        self._map_service.clear_data()
+        self.panel.canvas.clear_tiles()
         self._map_controller.unbind_world()
         self._session = None
         self._dimension_dirs.clear()
@@ -297,6 +314,12 @@ class QtRegionMapCoordinator:
     ) -> None:
         del size
         self._selected_region = coord
+        if coord is not None and self._style_id == "topview":
+            self._tile_requests.request_region_detail(
+                coord,
+                available_regions=tuple(self.panel.canvas._regions.keys()),
+            )
+            self._request_visible_tiles()
 
     def _on_marker_selected(self, marker: Optional[MapMarker]) -> None:
         if marker is None:
@@ -559,10 +582,13 @@ class QtRegionMapCoordinator:
         scale: float,
     ) -> None:
         self._map_controller.update_camera(center_x, center_z, scale)
+        self._request_visible_tiles()
 
     def _scan_ready(self, result: RegionScanResult, generation: int) -> None:
         del generation
         self.panel.show_regions(result.sizes, total_bytes=result.total_bytes)
+        self._seed_topview_inventory(result)
+        self._request_visible_tiles()
 
     def _scan_error(self, error: Exception, generation: int) -> None:
         del generation
@@ -585,6 +611,74 @@ class QtRegionMapCoordinator:
             percent=int(value * 100),
         ))
 
+    def _on_style_changed(self, style_id: str) -> None:
+        self._style_id = style_id
+        self.panel.canvas.set_display_mode(
+            "topview" if style_id == "topview" else "activity"
+        )
+        if style_id == "topview":
+            self._request_visible_tiles()
+        else:
+            self.panel.canvas.update()
+
+    def _seed_topview_inventory(self, result: RegionScanResult) -> None:
+        regions: dict[tuple[int, int], Path] = {}
+        for coord in result.sizes:
+            path = result.region_dir / f"r.{coord[0]}.{coord[1]}.mca"
+            if path.is_file():
+                regions[coord] = path
+        self._tile_requests.reset()
+        self.panel.canvas.clear_tiles()
+        self._map_service.seed_region_inventory(
+            regions,
+            sizes=dict(result.sizes),
+        )
+
+    def _request_visible_tiles(self) -> None:
+        if self._style_id != "topview" or self._session is None:
+            return
+        visible = self.panel.canvas.visible_regions()
+        if not visible:
+            return
+        tile_scale = self.panel.canvas.tile_scale
+        needed = self._tile_requests.visible_base_tile_size(tile_scale)
+        center = (
+            int(self.panel.canvas.center_block[0] // BLOCKS_PER_REGION),
+            int(self.panel.canvas.center_block[1] // BLOCKS_PER_REGION),
+        )
+        missing: list[tuple[int, int]] = []
+        for coord in visible:
+            raw = self._map_service.get_topview_tile(coord)
+            if raw:
+                self.panel.canvas.set_tile(coord, raw)
+            if not self._map_service.has_topview_tile(coord, min_size=needed):
+                missing.append(coord)
+        if missing:
+            self._tile_requests.request_visible(
+                missing,
+                visible_regions=visible,
+                scale=tile_scale,
+                center=center,
+            )
+        self._tile_requests.request_selected_detail(
+            scale=tile_scale,
+            selected=self._selected_region,
+            center=center,
+            available_regions=tuple(self.panel.canvas._regions.keys()),
+            enabled=True,
+        )
+
+    def _on_topview_tile_ready(self, coord: tuple[int, int]) -> None:
+        def apply() -> None:
+            raw = self._map_service.get_topview_tile(coord)
+            if raw:
+                self.panel.canvas.set_tile(coord, raw)
+            should_retry = self._tile_requests.on_tile_ready(coord)
+            if should_retry:
+                self._request_visible_tiles()
+
+        run_on_ui(apply)
+
     def _t(self, key: str, default: str = "", **kwargs: object) -> str:
         return self._app.translate(key, default, **kwargs)
 
@@ -595,6 +689,9 @@ class QtRegionMapCoordinator:
         self._region_delete_controller.cancel()
         self.panel.set_region_delete_busy(False)
         self._tasks.close()
+        self._tile_requests.reset()
+        self._map_service.set_tile_ready_callback(None)
+        self._map_service.close()
         self._map_controller.close()
         self._marker_scope.close()
         self._region_delete_scope.close()

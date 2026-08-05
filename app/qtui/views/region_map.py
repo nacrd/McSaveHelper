@@ -35,8 +35,10 @@ RegionSelected = Callable[[Optional[tuple[int, int]], Optional[int]], None]
 CameraChanged = Callable[[float, float, float], None]
 MarkerSelected = Callable[[Optional[MapMarker]], None]
 MarkerAddRequest = Callable[[str, int, int], None]
+StyleChanged = Callable[[str], None]
 
 _STYLE_OPTIONS = (
+    ("topview", "map.style_topview", "地表"),
     ("activity", "map.style_region", "区域"),
 )
 _MARKER_ID_ROLE = int(Qt.ItemDataRole.UserRole)
@@ -59,6 +61,7 @@ class QtRegionMapPanel(QWidget):
         on_delete_marker: Command,
         on_delete_region: Command,
         on_export: Command,
+        on_style_changed: StyleChanged | None = None,
     ) -> None:
         """构建区域地图面板。"""
         super().__init__()
@@ -72,6 +75,7 @@ class QtRegionMapPanel(QWidget):
         self._on_delete_marker = on_delete_marker
         self._on_delete_region = on_delete_region
         self._on_export = on_export
+        self._on_style_changed = on_style_changed
         self._external_region_selected = on_region_selected
         self._selected_marker_id: Optional[str] = None
         self._markers: tuple[MapMarker, ...] = ()
@@ -130,6 +134,7 @@ class QtRegionMapPanel(QWidget):
         for value, key, default in _STYLE_OPTIONS:
             self._style.addItem(self._t(key, default), value)
         self._style.setEnabled(False)
+        self._style.currentIndexChanged.connect(self._style_changed)
         row.addWidget(self._style)
         self._search = QLineEdit()
         self._search.setPlaceholderText(self._t(
@@ -473,6 +478,30 @@ class QtRegionMapPanel(QWidget):
             return
         self._on_add_marker(name, x, z)
 
+    def current_style(self) -> str:
+        """返回当前地图样式 id。"""
+        value = self._style.currentData()
+        return str(value or "topview")
+
+    def set_style(self, style_id: str) -> None:
+        """程序化设置样式下拉。"""
+        for index in range(self._style.count()):
+            if self._style.itemData(index) == style_id:
+                self._style.blockSignals(True)
+                self._style.setCurrentIndex(index)
+                self._style.blockSignals(False)
+                self._canvas.set_display_mode(
+                    "topview" if style_id == "topview" else "activity"
+                )
+                return
+
+    def _style_changed(self, _index: int) -> None:
+        style_id = self.current_style()
+        mode = "topview" if style_id == "topview" else "activity"
+        self._canvas.set_display_mode(mode)
+        if self._on_style_changed is not None:
+            self._on_style_changed(style_id)
+
     def _dimension_index_changed(self, _index: int) -> None:
         dimension_id = self.current_dimension_id
         if dimension_id:
@@ -512,6 +541,7 @@ class QtRegionMapPanel(QWidget):
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         self._dimension.setEnabled(enabled)
+        self._style.setEnabled(enabled)
         self._search.setEnabled(enabled)
         self._canvas.setEnabled(enabled)
         self._marker_list.setEnabled(enabled)

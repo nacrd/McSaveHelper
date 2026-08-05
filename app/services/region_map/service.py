@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.services.cache_registry import CachePolicy, CacheRegistration, CacheRegistry
@@ -89,6 +90,65 @@ class RegionMapService(
     def execution_runtime(self) -> ExecutionRuntime:
         """返回本地图会话使用的统一后台运行时。"""
         return self._execution_runtime
+
+    def seed_region_inventory(
+        self,
+        regions: dict[tuple[int, int], Path],
+        *,
+        sizes: dict[tuple[int, int], int] | None = None,
+    ) -> None:
+        """用已扫描的区域清单同步填充路径表，供俯视瓦片解析。
+
+        不触发完整异步扫描；会清空旧俯视缓存并推进 generation。
+
+        Args:
+            regions: 区域坐标 → MCA 文件路径。
+            sizes: 可选文件大小；缺省时用路径 stat。
+        """
+        prepared: dict[tuple[int, int], tuple[str, int]] = {}
+        for coord, raw_path in regions.items():
+            path_obj = Path(raw_path)
+            if not path_obj.is_file():
+                continue
+            size = (
+                int(sizes[coord])
+                if sizes is not None and coord in sizes
+                else int(path_obj.stat().st_size)
+            )
+            prepared[coord] = (str(path_obj.resolve()), size)
+        with self._data_lock:
+            self._scan_generation += 1
+            self._data_revision += 1
+            self._is_scanning = False
+            self._mca_data.clear()
+            self._region_paths.clear()
+            self._topview_tiles.clear()
+            self._topview_memory_bytes = 0
+            self._topview_tile_sizes.clear()
+            self._topview_tile_complete.clear()
+            self._topview_tile_revisions.clear()
+            self._topview_tile_sources.clear()
+            self._topview_source_checked_at.clear()
+            self._topview_source_pending.clear()
+            self._topview_pending.clear()
+            self._topview_pending_sizes.clear()
+            self._topview_upgrade_sizes.clear()
+            self._topview_progress_chunks.clear()
+            self._topview_queue.clear()
+            self._topview_cancel_event.set()
+            self._topview_cancel_event = __import__("threading").Event()
+            self._topview_generation += 1
+            for coord, (path_text, size) in prepared.items():
+                self._mca_data[coord] = size
+                self._region_paths[coord] = path_text
+            self._scanned_count = len(prepared)
+            self._total_count = len(prepared)
+            self._scan_progress = 1.0
+            self._error = None
+            self._stats_dirty = True
+            self._cached_stats = None
+            self._cached_data_snapshot = None
+            self._cached_snapshot_count = -1
 
     def clear_data(self) -> None:
         """清空所有缓存数据"""
