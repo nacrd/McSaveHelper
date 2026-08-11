@@ -1,6 +1,7 @@
 """Qt 页面布局组件：页头、面板、容器。"""
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -8,7 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.qtui.components.cards import title_label, muted_label
+from app.qtui.components.cards import muted_label
 
 
 def page_header(
@@ -16,7 +17,7 @@ def page_header(
     subtitle: str = "",
     icon: str = "",
 ) -> QWidget:
-    """构建页面头部：图标 + 标题 + 副标题。
+    """构建页面头部（与 Flet ``PageHeader`` 布局一致）。
 
     Args:
         title: 页面标题。
@@ -24,16 +25,51 @@ def page_header(
         icon: 可选字形图标。
 
     Returns:
-        QWidget: 头部容器。
+        QWidget: 头部容器（图标块 + 标题 + 副标题 + 底部边框）。
     """
+    from app.qtui.theme import get_theme_manager
+
     header = QWidget()
     layout = QHBoxLayout(header)
-    layout.setContentsMargins(0, 0, 0, 8)
-    title_widget = title_label(f"{icon}  {title}" if icon else title)
-    layout.addWidget(title_widget)
+    layout.setContentsMargins(0, 0, 0, 14)
+    layout.setSpacing(12)
+    colors = get_theme_manager().current
+    root = QWidget()
+    root.setStyleSheet(
+        f"QWidget {{ border: none; border-bottom: 1px solid"
+        f" {colors.border_subtle}; }}"
+    )
+    inner = QHBoxLayout(root)
+    inner.setContentsMargins(0, 0, 0, 14)
+    inner.setSpacing(12)
+    if icon:
+        icon_box = QLabel(icon)
+        icon_box.setFixedSize(40, 40)
+        icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_box.setStyleSheet(
+            f"background-color: {colors.bg_elevated};"
+            f" border: 1px solid {colors.border_standard};"
+            " border-radius: 6px; font-size: 20px;"
+        )
+        inner.addWidget(icon_box)
+    text_col = QWidget()
+    text_layout = QVBoxLayout(text_col)
+    text_layout.setContentsMargins(0, 0, 0, 0)
+    text_layout.setSpacing(2)
+    title_widget = QLabel(title)
+    title_widget.setStyleSheet(
+        f"color: {colors.text_primary}; font-size: 20px; font-weight: 600;"
+    )
+    text_layout.addWidget(title_widget)
     if subtitle:
-        layout.addWidget(muted_label(subtitle))
-    layout.addStretch(1)
+        sub = muted_label(subtitle)
+        sub.setStyleSheet(
+            f"color: {colors.text_secondary}; font-size: 13px;"
+        )
+        text_layout.addWidget(sub)
+    inner.addWidget(text_col, 1)
+    inner.addStretch(1)
+    layout.addWidget(root)
     return header
 
 
