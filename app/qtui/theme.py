@@ -191,7 +191,9 @@ QLabel[role="title"] {{
 QLabel[role="section"] {{
     font-size: 15px;
     font-weight: 600;
-    color: {colors.text_secondary};
+    color: {colors.text_primary};
+    padding-left: 8px;
+    border-left: 3px solid {colors.accent};
 }}
 QLabel[role="warning"] {{
     color: {colors.warning};

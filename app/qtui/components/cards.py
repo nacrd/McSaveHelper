@@ -71,3 +71,17 @@ def stretch() -> QWidget:
         QSizePolicy.Policy.Preferred,
     )
     return widget
+
+
+def divider() -> QFrame:
+    """返回主题细分割线（与 Flet ``ft.Divider`` 视觉一致）。"""
+    from app.qtui.theme import get_theme_manager
+
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFixedHeight(1)
+    line.setStyleSheet(
+        f"background-color: {get_theme_manager().current.border_subtle};"
+        " border: none; margin: 0;"
+    )
+    return line

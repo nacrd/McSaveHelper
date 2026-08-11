@@ -174,7 +174,7 @@ class SettingsView(QScrollArea):
     def _build(self) -> None:
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
 
         # 页头 + 保存状态

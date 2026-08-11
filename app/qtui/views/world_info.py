@@ -19,7 +19,7 @@ from app.presenters.world_info_presenter import (
     build_world_info_sections,
 )
 from app.qtui.components.buttons import btn_ghost, btn_primary
-from app.qtui.components.cards import card, muted_label, section_title
+from app.qtui.components.cards import card, divider, muted_label, section_title
 from core.omni.models import WorldInfo
 
 
@@ -54,24 +54,29 @@ class QtWorldInfoPanel(QScrollArea):
         self.show_empty()
 
     def show_empty(self) -> None:
-        """显示尚未选择世界的空状态。"""
+        """显示尚未选择世界的空状态（图标 + 标题 + 副标题 + 按钮）。"""
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(24, 48, 24, 48)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 40, 20, 40)
+        layout.setSpacing(8)
+        layout.addStretch(1)
+        icon = QLabel("📦")
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet("font-size: 44px;")
+        layout.addWidget(icon)
         title = QLabel(self._t(
             "explorer.select_world_title",
             "请先设置当前存档以查看信息",
         ))
-        title.setProperty("role", "section")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 16px; font-weight: 600;")
         subtitle = muted_label(self._t(
             "explorer.select_world_subtitle",
             "选择包含 level.dat 的 Minecraft 世界目录",
         ))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         select_button = btn_primary(
-            self._t("explorer.load_world", "选择存档"),
+            f"📂  {self._t('explorer.load_world', '选择存档')}",
             on_click=self._on_select_save,
         )
         button_row = QWidget()
@@ -79,12 +84,11 @@ class QtWorldInfoPanel(QScrollArea):
         button_layout.addStretch(1)
         button_layout.addWidget(select_button)
         button_layout.addStretch(1)
-        layout.addStretch(1)
         layout.addWidget(title)
         layout.addWidget(subtitle)
         layout.addWidget(button_row)
         layout.addStretch(1)
-        self._replace_widget(body)
+        self._replace_widget(card(body, padding=0))
 
     def show_loading(self, message: str) -> None:
         """显示世界读取中的状态。"""
@@ -140,14 +144,16 @@ class QtWorldInfoPanel(QScrollArea):
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
         layout.addWidget(section_title(section.title))
+        layout.addWidget(divider())
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(18)
         grid.setVerticalSpacing(7)
         for row_index, row in enumerate(section.rows):
             label = muted_label(row.label)
+            label.setMinimumWidth(130)
             value = QLabel(row.value)
             value.setWordWrap(True)
             value.setTextInteractionFlags(
@@ -164,17 +170,18 @@ class QtWorldInfoPanel(QScrollArea):
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
         layout.addWidget(section_title(self._t(
             "explorer.backup_title", "备份与恢复"
         )))
+        layout.addWidget(divider())
         layout.addWidget(muted_label(self._t(
             "explorer.backup_subtitle",
             "创建恢复点或打开备份中心管理已有快照",
         )))
         row = QWidget()
         row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setContentsMargins(0, 8, 0, 0)
         backup_button = btn_primary(
             self._t("explorer.create_backup", "创建备份"),
             on_click=self._on_backup,

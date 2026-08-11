@@ -120,7 +120,7 @@ class BackupCenterView(QScrollArea):
     def _build_ui(self) -> None:
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
 
         # ─── 页头 + 刷新按钮 ──────────────────────

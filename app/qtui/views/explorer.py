@@ -218,7 +218,7 @@ class ExplorerView(QWidget):
 
     def _build(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(10)
         layout.addWidget(self._build_header())
         self._tabs = QTabWidget()
