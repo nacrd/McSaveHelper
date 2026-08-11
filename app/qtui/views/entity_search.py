@@ -137,16 +137,16 @@ class QtEntitySearchPanel(QWidget):
             dimension_layout.addWidget(box)
         dimension_layout.addStretch(1)
         grid.addWidget(dimensions, 1, 1, 1, 3)
-        self._search = QPushButton(self._t(
-            "entity_search.start", "开始搜索"
-        ))
+        self._search = QPushButton(
+            f"🔍  {self._t('entity_search.start', '开始搜索')}"
+        )
         self._search.setProperty("role", "primary")
         self._search.setCursor(Qt.CursorShape.PointingHandCursor)
         self._search.clicked.connect(lambda _checked: on_search())
         grid.addWidget(self._search, 1, 4)
-        self._export = QPushButton(self._t(
-            "entity_search.export", "导出结果"
-        ))
+        self._export = QPushButton(
+            f"📤  {self._t('entity_search.export', '导出结果')}"
+        )
         self._export.setProperty("role", "ghost")
         self._export.setCursor(Qt.CursorShape.PointingHandCursor)
         self._export.clicked.connect(lambda _checked: on_export())

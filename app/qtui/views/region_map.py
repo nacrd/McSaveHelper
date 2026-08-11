@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -126,11 +127,13 @@ class QtRegionMapPanel(QWidget):
     def _build_toolbar(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(6)
+        row.addWidget(QLabel(self._t("map.dimension", "维度")))
         self._dimension = QComboBox()
         self._dimension.setMinimumWidth(160)
         self._dimension.currentIndexChanged.connect(self._dimension_index_changed)
         row.addWidget(self._dimension)
         self._style = QComboBox()
+        self._style.setToolTip(self._t("map.style", "地图样式"))
         for value, key, default in _STYLE_OPTIONS:
             self._style.addItem(self._t(key, default), value)
         self._style.setEnabled(False)
@@ -210,7 +213,57 @@ class QtRegionMapPanel(QWidget):
         self._delete_marker.setEnabled(False)
         actions.addWidget(self._delete_marker)
         layout.addLayout(actions)
+        layout.addWidget(self._build_legend())
         return host
+
+    def _build_legend(self) -> QWidget:
+        """构建地图图例（与 Flet ``build_region_legend_content`` 一致）。"""
+        from app.qtui.theme import get_theme_manager
+
+        colors = get_theme_manager().current
+        legend = QFrame()
+        legend.setStyleSheet(
+            f"QFrame {{ background-color: {colors.bg_card};"
+            f" border: 1px solid {colors.border_standard};"
+            " border-radius: 6px; }"
+        )
+        layout = QVBoxLayout(legend)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(5)
+        title = QLabel(self._t("map.legend", "地图图例"))
+        title.setStyleSheet(
+            f"color: {colors.text_primary}; font-size: 12px; font-weight: 700;"
+        )
+        layout.addWidget(title)
+        keys = (
+            ("#228B22", "map.legend_grass", "map.legend_vegetation"),
+            ("#64A4DF", "map.legend_water", "map.legend_sea_river"),
+            ("#EED6AF", "map.legend_sand", "map.legend_desert"),
+            ("#808080", "map.legend_rock", "map.legend_stone"),
+            ("#7A6F8F", "map.legend_placeholder", "map.legend_unloaded"),
+            ("#FFD54F", "map.legend_selected", "map.legend_border_marker"),
+        )
+        for color, title_key, desc_key in keys:
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            swatch = QLabel()
+            swatch.setFixedSize(16, 16)
+            swatch.setStyleSheet(
+                f"background-color: {color}; border-radius: 2px;"
+            )
+            row.addWidget(swatch)
+            name = QLabel(self._t(title_key, ""))
+            name.setStyleSheet(
+                f"color: {colors.text_primary}; font-size: 11px;"
+            )
+            name.setMinimumWidth(54)
+            row.addWidget(name)
+            desc = QLabel(self._t(desc_key, ""))
+            desc.setStyleSheet(f"color: {colors.text_muted}; font-size: 10px;")
+            row.addWidget(desc, 1)
+            layout.addLayout(row)
+        return legend
 
     @property
     def canvas(self) -> QtRegionMapCanvas:

@@ -40,12 +40,55 @@ def section_title(text: str) -> QLabel:
     return label
 
 
-def placeholder(text: str) -> QLabel:
-    """创建居中占位标签。"""
-    label = QLabel(text)
-    label.setProperty("role", "muted")
-    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return label
+def placeholder(
+    icon: str = "📄",
+    title: str = "暂无内容",
+    subtitle: str = "请加载数据后查看",
+    height: int = 150,
+) -> QWidget:
+    """创建美化的空状态占位符（与 Flet ``placeholder`` 布局一致）。
+
+    Args:
+        icon: 图标字形。
+        title: 主标题。
+        subtitle: 副标题说明。
+        height: 容器高度。
+
+    Returns:
+        QWidget: 居中图标 + 标题 + 副标题的占位容器。
+    """
+    from app.qtui.theme import get_theme_manager
+
+    colors = get_theme_manager().current
+    host = QWidget()
+    host.setFixedHeight(height)
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(20, 30, 20, 30)
+    layout.setSpacing(0)
+    layout.addStretch(1)
+    icon_label = QLabel(icon)
+    icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    icon_label.setStyleSheet(f"font-size: 36px; color: {colors.text_muted};")
+    layout.addWidget(icon_label)
+    spacer_icon = QWidget()
+    spacer_icon.setFixedHeight(10)
+    layout.addWidget(spacer_icon)
+    title_label = QLabel(title)
+    title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    title_label.setStyleSheet(
+        f"font-size: 16px; font-weight: 600; color: {colors.text_primary};"
+    )
+    layout.addWidget(title_label)
+    spacer_title = QWidget()
+    spacer_title.setFixedHeight(6)
+    layout.addWidget(spacer_title)
+    sub = QLabel(subtitle)
+    sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    sub.setStyleSheet(f"font-size: 14px; color: {colors.text_muted};")
+    sub.setWordWrap(True)
+    layout.addWidget(sub)
+    layout.addStretch(1)
+    return host
 
 
 def title_label(text: str) -> QLabel:

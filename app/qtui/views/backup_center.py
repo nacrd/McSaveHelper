@@ -30,7 +30,7 @@ from app.controllers.backup_operation_controller import (
     BackupOperationUiPorts,
 )
 from app.qtui.components.buttons import btn_danger, btn_primary
-from app.qtui.components.cards import card, section_title
+from app.qtui.components.cards import card, placeholder, section_title
 from app.qtui.components.fields import dropdown, text_field
 from app.qtui.components.layout import page_header
 from app.qtui.context import (
@@ -310,12 +310,12 @@ class BackupCenterView(QScrollArea):
         self._rebuild_backup_list([label])
 
     def _show_empty_state(self) -> None:
-        empty = QLabel(
-            f"🕐 {self._t('empty', '暂无备份')}\n"
-            f"{self._t('empty_subtitle', '创建的恢复点会显示在这里')}"
+        empty = placeholder(
+            icon="🕐",
+            title=self._t("empty", "暂无备份"),
+            subtitle=self._t("empty_subtitle", "创建的恢复点会显示在这里"),
+            height=160,
         )
-        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty.setProperty("role", "muted")
         self._rebuild_backup_list([empty])
 
     def _rebuild_backup_list(self, widgets: list[QWidget]) -> None:
