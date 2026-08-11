@@ -120,7 +120,7 @@ class MigratorView(QScrollArea):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(14)
+        layout.setSpacing(24)
         layout.addWidget(page_header(
             "存档转换",
             "跨版本迁移世界、玩家数据、UUID 和资源映射",

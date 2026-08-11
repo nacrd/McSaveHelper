@@ -96,7 +96,7 @@ class CompareView(QScrollArea):
         content = QWidget()
         layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(14)
+        layout.setSpacing(18)
 
         layout.addWidget(page_header(
             "存档对比",
