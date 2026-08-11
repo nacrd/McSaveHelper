@@ -32,6 +32,7 @@ class _TabButton(QPushButton):
         super().__init__(f"{icon}  {label}")
         self._view_id = view_id
         self._icon = icon
+        self._label = label
         self.setCheckable(True)
         self.setAutoExclusive(True)
         self.setToolTip(label)
@@ -39,8 +40,9 @@ class _TabButton(QPushButton):
         self.clicked.connect(lambda _checked: on_click(view_id))
 
     def set_collapsed(self, collapsed: bool) -> None:
-        """折叠时仅显示图标。"""
-        self.setText(self._icon if collapsed else f"{self._icon}  {self.text().split('  ', 1)[-1]}")
+        """折叠时仅显示图标，展开时恢复“图标 + 标签”。"""
+        # 始终从图标与标签的原始拼装还原，避免折叠往返后标签丢失或图标重复。
+        self.setText(self._icon if collapsed else f"{self._icon}  {self._label}")
 
 
 class QtSidebar(QFrame):
