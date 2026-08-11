@@ -37,6 +37,12 @@ ACTION_GLYPHS: Final[dict[str, str]] = {
     "EXPAND": "▶️",
     "COLLAPSE": "◀️",
     "PLUS": "➕",
+    "PICKAXE": "⛏",
+    "CLOCK": "🕐",
+    "CHEVRON_RIGHT": "▸",
+    "CHEVRON_DOWN": "▾",
+    "ARROW_RIGHT": "➤",
+    "ARROW_LEFT": "◀",
 }
 
 

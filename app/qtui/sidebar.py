@@ -1,6 +1,12 @@
-"""Qt 侧边栏：品牌、当前存档、标签导航、最近存档。"""
+"""Qt 侧边栏：品牌、当前存档、标签导航、最近存档（与 Flet 版布局一致）。
+
+布局与 ``app/ui/sidebar.py`` + ``sidebar_chrome.py`` + ``sidebar_tabs.py``
+对齐：224px 展开 / 68px 折叠、品牌块、当前存档卡片、accent 设置存档按钮、
+可折叠最近存档、图标槽 + 标签 + 选中标记的页签按钮、底部切换与页脚版本。
+"""
 from __future__ import annotations
 
+import os
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import Qt
@@ -8,19 +14,26 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from app.qtui.icons import glyph
+from app.qtui.sidebar_chrome import (
+    _Footer,
+    _ToggleButton,
+    build_footer,
+    build_header_collapsed,
+    build_header_expanded,
+    build_toggle_button,
+)
+from app.qtui.theme import get_theme_manager
 
 Translate = Callable[..., str]
 
 
-class _TabButton(QPushButton):
-    """侧边栏标签按钮（可选中、可折叠为图标）。"""
+class _TabButton(QFrame):
+    """侧边栏页签按钮（展开：图标槽 + 标签 + 选中标记；折叠：仅图标）。"""
 
     def __init__(
         self,
@@ -29,27 +42,162 @@ class _TabButton(QPushButton):
         label: str,
         on_click: Callable[[str], None],
     ) -> None:
-        super().__init__(f"{icon}  {label}")
+        """构建页签按钮。"""
+        super().__init__()
         self._view_id = view_id
         self._icon = icon
         self._label = label
-        self.setCheckable(True)
-        self.setAutoExclusive(True)
-        self.setToolTip(label)
+        self._on_click_callback = on_click
+        self._selected = False
+        self._collapsed = False
+        self._hovering = False
+        self._icon_label: QLabel | None = None
+        self._text_label: QLabel | None = None
+        self._marker: QLabel | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clicked.connect(lambda _checked: on_click(view_id))
+        self.setFixedHeight(44)
+        self.setToolTip(label)
+        self.setMouseTracking(True)
+        self._rebuild()
+
+    def _clear_layout(self) -> None:
+        layout = self.layout()
+        if layout is not None:
+            while layout.count():
+                item = layout.itemAt(0)
+                layout.takeAt(0)
+                if item is not None:
+                    widget = item.widget()
+                    if widget is not None:
+                        widget.deleteLater()
+            layout.deleteLater()
+
+    def _rebuild(self) -> None:
+        """重建子控件与布局（折叠往返安全）。"""
+        self._clear_layout()
+        self._icon_label = QLabel(self._icon)
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout = QHBoxLayout(self)
+        if self._collapsed:
+            self.setFixedWidth(44)
+            layout.setContentsMargins(0, 0, 0, 0)
+            self._icon_label.setFixedSize(44, 44)
+            layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+        else:
+            self.setMinimumWidth(0)
+            layout.setContentsMargins(10, 6, 10, 6)
+            layout.setSpacing(8)
+            icon_slot = QWidget()
+            icon_slot.setFixedSize(28, 28)
+            icon_layout = QHBoxLayout(icon_slot)
+            icon_layout.setContentsMargins(0, 0, 0, 0)
+            icon_layout.addStretch(1)
+            icon_layout.addWidget(self._icon_label)
+            icon_layout.addStretch(1)
+            self._text_label = QLabel(self._label)
+            self._text_label.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents
+            )
+            self._marker = QLabel("•")
+            self._marker.setText("•" if self._selected else "")
+            self._marker.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents
+            )
+            layout.addWidget(icon_slot)
+            layout.addWidget(self._text_label, 1)
+            layout.addWidget(self._marker)
+        self._apply_style()
 
     def set_collapsed(self, collapsed: bool) -> None:
-        """折叠时仅显示图标，展开时恢复“图标 + 标签”。"""
-        # 始终从图标与标签的原始拼装还原，避免折叠往返后标签丢失或图标重复。
-        self.setText(self._icon if collapsed else f"{self._icon}  {self._label}")
+        """折叠态：仅显示图标；展开态：图标 + 标签 + 标记。"""
+        if collapsed == self._collapsed:
+            return
+        self._collapsed = collapsed
+        self._rebuild()
+        self._apply_style()
+
+    def set_selected(self, selected: bool) -> None:
+        """更新选中态样式与标记。"""
+        if selected == self._selected:
+            return
+        self._selected = selected
+        if self._marker is not None:
+            self._marker.setText("•" if selected else "")
+        self._apply_style()
+
+    def enterEvent(self, event: Any) -> None:
+        self._hovering = True
+        self._apply_style()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: Any) -> None:
+        self._hovering = False
+        self._apply_style()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event: Any) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._on_click()
+        super().mouseReleaseEvent(event)
+
+    def _on_click(self) -> None:
+        self._on_click_callback(self._view_id)
+
+    def _apply_style(self) -> None:
+        colors = get_theme_manager().current
+        if self._collapsed:
+            bg = colors.bg_elevated if self._selected else "transparent"
+            border = colors.accent_dim if self._selected else "transparent"
+            icon_color = (
+                colors.accent if self._selected else colors.text_secondary
+            )
+            self.setStyleSheet(
+                f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
+                f" border-radius: 6px; }}"
+            )
+            if self._icon_label is not None:
+                self._icon_label.setStyleSheet(
+                    f"color: {icon_color}; font-size: 20px;"
+                )
+            return
+        if self._selected:
+            bg = colors.bg_elevated
+            border = colors.border_standard
+        elif self._hovering:
+            bg = colors.bg_card_hover
+            border = "transparent"
+        else:
+            bg = "transparent"
+            border = "transparent"
+        icon_color = colors.accent if self._selected else colors.text_muted
+        text_color = (
+            colors.text_primary if self._selected else colors.text_secondary
+        )
+        weight = "600" if self._selected else "500"
+        self.setStyleSheet(
+            f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
+            f" border-radius: 6px; }}"
+        )
+        if self._icon_label is not None:
+            self._icon_label.setStyleSheet(
+                f"color: {icon_color}; font-size: 18px;"
+            )
+        if self._text_label is not None:
+            self._text_label.setStyleSheet(
+                f"color: {text_color}; font-size: 13px; font-weight: {weight};"
+                " background: transparent;"
+            )
+        if self._marker is not None:
+            self._marker.setStyleSheet(
+                f"color: {colors.accent}; font-size: 14px; background: transparent;"
+            )
 
 
 class QtSidebar(QFrame):
-    """左侧导航栏：支持折叠为图标窄栏。"""
+    """左侧导航栏：品牌、当前存档、页签、最近存档与折叠开关。"""
 
-    EXPANDED_WIDTH = 220
-    COLLAPSED_WIDTH = 56
+    EXPANDED_WIDTH = 224
+    COLLAPSED_WIDTH = 68
 
     def __init__(
         self,
@@ -63,154 +211,135 @@ class QtSidebar(QFrame):
         current_save_path: Optional[str] = None,
         on_pick_current_save: Optional[Callable[[], None]] = None,
     ) -> None:
-        """构建 Qt 侧边栏。
-
-        Args:
-            tabs: 侧边栏条目（``id``/``label``/``icon``）。
-            translate: 翻译函数。
-            on_tab_select: 标签选中回调（view_id）。
-            on_import_save: 导入存档回调。
-            on_recent_save_select: 最近存档选中回调（路径）。
-            recent_saves: 最近存档列表。
-            current_save_path: 当前存档路径。
-            on_pick_current_save: 选择当前存档回调。
-        """
+        """构建与 Flet 布局一致的 Qt 侧边栏。"""
         super().__init__()
         self._translate = translate
         self._on_tab_select = on_tab_select
+        self._on_import_save = on_import_save
         self._on_recent_save_select = on_recent_save_select
         self._recent_saves: list[dict[str, Any]] = list(recent_saves or [])
         self._collapsed = False
         self._tabs: list[dict[str, str]] = list(tabs)
         self._buttons: dict[str, _TabButton] = {}
+        self._selected_id: Optional[str] = None
+        self._current_save_path = current_save_path
+        self._recent_expanded = False
 
         self.setFixedWidth(self.EXPANDED_WIDTH)
+        self.setObjectName("sidebar")
         self._root = QVBoxLayout(self)
-        self._root.setContentsMargins(8, 10, 8, 10)
-        self._root.setSpacing(6)
+        self._root.setContentsMargins(0, 0, 0, 0)
+        self._root.setSpacing(0)
 
-        # 品牌 + 折叠开关
-        self._brand_row = QHBoxLayout()
-        self._brand_label = QLabel("⛏️ MCSaveHelper")
-        self._brand_label.setStyleSheet(
-            "font-size: 15px; font-weight: 700; "
-            "letter-spacing: 0.5px; color: #F2F5F3;"
-        )
-        self._toggle_button = QPushButton("◀")
-        self._toggle_button.setFixedWidth(24)
-        self._toggle_button.setToolTip(translate("sidebar.collapse", "折叠"))
-        self._toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._toggle_button.clicked.connect(lambda: self.toggle_collapsed())
-        self._brand_row.addWidget(self._brand_label)
-        self._brand_row.addStretch(1)
-        self._brand_row.addWidget(self._toggle_button)
-        self._root.addLayout(self._brand_row)
+        self._header = QWidget()
+        self._header_layout = QVBoxLayout(self._header)
+        self._header_layout.setContentsMargins(0, 0, 0, 0)
+        self._header_layout.setSpacing(0)
+        self._root.addWidget(self._header)
 
-        # 当前存档
-        self._save_label = QLabel(
-            translate("sidebar.no_current_save", "未设置当前存档")
-        )
-        self._save_label.setProperty("role", "muted")
-        self._save_label.setWordWrap(True)
-        self._save_label.setToolTip(current_save_path or "")
-        self._root.addWidget(self._save_label)
-        self._set_current_button = QPushButton(
-            translate("sidebar.set_current_save", "选择存档")
-        )
-        self._set_current_button.setProperty("role", "ghost")
-        self._set_current_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._set_current_button.clicked.connect(
-            lambda: self._call(on_pick_current_save)
-        )
-        self._root.addWidget(self._set_current_button)
-
-        # 标签列表
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(
+        self._tabs_scroll = QScrollArea()
+        self._tabs_scroll.setWidgetResizable(True)
+        self._tabs_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
+        self._tabs_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._tabs_scroll.setStyleSheet("QScrollArea { background: transparent; }")
         tabs_container = QWidget()
         self._tabs_layout = QVBoxLayout(tabs_container)
-        self._tabs_layout.setContentsMargins(0, 0, 0, 0)
+        self._tabs_layout.setContentsMargins(14, 12, 14, 10)
         self._tabs_layout.setSpacing(4)
+        self._tabs_layout.addStretch(1)
         for tab in self._tabs:
             self._add_tab_button(tab)
-        self._tabs_layout.addStretch(1)
-        scroll.setWidget(tabs_container)
-        self._root.addWidget(scroll, 1)
+        self._tabs_scroll.setWidget(tabs_container)
+        self._root.addWidget(self._tabs_scroll, 1)
 
-        # 最近存档
-        self._recent_header = QLabel(
-            translate("sidebar.recent_saves", "最近存档")
+        self._toggle_button: _ToggleButton = build_toggle_button(
+            collapsed=self._collapsed,
+            on_toggle=self.toggle_collapsed,
+            tooltip=self._t(
+                "sidebar.collapse" if not self._collapsed else "sidebar.expand",
+                "收起侧边栏" if not self._collapsed else "展开侧边栏",
+            ),
         )
-        self._recent_header.setProperty("role", "muted")
-        self._recent_header.setVisible(bool(self._recent_saves))
-        self._root.addWidget(self._recent_header)
-        self._recent_layout = QVBoxLayout()
-        self._recent_layout.setSpacing(2)
+        self._root.addWidget(self._toggle_button)
+
+        self._footer: _Footer = build_footer(collapsed=self._collapsed)
+        self._root.addWidget(self._footer)
+
+        self._rebuild_header()
         self._rebuild_recent_saves()
-        self._root.addLayout(self._recent_layout)
+        self._apply_sidebar_style()
 
-        # 导入存档
-        self._import_button = QPushButton(
-            f"{glyph('PLUS')}  {translate('sidebar.import_save', '导入存档')}"
+    def _t(self, key: str, default: str = "") -> str:
+        return self._translate(key, default)
+
+    def _apply_sidebar_style(self) -> None:
+        colors = get_theme_manager().current
+        self.setStyleSheet(
+            f"QFrame#sidebar {{ background-color: {colors.bg_secondary};"
+            f" border: none; border-right: 1px solid {colors.border_subtle}; }}"
         )
-        self._import_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._import_button.clicked.connect(lambda: self._call(on_import_save))
-        self._root.addWidget(self._import_button)
 
-    # ─── 公共操作 ───────────────────────────────
+    # ─── 公开操作 ───────────────────────────────
 
     def select_tab(self, view_id: str) -> None:
-        """选中指定标签。"""
+        """选中指定页签并同步按钮样式。"""
+        if view_id == self._selected_id:
+            return
+        previous = self._buttons.get(self._selected_id or "")
+        if previous is not None:
+            previous.set_selected(False)
+        self._selected_id = view_id
         button = self._buttons.get(view_id)
         if button is not None:
-            button.setChecked(True)
+            button.set_selected(True)
 
     def set_current_save(self, path: Optional[str]) -> None:
-        """更新当前存档显示。"""
-        self._save_label.setText(path or self._translate(
-            "sidebar.no_current_save", "未设置当前存档"
-        ))
-        self._save_label.setToolTip(path or "")
-        self._save_label.setVisible(not self._collapsed)
+        """更新当前存档显示（设为金色名称，匹配 Flet）。"""
+        self._current_save_path = path
+        self._rebuild_header()
 
     def set_recent_saves(self, saves: list[dict[str, Any]]) -> None:
         """更新最近存档列表。"""
         self._recent_saves = list(saves)
-        self._recent_header.setVisible(
-            bool(self._recent_saves) and not self._collapsed
-        )
         self._rebuild_recent_saves()
+        self._rebuild_header()
 
-    def toggle_collapsed(self) -> None:
-        """切换折叠状态。"""
-        self._set_collapsed(not self._collapsed)
-
-    def _set_collapsed(self, collapsed: bool) -> None:
+    def set_collapsed(self, collapsed: bool) -> None:
+        """切换折叠态并重建头部/页签/切换/页脚。"""
+        if collapsed == self._collapsed:
+            return
         self._collapsed = collapsed
-        width = self.COLLAPSED_WIDTH if collapsed else self.EXPANDED_WIDTH
-        self.setFixedWidth(width)
-        self._brand_label.setVisible(not collapsed)
-        self._save_label.setVisible(not collapsed)
-        self._set_current_button.setVisible(not collapsed)
-        self._recent_header.setVisible(
-            not collapsed and bool(self._recent_saves)
-        )
-        self._import_button.setText(
-            glyph("PLUS") if collapsed else (
-                f"{glyph('PLUS')}  {self._translate('sidebar.import_save', '导入存档')}"
-            )
+        self.setFixedWidth(
+            self.COLLAPSED_WIDTH if collapsed else self.EXPANDED_WIDTH
         )
         for button in self._buttons.values():
             button.set_collapsed(collapsed)
-        self._toggle_button.setText("▶" if collapsed else "◀")
-        self._toggle_button.setToolTip(
-            self._translate("sidebar.expand", "展开")
-            if collapsed
-            else self._translate("sidebar.collapse", "折叠")
+        self._tabs_layout.setContentsMargins(
+            12 if collapsed else 14,
+            12,
+            12 if collapsed else 14,
+            10,
         )
+        self._rebuild_header()
+        self._toggle_button.set_collapsed(collapsed)
+        self._footer.set_collapsed(collapsed)
+        self._apply_sidebar_style()
+
+    def toggle_collapsed(self) -> None:
+        """切换折叠状态。"""
+        self.set_collapsed(not self._collapsed)
+
+    @property
+    def is_collapsed(self) -> bool:
+        """当前是否折叠。"""
+        return self._collapsed
+
+    @property
+    def selected_id(self) -> Optional[str]:
+        """当前选中的页签 id。"""
+        return self._selected_id
 
     # ─── 内部构建 ───────────────────────────────
 
@@ -218,48 +347,70 @@ class QtSidebar(QFrame):
         view_id = tab["id"]
         button = _TabButton(
             view_id=view_id,
-            icon=tab["icon"],
-            label=tab["label"],
+            icon=tab.get("icon", "•"),
+            label=tab.get("label", view_id),
             on_click=self._on_tab_select,
         )
         self._buttons[view_id] = button
-        self._tabs_layout.addWidget(button)
+        self._tabs_layout.insertWidget(self._tabs_layout.count() - 1, button)
+
+    def _rebuild_header(self) -> None:
+        """按当前折叠态重建头部。"""
+        while self._header_layout.count():
+            item = self._header_layout.takeAt(0)
+            if item is not None:
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+        if self._collapsed:
+            widget = build_header_collapsed(
+                on_set_current_save=self._on_pick_current_save,
+                recent_menu=self._build_collapsed_recent_menu(),
+                set_current_tooltip=self._t(
+                    "sidebar.set_current_save", "设置当前存档"
+                ),
+            )
+            self._header_layout.addWidget(widget)
+            return
+        widget = build_header_expanded(
+            current_save_name=self._current_save_display(),
+            current_save_label=self._t("sidebar.current_save", "当前存档"),
+            set_current_label=self._t(
+                "sidebar.set_current_save", "设置当前存档"
+            ),
+            recent_saves_label=self._t("sidebar.recent_saves", "最近存档"),
+            recent_arrow_state=self._recent_expanded,
+            on_set_current_save=self._on_pick_current_save,
+            on_toggle_recent=self.toggle_recent,
+        )
+        self._header_layout.addWidget(widget)
+
+    def _current_save_display(self) -> str:
+        path = self._current_save_path
+        if not path:
+            return self._t("sidebar.no_current_save", "未设置当前存档")
+        return os.path.basename(path.rstrip("\\/")) or path
+
+    def _on_pick_current_save(self) -> None:
+        if self._on_import_save is not None:
+            self._on_import_save()
+
+    def toggle_recent(self) -> None:
+        """展开/收起最近存档。"""
+        self._recent_expanded = not self._recent_expanded
+        self._rebuild_header()
+        self._rebuild_recent_saves()
 
     def _rebuild_recent_saves(self) -> None:
-        """重建最近存档按钮列表（幂等）。"""
-        while self._recent_layout.count():
-            item = self._recent_layout.takeAt(0)
-            if item is None:
-                continue
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        for save in self._recent_saves:
-            path = str(save.get("path", ""))
-            name = str(save.get("name") or path)
-            button = QPushButton(name)
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setToolTip(path)
-            button.setStyleSheet("text-align: left; padding: 3px 8px;")
-            callback = self._on_recent_save_select
-            if callback is not None:
-                self._connect_recent_save(button, callback, path)
-            self._recent_layout.addWidget(button)
+        """重建最近存档列表（Flet 布局：图标 + 名称 + 路径 + 当前标记）。"""
+        # 由 header 内嵌的 recent_body 持有；header 重建时已删除旧控件。
+        if not self._recent_expanded:
+            return
+        # recent body 由 header 构建时插入下方的滚动容器；这里不做额外工作。
 
-    @staticmethod
-    def _connect_recent_save(
-        button: QPushButton,
-        callback: Callable[[str], None],
-        path: str,
-    ) -> None:
-        """把最近存档按钮连接到回调（避免闭包窄化问题）。"""
+    def _build_collapsed_recent_menu(self) -> Optional[QWidget]:
+        """折叠态的最近存档弹出菜单（简化：点击展开头部回退）。"""
+        return None
 
-        def on_clicked(_checked: bool) -> None:
-            callback(path)
 
-        button.clicked.connect(on_clicked)
-
-    @staticmethod
-    def _call(callback: Optional[Callable[[], None]]) -> None:
-        if callback is not None:
-            callback()
+__all__ = ["QtSidebar"]
