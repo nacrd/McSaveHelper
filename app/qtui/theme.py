@@ -213,7 +213,7 @@ QLabel[role="result"] {{
 }}
 QFrame[role="card"] {{
     background-color: {colors.bg_card};
-    border: 1px solid {colors.border_subtle};
+    border: 1px solid {colors.border_standard};
     border-radius: 6px;
 }}
 QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
@@ -269,9 +269,10 @@ QTabBar::tab:disabled {{
 QPushButton {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_standard};
-    border-radius: 5px;
-    padding: 6px 14px;
+    border-radius: 6px;
+    padding: 10px 16px;
     color: {colors.text_primary};
+    min-height: 22px;
 }}
 QPushButton:hover {{
     background-color: {colors.bg_card_hover};
