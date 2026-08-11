@@ -174,6 +174,10 @@ QWidget {{
 QMainWindow, QDialog {{
     background-color: {colors.bg_primary};
 }}
+QWidget#top_bar {{
+    background-color: {colors.bg_secondary};
+    border-bottom: 1px solid {colors.border_subtle};
+}}
 QLabel {{
     background: transparent;
 }}
@@ -220,19 +224,26 @@ QComboBox QAbstractItemView {{
 }}
 QTabWidget::pane {{
     border: 1px solid {colors.border_subtle};
-    border-radius: 4px;
+    border-radius: 6px;
     background: {colors.bg_secondary};
 }}
 QTabBar::tab {{
-    background: {colors.bg_secondary};
+    background: transparent;
     color: {colors.text_secondary};
     border: 1px solid transparent;
-    padding: 8px 16px;
+    border-radius: 4px;
+    padding: 7px 16px;
+    margin-right: 2px;
+}}
+QTabBar::tab:hover {{
+    background: {colors.bg_card};
+    color: {colors.text_primary};
 }}
 QTabBar::tab:selected {{
     background: {colors.bg_elevated};
     color: {colors.text_primary};
     border-color: {colors.border_standard};
+    font-weight: 600;
 }}
 QTabBar::tab:disabled {{
     color: {colors.text_disabled};
@@ -240,7 +251,7 @@ QTabBar::tab:disabled {{
 QPushButton {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_standard};
-    border-radius: 4px;
+    border-radius: 5px;
     padding: 6px 14px;
     color: {colors.text_primary};
 }}
@@ -250,6 +261,12 @@ QPushButton:hover {{
 }}
 QPushButton:pressed {{
     background-color: {colors.bg_elevated};
+    border-color: {colors.accent_dim};
+}}
+QPushButton:checked {{
+    background-color: {colors.accent_dim};
+    border-color: {colors.accent};
+    color: {colors.text_primary};
 }}
 QPushButton:disabled {{
     color: {colors.text_disabled};
@@ -264,11 +281,18 @@ QPushButton[role="primary"] {{
 }}
 QPushButton[role="primary"]:hover {{
     background-color: {colors.accent_hover};
+    border-color: {colors.accent};
+}}
+QPushButton[role="primary"]:pressed {{
+    background-color: {colors.accent_dim};
 }}
 QPushButton[role="danger"] {{
     background-color: {colors.error};
     border-color: {colors.border_dark};
     color: {colors.text_invert};
+}}
+QPushButton[role="danger"]:hover {{
+    background-color: #BF5260;
 }}
 QPushButton[role="ghost"] {{
     background-color: transparent;
@@ -276,6 +300,10 @@ QPushButton[role="ghost"] {{
 }}
 QPushButton[role="ghost"]:hover {{
     background-color: {colors.bg_card_hover};
+}}
+QPushButton[role="ghost"]:checked {{
+    background-color: {colors.bg_card};
+    border-color: {colors.accent};
 }}
 QCheckBox {{
     spacing: 6px;
@@ -324,14 +352,15 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 }}
 QProgressBar {{
     border: 1px solid {colors.border_standard};
-    border-radius: 4px;
+    border-radius: 5px;
     background: {colors.bg_secondary};
     text-align: center;
     color: {colors.text_primary};
+    min-height: 14px;
 }}
 QProgressBar::chunk {{
     background-color: {colors.accent};
-    border-radius: 3px;
+    border-radius: 4px;
 }}
 QStatusBar {{
     background: {colors.bg_secondary};
@@ -346,7 +375,14 @@ QToolTip {{
 QListWidget, QTreeWidget {{
     background: {colors.bg_secondary};
     border: 1px solid {colors.border_subtle};
+    border-radius: 5px;
+}}
+QListWidget::item, QTreeWidget::item {{
+    padding: 3px 6px;
     border-radius: 4px;
+}}
+QListWidget::item:hover, QTreeWidget::item:hover {{
+    background: {colors.bg_card};
 }}
 QListWidget::item:selected, QTreeWidget::item:selected {{
     background: {colors.accent_dim};
@@ -355,14 +391,44 @@ QListWidget::item:selected, QTreeWidget::item:selected {{
 QTableWidget {{
     background: {colors.bg_secondary};
     border: 1px solid {colors.border_subtle};
+    border-radius: 5px;
     gridline-color: {colors.border_subtle};
+    selection-background-color: {colors.accent_dim};
+    selection-color: {colors.text_primary};
+}}
+QTableWidget::item:hover {{
+    background: {colors.bg_card};
 }}
 QHeaderView::section {{
     background: {colors.bg_elevated};
     color: {colors.text_secondary};
     border: none;
+    border-bottom: 1px solid {colors.border_subtle};
     border-right: 1px solid {colors.border_subtle};
-    padding: 4px 8px;
+    padding: 5px 8px;
+    font-weight: 600;
+}}
+QTableCornerButton::section {{
+    background: {colors.bg_elevated};
+    border: none;
+}}
+QGroupBox {{
+    border: 1px solid {colors.border_subtle};
+    border-radius: 6px;
+    margin-top: 10px;
+    font-weight: 600;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: {colors.text_secondary};
+}}
+QSplitter::handle {{
+    background: transparent;
+}}
+QSplitter::handle:hover {{
+    background: {colors.border_subtle};
 }}
 QMenuBar {{
     background: {colors.bg_secondary};

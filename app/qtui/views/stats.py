@@ -90,9 +90,12 @@ class QtStatsPanel(QWidget):
         toolbar.addWidget(self._status, 1)
         self._start = QPushButton(self._t("stats.start", "开始统计"))
         self._start.setProperty("role", "primary")
+        self._start.setCursor(Qt.CursorShape.PointingHandCursor)
         self._start.clicked.connect(lambda _checked: on_start())
         toolbar.addWidget(self._start)
         self._cancel = QPushButton(self._t("stats.cancel", "取消"))
+        self._cancel.setProperty("role", "ghost")
+        self._cancel.setCursor(Qt.CursorShape.PointingHandCursor)
         self._cancel.clicked.connect(lambda _checked: on_cancel())
         toolbar.addWidget(self._cancel)
         layout.addLayout(toolbar)
@@ -102,16 +105,20 @@ class QtStatsPanel(QWidget):
         layout.addWidget(self._progress)
 
         tabs = QTabWidget()
-        tabs.addTab(self._build_overview(), self._t(
-            "stats.tab_overview", "概览"
+        tabs.addTab(self._build_overview(), self._tab_label(
+            "🏠", "stats.tab_overview", "概览"
         ))
-        tabs.addTab(self._build_players(), self._t(
-            "stats.tab_players", "玩家"
+        tabs.addTab(self._build_players(), self._tab_label(
+            "🧍", "stats.tab_players", "玩家"
         ))
-        tabs.addTab(self._build_rankings(), self._t(
-            "stats.tab_rankings", "排行"
+        tabs.addTab(self._build_rankings(), self._tab_label(
+            "🏆", "stats.tab_rankings", "排行"
         ))
         layout.addWidget(tabs, 1)
+
+    def _tab_label(self, icon: str, key: str, default: str) -> str:
+        """为统计内部 tab 标题加上图标。"""
+        return f"{icon}  {self._t(key, default)}"
 
     def _build_overview(self) -> QWidget:
         host = QWidget()

@@ -90,7 +90,10 @@ class QtSidebar(QFrame):
         # 品牌 + 折叠开关
         self._brand_row = QHBoxLayout()
         self._brand_label = QLabel("⛏️ MCSaveHelper")
-        self._brand_label.setStyleSheet("font-size: 15px; font-weight: 700;")
+        self._brand_label.setStyleSheet(
+            "font-size: 15px; font-weight: 700; "
+            "letter-spacing: 0.5px; color: #F2F5F3;"
+        )
         self._toggle_button = QPushButton("◀")
         self._toggle_button.setFixedWidth(24)
         self._toggle_button.setToolTip(translate("sidebar.collapse", "折叠"))
@@ -112,6 +115,7 @@ class QtSidebar(QFrame):
         self._set_current_button = QPushButton(
             translate("sidebar.set_current_save", "选择存档")
         )
+        self._set_current_button.setProperty("role", "ghost")
         self._set_current_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self._set_current_button.clicked.connect(
             lambda: self._call(on_pick_current_save)

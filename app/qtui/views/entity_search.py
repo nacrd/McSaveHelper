@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Callable, Sequence
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -140,11 +141,14 @@ class QtEntitySearchPanel(QWidget):
             "entity_search.start", "开始搜索"
         ))
         self._search.setProperty("role", "primary")
+        self._search.setCursor(Qt.CursorShape.PointingHandCursor)
         self._search.clicked.connect(lambda _checked: on_search())
         grid.addWidget(self._search, 1, 4)
         self._export = QPushButton(self._t(
             "entity_search.export", "导出结果"
         ))
+        self._export.setProperty("role", "ghost")
+        self._export.setCursor(Qt.CursorShape.PointingHandCursor)
         self._export.clicked.connect(lambda _checked: on_export())
         grid.addWidget(self._export, 1, 5)
         grid.setColumnStretch(3, 1)

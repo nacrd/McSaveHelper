@@ -58,11 +58,14 @@ class QtShell(QWidget):
 
         # 顶栏
         top_bar = QWidget()
+        top_bar.setObjectName("top_bar")
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(16, 8, 16, 8)
         top_layout.setSpacing(8)
         self._title_label = QLabel("MCSaveHelper")
-        self._title_label.setStyleSheet("font-size: 15px; font-weight: 600;")
+        self._title_label.setStyleSheet(
+            "font-size: 15px; font-weight: 700; font-family: 'Segoe UI', 'Microsoft YaHei';"
+        )
         top_layout.addWidget(self._title_label)
         self._action_host = QWidget()
         self._action_layout = QHBoxLayout(self._action_host)
