@@ -193,6 +193,22 @@ QLabel[role="section"] {{
     font-weight: 600;
     color: {colors.text_secondary};
 }}
+QLabel[role="warning"] {{
+    color: {colors.warning};
+}}
+QLabel[role="error"] {{
+    color: {colors.error};
+}}
+QLabel[role="info"] {{
+    color: {colors.info};
+}}
+QLabel[role="success"] {{
+    color: {colors.success};
+}}
+QLabel[role="result"] {{
+    color: {colors.text_primary};
+    font-family: 'Consolas', 'SFMono-Regular', monospace;
+}}
 QFrame[role="card"] {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_subtle};

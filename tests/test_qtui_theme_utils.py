@@ -23,6 +23,20 @@ def test_build_qss_contains_theme_colors() -> None:
     assert "QLineEdit" in qss
 
 
+def test_build_qss_defines_status_roles() -> None:
+    qss = build_qss(LIGHT_THEME)
+
+    assert 'QLabel[role="warning"]' in qss
+    assert 'QLabel[role="error"]' in qss
+    assert 'QLabel[role="success"]' in qss
+    assert 'QPushButton:checked' in qss
+    assert 'QTabBar::tab:selected' in qss
+    assert 'QListWidget::item:hover' in qss
+    assert LIGHT_THEME.warning in qss
+    assert LIGHT_THEME.error in qss
+    assert LIGHT_THEME.success in qss
+
+
 def test_apply_theme_switches_app_stylesheet(qt_app: QApplication) -> None:
     colors = apply_theme(qt_app, "light")
 
