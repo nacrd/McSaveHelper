@@ -3,16 +3,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Collection,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from core.mca.block_palette import ChunkBlocks, get_chunk_blocks
-from core.mca.errors import ChunkMissing
+from core.mca.errors import ChunkMissing, McaError
 from core.mca.nbt_access import as_int, first_key
 from core.mca.region_file import RegionFile
 from core.mca.versions import section_y_range
 from core.region_utils import parse_region_coords
 
 PathLike = Union[str, Path]
+CHUNK_COORD_FIELDS = frozenset({"DataVersion", "dataVersion", "xPos", "zPos"})
+BLOCK_SEARCH_ROOT_FIELDS = CHUNK_COORD_FIELDS | frozenset({
+    "sections",
+    "Sections",
+})
+ENTITY_SEARCH_ROOT_FIELDS = CHUNK_COORD_FIELDS | frozenset({
+    "entities",
+    "Entities",
+    "Level",
+})
+CONTAINER_SEARCH_ROOT_FIELDS = CHUNK_COORD_FIELDS | frozenset({
+    "block_entities",
+    "BlockEntities",
+    "TileEntities",
+    "Level",
+})
+STATS_CHUNK_ROOT_FIELDS = (
+    BLOCK_SEARCH_ROOT_FIELDS
+    | ENTITY_SEARCH_ROOT_FIELDS
+    | CONTAINER_SEARCH_ROOT_FIELDS
+)
 
 
 @dataclass(frozen=True)
@@ -70,6 +102,11 @@ class ChunkView:
                 self.z = zpos
         except (TypeError, ValueError, AttributeError, KeyError):
             pass
+
+    @property
+    def blocks(self) -> ChunkBlocks:
+        """Return the lazily decoded section view for this chunk."""
+        return self._blocks
 
     def get_block(self, x: int, y: int, z: int) -> NamedBlock:
         """查询区块内局部坐标的方块。
@@ -205,6 +242,45 @@ class NativeRegion:
             Optional[ChunkView]: 存在且可读时返回视图。
         """
         return get_chunk(self._rf, local_cx, local_cz, self._rx, self._rz)
+
+    def read_chunk_fields(
+        self,
+        local_cx: int,
+        local_cz: int,
+        root_fields: Collection[str],
+        compound_list_fields: Optional[
+            Mapping[str, Collection[str] | Any]
+        ] = None,
+    ) -> Optional[ChunkView]:
+        """Read a projected chunk view, keeping only selected root fields.
+
+        Missing chunks return ``None``.  Corrupt payloads raise ``McaError``
+        so callers can count them as skipped instead of empty.
+
+        Args:
+            local_cx: Region-local chunk X.
+            local_cz: Region-local chunk Z.
+            root_fields: Root NBT field names to retain.
+            compound_list_fields: Optional nested projections for root lists.
+        """
+        try:
+            nbt = self._rf.read_chunk_fields(
+                local_cx,
+                local_cz,
+                root_fields,
+                compound_list_fields=compound_list_fields,
+            )
+        except ChunkMissing:
+            return None
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            raise McaError(
+                f"Cannot project chunk ({local_cx}, {local_cz}): {exc}"
+            ) from exc
+        return ChunkView(
+            nbt,
+            self._rx * 32 + local_cx,
+            self._rz * 32 + local_cz,
+        )
 
     def iter_present_chunks(self) -> Iterable[Tuple[int, int]]:
         """遍历位置表非空槽的局部坐标。

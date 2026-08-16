@@ -132,6 +132,11 @@ def _default_world_compare(world_repository: WorldRepository) -> WorldCompareSer
     return WorldCompareService(index_provider=world_repository.get_index)
 
 
+def _default_world_stats(runtime: ExecutionRuntime) -> WorldStatsService:
+    """Bind statistics scans to the shared execution runtime."""
+    return WorldStatsService(runtime=runtime)
+
+
 @dataclass(frozen=True)
 class ServiceFactories:
     """可替换的服务工厂表，便于测试注入替身。"""
@@ -164,7 +169,10 @@ class ServiceFactories:
         [WorldIndexRegistry, WorldWriteCoordinator, BackupService, WorldTransactionService],
         WorldRepository,
     ] = _default_world_repository
-    world_stats: Callable[[], WorldStatsService] = WorldStatsService
+    world_stats: Callable[
+        [ExecutionRuntime],
+        WorldStatsService,
+    ] = _default_world_stats
     world_compare: Callable[[WorldRepository], WorldCompareService] = (
         _default_world_compare
     )
@@ -320,7 +328,11 @@ def create_app_services(
             backup,
             world_transactions,
         )
-        world_stats = _create("world_stats", selected.world_stats)
+        world_stats = _create(
+            "world_stats",
+            selected.world_stats,
+            execution_runtime,
+        )
         world_compare = _create(
             "world_compare",
             selected.world_compare,

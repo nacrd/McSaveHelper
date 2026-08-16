@@ -16,7 +16,16 @@ from core.mca.biome_palette import (
     ChunkBiomes,
     decode_biome_section,
 )
-from core.mca.chunk_view import ChunkView, NamedBlock, NativeRegion, section_range_for_chunk
+from core.mca.chunk_view import (
+    BLOCK_SEARCH_ROOT_FIELDS,
+    CONTAINER_SEARCH_ROOT_FIELDS,
+    ENTITY_SEARCH_ROOT_FIELDS,
+    STATS_CHUNK_ROOT_FIELDS,
+    ChunkView,
+    NamedBlock,
+    NativeRegion,
+    section_range_for_chunk,
+)
 from core.mca.errors import (
     ChunkMissing,
     CorruptChunk,
@@ -107,10 +116,13 @@ __all__ = [
     "BlockBounds",
     "BLOCKS_PER_CHUNK",
     "BLOCKS_PER_REGION",
+    "BLOCK_SEARCH_ROOT_FIELDS",
     "CHUNKS_PER_REGION",
+    "CONTAINER_SEARCH_ROOT_FIELDS",
     "DEFAULT_TILE_SIZE",
     "DEFAULT_TILE_LADDER",
     "DETAIL_TILE_SIZE",
+    "ENTITY_SEARCH_ROOT_FIELDS",
     "HIGH_DETAIL_TILE_LADDER",
     "HIRES_TILE_SIZE",
     "McaError",
@@ -132,6 +144,7 @@ __all__ = [
     "RegionFile",
     "RegionEditor",
     "RegionInfo",
+    "STATS_CHUNK_ROOT_FIELDS",
     "LevelChange",
     "LEAF_TILE_SIZE",
     "PREVIEW_TILE_SIZE",

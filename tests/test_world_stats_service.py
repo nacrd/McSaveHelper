@@ -1,4 +1,6 @@
 import json
+from collections import Counter
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,8 +17,24 @@ from app.services.world_stats_service import (
     WorldStatsService,
     DimensionSizeStats,
     PlayerPlaytimeStats,
+    _RegionAnalysis,
+    _RegionChunkStats,
 )
 from core.world_index import WorldIndexBuilder
+
+
+def _empty_region_analysis(world_path: Path, region_path: Path) -> _RegionAnalysis:
+    return _RegionAnalysis(
+        path=region_path,
+        rel_key=region_path.name,
+        size_bytes=0,
+        stats=_RegionChunkStats(
+            loaded_chunks=0,
+            empty_chunks=0,
+            block_counts=Counter(),
+            entity_counts=Counter(),
+        ),
+    )
 
 
 def test_analyze_chunk_counts_palette_and_entity_types() -> None:
@@ -578,11 +596,19 @@ def test_analyze_world_stops_between_region_files(
         "scan_all_regions",
         lambda _world: region_paths,
     )
-    monkeypatch.setattr(
-        service,
-        "_analyze_one_region",
-        lambda *args: analyzed.append(args[1]),
-    )
+
+    def analyze_region(world_path, region_path):
+        del world_path
+        analyzed.append(region_path)
+        return _empty_region_analysis(tmp_path, region_path)
+
+    monkeypatch.setattr(service, "_analyze_region_file", analyze_region)
+
+    with pytest.raises(WorldStatsCancelledError, match="统计已取消"):
+        service.analyze_world(
+            tmp_path,
+            cancel_check=lambda: bool(analyzed),
+        )
 
     with pytest.raises(WorldStatsCancelledError, match="统计已取消"):
         service.analyze_world(

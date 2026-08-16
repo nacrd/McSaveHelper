@@ -1,12 +1,14 @@
 """Block search implementation."""
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, List, Optional
+
+from core.mca.block_palette import ChunkBlocks
 
 from .base_searcher import BaseSearcher
 from .container_searcher import ContainerSearcher
 from .models import SearchResult
-from .utils import get_block_name, get_section_range, matches_target, tag_to_str
+from .utils import get_section_range, matches_target
 
 
 class BlockSearcher(BaseSearcher):
@@ -33,11 +35,22 @@ class BlockSearcher(BaseSearcher):
             dimension: 维度标识（写入结果）。
         """
         try:
-            matching_sections = self._matching_sections(chunk, target)
+            blocks = self._chunk_blocks(chunk)
+            if blocks is None:
+                return
+            matching_sections = self._matching_sections(chunk, blocks, target)
             if not matching_sections:
                 return
+            containers = self.container_helper.container_lookup(chunk)
             for section_y in matching_sections:
-                self._scan_section(chunk, target, dimension, section_y)
+                self._scan_section(
+                    chunk,
+                    blocks,
+                    target,
+                    dimension,
+                    section_y,
+                    containers,
+                )
         except (
             OSError,
             ValueError,
@@ -48,91 +61,71 @@ class BlockSearcher(BaseSearcher):
             IndexError,
         ):
             return
-        except Exception:
-            return
 
-    def _matching_sections(self, chunk: Any, target: str) -> List[int]:
-        matches: List[int] = []
-        for section_y in get_section_range(chunk):
-            if self._section_palette_matches(chunk, section_y, target):
-                matches.append(section_y)
-        return matches
-
-    def _section_palette_matches(
+    def _matching_sections(
         self,
         chunk: Any,
+        blocks: ChunkBlocks,
+        target: str,
+    ) -> List[int]:
+        section_ys = list(reversed(blocks.section_ys_desc)) or list(
+            get_section_range(chunk)
+        )
+        return [
+            section_y
+            for section_y in section_ys
+            if self._section_may_contain(blocks, section_y, target)
+        ]
+
+    def _section_may_contain(
+        self,
+        blocks: ChunkBlocks,
         section_y: int,
         target: str,
     ) -> bool:
-        try:
-            palette = chunk.get_palette(section_y)
-            if palette is None:
-                return False
-            return any(
-                self._block_matches(block, target)
-                for block in palette
-                if block is not None
-            )
-        except (
-            OSError,
-            ValueError,
-            TypeError,
-            RuntimeError,
-            KeyError,
-            AttributeError,
-            IndexError,
-        ):
-            return False
-        except Exception:
-            return False
+        names = blocks.get_palette_names(section_y)
+        if names:
+            return any(self._name_matches(name, target) for name in names)
+        # Legacy or palette-less sections: let the iterator filter cells.
+        return True
 
     def _scan_section(
         self,
         chunk: Any,
+        blocks: ChunkBlocks,
         target: str,
         dimension: str,
         section_y: int,
+        containers: dict[tuple[int, int, int], dict[str, Any]],
     ) -> None:
-        for x in range(16):
-            for z in range(16):
-                for y in range(section_y * 16, section_y * 16 + 16):
-                    if self._limit_reached():
-                        return
-                    try:
-                        block = chunk.get_block(x, y, z)
-                        if block is None or not self._block_matches(
-                            block, target
-                        ):
-                            continue
-                        world_x = chunk.x * 16 + x
-                        world_z = chunk.z * 16 + z
-                        self.results.append(SearchResult(
-                            "block",
-                            get_block_name(block),
-                            (world_x, y, world_z),
-                            dimension,
-                            self.container_helper.get_container_info_at(
-                                chunk, world_x, y, world_z
-                            ),
-                        ))
-                    except (
-                        OSError,
-                        ValueError,
-                        TypeError,
-                        RuntimeError,
-                        KeyError,
-                        AttributeError,
-                        IndexError,
-                    ):
-                        continue
-                    except Exception:
-                        continue
+        chunk_x = int(getattr(chunk, "x", 0) or 0)
+        chunk_z = int(getattr(chunk, "z", 0) or 0)
+        for x, y, z, block_id in blocks.iter_matching_blocks(
+            section_y,
+            lambda name: self._name_matches(name, target),
+        ):
+            if self._limit_reached():
+                return
+            world_x = chunk_x * 16 + x
+            world_z = chunk_z * 16 + z
+            self.results.append(SearchResult(
+                "block",
+                block_id,
+                (world_x, y, world_z),
+                dimension,
+                containers.get((world_x, y, world_z), {}),
+            ))
 
     @staticmethod
-    def _block_matches(block: Any, target: str) -> bool:
-        block_name = get_block_name(block)
-        block_id = tag_to_str(getattr(block, "id", ""))
-        return (
-            matches_target(block_name, target)
-            or matches_target(block_id, target)
-        )
+    def _chunk_blocks(chunk: Any) -> Optional[ChunkBlocks]:
+        blocks = getattr(chunk, "blocks", None)
+        if isinstance(blocks, ChunkBlocks):
+            return blocks
+        data = getattr(chunk, "data", None)
+        if not data:
+            return None
+        return ChunkBlocks(data)
+
+    @staticmethod
+    def _name_matches(name: str, target: str) -> bool:
+        return matches_target(name, target)

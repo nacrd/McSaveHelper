@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from core.mca.chunk_view import CONTAINER_SEARCH_ROOT_FIELDS
+
 from .base_searcher import BaseSearcher
 from .models import SearchResult
 from .utils import (
@@ -18,6 +20,7 @@ class ContainerSearcher(BaseSearcher):
     """搜索区块中的容器方块实体。"""
 
     progress_label = "容器"
+    chunk_root_fields = CONTAINER_SEARCH_ROOT_FIELDS
 
     def search_chunk(self, chunk: Any, target: str, dimension: str) -> None:
         """在单个区块中扫描匹配的容器方块实体。
@@ -41,8 +44,26 @@ class ContainerSearcher(BaseSearcher):
             AttributeError,
         ):
             return
-        except Exception:
-            return
+
+    def container_lookup(self, chunk: Any) -> Dict[tuple[int, int, int], Dict[str, Any]]:
+        """Build a world-coordinate lookup of container summaries for one chunk."""
+        lookup: Dict[tuple[int, int, int], Dict[str, Any]] = {}
+        try:
+            for block_entity in get_block_entities(chunk):
+                position = get_block_entity_position(block_entity)
+                if position is None:
+                    continue
+                lookup[position] = extract_container_info(block_entity)
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+            KeyError,
+            AttributeError,
+        ):
+            return lookup
+        return lookup
 
     def get_container_info_at(
         self,
@@ -52,22 +73,7 @@ class ContainerSearcher(BaseSearcher):
         z: int,
     ) -> Dict[str, Any]:
         """Return inventory summary for a container at world coords."""
-        try:
-            for block_entity in get_block_entities(chunk):
-                if get_block_entity_position(block_entity) == (x, y, z):
-                    return extract_container_info(block_entity)
-        except (
-            OSError,
-            ValueError,
-            TypeError,
-            RuntimeError,
-            KeyError,
-            AttributeError,
-        ):
-            pass
-        except Exception:
-            pass
-        return {}
+        return self.container_lookup(chunk).get((x, y, z), {})
 
     def _handle_container(
         self,
@@ -96,8 +102,6 @@ class ContainerSearcher(BaseSearcher):
             AttributeError,
             IndexError,
         ):
-            return
-        except Exception:
             return
 
 

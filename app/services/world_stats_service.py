@@ -7,6 +7,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app.services.execution_runtime import (
+    CancellationToken,
+    ExecutionLane,
+    ExecutionRuntime,
+    OperationCancelledError,
+    TaskPriority,
+)
+from app.services.runtime_map import map_items
+from core.mca import McaError
+from core.mca.chunk_view import STATS_CHUNK_ROOT_FIELDS
 from core.omni.player_manager import PlayerManager
 from core.omni.world_scanner import WorldScanner
 from core.region_utils import (
@@ -138,6 +148,15 @@ class _RegionChunkStats:
     entity_counts: Counter[str]
 
 
+@dataclass(frozen=True)
+class _RegionAnalysis:
+    path: Path
+    rel_key: str
+    size_bytes: int
+    stats: Optional[_RegionChunkStats]
+    error: Optional[str] = None
+
+
 # value in [0.0, 1.0], human-readable stage message
 StatsProgressCallback = Callable[[float, str], None]
 StatsCancelCheck = Callable[[], bool]
@@ -168,13 +187,19 @@ class WorldStatsService:
     _REGION_SPAN = 0.82
     _FINALIZE_VALUE = 0.98
 
-    def __init__(self, log: Optional[LogCallback] = None) -> None:
+    def __init__(
+        self,
+        log: Optional[LogCallback] = None,
+        runtime: Optional[ExecutionRuntime] = None,
+    ) -> None:
         """初始化统计服务。
 
         Args:
             log: 可选日志回调；默认空操作。
+            runtime: 可选共享运行时；缺省时区域扫描保持串行。
         """
         self.log: LogCallback = log or _default_log
+        self._runtime = runtime
 
     def analyze_world(
         self,
@@ -270,26 +295,108 @@ class WorldStatsService:
             self._REGION_START,
             f"regions:0:{total_regions}",
         )
-        for idx, region_path in enumerate(region_files):
+        analyses = self._scan_region_files(
+            world_path,
+            region_files,
+            cancel_check,
+        )
+        completed = 0
+        for analysis in analyses:
             self._raise_if_cancelled(cancel_check)
-            self._analyze_one_region(
-                world_path,
-                region_path,
-                stats,
-                block_counter,
-                entity_counter,
-                tracker,
-            )
-            self._raise_if_cancelled(cancel_check)
-            done = idx + 1
-            fraction = done / total_regions
+            if analysis.error is not None:
+                self.log(analysis.error, "WARNING")
+                tracker.increment_errors(1)
+            else:
+                stats.region_sizes[analysis.rel_key] = analysis.size_bytes
+                assert analysis.stats is not None
+                self._merge_region_stats(
+                    stats,
+                    analysis.stats,
+                    block_counter,
+                    entity_counter,
+                )
+            completed += 1
+            fraction = completed / total_regions
             value = self._REGION_START + self._REGION_SPAN * fraction
             self._report_progress(
                 progress_callback,
                 value,
-                f"regions:{done}:{total_regions}",
+                f"regions:{completed}:{total_regions}",
             )
         return block_counter, entity_counter
+
+    def _scan_region_files(
+        self,
+        world_path: Path,
+        region_files: List[Path],
+        cancel_check: Optional[StatsCancelCheck],
+    ) -> List[_RegionAnalysis]:
+        """Analyze region files, optionally in bounded parallel."""
+        if self._runtime is None or len(region_files) <= 1:
+            analyses: List[_RegionAnalysis] = []
+            for region_path in region_files:
+                self._raise_if_cancelled(cancel_check)
+                analyses.append(self._analyze_region_file(world_path, region_path))
+            return analyses
+
+        def worker(
+            _token: CancellationToken,
+            region_path: Path,
+        ) -> _RegionAnalysis:
+            return self._analyze_region_file(world_path, region_path)
+
+        try:
+            mapped = map_items(
+                self._runtime,
+                "analyze_region",
+                region_files,
+                worker,
+                lane=ExecutionLane.CPU,
+                priority=TaskPriority.BACKGROUND,
+                cancel_check=cancel_check,
+                max_in_flight=min(max(1, (len(region_files) + 3) // 4), 4),
+            )
+        except OperationCancelledError as exc:
+            raise WorldStatsCancelledError("存档统计已取消") from exc
+        analyses: List[_RegionAnalysis] = []
+        for region_path, value in zip(region_files, mapped):
+            if isinstance(value, BaseException):
+                analyses.append(
+                    _RegionAnalysis(
+                        path=region_path,
+                        rel_key=self._region_size_key(world_path, region_path),
+                        size_bytes=0,
+                        stats=None,
+                        error=f"分析区域 {region_path.name} 失败: {value}",
+                    )
+                )
+            else:
+                analyses.append(value)
+        return analyses
+
+    def _analyze_region_file(
+        self,
+        world_path: Path,
+        region_path: Path,
+    ) -> _RegionAnalysis:
+        """Analyze one region and return a mergeable snapshot."""
+        rel_key = self._region_size_key(world_path, region_path)
+        try:
+            size_bytes = region_path.stat().st_size
+            return _RegionAnalysis(
+                path=region_path,
+                rel_key=rel_key,
+                size_bytes=size_bytes,
+                stats=self._analyze_region_chunks(region_path),
+            )
+        except (OSError, ValueError, TypeError, RuntimeError, McaError) as exc:
+            return _RegionAnalysis(
+                path=region_path,
+                rel_key=rel_key,
+                size_bytes=0,
+                stats=None,
+                error=f"分析区域 {region_path.name} 失败: {exc}",
+            )
 
     @staticmethod
     def _raise_if_cancelled(
@@ -297,40 +404,6 @@ class WorldStatsService:
     ) -> None:
         if cancel_check is not None and cancel_check():
             raise WorldStatsCancelledError("存档统计已取消")
-
-    def _analyze_one_region(
-        self,
-        world_path: Path,
-        region_path: Path,
-        stats: WorldStatistics,
-        block_counter: Counter[str],
-        entity_counter: Counter[str],
-        tracker: Any,
-    ) -> None:
-        """Analyze a single region file; log and continue on failure."""
-        try:
-            rel_key = self._region_size_key(world_path, region_path)
-            stats.region_sizes[rel_key] = region_path.stat().st_size
-            region_stats = self._analyze_region_chunks(region_path)
-            self._merge_region_stats(
-                stats,
-                region_stats,
-                block_counter,
-                entity_counter,
-            )
-        except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            self.log(
-                f"分析区域 {region_path.name} 失败: {exc}",
-                "WARNING",
-            )
-            tracker.increment_errors(1)
-        except Exception as exc:
-            # 区域解析库可能抛出非标准错误；跳过该文件继续。
-            self.log(
-                f"分析区域 {region_path.name} 失败: {exc}",
-                "WARNING",
-            )
-            tracker.increment_errors(1)
 
     @staticmethod
     def _report_progress(
@@ -607,7 +680,7 @@ class WorldStatsService:
         coordinates = present if present is not None else self._all_chunk_coordinates()
         for x, z in coordinates:
             try:
-                chunk = region.get_chunk(x, z)
+                chunk = self._read_chunk(region, x, z)
                 if chunk is not None:
                     loaded_chunks += 1
                     chunk_blocks, chunk_entities = self._analyze_chunk(chunk)
@@ -615,11 +688,7 @@ class WorldStatsService:
                     entity_counts.update(chunk_entities)
                 elif present is None:
                     empty_chunks += 1
-            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
-                if present is None:
-                    empty_chunks += 1
-            except Exception:
-                # Region adapters may raise package-specific errors.
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, McaError):
                 if present is None:
                     empty_chunks += 1
         return _RegionChunkStats(
@@ -717,12 +786,16 @@ class WorldStatsService:
                 'block_entities',
                 prefix='block:',
             ))
-        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
-            pass
-        except Exception:
-            # Corrupted chunk payloads should not abort region analysis.
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, McaError):
             pass
         return block_counter, entity_counter
+
+    @staticmethod
+    def _read_chunk(region: Any, x: int, z: int) -> Any:
+        reader = getattr(region, "read_chunk_fields", None)
+        if callable(reader):
+            return reader(x, z, STATS_CHUNK_ROOT_FIELDS)
+        return region.get_chunk(x, z)
 
     def _count_palette_blocks(self, data: Any) -> Counter[str]:
         from core.mca.block_palette import ChunkBlocks

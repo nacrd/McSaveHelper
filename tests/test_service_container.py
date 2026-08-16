@@ -161,8 +161,11 @@ class _ServiceFactoryProbe:
         self.events.append(("world_repository", indexes))
         return self.world_repository
 
-    def create_world_stats(self) -> WorldStatsService:
-        self.events.append("world_stats")
+    def create_world_stats(
+        self,
+        runtime: ExecutionRuntime,
+    ) -> WorldStatsService:
+        self.events.append(("world_stats", runtime))
         return self.world_stats
 
     def create_world_compare(
@@ -238,7 +241,7 @@ class _ServiceFactoryProbe:
             "world_indexes",
             ("world_transactions", self.world_writes, self.backup),
             ("world_repository", self.world_indexes),
-            "world_stats",
+            ("world_stats", self.execution_runtime),
             ("world_compare", self.world_repository),
             (
                 "migration",

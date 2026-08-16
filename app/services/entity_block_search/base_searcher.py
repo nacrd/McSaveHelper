@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Callable, List
+from typing import Any, Callable, Collection, List
+
+from core.mca import McaError, NativeRegion
+from core.mca.chunk_view import BLOCK_SEARCH_ROOT_FIELDS
 
 from .constants import MAX_RESULTS
 from .models import SearchResult, SearchSummary
@@ -17,6 +20,7 @@ class BaseSearcher(ABC):
     """提供共享的区域扫描逻辑；子类实现 ``search_chunk``。"""
 
     progress_label: str = "区块文件"
+    chunk_root_fields: Collection[str] = BLOCK_SEARCH_ROOT_FIELDS
 
     def __init__(
         self,
@@ -56,9 +60,7 @@ class BaseSearcher(ABC):
                 f"MCA 读取模块不可用，无法搜索{self.progress_label}",
                 "ERROR",
             )
-        except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            log(f"搜索维度 {dimension} 失败: {exc}", "ERROR")
-        except Exception as exc:
+        except (OSError, ValueError, TypeError, RuntimeError, McaError) as exc:
             log(f"搜索维度 {dimension} 失败: {exc}", "ERROR")
 
     @abstractmethod
@@ -73,8 +75,6 @@ class BaseSearcher(ABC):
         log: LogFn,
         progress: ProgressFn,
     ) -> None:
-        from core.mca import NativeRegion
-
         total = len(region_files)
         for idx, region_file in enumerate(region_files):
             if self._limit_reached():
@@ -87,9 +87,7 @@ class BaseSearcher(ABC):
             try:
                 with NativeRegion.from_file(region_file) as region:
                     self._scan_region(region, target, dimension)
-            except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
-                log(f"读取区块文件 {region_file.name} 失败: {exc}", "WARNING")
-            except Exception as exc:
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError, McaError) as exc:
                 log(f"读取区块文件 {region_file.name} 失败: {exc}", "WARNING")
 
     def _scan_region(self, region: Any, target: str, dimension: str) -> None:
@@ -107,14 +105,18 @@ class BaseSearcher(ABC):
             if self._limit_reached():
                 return
             try:
-                chunk = region.get_chunk(cx, cz)
+                chunk = self._read_chunk(region, cx, cz)
                 if chunk is not None:
                     self.summary.scanned_chunks += 1
                     self.search_chunk(chunk, target, dimension)
-            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError):
+            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, McaError):
                 self.summary.skipped_chunks += 1
-            except Exception:
-                self.summary.skipped_chunks += 1
+
+    def _read_chunk(self, region: Any, cx: int, cz: int) -> Any:
+        reader = getattr(region, "read_chunk_fields", None)
+        if callable(reader):
+            return reader(cx, cz, self.chunk_root_fields)
+        return region.get_chunk(cx, cz)
 
     def _limit_reached(self) -> bool:
         return len(self.results) >= MAX_RESULTS

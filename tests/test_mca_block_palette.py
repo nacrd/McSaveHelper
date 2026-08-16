@@ -272,3 +272,61 @@ def test_count_block_ids_treats_out_of_range_packed_indices_as_air() -> None:
     assert counts == _point_counts(blocks)
     assert counts["minecraft:air"] == 16
     assert counts["minecraft:stone"] == 4080
+
+
+def _point_positions(blocks: ChunkBlocks, section_y: int, name: str):
+    y_base = section_y * 16
+    matches = []
+    for x in range(16):
+        for z in range(16):
+            for local_y in range(16):
+                block_id = blocks.block_id_at(x, y_base + local_y, z)
+                if block_id == name:
+                    matches.append((x, y_base + local_y, z, block_id))
+    return matches
+
+
+def test_iter_matching_blocks_single_palette_matches_point_reads() -> None:
+    chunk = nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "sections": nbtlib.List[nbtlib.Compound]([
+            _single_block_section(4, "minecraft:stone"),
+        ]),
+    })
+    blocks = ChunkBlocks(chunk)
+
+    assert list(blocks.iter_matching_blocks(4, lambda name: name == "minecraft:stone")) == (
+        _point_positions(blocks, 4, "minecraft:stone")
+    )
+    assert list(blocks.iter_matching_blocks(4, lambda name: name == "minecraft:dirt")) == []
+
+
+def test_iter_matching_blocks_compact_palette_matches_point_reads() -> None:
+    data = [0] * 256
+    data[0] = 1 << 4  # local (1, 0, 0) uses palette index 1
+    chunk = nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "sections": nbtlib.List[nbtlib.Compound]([
+            _palette_section(0, ["minecraft:air", "minecraft:dirt"], data),
+        ]),
+    })
+    blocks = ChunkBlocks(chunk)
+
+    assert blocks.matching_palette_indices(0, lambda name: name.endswith(":dirt")) == [1]
+    assert list(blocks.iter_matching_blocks(0, lambda name: name.endswith(":dirt"))) == [
+        (1, 0, 0, "minecraft:dirt"),
+    ]
+
+
+def test_iter_matching_blocks_skips_unmatched_section() -> None:
+    chunk = nbtlib.File({
+        "DataVersion": nbtlib.Int(3463),
+        "sections": nbtlib.List[nbtlib.Compound]([
+            _single_block_section(0, "minecraft:stone"),
+        ]),
+    })
+    blocks = ChunkBlocks(chunk)
+
+    assert blocks.matching_palette_indices(0, lambda name: "ore" in name) == []
+    assert list(blocks.iter_block_positions(0, [])) == []
+    assert list(blocks.iter_matching_blocks(0, lambda name: "ore" in name)) == []

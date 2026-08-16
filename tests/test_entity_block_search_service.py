@@ -2,6 +2,9 @@
 
 from pathlib import Path
 
+import core.nbt as nbtlib
+
+from app.services.entity_block_search.block_searcher import BlockSearcher
 from app.services.entity_block_search.container_searcher import (
     ContainerSearcher,
     extract_container_info,
@@ -13,6 +16,7 @@ from app.services.entity_block_search.utils import (
     get_dimension_region_files,
     matches_target,
 )
+from core.mca.chunk_view import ChunkView
 
 
 class MockChunk:
@@ -216,6 +220,118 @@ def test_container_info_at_returns_matching_items():
     assert searcher.get_container_info_at(chunk, 0, 70, 8) == {}
 
 
+# ==================== 方块搜索测试 ====================
+
+def _single_block_section(section_y: int, name: str) -> nbtlib.Compound:
+    return nbtlib.Compound({
+        "Y": nbtlib.Byte(section_y),
+        "block_states": nbtlib.Compound({
+            "palette": nbtlib.List[nbtlib.Compound]([
+                nbtlib.Compound({"Name": nbtlib.String(name)}),
+            ]),
+        }),
+    })
+
+
+def _palette_section(section_y: int, names: list[str], data: list[int]) -> nbtlib.Compound:
+    return nbtlib.Compound({
+        "Y": nbtlib.Byte(section_y),
+        "block_states": nbtlib.Compound({
+            "palette": nbtlib.List[nbtlib.Compound]([
+                nbtlib.Compound({"Name": nbtlib.String(name)}) for name in names
+            ]),
+            "data": nbtlib.LongArray(data),
+        }),
+    })
+
+
+def test_block_search_single_palette_reports_all_cells_in_scan_order():
+    results = []
+    searcher = BlockSearcher(results, SearchSummary())
+    chunk = ChunkView(
+        nbtlib.File({
+            "DataVersion": nbtlib.Int(3463),
+            "xPos": nbtlib.Int(1),
+            "zPos": nbtlib.Int(2),
+            "sections": nbtlib.List[nbtlib.Compound]([
+                _single_block_section(4, "minecraft:diamond_ore"),
+                _single_block_section(5, "minecraft:stone"),
+            ]),
+        }),
+        1,
+        2,
+    )
+
+    searcher.search_chunk(chunk, "diamond_ore", "overworld")
+
+    assert len(results) == 4096
+    assert results[0].position == (16, 64, 32)
+    assert results[1].position == (16, 65, 32)
+    assert results[-1].position == (31, 79, 47)
+    assert all(result.name == "minecraft:diamond_ore" for result in results)
+
+
+def test_block_search_packed_palette_and_container_lookup():
+    data = [0] * 256
+    data[0] = 1 << 4
+    results = []
+    searcher = BlockSearcher(results, SearchSummary())
+    chunk = ChunkView(
+        nbtlib.File({
+            "DataVersion": nbtlib.Int(3463),
+            "xPos": nbtlib.Int(0),
+            "zPos": nbtlib.Int(0),
+            "sections": nbtlib.List[nbtlib.Compound]([
+                _palette_section(0, ["minecraft:air", "minecraft:chest"], data),
+            ]),
+            "block_entities": nbtlib.List[nbtlib.Compound]([
+                nbtlib.Compound({
+                    "id": nbtlib.String("minecraft:chest"),
+                    "x": nbtlib.Int(1),
+                    "y": nbtlib.Int(0),
+                    "z": nbtlib.Int(0),
+                    "Items": nbtlib.List[nbtlib.Compound]([
+                        nbtlib.Compound({
+                            "id": nbtlib.String("minecraft:diamond"),
+                            "Count": nbtlib.Byte(3),
+                        }),
+                    ]),
+                }),
+            ]),
+        }),
+        0,
+        0,
+    )
+
+    searcher.search_chunk(chunk, "chest", "overworld")
+
+    assert len(results) == 1
+    assert results[0].position == (1, 0, 0)
+    assert results[0].extra_info["item_count"] == 1
+    assert "minecraft:diamond x3" in results[0].extra_info["items"]
+
+
+def test_block_search_skips_unmatched_section():
+    results = []
+    searcher = BlockSearcher(results, SearchSummary())
+    chunk = ChunkView(
+        nbtlib.File({
+            "DataVersion": nbtlib.Int(3463),
+            "xPos": nbtlib.Int(0),
+            "zPos": nbtlib.Int(0),
+            "sections": nbtlib.List[nbtlib.Compound]([
+                _single_block_section(0, "minecraft:stone"),
+            ]),
+        }),
+        0,
+        0,
+    )
+
+    searcher.search_chunk(chunk, "diamond_ore", "overworld")
+
+    assert results == []
+
+
 # ==================== 维度路径测试 ====================
 
 def test_dimension_region_files_do_not_cross_dimensions(tmp_path):
@@ -253,6 +369,41 @@ def test_dimension_entity_files_scan_modern_storage(tmp_path):
     assert get_dimension_entity_files(world, "nether") == [
         nether_entities / "r.1.0.mca"
     ]
+
+
+def test_entity_search_prefers_entity_regions_over_chunk_regions(tmp_path, monkeypatch):
+    world = tmp_path / "world"
+    scanned: list[list[Path]] = []
+    entity_file = world / "entities" / "r.0.0.mca"
+    chunk_file = world / "region" / "r.0.0.mca"
+
+    def fake_scan(self, files, dimension, target, log, progress):
+        del self, dimension, target, log, progress
+        scanned.append(list(files))
+
+    monkeypatch.setattr(
+        EntitySearcher,
+        "_scan_regions",
+        fake_scan,
+    )
+    monkeypatch.setattr(
+        "app.services.entity_block_search.entity_searcher.get_dimension_entity_files",
+        lambda world_path, dimension: [entity_file],
+    )
+    monkeypatch.setattr(
+        "app.services.entity_block_search.entity_searcher.get_dimension_region_files",
+        lambda world_path, dimension: [chunk_file],
+    )
+
+    EntitySearcher([], SearchSummary()).search_dimension(
+        world,
+        "overworld",
+        "zombie",
+        lambda message, level: None,
+        lambda value, message: None,
+    )
+
+    assert scanned == [[entity_file]]
 
 
 # ==================== SearchCondition 测试 ====================

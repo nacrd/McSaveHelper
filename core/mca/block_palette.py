@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable, Iterator
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -351,6 +352,155 @@ def _count_section_block_ids(section: _SectionData) -> Counter[str]:
     return _count_packed_blocks(section)
 
 
+def _iter_full_section_positions(
+    section_y: int,
+    block_id: str,
+) -> Iterator[Tuple[int, int, int, str]]:
+    """Yield every cell in a uniform section in historical (x, z, y) order."""
+    y0 = section_y * 16
+    for x in range(16):
+        for z in range(16):
+            for y in range(y0, y0 + 16):
+                yield x, y, z, block_id
+
+
+def _resolved_block_id(section: _SectionData, palette_index: int) -> str:
+    """Map a decoded palette index to the same ID ``block_id_at`` would return."""
+    if 0 <= palette_index < len(section.palette):
+        return section.palette[palette_index]
+    return _AIR_BLOCK_ID
+
+
+def _collect_matching_compact(
+    words: List[int],
+    bits: int,
+    section: _SectionData,
+    wanted_names: set[str],
+) -> List[Tuple[int, str]]:
+    """Collect compact packed cells whose resolved ID is in *wanted_names*."""
+    matches: List[Tuple[int, str]] = []
+    decoded = 0
+    mask = (1 << bits) - 1
+    values_per_long = 64 // bits
+    if values_per_long <= 0:
+        if section.palette[0] in wanted_names:
+            return [
+                (index, section.palette[0])
+                for index in range(_SECTION_BLOCK_COUNT)
+            ]
+        return matches
+    for word in words:
+        take = min(values_per_long, _SECTION_BLOCK_COUNT - decoded)
+        for _ in range(take):
+            block_id = _resolved_block_id(section, word & mask)
+            if block_id in wanted_names:
+                matches.append((decoded, block_id))
+            word >>= bits
+            decoded += 1
+        if decoded >= _SECTION_BLOCK_COUNT:
+            break
+    if section.palette[0] in wanted_names:
+        for index in range(decoded, _SECTION_BLOCK_COUNT):
+            matches.append((index, section.palette[0]))
+    return matches
+
+
+def _collect_matching_stretched(
+    words: List[int],
+    bits: int,
+    section: _SectionData,
+    wanted_names: set[str],
+) -> List[Tuple[int, str]]:
+    """Collect stretched packed cells whose resolved ID is in *wanted_names*."""
+    matches: List[Tuple[int, str]] = []
+    decoded = 0
+    mask = (1 << bits) - 1
+    buffer = 0
+    available = 0
+    for word in words:
+        buffer |= word << available
+        available += 64
+        while available >= bits and decoded < _SECTION_BLOCK_COUNT:
+            block_id = _resolved_block_id(section, buffer & mask)
+            if block_id in wanted_names:
+                matches.append((decoded, block_id))
+            buffer >>= bits
+            available -= bits
+            decoded += 1
+        if decoded >= _SECTION_BLOCK_COUNT:
+            break
+    if decoded < _SECTION_BLOCK_COUNT and available > 0:
+        block_id = _resolved_block_id(section, buffer & mask)
+        if block_id in wanted_names:
+            matches.append((decoded, block_id))
+        decoded += 1
+    if section.palette[0] in wanted_names:
+        for index in range(decoded, _SECTION_BLOCK_COUNT):
+            matches.append((index, section.palette[0]))
+    return matches
+
+
+def _matching_packed_cells(
+    section: _SectionData,
+    wanted_names: set[str],
+) -> List[Tuple[int, str]]:
+    """Return ``(linear_index, block_id)`` pairs for packed matching cells."""
+    data = section.data
+    assert data is not None
+    try:
+        words = [int(word) & ((1 << 64) - 1) for word in data]
+    except (TypeError, ValueError):
+        words = []
+    if not words or section.bits <= 0:
+        if section.palette[0] in wanted_names:
+            return [
+                (index, section.palette[0])
+                for index in range(_SECTION_BLOCK_COUNT)
+            ]
+        return []
+    if section.stretch:
+        return _collect_matching_stretched(
+            words, section.bits, section, wanted_names
+        )
+    return _collect_matching_compact(words, section.bits, section, wanted_names)
+
+
+def _iter_legacy_positions(
+    legacy_blocks: List[int],
+    section_y: int,
+    wanted_names: set[str],
+) -> Iterator[Tuple[int, int, int, str]]:
+    """Yield matching legacy cells in historical (x, z, y) order."""
+    y0 = section_y * 16
+    for x in range(16):
+        for z in range(16):
+            for local_y in range(16):
+                block_id = _legacy_block_id(legacy_blocks, x, y0 + local_y, z, section_y)
+                if block_id in wanted_names:
+                    yield x, y0 + local_y, z, block_id
+
+
+def _iter_packed_positions(
+    section: _SectionData,
+    section_y: int,
+    wanted_names: set[str],
+) -> Iterator[Tuple[int, int, int, str]]:
+    """Yield packed matching cells in historical (x, z, y) order."""
+    by_linear = {
+        linear: block_id
+        for linear, block_id in _matching_packed_cells(section, wanted_names)
+    }
+    if not by_linear:
+        return
+    y0 = section_y * 16
+    for x in range(16):
+        for z in range(16):
+            for local_y in range(16):
+                block_id = by_linear.get(local_y * 256 + z * 16 + x)
+                if block_id is not None:
+                    yield x, y0 + local_y, z, block_id
+
+
 class ChunkBlocks:
     """已解析的区块视图：懒解码 section，服务俯视渲染热路径。"""
 
@@ -474,6 +624,127 @@ class ChunkBlocks:
         if sec is None or not sec.palette:
             return None
         return list(sec.palette)
+
+    def matching_palette_indices(
+        self,
+        section_y: int,
+        predicate: Callable[[str], bool],
+    ) -> List[int]:
+        """Return palette indices whose names satisfy *predicate*.
+
+        Legacy sections have no modern palette; this returns an empty list
+        so callers fall back to :meth:`iter_matching_blocks`.
+        """
+        sec = self._ensure_section(int(section_y))
+        if sec is None or not sec.palette or sec.legacy_blocks is not None:
+            return []
+        return [
+            index
+            for index, name in enumerate(sec.palette)
+            if predicate(name)
+        ]
+
+    def iter_matching_blocks(
+        self,
+        section_y: int,
+        predicate: Callable[[str], bool],
+    ) -> Iterator[Tuple[int, int, int, str]]:
+        """Yield cells whose block ID satisfies *predicate*.
+
+        Modern palettes are filtered by index first.  Legacy sections walk
+        the ``Blocks`` array with the same fallback rules as ``block_id_at``.
+        """
+        sec = self._ensure_section(int(section_y))
+        if sec is None:
+            return
+        if sec.legacy_blocks is not None:
+            wanted = {
+                f"legacy:{block_id}"
+                for block_id in sec.legacy_blocks[:_SECTION_BLOCK_COUNT]
+                if predicate(f"legacy:{block_id}")
+            }
+            if _AIR_BLOCK_ID in wanted or (
+                len(sec.legacy_blocks) < _SECTION_BLOCK_COUNT
+                and predicate(_AIR_BLOCK_ID)
+            ):
+                wanted.add(_AIR_BLOCK_ID)
+            if wanted:
+                yield from _iter_legacy_positions(
+                    sec.legacy_blocks,
+                    section_y,
+                    wanted,
+                )
+            return
+        if not sec.palette:
+            if predicate(_AIR_BLOCK_ID):
+                yield from _iter_full_section_positions(section_y, _AIR_BLOCK_ID)
+            return
+        indices = [
+            index
+            for index, name in enumerate(sec.palette)
+            if predicate(name)
+        ]
+        if not indices:
+            return
+        yield from self.iter_block_positions(section_y, indices)
+
+    def iter_block_positions(
+        self,
+        section_y: int,
+        palette_indices: Optional[Sequence[int]] = None,
+        *,
+        names: Optional[Sequence[str]] = None,
+    ) -> Iterator[Tuple[int, int, int, str]]:
+        """Yield matching cells as ``(x, y, z, block_id)`` in scan order.
+
+        Order matches the historical block search loop: ``x``, then ``z``,
+        then world ``y`` within the section.  *palette_indices* selects
+        modern palette entries; *names* is used for legacy sections or when
+        the caller already has resolved IDs.
+
+        Args:
+            section_y: Section Y index.
+            palette_indices: Optional modern palette indices to keep.
+            names: Optional resolved block IDs to keep.
+
+        Yields:
+            Local X, world Y, local Z, and the matching block ID.
+        """
+        sec = self._ensure_section(int(section_y))
+        if sec is None:
+            return
+        wanted = self._wanted_block_ids(sec, palette_indices, names)
+        if not wanted:
+            return
+        if sec.legacy_blocks is not None:
+            yield from _iter_legacy_positions(sec.legacy_blocks, section_y, wanted)
+            return
+        if not sec.palette:
+            if _AIR_BLOCK_ID in wanted:
+                yield from _iter_full_section_positions(section_y, _AIR_BLOCK_ID)
+            return
+        if len(sec.palette) == 1 or sec.data is None:
+            block_id = sec.palette[0]
+            if block_id in wanted:
+                yield from _iter_full_section_positions(section_y, block_id)
+            return
+        yield from _iter_packed_positions(sec, section_y, wanted)
+
+    @staticmethod
+    def _wanted_block_ids(
+        section: _SectionData,
+        palette_indices: Optional[Sequence[int]],
+        names: Optional[Sequence[str]],
+    ) -> set[str]:
+        """Resolve the caller's filter into a set of block IDs."""
+        wanted: set[str] = set()
+        if names is not None:
+            wanted.update(names)
+        if palette_indices is not None and section.palette:
+            for index in palette_indices:
+                if 0 <= int(index) < len(section.palette):
+                    wanted.add(section.palette[int(index)])
+        return wanted
 
     def surface_y(self, x: int, z: int) -> Optional[int]:
         """表面高度：优先高度图，失败则向下扫描。

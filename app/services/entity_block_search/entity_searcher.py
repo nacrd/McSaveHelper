@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Dict
 
+from core.mca.chunk_view import ENTITY_SEARCH_ROOT_FIELDS
+
 from .base_searcher import BaseSearcher
 from .models import SearchResult
 from .utils import (
@@ -23,6 +25,7 @@ class EntitySearcher(BaseSearcher):
     """搜索区域区块中的实体。"""
 
     progress_label = "区块文件"
+    chunk_root_fields = ENTITY_SEARCH_ROOT_FIELDS
 
     def search_dimension(
         self,
@@ -32,19 +35,25 @@ class EntitySearcher(BaseSearcher):
         log: LogFn,
         progress: ProgressFn,
     ) -> None:
-        """Scan modern entity regions and legacy chunk-embedded entities."""
+        """Scan modern entity regions, falling back to chunk-embedded entities."""
         entity_files = get_dimension_entity_files(world_path, dimension)
+        if entity_files:
+            log(
+                f"在 {dimension} 中找到 {len(entity_files)} 个实体文件",
+                "INFO",
+            )
+            self._scan_regions(entity_files, dimension, target, log, progress)
+            return
         chunk_files = get_dimension_region_files(world_path, dimension)
-        region_files = entity_files + chunk_files
-        if not region_files:
+        if not chunk_files:
             log(f"维度 {dimension} 没有实体或区块文件", "WARNING")
             return
         log(
-            f"在 {dimension} 中找到 {len(entity_files)} 个实体文件、"
+            f"在 {dimension} 中未找到独立实体文件，回退扫描 "
             f"{len(chunk_files)} 个区块文件",
             "INFO",
         )
-        self._scan_regions(region_files, dimension, target, log, progress)
+        self._scan_regions(chunk_files, dimension, target, log, progress)
 
     def search_chunk(self, chunk: Any, target: str, dimension: str) -> None:
         """在单个区块中扫描匹配的实体。
@@ -67,8 +76,6 @@ class EntitySearcher(BaseSearcher):
             KeyError,
             AttributeError,
         ):
-            return
-        except Exception:
             return
 
     def _handle_entity(
@@ -99,8 +106,6 @@ class EntitySearcher(BaseSearcher):
             AttributeError,
             IndexError,
         ):
-            return
-        except Exception:
             return
 
     @staticmethod
