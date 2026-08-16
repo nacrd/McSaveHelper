@@ -1,8 +1,9 @@
 """日志级别枚举与结构化日志记录模型。"""
 import json
+import os
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 
@@ -11,8 +12,10 @@ class LogLevel(Enum):
     DEBUG = 10
     INFO = 20
     WARNING = 30
+    WARN = 30
     ERROR = 40
     CRITICAL = 50
+    FATAL = 50
     SUCCESS = 25
     API = 15
 
@@ -30,6 +33,7 @@ class LogLevel(Enum):
         level_map = {
             "DEBUG": cls.DEBUG, "INFO": cls.INFO, "WARNING": cls.WARNING,
             "WARN": cls.WARNING, "ERROR": cls.ERROR, "CRITICAL": cls.CRITICAL,
+            "FATAL": cls.CRITICAL,
             "SUCCESS": cls.SUCCESS, "API": cls.API,
         }
         return level_map.get(level_str, cls.INFO)
@@ -83,6 +87,13 @@ class LogRecord:
     thread_id: int = 0
     thread_name: str = ""
     extra: Dict[str, Any] = field(default_factory=dict)
+    process_id: int = field(default_factory=os.getpid)
+    logger_name: str = ""
+    exception_type: Optional[str] = None
+    exception_message: Optional[str] = None
+    stack_trace: Optional[str] = None
+    fingerprint: Optional[str] = None
+    created_at: Optional[datetime] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典（含 extra 字段展开）。
@@ -97,6 +108,12 @@ class LogRecord:
             "module": self.module,
             "thread_id": self.thread_id,
             "thread_name": self.thread_name,
+            "process_id": self.process_id,
+            "logger_name": self.logger_name,
+            "exception_type": self.exception_type,
+            "exception_message": self.exception_message,
+            "stack_trace": self.stack_trace,
+            "fingerprint": self.fingerprint,
             **self.extra
         }
 

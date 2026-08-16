@@ -153,33 +153,70 @@ class WorldCompareService:
         left_index: Optional[WorldIndexSnapshot] = None,
         right_index: Optional[WorldIndexSnapshot] = None,
     ) -> List[CompareItem]:
-        """Compare MCA files by relative path using size+sha256 signatures."""
-        left_regions = {
-            path.relative_to(left_path).as_posix(): self._file_signature(path)
+        """Compare MCA files by relative path with metadata short-circuiting."""
+        left_paths = {
+            path.relative_to(left_path).as_posix(): path
             for path in (
                 left_index.region_files
                 if left_index is not None
                 else scan_all_regions(left_path)
             )
         }
-        right_regions = {
-            path.relative_to(right_path).as_posix(): self._file_signature(path)
+        right_paths = {
+            path.relative_to(right_path).as_posix(): path
             for path in (
                 right_index.region_files
                 if right_index is not None
                 else scan_all_regions(right_path)
             )
         }
+        left_regions = {
+            name: self._file_signature(path)
+            for name, path in left_paths.items()
+        }
+        right_regions = {
+            name: self._file_signature(path)
+            for name, path in right_paths.items()
+        }
         keys = sorted(set(left_regions) | set(right_regions))
-        return [
-            CompareItem(
-                key,
-                left_regions.get(key),
-                right_regions.get(key),
-                left_regions.get(key) == right_regions.get(key),
+        result: List[CompareItem] = []
+        for key in keys:
+            left_signature = left_regions.get(key)
+            right_signature = right_regions.get(key)
+            same = self._signatures_match(
+                left_paths.get(key),
+                right_paths.get(key),
+                left_signature,
+                right_signature,
             )
-            for key in keys
-        ]
+            result.append(
+                CompareItem(key, left_signature, right_signature, same)
+            )
+        return result
+
+    def _signatures_match(
+        self,
+        left_path: Optional[Path],
+        right_path: Optional[Path],
+        left_signature: Optional[Dict[str, Any]],
+        right_signature: Optional[Dict[str, Any]],
+    ) -> bool:
+        """Compare metadata first and hash only equal-sized, retimestamped files."""
+        if left_signature is None or right_signature is None:
+            return False
+        if "error" in left_signature or "error" in right_signature:
+            return False
+        if left_signature.get("size") != right_signature.get("size"):
+            return False
+        if left_signature.get("mtime_ns") == right_signature.get("mtime_ns"):
+            return True
+        if left_path is None or right_path is None:
+            return False
+        left_hash = self._file_signature(left_path, include_hash=True)["sha256"]
+        right_hash = self._file_signature(right_path, include_hash=True)["sha256"]
+        left_signature["sha256"] = left_hash
+        right_signature["sha256"] = right_hash
+        return bool(left_hash) and left_hash == right_hash
 
     def _get_index(self, world_path: Path) -> Optional[WorldIndexSnapshot]:
         """通过注入端口读取共享索引，未配置时保持兼容路径。"""
@@ -214,25 +251,44 @@ class WorldCompareService:
             result[uuid] = summary
         return result
 
-    def _file_signature(self, path: Path) -> Dict[str, Any]:
-        """Return size and sha256 for a region file.
+    def _file_signature(
+        self,
+        path: Path,
+        *,
+        include_hash: bool = False,
+    ) -> Dict[str, Any]:
+        """Return lightweight metadata, optionally including SHA-256.
 
         Args:
             path: MCA path.
+            include_hash: Whether to read the file and include SHA-256.
 
         Returns:
-            dict: ``{"size": int, "sha256": str}``; on I/O failure size/hash
+            dict: Size and nanosecond mtime are always returned on success;
+            ``sha256`` is included when requested. On I/O failure size/hash
             may be zero/empty with an ``error`` key.
         """
         try:
             stats = path.stat()
-            digest = hashlib.sha256()
-            with path.open("rb") as region_file:
-                for chunk in iter(lambda: region_file.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            return {"size": stats.st_size, "sha256": digest.hexdigest()}
+            signature: Dict[str, Any] = {
+                "size": stats.st_size,
+                "mtime_ns": stats.st_mtime_ns,
+            }
+            if include_hash:
+                digest = hashlib.sha256()
+                with path.open("rb") as region_file:
+                    for chunk in iter(
+                        lambda: region_file.read(1024 * 1024),
+                        b"",
+                    ):
+                        digest.update(chunk)
+                signature["sha256"] = digest.hexdigest()
+            return signature
         except OSError as exc:
-            return {"size": 0, "sha256": "", "error": str(exc)}
+            signature = {"size": 0, "mtime_ns": 0, "error": str(exc)}
+            if include_hash:
+                signature["sha256"] = ""
+            return signature
 
 
 def get_world_compare_service(

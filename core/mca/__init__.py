@@ -72,7 +72,7 @@ from core.mca.map_tiles import (
     plan_visible_requests,
     prioritize_regions,
 )
-from core.mca.region_file import RegionFile
+from core.mca.region_file import ChunkRecord, RegionFile
 from core.mca.region_selection import format_region_selection
 from core.mca.surface import (
     chunk_decode_cache_bytes,
@@ -110,6 +110,7 @@ from core.mca.writer import (
 
 __all__ = [
     "ChunkMissing",
+    "ChunkRecord",
     "ChunkInfo",
     "ChunkView",
     "CorruptChunk",

@@ -1,19 +1,29 @@
 """WritableRegion round-trip tests (no anvil)."""
 from __future__ import annotations
 
+import struct
+import zlib
 from pathlib import Path
 
 import core.nbt as nbtlib
 import pytest
 
+import core.mca.writer as writer_module
 from core.mca import (
     RegionFile,
     WritableRegion,
     copy_chunk_record,
     delete_chunk_entries,
 )
-from core.mca.format import HEADER_SIZE
 from core.mca.errors import McaError
+from core.mca.format import (
+    COMPRESSION_ZLIB,
+    EXTERNAL_CHUNK_STREAM_FLAG,
+    HEADER_SIZE,
+    SECTOR_SIZE,
+)
+from core.types import UUIDMapping
+from core.worker import process_region_file
 
 
 def _mini_chunk(x: int = 0, z: int = 0, marker: str = "full") -> nbtlib.File:
@@ -23,6 +33,31 @@ def _mini_chunk(x: int = 0, z: int = 0, marker: str = "full") -> nbtlib.File:
         "zPos": nbtlib.Int(z),
         "Status": nbtlib.String(marker),
     })
+
+
+def _uuid_mapping(old_uuid: str, new_uuid: str) -> UUIDMapping:
+    return ([], [], old_uuid, new_uuid, (0, 0), (0, 0))
+
+
+def _make_chunk_external(path: Path, local_cx: int, local_cz: int) -> Path:
+    with RegionFile.open(path) as region:
+        sector, sectors = region.chunk_location(local_cx, local_cz)
+        external_path = region.external_chunk_path(local_cx, local_cz)
+        chunk = region.read_chunk(local_cx, local_cz)
+    assert sectors >= 1
+
+    raw = writer_module.nbt_to_bytes(chunk)
+    external_path.write_bytes(zlib.compress(raw))
+    marker = EXTERNAL_CHUNK_STREAM_FLAG | COMPRESSION_ZLIB
+    record = struct.pack(">I", 1) + bytes([marker])
+    padded_record = record + b"\x00" * (sectors * SECTOR_SIZE - len(record))
+    region_bytes = bytearray(path.read_bytes())
+    record_offset = sector * SECTOR_SIZE
+    region_bytes[
+        record_offset:record_offset + sectors * SECTOR_SIZE
+    ] = padded_record
+    path.write_bytes(region_bytes)
+    return external_path
 
 
 def test_writable_roundtrip(tmp_path: Path) -> None:
@@ -135,3 +170,131 @@ def test_copy_chunk_record_preserves_source_and_updates_destination(
     with RegionFile.open(destination) as region:
         assert str(region.read_chunk(0, 0)["Status"]) == "kept"
         assert str(region.read_chunk(3, 4)["Status"]) == "copied"
+
+
+def test_sparse_save_reencodes_only_dirty_chunk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "r.0.0.mca"
+    initial = WritableRegion.empty(path)
+    initial.set_chunk(0, 0, _mini_chunk(marker="change"))
+    initial.set_chunk(1, 0, _mini_chunk(marker="keep"))
+    initial.save(backup=False)
+    with RegionFile.open(path) as source:
+        clean_before = source.read_chunk_record(1, 0)
+
+    compression_calls = 0
+    original_compress = writer_module.compress_chunk
+
+    def track_compression(raw: bytes, compression: int) -> tuple[int, bytes]:
+        nonlocal compression_calls
+        compression_calls += 1
+        return original_compress(raw, compression)
+
+    monkeypatch.setattr(writer_module, "compress_chunk", track_compression)
+    region = WritableRegion.open_for_patch(path)
+    for local_cx, local_cz, chunk in region.iter_chunks():
+        if (local_cx, local_cz) == (0, 0):
+            chunk["Status"] = nbtlib.String("changed")
+            region.mark_chunk_dirty(local_cx, local_cz)
+        else:
+            region.discard_chunk_changes(local_cx, local_cz)
+    region.save(backup=False)
+
+    assert compression_calls == 1
+    with RegionFile.open(path) as saved:
+        assert str(saved.read_chunk(0, 0)["Status"]) == "changed"
+        assert saved.read_chunk_record(1, 0) == clean_before
+
+
+def test_sparse_save_preserves_clean_external_chunk(tmp_path: Path) -> None:
+    path = tmp_path / "r.0.0.mca"
+    initial = WritableRegion.empty(path)
+    initial.set_chunk(0, 0, _mini_chunk(marker="change"))
+    initial.set_chunk(1, 0, _mini_chunk(x=1, marker="external"))
+    initial.save(backup=False)
+    external_path = _make_chunk_external(path, 1, 0)
+    external_before = external_path.read_bytes()
+
+    region = WritableRegion.open_for_patch(path)
+    for local_cx, local_cz, chunk in region.iter_chunks():
+        if (local_cx, local_cz) == (0, 0):
+            chunk["Status"] = nbtlib.String("changed")
+            region.mark_chunk_dirty(local_cx, local_cz)
+        else:
+            region.discard_chunk_changes(local_cx, local_cz)
+    region.save(backup=False)
+
+    assert external_path.read_bytes() == external_before
+    with RegionFile.open(path) as saved:
+        external_record = saved.read_chunk_record(1, 0)
+        assert external_record.data[4] & EXTERNAL_CHUNK_STREAM_FLAG
+        assert str(saved.read_chunk(1, 0)["Status"]) == "external"
+
+
+def test_region_worker_does_not_write_when_uuid_is_absent(tmp_path: Path) -> None:
+    path = tmp_path / "r.0.0.mca"
+    initial = WritableRegion.empty(path)
+    chunk = _mini_chunk()
+    chunk["Owner"] = nbtlib.String("unrelated")
+    initial.set_chunk(0, 0, chunk)
+    initial.save(backup=False)
+    before = path.read_bytes()
+
+    result = process_region_file(
+        path,
+        [_uuid_mapping("old-uuid", "new-uuid")],
+    )
+
+    assert result == (str(path), 0, None)
+    assert path.read_bytes() == before
+    assert not path.with_suffix(".mca.bak").exists()
+
+
+def test_region_worker_preserves_clean_record_and_patches_match(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "r.0.0.mca"
+    initial = WritableRegion.empty(path)
+    changed = _mini_chunk(marker="change")
+    changed["Owner"] = nbtlib.String("old-uuid")
+    clean = _mini_chunk(x=1, marker="keep")
+    clean["Owner"] = nbtlib.String("unrelated")
+    initial.set_chunk(0, 0, changed)
+    initial.set_chunk(1, 0, clean)
+    initial.save(backup=False)
+    with RegionFile.open(path) as source:
+        clean_before = source.read_chunk_record(1, 0)
+
+    result = process_region_file(
+        path,
+        [_uuid_mapping("old-uuid", "new-uuid")],
+    )
+
+    assert result == (str(path), 1, None)
+    assert path.with_suffix(".mca.bak").is_file()
+    with RegionFile.open(path) as saved:
+        assert str(saved.read_chunk(0, 0)["Owner"]) == "new-uuid"
+        assert saved.read_chunk_record(1, 0) == clean_before
+
+
+def test_region_worker_keeps_original_file_when_patch_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "r.0.0.mca"
+    initial = WritableRegion.empty(path)
+    initial.set_chunk(0, 0, _mini_chunk())
+    initial.save(backup=False)
+    before = path.read_bytes()
+
+    def fail_patch(_tag: object, _mappings: list[UUIDMapping]) -> None:
+        raise ValueError("patch failed")
+
+    monkeypatch.setattr("core.worker.patch_nbt", fail_patch)
+    result = process_region_file(path, [])
+
+    assert result == (str(path), -1, "patch failed")
+    assert path.read_bytes() == before
+    assert not path.with_suffix(".mca.bak").exists()

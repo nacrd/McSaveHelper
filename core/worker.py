@@ -25,12 +25,15 @@ def process_region_file(
     try:
         from core.mca import WritableRegion
 
-        region = WritableRegion.open(file_path)
+        region = WritableRegion.open_for_patch(file_path)
         changes = 0
-        for _x, _z, data in region.iter_chunks():
-            if data:
-                _, count = patch_nbt(data, mappings)
-                changes += count
+        for local_x, local_z, data in region.iter_chunks():
+            _, count = patch_nbt(data, mappings)
+            changes += count
+            if count > 0:
+                region.mark_chunk_dirty(local_x, local_z)
+            else:
+                region.discard_chunk_changes(local_x, local_z)
         if changes > 0:
             region.save(file_path, backup=True)
         return str(file_path), changes, None

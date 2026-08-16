@@ -17,18 +17,23 @@ from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
 import core.nbt as nbtlib
 
-from core.mca.chunk_codec import compress_chunk
+from core.mca.chunk_codec import compress_chunk, decompress_chunk
 from core.mca.errors import ChunkMissing, McaError
 from core.mca.format import (
     CHUNKS_PER_SIDE,
+    COMPRESSION_HEADER_SIZE,
+    COMPRESSION_TYPE_MASK,
     COMPRESSION_ZLIB,
+    EXTERNAL_CHUNK_STREAM_FLAG,
     HEADER_SIZE,
+    LENGTH_HEADER_SIZE,
     LOCATION_TABLE_SIZE,
     SECTOR_SIZE,
 )
-from core.mca.region_file import RegionFile, local_chunk_index
+from core.mca.region_file import ChunkRecord, RegionFile, local_chunk_index
 
 PathLike = Union[str, Path]
+ChunkKey = Tuple[int, int]
 
 
 def nbt_to_bytes(nbt: Any) -> bytes:
@@ -68,7 +73,14 @@ class WritableRegion:
     删除以 ``_deleted`` 集合记录，直到 save 才真正省略槽位。
     """
 
-    __slots__ = ("path", "_chunks", "_deleted", "_loaded")
+    __slots__ = (
+        "path",
+        "_chunks",
+        "_deleted",
+        "_dirty",
+        "_loaded",
+        "_source_records",
+    )
 
     def __init__(self, path: Optional[PathLike] = None) -> None:
         """创建空或绑定路径的可写区域（未自动 load）。
@@ -78,8 +90,10 @@ class WritableRegion:
         """
         self.path: Optional[Path] = Path(path) if path is not None else None
         # (local_cx, local_cz) -> File (mutable)
-        self._chunks: Dict[Tuple[int, int], nbtlib.File] = {}
-        self._deleted: set[Tuple[int, int]] = set()
+        self._chunks: Dict[ChunkKey, nbtlib.File] = {}
+        self._source_records: Dict[ChunkKey, ChunkRecord] = {}
+        self._deleted: set[ChunkKey] = set()
+        self._dirty: set[ChunkKey] = set()
         self._loaded = False
 
     # ------------------------------------------------------------------ factory
@@ -96,6 +110,25 @@ class WritableRegion:
         wr = cls(path)
         wr.load()
         return wr
+
+    @classmethod
+    def open_for_patch(cls, path: PathLike) -> "WritableRegion":
+        """Open a region while deferring NBT decoding until iteration.
+
+        This mode is intended for sparse patch operations. Call
+        :meth:`discard_chunk_changes` after inspecting an unchanged chunk so
+        its parsed tree can be released and its original compressed record is
+        copied during save.
+
+        Args:
+            path: Source ``.mca`` path.
+
+        Returns:
+            WritableRegion: Lazily decoded writable region.
+        """
+        region = cls(path)
+        region._load(parse_chunks=False)
+        return region
 
     @classmethod
     def empty(cls, path: Optional[PathLike] = None) -> "WritableRegion":
@@ -117,25 +150,26 @@ class WritableRegion:
         Raises:
             McaError: 无 path，或某区块无法安全加载。
         """
+        self._load(parse_chunks=True)
+
+    def _load(self, *, parse_chunks: bool) -> None:
         if self.path is None:
             raise McaError("WritableRegion has no path to load")
+        self._chunks.clear()
+        self._source_records.clear()
+        self._deleted.clear()
+        self._dirty.clear()
         if not self.path.is_file():
-            # Treat missing file as empty region (will create on save).
-            self._chunks.clear()
-            self._deleted.clear()
             self._loaded = True
             return
 
-        self._chunks.clear()
-        self._deleted.clear()
         with RegionFile.open(self.path) as rf:
             for cx, cz in rf.iter_present_chunks():
                 try:
-                    nbt = rf.read_chunk(cx, cz)
-                    # Ensure File type for write-back
-                    if not isinstance(nbt, nbtlib.File):
-                        nbt = nbtlib.File(dict(nbt))
-                    self._chunks[(cx, cz)] = nbt
+                    key = (cx, cz)
+                    self._source_records[key] = rf.read_chunk_record(cx, cz)
+                    if parse_chunks:
+                        self._chunks[key] = _as_nbt_file(rf.read_chunk(cx, cz))
                 except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
                     raise McaError(
                         f"Cannot safely load chunk ({cx}, {cz}) from {self.path}: {exc}"
@@ -144,6 +178,8 @@ class WritableRegion:
                     raise McaError(
                         f"Cannot safely load chunk ({cx}, {cz}) from {self.path}: {exc}"
                     ) from exc
+        if parse_chunks:
+            self._dirty.update(self._chunks)
         self._loaded = True
 
     def _ensure_loaded(self) -> None:
@@ -168,7 +204,7 @@ class WritableRegion:
         key = (local_cx, local_cz)
         if key in self._deleted:
             return False
-        return key in self._chunks
+        return key in self._chunks or key in self._source_records
 
     def get_chunk(self, local_cx: int, local_cz: int) -> Optional[nbtlib.File]:
         """返回可变区块 NBT，缺失则为 None。
@@ -184,7 +220,41 @@ class WritableRegion:
         key = (local_cx, local_cz)
         if key in self._deleted:
             return None
-        return self._chunks.get(key)
+        chunk = self._chunks.get(key)
+        if chunk is None:
+            source_record = self._source_records.get(key)
+            if source_record is None:
+                return None
+            chunk = self._decode_source_chunk(key, source_record)
+            self._chunks[key] = chunk
+        self._dirty.add(key)
+        return chunk
+
+    def _decode_source_chunk(
+        self,
+        key: ChunkKey,
+        source_record: ChunkRecord,
+    ) -> nbtlib.File:
+        marker = source_record.data[LENGTH_HEADER_SIZE]
+        try:
+            if marker & EXTERNAL_CHUNK_STREAM_FLAG:
+                if self.path is None:
+                    raise McaError("External chunk has no source region path")
+                with RegionFile.open(self.path) as region:
+                    return _as_nbt_file(region.read_chunk(*key))
+            compression = marker & COMPRESSION_TYPE_MASK
+            payload = source_record.data[
+                LENGTH_HEADER_SIZE + COMPRESSION_HEADER_SIZE:
+            ]
+            return bytes_to_nbt(decompress_chunk(compression, payload))
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            raise McaError(
+                f"Cannot safely load chunk {key} from {self.path}: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise McaError(
+                f"Cannot safely load chunk {key} from {self.path}: {exc}"
+            ) from exc
 
     def set_chunk(self, local_cx: int, local_cz: int, nbt: Any) -> None:
         """写入/覆盖局部区块，并取消删除标记。
@@ -202,9 +272,35 @@ class WritableRegion:
             raise ChunkMissing(f"Local chunk ({local_cx}, {local_cz}) out of bounds")
         key = (local_cx, local_cz)
         self._deleted.discard(key)
-        if not isinstance(nbt, nbtlib.File):
-            nbt = nbtlib.File(dict(nbt) if hasattr(nbt, "items") else nbt)
-        self._chunks[key] = nbt
+        self._chunks[key] = _as_nbt_file(nbt)
+        self._dirty.add(key)
+
+    def mark_chunk_dirty(self, local_cx: int, local_cz: int) -> None:
+        """Retain a decoded chunk for re-encoding during save.
+
+        Args:
+            local_cx: Region-local X coordinate.
+            local_cz: Region-local Z coordinate.
+
+        Raises:
+            ChunkMissing: The chunk has not been decoded or does not exist.
+        """
+        key = (local_cx, local_cz)
+        if key not in self._chunks or key in self._deleted:
+            raise ChunkMissing(f"Chunk ({local_cx}, {local_cz}) is not loaded")
+        self._dirty.add(key)
+
+    def discard_chunk_changes(self, local_cx: int, local_cz: int) -> None:
+        """Release a decoded tree and restore its original compressed record.
+
+        Args:
+            local_cx: Region-local X coordinate.
+            local_cz: Region-local Z coordinate.
+        """
+        key = (local_cx, local_cz)
+        self._chunks.pop(key, None)
+        self._dirty.discard(key)
+        self._deleted.discard(key)
 
     def delete_chunk(self, local_cx: int, local_cz: int) -> bool:
         """标记删除局部区块（save 前不落盘）。
@@ -218,23 +314,29 @@ class WritableRegion:
         """
         self._ensure_loaded()
         key = (local_cx, local_cz)
-        existed = key in self._chunks and key not in self._deleted
+        existed = (
+            key not in self._deleted
+            and (key in self._chunks or key in self._source_records)
+        )
         self._chunks.pop(key, None)
+        self._dirty.discard(key)
         self._deleted.add(key)
         return existed
 
     def iter_chunks(self) -> Iterable[Tuple[int, int, nbtlib.File]]:
         """遍历未删除的 ``(cx, cz, nbt)``。"""
         self._ensure_loaded()
-        for key, nbt in list(self._chunks.items()):
-            if key in self._deleted:
-                continue
-            yield key[0], key[1], nbt
+        keys = sorted(set(self._source_records) | set(self._chunks))
+        for local_cx, local_cz in keys:
+            chunk = self.get_chunk(local_cx, local_cz)
+            if chunk is not None:
+                yield local_cx, local_cz, chunk
 
     def count_chunks(self) -> int:
         """未删除区块数量。"""
         self._ensure_loaded()
-        return sum(1 for k in self._chunks if k not in self._deleted)
+        keys = set(self._source_records) | set(self._chunks)
+        return sum(1 for key in keys if key not in self._deleted)
 
     # ------------------------------------------------------------------ save
     def save(
@@ -257,10 +359,19 @@ class WritableRegion:
         if dest is None:
             raise McaError("No destination path for WritableRegion.save()")
         dest.parent.mkdir(parents=True, exist_ok=True)
+        self._materialize_external_chunks_for_new_path(dest)
         _create_backup(dest, backup)
         _replace_file_atomically(dest, self._serialize(), "Failed to write region")
         self.path = dest
-        self._deleted.clear()
+        self._load(parse_chunks=False)
+
+    def _materialize_external_chunks_for_new_path(self, dest: Path) -> None:
+        if self.path is None or dest.absolute() == self.path.absolute():
+            return
+        for key, source_record in self._source_records.items():
+            marker = source_record.data[LENGTH_HEADER_SIZE]
+            if marker & EXTERNAL_CHUNK_STREAM_FLAG and key not in self._deleted:
+                self.get_chunk(*key)
 
     def _serialize(self) -> bytes:
         """Build a complete MCA byte blob from in-memory chunks."""
@@ -273,31 +384,28 @@ class WritableRegion:
         body = bytearray()
         next_sector = 2  # header occupies sectors 0 and 1
 
-        # Deterministic order
-        keys = sorted(k for k in self._chunks.keys() if k not in self._deleted)
+        keys = sorted(
+            key
+            for key in set(self._source_records) | set(self._chunks)
+            if key not in self._deleted
+        )
         for cx, cz in keys:
-            nbt = self._chunks[(cx, cz)]
-            try:
-                raw = nbt_to_bytes(nbt)
-                compression, payload = compress_chunk(raw, COMPRESSION_ZLIB)
-            except (OSError, ValueError, TypeError, RuntimeError) as exc:
-                raise McaError(
-                    f"Failed to encode chunk ({cx}, {cz}): {exc}"
-                ) from exc
-            except Exception as exc:
-                raise McaError(
-                    f"Failed to encode chunk ({cx}, {cz}): {exc}"
-                ) from exc
-
-            length = 1 + len(payload)  # includes compression byte
-            record = struct.pack(">I", length) + bytes([compression]) + payload
-            sectors = (len(record) + SECTOR_SIZE - 1) // SECTOR_SIZE
+            key = (cx, cz)
+            source_record = self._source_records.get(key)
+            if key in self._dirty or source_record is None:
+                record = self._encode_chunk(key)
+                timestamp = now
+            else:
+                record = source_record.data
+                timestamp = source_record.timestamp
+            used_length = _validated_record_length(record)
+            sectors = (used_length + SECTOR_SIZE - 1) // SECTOR_SIZE
             if sectors <= 0 or sectors > 255:
                 raise McaError(
                     f"Chunk ({cx}, {cz}) needs {sectors} sectors (max 255)"
                 )
-            pad = sectors * SECTOR_SIZE - len(record)
-            body.extend(record)
+            pad = sectors * SECTOR_SIZE - used_length
+            body.extend(record[:used_length])
             if pad:
                 body.extend(b"\x00" * pad)
 
@@ -305,10 +413,27 @@ class WritableRegion:
             b_off = index * 4
             locations[b_off:b_off + 3] = int(next_sector).to_bytes(3, "big")
             locations[b_off + 3] = sectors
-            timestamps[b_off:b_off + 4] = struct.pack(">I", now)
+            timestamps[b_off:b_off + 4] = struct.pack(">I", timestamp)
             next_sector += sectors
 
         return bytes(locations) + bytes(timestamps) + bytes(body)
+
+    def _encode_chunk(self, key: ChunkKey) -> bytes:
+        try:
+            raw = nbt_to_bytes(self._chunks[key])
+            compression, payload = compress_chunk(raw, COMPRESSION_ZLIB)
+        except (OSError, ValueError, TypeError, RuntimeError, KeyError) as exc:
+            raise McaError(f"Failed to encode chunk {key}: {exc}") from exc
+        except Exception as exc:
+            raise McaError(f"Failed to encode chunk {key}: {exc}") from exc
+        length = COMPRESSION_HEADER_SIZE + len(payload)
+        return struct.pack(">I", length) + bytes([compression]) + payload
+
+
+def _as_nbt_file(value: Any) -> nbtlib.File:
+    if isinstance(value, nbtlib.File):
+        return value
+    return nbtlib.File(dict(value) if hasattr(value, "items") else value)
 
 
 def _create_backup(destination: Path, backup: bool) -> None:

@@ -125,6 +125,20 @@ class TestRegionFileSynthetic:
         assert int(projected["DataVersion"]) == 3463
         assert str(projected["Status"]) == "full"
 
+    def test_read_chunk_record_returns_compressed_bytes_and_allocation(self) -> None:
+        raw_nbt = _build_minimal_chunk_nbt(x=2, z=3)
+        blob = _build_region_with_chunk(2, 3, raw_nbt)
+        region = RegionFile.from_bytes(blob)
+
+        record = region.read_chunk_record(2, 3)
+
+        declared_length = int.from_bytes(record.data[:4], "big")
+        assert len(record.data) == declared_length + 4
+        assert record.data[4] == COMPRESSION_ZLIB
+        assert record.allocated_sectors == 1
+        assert record.timestamp == 0
+        assert zlib.decompress(record.data[5:]) == raw_nbt
+
     def test_repeated_location_scans_reuse_parsed_table(self) -> None:
         blob = _build_region_with_chunk(2, 3, _build_minimal_chunk_nbt())
         rf = RegionFile.from_bytes(blob)
@@ -181,9 +195,12 @@ class TestRegionFileSynthetic:
         monkeypatch.setattr(Path, "read_bytes", reject_read_bytes)
         with RegionFile.open(path) as region:
             assert isinstance(region._data, mmap.mmap)
+            assert region._file is not None
+            assert not region._file.closed
             assert int(region.read_chunk(0, 0)["DataVersion"]) == 3463
 
         assert region._data == b""
+        assert region._file is None
 
     def test_reads_standard_external_mcc_chunk(self, tmp_path: Path) -> None:
         local_cx, local_cz = 31, 3

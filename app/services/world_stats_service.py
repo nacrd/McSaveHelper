@@ -333,11 +333,13 @@ class WorldStatsService:
     ) -> List[_RegionAnalysis]:
         """Analyze region files, optionally in bounded parallel."""
         if self._runtime is None or len(region_files) <= 1:
-            analyses: List[_RegionAnalysis] = []
+            sequential_analyses: List[_RegionAnalysis] = []
             for region_path in region_files:
                 self._raise_if_cancelled(cancel_check)
-                analyses.append(self._analyze_region_file(world_path, region_path))
-            return analyses
+                sequential_analyses.append(
+                    self._analyze_region_file(world_path, region_path)
+                )
+            return sequential_analyses
 
         def worker(
             _token: CancellationToken,
@@ -688,7 +690,15 @@ class WorldStatsService:
                     entity_counts.update(chunk_entities)
                 elif present is None:
                     empty_chunks += 1
-            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, McaError):
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                RuntimeError,
+                KeyError,
+                AttributeError,
+                McaError,
+            ):
                 if present is None:
                     empty_chunks += 1
         return _RegionChunkStats(

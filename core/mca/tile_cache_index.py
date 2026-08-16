@@ -4,15 +4,25 @@
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 
 _INDEX_NAME = "index.json"
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
+
+
+@dataclass
+class _IndexState:
+    """进程内索引快照及其持久化状态。"""
+
+    entries: dict[str, dict[str, Any]]
+    dirty: bool = False
 
 
 def index_path(cache_root: Path) -> Path:
@@ -20,7 +30,12 @@ def index_path(cache_root: Path) -> Path:
     return cache_root / _INDEX_NAME
 
 
-def load_index(cache_root: Path) -> dict[str, dict[str, Any]]:
+def _root_key(cache_root: Path) -> Path:
+    """返回可稳定复用的缓存根路径。"""
+    return cache_root.absolute()
+
+
+def _read_index(cache_root: Path) -> dict[str, dict[str, Any]]:
     """加载索引；损坏或缺失时返回空表。"""
     path = index_path(cache_root)
     try:
@@ -39,14 +54,76 @@ def load_index(cache_root: Path) -> dict[str, dict[str, Any]]:
     return {}
 
 
-def save_index(cache_root: Path, entries: dict[str, dict[str, Any]]) -> None:
-    """原子写入索引。"""
+_STATES: dict[Path, _IndexState] = {}
+
+
+def _state_locked(cache_root: Path) -> _IndexState:
+    key = _root_key(cache_root)
+    state = _STATES.get(key)
+    if state is None:
+        state = _IndexState(_read_index(key))
+        _STATES[key] = state
+    return state
+
+
+def load_index(cache_root: Path) -> dict[str, dict[str, Any]]:
+    """返回进程内索引快照；首次访问时从磁盘加载。"""
+    with _LOCK:
+        return {
+            name: dict(metadata)
+            for name, metadata in _state_locked(cache_root).entries.items()
+        }
+
+
+def _write_index(cache_root: Path, entries: dict[str, dict[str, Any]]) -> None:
+    """将调用方持有的索引快照原子写入磁盘。"""
     path = index_path(cache_root)
     tmp = path.with_suffix(".tmp")
     payload = {"version": 1, "entries": entries}
     text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
+
+
+def save_index(cache_root: Path, entries: dict[str, dict[str, Any]]) -> None:
+    """原子写入索引并同步进程内快照。"""
+    with _LOCK:
+        snapshot = {
+            name: dict(metadata) for name, metadata in entries.items()
+        }
+        _write_index(cache_root, snapshot)
+        state = _state_locked(cache_root)
+        state.entries = snapshot
+        state.dirty = False
+
+
+def flush_index(cache_root: Optional[Path] = None) -> None:
+    """将一个或全部脏索引原子写回磁盘。"""
+    with _LOCK:
+        states = (
+            {_root_key(cache_root): _state_locked(cache_root)}
+            if cache_root is not None
+            else dict(_STATES)
+        )
+        for root, state in states.items():
+            if not state.dirty:
+                continue
+            try:
+                _write_index(root, state.entries)
+            except OSError:
+                continue
+            state.dirty = False
+
+
+def _flush_all_indexes() -> None:
+    """进程退出时尽力保存尚未刷新的索引。"""
+    try:
+        flush_index()
+    except (OSError, RuntimeError):
+        pass
+
+
+atexit.register(_flush_all_indexes)
 
 
 def record_file(
@@ -58,33 +135,29 @@ def record_file(
 ) -> None:
     """登记或更新一个缓存文件条目。"""
     with _LOCK:
-        entries = load_index(cache_root)
         try:
             st = file_path.stat()
             size = int(st.st_size if size is None else size)
             mtime = float(st.st_mtime if mtime is None else mtime)
         except OSError:
             return
+        state = _state_locked(cache_root)
+        entries = state.entries
         entries[file_path.name] = {
             "size": size,
             "mtime": mtime,
         }
-        try:
-            save_index(cache_root, entries)
-        except OSError:
-            pass
+        state.dirty = True
 
 
 def remove_file(cache_root: Path, file_name: str) -> None:
     """从索引移除条目。"""
     with _LOCK:
-        entries = load_index(cache_root)
+        state = _state_locked(cache_root)
+        entries = state.entries
         if file_name in entries:
             entries.pop(file_name, None)
-            try:
-                save_index(cache_root, entries)
-            except OSError:
-                pass
+            state.dirty = True
 
 
 def _scan_cache_files(cache_root: Path) -> dict[str, dict[str, Any]]:
@@ -108,12 +181,11 @@ def _scan_cache_files(cache_root: Path) -> dict[str, dict[str, Any]]:
 
 
 def _rebuild_index_locked(cache_root: Path) -> dict[str, dict[str, Any]]:
-    """在已持有索引锁时扫描并保存索引。"""
+    """在已持有索引锁时扫描并更新内存索引。"""
     entries = _scan_cache_files(cache_root)
-    try:
-        save_index(cache_root, entries)
-    except OSError:
-        return {}
+    state = _state_locked(cache_root)
+    state.entries = entries
+    state.dirty = True
     return entries
 
 
@@ -127,6 +199,7 @@ def clear_index(cache_root: Path) -> None:
     """删除磁盘索引及未完成的临时索引。"""
     path = index_path(cache_root)
     with _LOCK:
+        _STATES.pop(_root_key(cache_root), None)
         for target in (path, path.with_suffix(".tmp")):
             try:
                 target.unlink()
@@ -142,10 +215,12 @@ def prune_to_limit(
     if max_files < 1:
         raise ValueError("max_files must be >= 1")
     with _LOCK:
-        entries = load_index(cache_root)
+        state = _state_locked(cache_root)
+        entries = state.entries
         if not entries:
             entries = _rebuild_index_locked(cache_root)
         if len(entries) <= max_files:
+            flush_index(cache_root)
             return 0, 0
         ordered = sorted(
             entries.items(),
@@ -169,19 +244,18 @@ def prune_to_limit(
             except OSError:
                 entries.pop(name, None)
                 continue
-        try:
-            save_index(cache_root, entries)
-        except OSError:
-            pass
+        state.dirty = True
+        flush_index(cache_root)
         return deleted, freed
 
 
 def index_stats(cache_root: Path) -> dict[str, Any]:
     """返回索引导出的占用统计（不全量扫描目录）。"""
     with _LOCK:
-        entries = load_index(cache_root)
-    if not entries:
-        entries = rebuild_index(cache_root)
+        state = _state_locked(cache_root)
+        if not state.entries and not index_path(cache_root).is_file():
+            _rebuild_index_locked(cache_root)
+        entries = state.entries
     total_bytes = sum(int(item.get("size", 0) or 0) for item in entries.values())
     return {
         "indexed_files": len(entries),
@@ -192,6 +266,7 @@ def index_stats(cache_root: Path) -> dict[str, Any]:
 
 __all__ = [
     "clear_index",
+    "flush_index",
     "index_path",
     "index_stats",
     "load_index",

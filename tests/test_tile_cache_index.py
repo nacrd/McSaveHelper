@@ -7,6 +7,7 @@ import pytest
 
 from core.mca import tile_cache
 from core.mca.tile_cache_index import (
+    flush_index,
     index_path,
     index_stats,
     load_index,
@@ -14,6 +15,22 @@ from core.mca.tile_cache_index import (
     record_file,
     rebuild_index,
 )
+
+
+def test_record_stays_in_memory_until_flush(tmp_path: Path) -> None:
+    root = tmp_path / "tiles"
+    root.mkdir()
+    tile = root / "a.png"
+    tile.write_bytes(b"\x89PNG" + b"a" * 40)
+
+    record_file(root, tile)
+
+    assert load_index(root)["a.png"]["size"] == tile.stat().st_size
+    assert not index_path(root).exists()
+
+    flush_index(root)
+
+    assert index_path(root).is_file()
 
 
 def test_record_and_prune_by_index(tmp_path: Path) -> None:
@@ -54,6 +71,7 @@ def test_clear_disk_cache_removes_index_metadata(
     tile = root / "a.png"
     tile.write_bytes(b"\x89PNG" + b"a" * 40)
     record_file(root, tile)
+    flush_index(root)
     assert index_path(root).is_file()
 
     result = tile_cache.clear_disk_cache()

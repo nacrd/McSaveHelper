@@ -9,6 +9,7 @@ import io
 import hashlib
 import mmap
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     Any,
@@ -44,6 +45,21 @@ PathLike = Union[str, Path]
 RegionData = Union[bytes, mmap.mmap]
 LocationTable = Tuple[Tuple[int, int], ...]
 _REGION_NAME_RE = re.compile(r"^r\.(-?\d+)\.(-?\d+)\.mca$")
+
+
+@dataclass(frozen=True)
+class ChunkRecord:
+    """One validated compressed MCA chunk record.
+
+    Attributes:
+        data: Used bytes, including the length and compression headers.
+        allocated_sectors: Sector count reserved by the location table.
+        timestamp: Original timestamp-table value.
+    """
+
+    data: bytes
+    allocated_sectors: int
+    timestamp: int
 
 
 def local_chunk_index(local_cx: int, local_cz: int) -> int:
@@ -84,9 +100,14 @@ def world_to_local(chunk_x: int, chunk_z: int) -> Tuple[int, int, int, int]:
 class RegionFile:
     """单个 ``r.X.Z.mca`` 的只读视图。"""
 
-    __slots__ = ("_path", "_data", "_closed", "_locations")
+    __slots__ = ("_path", "_data", "_file", "_closed", "_locations")
 
-    def __init__(self, data: RegionData, path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        data: RegionData,
+        path: Optional[Path] = None,
+        file: Optional[BinaryIO] = None,
+    ) -> None:
         """用已加载的区域字节/mmap 构造只读视图。
 
         Args:
@@ -102,6 +123,7 @@ class RegionFile:
             )
         self._data = data
         self._path = path
+        self._file = file
         self._closed = False
         self._locations: Optional[LocationTable] = None
 
@@ -119,23 +141,33 @@ class RegionFile:
             McaError: 文件过小或无法读取。
         """
         p = Path(path)
+        region_file: Optional[BinaryIO] = None
+        mapped_data: Optional[mmap.mmap] = None
         try:
             size = p.stat().st_size
             if size < HEADER_SIZE:
                 raise McaError(
                     f"Region file too small ({size} bytes); need >= {HEADER_SIZE}"
                 )
-            with p.open("rb") as region_file:
-                data = mmap.mmap(
-                    region_file.fileno(),
-                    length=0,
-                    access=mmap.ACCESS_READ,
-                )
+            region_file = p.open("rb")
+            mapped_data = mmap.mmap(
+                region_file.fileno(),
+                length=0,
+                access=mmap.ACCESS_READ,
+            )
+            return cls(data=mapped_data, path=p, file=region_file)
         except McaError:
+            if mapped_data is not None:
+                mapped_data.close()
+            if region_file is not None:
+                region_file.close()
             raise
         except (OSError, ValueError) as exc:
+            if mapped_data is not None:
+                mapped_data.close()
+            if region_file is not None:
+                region_file.close()
             raise McaError(f"Cannot read region file {p}: {exc}") from exc
-        return cls(data=data, path=p)
 
     @classmethod
     def from_bytes(cls, data: bytes, path: Optional[Path] = None) -> "RegionFile":
@@ -170,8 +202,14 @@ class RegionFile:
         self._closed = True
         data = self._data
         self._data = b""
-        if isinstance(data, mmap.mmap):
-            data.close()
+        file = self._file
+        self._file = None
+        try:
+            if isinstance(data, mmap.mmap):
+                data.close()
+        finally:
+            if file is not None:
+                file.close()
 
     def __enter__(self) -> "RegionFile":
         """进入上下文管理器，返回 self。"""
@@ -378,6 +416,35 @@ class RegionFile:
             ChunkMissing: 位置表槽为空。
             CorruptChunk: 位置/长度/外置流非法。
         """
+        record = self.read_chunk_record(local_cx, local_cz)
+        compression_marker = record.data[LENGTH_HEADER_SIZE]
+        compression = compression_marker & COMPRESSION_TYPE_MASK
+        if compression_marker & EXTERNAL_CHUNK_STREAM_FLAG:
+            payload = self._read_external_chunk(local_cx, local_cz)
+        else:
+            payload = record.data[
+                LENGTH_HEADER_SIZE + COMPRESSION_HEADER_SIZE:
+            ]
+        return decompress_chunk(compression, payload)
+
+    def read_chunk_record(
+        self,
+        local_cx: int,
+        local_cz: int,
+    ) -> ChunkRecord:
+        """Return one validated compressed record without decoding its NBT.
+
+        Args:
+            local_cx: Region-local chunk X coordinate.
+            local_cz: Region-local chunk Z coordinate.
+
+        Returns:
+            ChunkRecord: Used record bytes, allocation size, and timestamp.
+
+        Raises:
+            ChunkMissing: The location-table slot is empty.
+            CorruptChunk: The location or record length is invalid.
+        """
         self._ensure_open()
         off, sectors = self.chunk_location(local_cx, local_cz)
         if off == 0 and sectors == 0:
@@ -422,13 +489,11 @@ class RegionFile:
                 f"(need {end}, have {len(self._data)})"
             )
 
-        compression_marker = self._data[comp_off]
-        compression = compression_marker & COMPRESSION_TYPE_MASK
-        if compression_marker & EXTERNAL_CHUNK_STREAM_FLAG:
-            payload = self._read_external_chunk(local_cx, local_cz)
-        else:
-            payload = self._data[comp_off + COMPRESSION_HEADER_SIZE:end]
-        return decompress_chunk(compression, payload)
+        return ChunkRecord(
+            data=bytes(self._data[byte_off:end]),
+            allocated_sectors=sectors,
+            timestamp=self.chunk_timestamp(local_cx, local_cz),
+        )
 
     def _read_external_chunk(self, local_cx: int, local_cz: int) -> bytes:
         external_path = self.external_chunk_path(local_cx, local_cz)

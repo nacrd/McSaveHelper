@@ -109,7 +109,15 @@ class BaseSearcher(ABC):
                 if chunk is not None:
                     self.summary.scanned_chunks += 1
                     self.search_chunk(chunk, target, dimension)
-            except (OSError, ValueError, TypeError, RuntimeError, KeyError, AttributeError, McaError):
+            except (
+                OSError,
+                ValueError,
+                TypeError,
+                RuntimeError,
+                KeyError,
+                AttributeError,
+                McaError,
+            ):
                 self.summary.skipped_chunks += 1
 
     def _read_chunk(self, region: Any, cx: int, cz: int) -> Any:
