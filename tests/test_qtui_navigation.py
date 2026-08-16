@@ -1,7 +1,8 @@
 """Qt 任务导航与世界上下文栏回归测试。"""
 from __future__ import annotations
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtCore import qInstallMessageHandler
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from app.qtui.registry import create_qt_registry
 from app.qtui.sidebar import QtSidebar
@@ -60,6 +61,41 @@ def test_sidebar_restores_navigation_width_after_auto_expand(
     assert button.maximumWidth() > 44
     assert button._text_label is not None
     assert button._text_label.text() == "概览"
+    sidebar.deleteLater()
+
+
+def test_sidebar_reuses_layout_during_repeated_collapse_and_selection(
+    qt_app: QApplication,
+) -> None:
+    messages: list[str] = []
+    previous_handler = qInstallMessageHandler(
+        lambda _type, _context, message: messages.append(message)
+    )
+    sidebar = QtSidebar(
+        tabs=[
+            {"id": "overview", "label": "概览", "icon": "O"},
+            {"id": "players", "label": "玩家", "icon": "P"},
+        ],
+        translate=_translate,
+        on_tab_select=lambda _view_id: None,
+    )
+
+    try:
+        sidebar.select_tab("overview")
+        for _iteration in range(3):
+            sidebar.set_collapsed(True)
+            sidebar.select_tab("players")
+            qt_app.processEvents()
+            sidebar.set_collapsed(False)
+            sidebar.select_tab("overview")
+            qt_app.processEvents()
+    finally:
+        qInstallMessageHandler(previous_handler)
+
+    overview = sidebar._buttons["overview"]
+    assert overview._marker is not None
+    assert overview._marker.text() == "•"
+    assert not any("already has a layout" in message for message in messages)
     sidebar.deleteLater()
 
 

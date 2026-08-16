@@ -291,6 +291,7 @@ class _Footer(QWidget):
     def __init__(self, collapsed: bool) -> None:
         super().__init__()
         self._collapsed = collapsed
+        self._content_layout = QHBoxLayout(self)
         self._rebuild()
 
     def set_collapsed(self, collapsed: bool) -> None:
@@ -300,20 +301,18 @@ class _Footer(QWidget):
         self._rebuild()
 
     def _rebuild(self) -> None:
-        layout = self.layout()
-        if layout is not None:
-            while layout.count():
-                item = layout.takeAt(0)
-                widget = item.widget() if item is not None else None
-                if widget is not None:
-                    widget.deleteLater()
-            layout.deleteLater()
+        layout = self._content_layout
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
         colors = _colors()
         if self._collapsed:
             self.setFixedHeight(0)
             return
         self.setMinimumHeight(0)
-        layout = QHBoxLayout(self)
+        self.setMaximumHeight(16777215)
         layout.setContentsMargins(16, 12, 16, 12)
         version = QLabel(APP_VERSION)
         version.setStyleSheet(

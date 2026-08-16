@@ -54,19 +54,18 @@ class _TabButton(QFrame):
         self.setFixedHeight(44)
         self.setToolTip(label)
         self.setMouseTracking(True)
+        self._content_layout = QHBoxLayout(self)
         self._rebuild()
 
     def _clear_layout(self) -> None:
-        layout = self.layout()
-        if layout is not None:
-            while layout.count():
-                item = layout.itemAt(0)
-                layout.takeAt(0)
-                if item is not None:
-                    widget = item.widget()
-                    if widget is not None:
-                        widget.deleteLater()
-            layout.deleteLater()
+        self._icon_label = None
+        self._text_label = None
+        self._marker = None
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
 
     def _rebuild(self) -> None:
         """重建子控件与布局（折叠往返安全）。"""
@@ -74,7 +73,7 @@ class _TabButton(QFrame):
         icon_label = QLabel(self._icon)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon_label = icon_label
-        layout = QHBoxLayout(self)
+        layout = self._content_layout
         if self._collapsed:
             self.setFixedWidth(44)
             layout.setContentsMargins(0, 0, 0, 0)
