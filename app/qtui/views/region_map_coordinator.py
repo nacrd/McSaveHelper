@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 from typing import Callable, Optional, Protocol, cast
 
 from app.controllers.map_controller import MapController
@@ -115,6 +116,10 @@ class QtRegionMapCoordinator:
             self._map_service = RegionMapService(app.execution_runtime)
         self._map_service.set_tile_ready_callback(self._on_topview_tile_ready)
         self._tile_requests = TopviewTileRequestCoordinator(self._map_service)
+        self._tile_ready_lock = Lock()
+        self._pending_tile_ready: set[tuple[int, int]] = set()
+        self._tile_ready_dispatch_pending = False
+        self._closed = False
         self._style_id = "topview"
         self._map_export_dialog = QtMapExportDialog(app)
         self.panel = QtRegionMapPanel(
@@ -672,21 +677,43 @@ class QtRegionMapCoordinator:
         )
 
     def _on_topview_tile_ready(self, coord: tuple[int, int]) -> None:
-        def apply() -> None:
+        with self._tile_ready_lock:
+            if self._closed:
+                return
+            self._pending_tile_ready.add(coord)
+            if self._tile_ready_dispatch_pending:
+                return
+            self._tile_ready_dispatch_pending = True
+        run_on_ui(self._flush_tile_ready)
+
+    def _flush_tile_ready(self) -> None:
+        """在一次 UI 刷新中应用所有已完成瓦片。"""
+        with self._tile_ready_lock:
+            coords = tuple(self._pending_tile_ready)
+            self._pending_tile_ready.clear()
+            self._tile_ready_dispatch_pending = False
+            if self._closed:
+                return
+        should_retry = False
+        for coord in coords:
             raw = self._map_service.get_topview_tile(coord)
             if raw:
                 self.panel.canvas.set_tile(coord, raw)
-            should_retry = self._tile_requests.on_tile_ready(coord)
-            if should_retry:
-                self._request_visible_tiles()
-
-        run_on_ui(apply)
+            should_retry = self._tile_requests.on_tile_ready(coord) or should_retry
+        if should_retry:
+            self._request_visible_tiles()
 
     def _t(self, key: str, default: str = "", **kwargs: object) -> str:
         return self._app.translate(key, default, **kwargs)
 
     def close(self) -> None:
         """幂等关闭扫描任务、导出/删除/标记作用域与地图控制器。"""
+        with self._tile_ready_lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._pending_tile_ready.clear()
+            self._tile_ready_dispatch_pending = False
         self._host_generation += 1
         self._map_export_dialog.dispose()
         self._region_delete_controller.cancel()

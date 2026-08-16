@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 
 from PySide6.QtCore import QBuffer, QByteArray
 from PySide6.QtGui import QPixmap
 
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
+from app.qtui.views import region_map_coordinator as coordinator_module
 from app.services.execution_runtime import ExecutionRuntime, LaneLimits
 from app.services.region_map import RegionMapService
 from core.mca import WritableRegion
@@ -75,3 +77,45 @@ def test_canvas_tile_scale_and_grid_thresholds(qt_app: object) -> None:
     assert canvas.tile_scale >= canvas._CHUNK_GRID_TILE_SCALE
     canvas.set_camera(256.0, 256.0, 1.5)
     assert canvas.tile_scale >= canvas._BLOCK_GRID_TILE_SCALE
+
+
+def test_canvas_coalesces_drag_camera_callbacks(qt_app: object) -> None:
+    del qt_app
+    events: list[tuple[float, float, float]] = []
+    canvas = QtRegionMapCanvas(
+        lambda *_args: None,
+        lambda x, z, scale: events.append((x, z, scale)),
+    )
+
+    canvas._emit_camera(immediate=False)
+    canvas._center_x = 128.0
+    canvas._emit_camera(immediate=False)
+
+    assert events == []
+    assert canvas._camera_emit_pending is True
+
+    canvas._flush_camera()
+
+    assert events == [(128.0, 0.0, canvas.scale)]
+    assert canvas._camera_emit_pending is False
+
+
+def test_region_map_coalesces_tile_ready_ui_dispatches(monkeypatch) -> None:
+    coordinator = object.__new__(coordinator_module.QtRegionMapCoordinator)
+    coordinator._tile_ready_lock = Lock()
+    coordinator._pending_tile_ready = set()
+    coordinator._tile_ready_dispatch_pending = False
+    coordinator._closed = False
+    dispatched: list[object] = []
+    monkeypatch.setattr(
+        coordinator_module,
+        "run_on_ui",
+        lambda callback: dispatched.append(callback),
+    )
+
+    coordinator._on_topview_tile_ready((0, 0))
+    coordinator._on_topview_tile_ready((0, 0))
+    coordinator._on_topview_tile_ready((1, 0))
+
+    assert len(dispatched) == 1
+    assert coordinator._pending_tile_ready == {(0, 0), (1, 0)}

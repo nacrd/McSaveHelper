@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional, Sequence
 
-from PySide6.QtCore import QPoint, QRect, Qt
+from PySide6.QtCore import QPoint, QRect, QTimer, Qt
 from PySide6.QtGui import (
     QColor,
     QMouseEvent,
@@ -65,6 +65,11 @@ class QtRegionMapCanvas(QWidget):
         self._dragged = False
         self._last_pos = QPoint()
         self._press_pos = QPoint()
+        self._camera_emit_pending = False
+        self._camera_timer = QTimer(self)
+        self._camera_timer.setSingleShot(True)
+        self._camera_timer.setInterval(40)
+        self._camera_timer.timeout.connect(self._flush_camera)
         self._max_size = 1
         self._display_mode = "activity"
         self._tiles: dict[RegionCoord, QPixmap] = {}
@@ -107,6 +112,8 @@ class QtRegionMapCanvas(QWidget):
 
     def clear(self) -> None:
         """清空区域数据与选择。"""
+        self._camera_timer.stop()
+        self._camera_emit_pending = False
         self._regions = {}
         self._markers = ()
         self._tiles.clear()
@@ -350,7 +357,7 @@ class QtRegionMapCanvas(QWidget):
             if self._scale > 0 and (delta.x() or delta.y()):
                 self._center_x -= delta.x() / self._scale
                 self._center_z -= delta.y() / self._scale
-                self._emit_camera()
+                self._emit_camera(immediate=False)
                 self.update()
         super().mouseMoveEvent(event)
 
@@ -358,6 +365,7 @@ class QtRegionMapCanvas(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self._dragging:
             self._dragging = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
+            self._flush_camera()
             release = event.position().toPoint()
             moved = (release - self._press_pos).manhattanLength()
             if not self._dragged and moved < 6:
@@ -459,9 +467,32 @@ class QtRegionMapCanvas(QWidget):
             b = int(60 - 20 * t)
         return QColor(r, g, b)
 
-    def _emit_camera(self) -> None:
-        if self._on_camera_changed is not None:
-            self._on_camera_changed(self._center_x, self._center_z, self._scale)
+    def _emit_camera(self, *, immediate: bool = True) -> None:
+        """发送镜头状态；拖拽期间合并高频回调。"""
+        if self._on_camera_changed is None:
+            return
+        if immediate:
+            self._camera_timer.stop()
+            self._camera_emit_pending = False
+            self._on_camera_changed(
+                self._center_x,
+                self._center_z,
+                self._scale,
+            )
+            return
+        if self._camera_emit_pending:
+            return
+        self._camera_emit_pending = True
+        self._camera_timer.start()
+
+    def _flush_camera(self) -> None:
+        """发送合并后的最新镜头状态。"""
+        if not self._camera_emit_pending:
+            return
+        self._camera_emit_pending = False
+        callback = self._on_camera_changed
+        if callback is not None:
+            callback(self._center_x, self._center_z, self._scale)
 
     @staticmethod
     def _clamp_scale(scale: float) -> float:
