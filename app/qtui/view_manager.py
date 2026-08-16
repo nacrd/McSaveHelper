@@ -53,6 +53,8 @@ class QtViewManager:
 
     def switch_view(self, view_id: str) -> None:
         """切换（并按需创建）指定视图。"""
+        if view_id == self._current_id:
+            return
         view = self._views.get(view_id)
         if view is None:
             view = self._create_view(view_id)

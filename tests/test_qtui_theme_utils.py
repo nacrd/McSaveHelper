@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QTableWidget, QTableWidgetItem
 
 from app.qtui.theme import (
     LIGHT_THEME,
@@ -10,7 +10,7 @@ from app.qtui.theme import (
     apply_theme,
     build_qss,
 )
-from app.qtui.utils import run_on_ui
+from app.qtui.utils import batch_widget_updates, run_on_ui
 
 
 def test_build_qss_contains_theme_colors() -> None:
@@ -90,3 +90,25 @@ def test_run_on_ui_dispatches_callback_from_current_thread(
 def test_run_on_ui_ignores_non_callable(qt_app: QApplication) -> None:
     run_on_ui("not-a-callable")  # type: ignore[arg-type]
     qt_app.processEvents()
+
+
+def test_batch_widget_updates_restores_state_and_rows(qt_app: QApplication) -> None:
+    table = QTableWidget()
+    table.setUpdatesEnabled(False)
+    table.blockSignals(True)
+
+    with batch_widget_updates(table):
+        table.setRowCount(2)
+        table.setItem(0, 0, QTableWidgetItem("a"))
+
+    assert table.rowCount() == 2
+    assert table.updatesEnabled() is False
+    assert table.signalsBlocked() is True
+
+    table.setUpdatesEnabled(True)
+    table.blockSignals(False)
+    with batch_widget_updates(table):
+        table.setRowCount(1)
+    qt_app.processEvents()
+    assert table.updatesEnabled() is True
+    assert table.signalsBlocked() is False

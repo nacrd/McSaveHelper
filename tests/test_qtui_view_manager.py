@@ -25,6 +25,7 @@ class _TestPage(QWidget):
 
 def _make_manager(
     factories: dict[str, Callable[[QtFeatureContext], QWidget]],
+    on_view_changed: Callable[[str], None] | None = None,
 ) -> tuple[QtViewManager, QtFeatureRegistry, QStackedWidget]:
     registry = QtFeatureRegistry(
         tuple(
@@ -43,6 +44,7 @@ def _make_manager(
         registry=registry,
         stack=stack,
         context=QtFeatureContext({}),  # type: ignore[arg-type]
+        on_view_changed=on_view_changed,
     )
     return manager, registry, stack
 
@@ -85,6 +87,20 @@ def test_switch_view_creates_lazily_and_tracks_current(qt_app: object) -> None:
     # 再次切换不重复创建
     manager.switch_view("alpha")
     assert created == ["alpha"]
+
+
+def test_switching_current_view_is_a_noop(qt_app: object) -> None:
+    del qt_app
+    events: list[str] = []
+    manager, _registry, _stack = _make_manager(
+        {"alpha": lambda _ctx: _TestPage("alpha")},
+        on_view_changed=events.append,
+    )
+
+    manager.switch_view("alpha")
+    manager.switch_view("alpha")
+
+    assert events == ["alpha"]
 
 
 def test_remove_view_disposes_and_drops_state(qt_app: object) -> None:

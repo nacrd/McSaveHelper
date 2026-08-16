@@ -50,7 +50,7 @@ from app.qtui.context import (
     QtTranslationPort,
 )
 from app.qtui.theme import get_theme_manager
-from app.qtui.utils import run_on_ui
+from app.qtui.utils import batch_widget_updates, run_on_ui
 from app.qtui.view_actions import QtViewAction
 from app.qtui.views.mappings_operations import (
     DebouncedLatestSave,
@@ -469,43 +469,44 @@ class MappingsView(QScrollArea):
 
     def _render_item_table(self, filter_text: str) -> None:
         mappings = self._item_service.get_custom_item_mappings()
-        self._item_table.setRowCount(0)
         filter_lower = filter_text.lower()
         theme = get_theme_manager().current
         inserted = 0
-        for item_id, display_name in sorted(mappings.items()):
-            if (
-                filter_lower
-                and filter_lower not in item_id.lower()
-                and filter_lower not in display_name.lower()
-            ):
-                continue
-            self._item_table.insertRow(inserted)
-            id_item = QTableWidgetItem(item_id)
-            id_item.setForeground(QColor(theme.text_secondary))
-            name_item = QTableWidgetItem(display_name)
-            name_item.setForeground(QColor(theme.text_primary))
-            self._item_table.setItem(inserted, 0, id_item)
-            self._item_table.setItem(inserted, 1, name_item)
-            delete_button = QPushButton("🗑️")
-            delete_button.setFixedWidth(34)
-            delete_button.setToolTip("删除")
-            delete_button.clicked.connect(
-                lambda _checked, iid=item_id: self._delete_item_mapping(iid)
-            )
-            self._item_table.setCellWidget(inserted, 2, delete_button)
-            inserted += 1
-        if self._item_table.rowCount() == 0:
-            placeholder_text = (
-                "暂无自定义物品映射 — 可通过导入语言文件、导入 JSON 或手动添加映射"
-                if not mappings
-                else "没有匹配的映射 — 尝试更换物品 ID 或显示名称关键词"
-            )
-            self._item_table.insertRow(0)
-            hint_item = QTableWidgetItem(placeholder_text)
-            hint_item.setForeground(QColor(theme.text_muted))
-            self._item_table.setItem(0, 0, hint_item)
-            self._item_table.setSpan(0, 0, 1, 3)
+        with batch_widget_updates(self._item_table):
+            self._item_table.setRowCount(0)
+            for item_id, display_name in sorted(mappings.items()):
+                if (
+                    filter_lower
+                    and filter_lower not in item_id.lower()
+                    and filter_lower not in display_name.lower()
+                ):
+                    continue
+                self._item_table.insertRow(inserted)
+                id_item = QTableWidgetItem(item_id)
+                id_item.setForeground(QColor(theme.text_secondary))
+                name_item = QTableWidgetItem(display_name)
+                name_item.setForeground(QColor(theme.text_primary))
+                self._item_table.setItem(inserted, 0, id_item)
+                self._item_table.setItem(inserted, 1, name_item)
+                delete_button = QPushButton("🗑️")
+                delete_button.setFixedWidth(34)
+                delete_button.setToolTip("删除")
+                delete_button.clicked.connect(
+                    lambda _checked, iid=item_id: self._delete_item_mapping(iid)
+                )
+                self._item_table.setCellWidget(inserted, 2, delete_button)
+                inserted += 1
+            if inserted == 0:
+                placeholder_text = (
+                    "暂无自定义物品映射 — 可通过导入语言文件、导入 JSON 或手动添加映射"
+                    if not mappings
+                    else "没有匹配的映射 — 尝试更换物品 ID 或显示名称关键词"
+                )
+                self._item_table.insertRow(0)
+                hint_item = QTableWidgetItem(placeholder_text)
+                hint_item.setForeground(QColor(theme.text_muted))
+                self._item_table.setItem(0, 0, hint_item)
+                self._item_table.setSpan(0, 0, 1, 3)
 
     def _add_item_mapping(self) -> None:
         if not self._state.can_edit_items:

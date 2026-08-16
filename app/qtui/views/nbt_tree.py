@@ -23,6 +23,7 @@ from app.presenters.nbt_tree import (
     nbt_type_name,
     raw_nbt_value,
 )
+from app.qtui.utils import batch_widget_updates
 
 
 Translate = Callable[..., str]
@@ -76,13 +77,14 @@ class QtNbtTree(QTreeWidget):
             data: NBT 或 JSON 根节点。
             changes: 当前目标的暂存变更快照。
         """
-        self.clear()
-        self._values.clear()
-        self._staged_values = tuple(
-            (change.path, change.new_value) for change in changes
-        )
-        for key, value in iter_nbt_children(data):
-            self._add_item(None, str(key), (key,), value)
+        with batch_widget_updates(self):
+            self.clear()
+            self._values.clear()
+            self._staged_values = tuple(
+                (change.path, change.new_value) for change in changes
+            )
+            for key, value in iter_nbt_children(data):
+                self._add_item(None, str(key), (key,), value)
 
     def stage_item_value(self, item: QTreeWidgetItem, raw: str) -> bool:
         """转换叶子输入并发出暂存回调，供对话框与测试复用。
@@ -168,28 +170,29 @@ class QtNbtTree(QTreeWidget):
     def _populate_expanded_item(self, item: QTreeWidgetItem) -> None:
         if bool(item.data(0, self._LOADED_ROLE)):
             return
-        item.takeChildren()
-        value = self._values.get(id(item))
-        path = item.data(0, self._PATH_ROLE)
-        if not isinstance(path, tuple):
-            return
-        children = tuple(iter_nbt_children(value))
-        for key, child_value in children[:self.MAX_CHILDREN]:
-            child_path = path + (key,)
-            child_name = f"[{key}]" if isinstance(key, int) else str(key)
-            self._add_item(item, child_name, child_path, child_value)
-        if len(children) > self.MAX_CHILDREN:
-            remaining = len(children) - self.MAX_CHILDREN
-            item.addChild(QTreeWidgetItem((
-                self._t(
-                    "nbt_editor.more_children",
-                    "还有 {count} 个子节点未显示",
-                    count=remaining,
-                ),
-                "",
-                "",
-            )))
-        item.setData(0, self._LOADED_ROLE, True)
+        with batch_widget_updates(self):
+            item.takeChildren()
+            value = self._values.get(id(item))
+            path = item.data(0, self._PATH_ROLE)
+            if not isinstance(path, tuple):
+                return
+            children = tuple(iter_nbt_children(value))
+            for key, child_value in children[:self.MAX_CHILDREN]:
+                child_path = path + (key,)
+                child_name = f"[{key}]" if isinstance(key, int) else str(key)
+                self._add_item(item, child_name, child_path, child_value)
+            if len(children) > self.MAX_CHILDREN:
+                remaining = len(children) - self.MAX_CHILDREN
+                item.addChild(QTreeWidgetItem((
+                    self._t(
+                        "nbt_editor.more_children",
+                        "还有 {count} 个子节点未显示",
+                        count=remaining,
+                    ),
+                    "",
+                    "",
+                )))
+            item.setData(0, self._LOADED_ROLE, True)
 
     def _edit_item(self, item: QTreeWidgetItem, _column: int) -> None:
         value = self._values.get(id(item))

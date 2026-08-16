@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.models.nbt_edit import ChunkNbtTarget, NbtChange, NbtPath
 from app.presenters.nbt_tree import format_nbt_value
+from app.qtui.utils import batch_widget_updates
 from app.qtui.views.nbt_tree import QtNbtTree
 from app.services.nbt_document_service import (
     LoadedNbtDocument,
@@ -363,20 +364,21 @@ class QtNbtPanel(QWidget):
 
     def show_stages(self, changes: Sequence[NbtChange]) -> None:
         """把完整暂存快照投影到审阅表。"""
-        self._stages.setRowCount(len(changes))
-        for row, change in enumerate(changes):
-            values = (
-                change.display_path,
-                format_nbt_value(change.old_value, 80),
-                format_nbt_value(change.new_value, 80),
-                change.format.upper(),
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
-                item.setToolTip(value)
-                if column == 0:
-                    item.setData(self._INDEX_ROLE, row)
-                self._stages.setItem(row, column, item)
+        with batch_widget_updates(self._stages):
+            self._stages.setRowCount(len(changes))
+            for row, change in enumerate(changes):
+                values = (
+                    change.display_path,
+                    format_nbt_value(change.old_value, 80),
+                    format_nbt_value(change.new_value, 80),
+                    change.format.upper(),
+                )
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(value)
+                    item.setToolTip(value)
+                    if column == 0:
+                        item.setData(self._INDEX_ROLE, row)
+                    self._stages.setItem(row, column, item)
         self._stage_status.setText(self._t(
             "nbt_editor.stage_count",
             "暂存区: {count} 个变更",

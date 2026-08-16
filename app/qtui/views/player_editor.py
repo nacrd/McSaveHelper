@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from app.presenters.player_presenter import format_player_summary_text
 from app.qtui.components.buttons import btn_ghost, btn_primary
 from app.qtui.components.cards import muted_label, section_title
+from app.qtui.utils import batch_widget_updates
 from app.qtui.views.equipment_preview import QtEquipmentPreview
 from app.qtui.views.inventory_grid import QtInventoryGrid
 from app.qtui.views.player_tasks import PlayerDetailResult
@@ -526,32 +527,34 @@ class QtPlayerEditor(QWidget):
         return "\n".join(lines)
 
     def _show_attributes(self, attributes: Sequence[PlayerAttribute]) -> None:
-        self._attributes.clear()
-        if not attributes:
-            self._attributes.addItem(self._t(
-                "player.attributes.empty", "无属性数据"
-            ))
-            return
-        for attr in attributes:
-            text = (
-                f"{attr.name}: base={_fmt(attr.base)} "
-                f"mods={attr.modifiers}"
-            )
-            self._attributes.addItem(QListWidgetItem(text))
+        with batch_widget_updates(self._attributes):
+            self._attributes.clear()
+            if not attributes:
+                self._attributes.addItem(self._t(
+                    "player.attributes.empty", "无属性数据"
+                ))
+                return
+            for attr in attributes:
+                text = (
+                    f"{attr.name}: base={_fmt(attr.base)} "
+                    f"mods={attr.modifiers}"
+                )
+                self._attributes.addItem(QListWidgetItem(text))
 
     def _show_effects(self, effects: Sequence[PlayerEffect]) -> None:
-        self._effects.clear()
-        if not effects:
-            self._effects.addItem(self._t(
-                "player.effects.empty", "无状态效果"
-            ))
-            return
-        for effect in effects:
-            text = (
-                f"{effect.id} · amp={effect.amplifier} · "
-                f"dur={effect.duration}"
-            )
-            self._effects.addItem(QListWidgetItem(text))
+        with batch_widget_updates(self._effects):
+            self._effects.clear()
+            if not effects:
+                self._effects.addItem(self._t(
+                    "player.effects.empty", "无状态效果"
+                ))
+                return
+            for effect in effects:
+                text = (
+                    f"{effect.id} · amp={effect.amplifier} · "
+                    f"dur={effect.duration}"
+                )
+                self._effects.addItem(QListWidgetItem(text))
 
     def _show_containers(
         self,

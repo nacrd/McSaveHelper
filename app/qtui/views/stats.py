@@ -25,7 +25,7 @@ from app.presenters.stats_view_state import (
     build_stats_view_state,
 )
 from app.qtui.components.cards import muted_label
-from app.qtui.utils import format_size
+from app.qtui.utils import batch_widget_updates, format_size
 from app.services.world_stats_service import (
     PLAYER_SORT_DAMAGE,
     PLAYER_SORT_DEATHS,
@@ -344,12 +344,13 @@ class QtStatsPanel(QWidget):
         rows: Iterable[Sequence[object]],
     ) -> None:
         materialized = list(rows)
-        table.setRowCount(len(materialized))
-        for row_index, row in enumerate(materialized):
-            for column, value in enumerate(row):
-                item = QTableWidgetItem(str(value))
-                item.setToolTip(str(value))
-                table.setItem(row_index, column, item)
+        with batch_widget_updates(table):
+            table.setRowCount(len(materialized))
+            for row_index, row in enumerate(materialized):
+                for column, value in enumerate(row):
+                    item = QTableWidgetItem(str(value))
+                    item.setToolTip(str(value))
+                    table.setItem(row_index, column, item)
 
     def _on_sort_changed(self, _index: int) -> None:
         stats = self._stats

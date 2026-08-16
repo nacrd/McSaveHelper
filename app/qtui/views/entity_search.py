@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from app.services.entity_block_search.constants import get_preset_options
 from app.services.entity_block_search.models import SearchCondition, SearchResult
+from app.qtui.utils import batch_widget_updates
 
 
 Translate = Callable[..., str]
@@ -223,27 +224,28 @@ class QtEntitySearchPanel(QWidget):
         """投影搜索结果并保留完整结果快照。"""
         self._results = tuple(results)
         displayed = self._results[:self.DISPLAY_LIMIT]
-        self._table.setRowCount(len(displayed))
-        for row, result in enumerate(displayed):
-            details = json.dumps(
-                result.extra_info,
-                ensure_ascii=False,
-                sort_keys=True,
-            ) if result.extra_info else ""
-            values = (
-                row + 1,
-                result.target_id,
-                self._type_label(result.result_type),
-                self._dimension_label(result.dimension),
-                result.x,
-                result.y,
-                result.z,
-                details,
-            )
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
-                item.setToolTip(str(value))
-                self._table.setItem(row, column, item)
+        with batch_widget_updates(self._table):
+            self._table.setRowCount(len(displayed))
+            for row, result in enumerate(displayed):
+                details = json.dumps(
+                    result.extra_info,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ) if result.extra_info else ""
+                values = (
+                    row + 1,
+                    result.target_id,
+                    self._type_label(result.result_type),
+                    self._dimension_label(result.dimension),
+                    result.x,
+                    result.y,
+                    result.z,
+                    details,
+                )
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    item.setToolTip(str(value))
+                    self._table.setItem(row, column, item)
         self._status.setText(self._t(
             "entity_search.done", "搜索完成"
         ))

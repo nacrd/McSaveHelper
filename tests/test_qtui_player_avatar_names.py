@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator, cast
+from typing import Callable, Iterator, Optional, cast
 
 import pytest
 from PySide6.QtGui import QPixmap
@@ -21,6 +21,7 @@ from app.services.execution_runtime import (
 )
 from app.services.item_service import ItemService
 from app.services.player.models import PlayerRef
+from app.services.player_avatar_service import PlayerAvatarService
 from app.services.player_service import PlayerService
 from app.services.uuid_service import UUIDService
 from core.omni.world_session import WorldSession
@@ -80,6 +81,51 @@ def test_apply_resolved_names_updates_list(panel: QtPlayerPanel) -> None:
     assert "Alex" in panel._list.item(0).text()
     assert panel.player_refs[0].name == "Alex"
     assert panel.player_refs[1].name == "Steve"
+
+
+def test_cached_list_avatar_does_not_submit_duplicate_request(
+    qt_app: object,
+) -> None:
+    del qt_app
+
+    class _AvatarService:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def load_avatar_async(
+            self,
+            uuid: str,
+            on_loaded: Callable[[Optional[str]], None],
+        ) -> None:
+            del on_loaded
+            self.calls.append(uuid)
+
+        def close(self) -> None:
+            return None
+
+    avatar_service = _AvatarService()
+    view = QtPlayerPanel(
+        lambda key, default="", **kw: default.format(**kw),
+        lambda _uuid: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        lambda: None,
+        avatar_service=cast(PlayerAvatarService, avatar_service),
+    )
+    player_uuid = "a" * 32
+    view._avatar_paths[player_uuid] = "cached.png"
+
+    view.show_players((
+        PlayerRef(
+            uuid_norm=player_uuid,
+            uuid_hyphen="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            name="Alex",
+        ),
+    ))
+
+    assert avatar_service.calls == []
+    view.dispose()
 
 
 def test_editor_set_avatar_path_uses_pixmap_or_initial(

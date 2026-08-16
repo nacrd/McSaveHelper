@@ -218,6 +218,8 @@ class QtApplication(QMainWindow):
         collapsed = mode == "collapsed" or (
             mode == "auto" and self.width() < 1000
         )
+        if collapsed == self.sidebar.is_collapsed:
+            return
         self.sidebar.set_collapsed(collapsed)
 
     def _set_log_panel_visible(self, visible: bool) -> None:

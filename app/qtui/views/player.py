@@ -31,7 +31,7 @@ from app.presenters.player_list_state import (
 )
 from app.qtui.components.buttons import btn_ghost
 from app.qtui.components.cards import muted_label, section_title
-from app.qtui.utils import run_on_ui
+from app.qtui.utils import batch_widget_updates, run_on_ui
 from app.qtui.views.player_editor import QtPlayerEditor
 from app.qtui.views.player_tasks import PlayerDetailResult
 from app.services.item_service import ItemService
@@ -370,29 +370,29 @@ class QtPlayerPanel(QWidget):
             self._avatar_state,
             AvatarRequestKind.LIST,
         )
-        self._list.blockSignals(True)
-        self._list.clear()
-        for player in state.items:
-            ref = refs_by_uuid.get(player.uuid)
-            if ref is None:
-                continue
-            name = ref.name or self._t(
-                "explorer.unknown_player", "未知玩家"
-            )
-            item = QListWidgetItem(
-                f"{name}\n{ref.uuid_hyphen or ref.uuid_norm}"
-            )
-            item.setData(_UUID_ROLE, ref.uuid_norm)
-            item.setSizeHint(QSize(0, 48))
-            item.setToolTip(ref.uuid_hyphen or ref.uuid_norm)
-            cached = self._avatar_paths.get(ref.uuid_norm)
-            if cached:
-                item.setIcon(self._icon_from_path(cached))
-            self._list.addItem(item)
-            if ref.uuid_norm == self._current_uuid:
-                self._list.setCurrentItem(item)
-            self._load_list_avatar(ref)
-        self._list.blockSignals(False)
+        with batch_widget_updates(self._list):
+            self._list.clear()
+            for player in state.items:
+                ref = refs_by_uuid.get(player.uuid)
+                if ref is None:
+                    continue
+                name = ref.name or self._t(
+                    "explorer.unknown_player", "未知玩家"
+                )
+                item = QListWidgetItem(
+                    f"{name}\n{ref.uuid_hyphen or ref.uuid_norm}"
+                )
+                item.setData(_UUID_ROLE, ref.uuid_norm)
+                item.setSizeHint(QSize(0, 48))
+                item.setToolTip(ref.uuid_hyphen or ref.uuid_norm)
+                cached = self._avatar_paths.get(ref.uuid_norm)
+                if cached:
+                    item.setIcon(self._icon_from_path(cached))
+                else:
+                    self._load_list_avatar(ref)
+                self._list.addItem(item)
+                if ref.uuid_norm == self._current_uuid:
+                    self._list.setCurrentItem(item)
         self._page_status.setText(self._t(
             "player.page_status",
             "第 {page}/{pages} 页 · {total} 人",

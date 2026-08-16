@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.qtui.components.buttons import btn_danger, btn_ghost, btn_primary
 from app.qtui.components.cards import muted_label, section_title
+from app.qtui.utils import batch_widget_updates
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
 from core.mca.map_models import MapMarker
 from core.mca.region_selection import format_region_selection
@@ -376,21 +377,20 @@ class QtRegionMapPanel(QWidget):
         """投影标记列表与画布针点。"""
         self._markers = tuple(markers)
         self._canvas.set_markers(markers)
-        self._marker_list.blockSignals(True)
-        self._marker_list.clear()
         selected_row = -1
-        for index, marker in enumerate(markers):
-            item = QListWidgetItem(
-                f"{marker.name}\nX {marker.x} · Z {marker.z}"
-            )
-            item.setData(_MARKER_ID_ROLE, marker.id)
-            item.setToolTip(
-                f"{marker.name}\nX {marker.x}, Y {marker.y}, Z {marker.z}"
-            )
-            self._marker_list.addItem(item)
-            if marker.id == self._selected_marker_id:
-                selected_row = index
-        self._marker_list.blockSignals(False)
+        with batch_widget_updates(self._marker_list):
+            self._marker_list.clear()
+            for index, marker in enumerate(markers):
+                item = QListWidgetItem(
+                    f"{marker.name}\nX {marker.x} · Z {marker.z}"
+                )
+                item.setData(_MARKER_ID_ROLE, marker.id)
+                item.setToolTip(
+                    f"{marker.name}\nX {marker.x}, Y {marker.y}, Z {marker.z}"
+                )
+                self._marker_list.addItem(item)
+                if marker.id == self._selected_marker_id:
+                    selected_row = index
         self._marker_count.setText(self._t(
             "map.marker_count", "{count} 个标记", count=len(markers)
         ))

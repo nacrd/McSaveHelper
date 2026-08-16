@@ -1,9 +1,12 @@
 """Qt UI 线程工具：后台回调投递与线程判断。"""
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Callable
 
 from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtWidgets import QWidget
 
 
 class _UiDispatcher(QObject):
@@ -45,6 +48,26 @@ def run_on_ui(callback: Callable[..., object], *args: Any) -> None:
 def invoke_later(callback: Callable[..., object], *args: Any) -> None:
     """在当前线程稍后执行回调（立即排入事件队列）。"""
     _dispatcher.invoked.emit(callback, args)
+
+
+@contextmanager
+def batch_widget_updates(widget: QWidget) -> Iterator[None]:
+    """批量修改控件时暂停重绘和信号，退出时恢复原状态。
+
+    大型表格和列表的逐项投影如果让 Qt 在每次写入后布局，会产生明显的
+    重绘开销；调用方仍需在上下文结束后显式刷新依赖派生状态的控件。
+    """
+    updates_enabled = widget.updatesEnabled()
+    signals_blocked = widget.signalsBlocked()
+    widget.setUpdatesEnabled(False)
+    widget.blockSignals(True)
+    try:
+        yield
+    finally:
+        widget.blockSignals(signals_blocked)
+        widget.setUpdatesEnabled(updates_enabled)
+        if updates_enabled:
+            widget.update()
 
 
 def format_size(size: int) -> str:
