@@ -9,11 +9,39 @@ from PySide6.QtGui import QPixmap
 
 from app.qtui.views.player import QtPlayerPanel
 from app.qtui.views.player_editor import QtPlayerEditor
-from app.qtui.views.player_tasks import NameLookupResult, PlayerTasks
-from app.services.execution_runtime import ExecutionRuntime, LaneLimits
+from app.qtui.views.player_tasks import (
+    NameLookupResult,
+    PlayerTaskCallbacks,
+    PlayerTasks,
+)
+from app.services.execution_runtime import (
+    ExecutionRuntime,
+    LaneLimits,
+    OperationContext,
+)
 from app.services.item_service import ItemService
 from app.services.player.models import PlayerRef
 from app.services.player_service import PlayerService
+from app.services.uuid_service import UUIDService
+from core.omni.world_session import WorldSession
+
+
+def _task_callbacks(events: list[str] | None = None) -> PlayerTaskCallbacks:
+    recorded = events if events is not None else []
+    return PlayerTaskCallbacks(
+        players_ready=lambda *_args: None,
+        players_error=lambda *_args: None,
+        detail_ready=lambda *_args: None,
+        detail_error=lambda *_args: None,
+        export_success=lambda *_args: None,
+        export_error=lambda *_args: None,
+        usercache_success=lambda imported, generation: recorded.append(
+            f"uc:{imported}:{generation}"
+        ),
+        usercache_error=lambda *_args: recorded.append("uc-err"),
+        name_lookup_success=lambda *_args: None,
+        name_lookup_error=lambda *_args: None,
+    )
 
 
 @pytest.fixture
@@ -108,27 +136,13 @@ def test_player_tasks_usercache_success(tmp_path: Path, qt_app: object) -> None:
             assert path.name.endswith(".json")
             return 2
 
-    class _CB:
-        players_ready = staticmethod(lambda *a: None)
-        players_error = staticmethod(lambda *a: None)
-        detail_ready = staticmethod(lambda *a: None)
-        detail_error = staticmethod(lambda *a: None)
-        export_success = staticmethod(lambda *a: None)
-        export_error = staticmethod(lambda *a: None)
-        usercache_success = staticmethod(
-            lambda imported, gen: events.append(f"uc:{imported}:{gen}")
-        )
-        usercache_error = staticmethod(lambda *a: events.append("uc-err"))
-        name_lookup_success = staticmethod(lambda *a: None)
-        name_lookup_error = staticmethod(lambda *a: None)
-
-    session = _Session()
+    session = cast(WorldSession, _Session())
     tasks = PlayerTasks(
         runtime,
         PlayerService(),
-        cast(object, _CB()),
+        _task_callbacks(events),
     )
-    tasks._session = session  # type: ignore[assignment]
+    tasks._session = session
     tasks._world_generation = 1
     cache = tmp_path / "usercache.json"
     cache.write_text("[]", encoding="utf-8")
@@ -164,30 +178,12 @@ def test_resolve_names_direct() -> None:
     tasks = PlayerTasks(
         runtime,
         PlayerService(),
-        cast(
-            object,
-            type(
-                "CB",
-                (),
-                {
-                    "players_ready": staticmethod(lambda *a: None),
-                    "players_error": staticmethod(lambda *a: None),
-                    "detail_ready": staticmethod(lambda *a: None),
-                    "detail_error": staticmethod(lambda *a: None),
-                    "export_success": staticmethod(lambda *a: None),
-                    "export_error": staticmethod(lambda *a: None),
-                    "usercache_success": staticmethod(lambda *a: None),
-                    "usercache_error": staticmethod(lambda *a: None),
-                    "name_lookup_success": staticmethod(lambda *a: None),
-                    "name_lookup_error": staticmethod(lambda *a: None),
-                },
-            )(),
-        ),
+        _task_callbacks(),
     )
     result = tasks._resolve_names(
-        cast(object, _Uuid()),
+        cast(UUIDService, _Uuid()),
         ["a" * 32, "b" * 32],
-        cast(object, _Context()),
+        cast(OperationContext, _Context()),
     )
     tasks.close()
     runtime.shutdown(wait=True, timeout=3.0)

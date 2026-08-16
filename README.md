@@ -1,6 +1,6 @@
 # MCSaveHelper
 
-MCSaveHelper 是一个使用 Python 和 Flet 构建的 Minecraft 世界存档管理工具，面向
+MCSaveHelper 是一个使用 Python 和 PySide6/Qt6 构建的 Minecraft 世界存档管理工具，面向
 Java 版存档的检查、备份、迁移、编辑和分析工作流。
 
 ## 主要功能
@@ -21,6 +21,8 @@ Java 版存档的检查、备份、迁移、编辑和分析工作流。
 pip install -r requirements.txt
 python main.py
 ```
+
+Qt6 是唯一界面后端。
 
 ## 开发检查
 
@@ -43,7 +45,7 @@ Nuitka 构建产物分别位于 `dist/MCSaveHelper.exe` 和 `dist/MCSaveHelper/`
 
 ## 项目结构
 
-- `app/ui/`：Flet 页面、组件和交互适配。
+- `app/qtui/`：Qt6 页面、组件、壳层和交互适配。
 - `app/controllers/`：跨页面用例协调。
 - `app/services/`：备份、迁移、修复、搜索和分析等业务服务。
 - `core/`：NBT、MCA、UUID 和文件格式算法。

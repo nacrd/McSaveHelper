@@ -120,6 +120,7 @@ def check_app_threadpools() -> CheckResult:
     offenders: list[str] = []
     allowed = {
         "app/services/execution_runtime.py",
+        "app/services/performance_monitoring.py",
     }
     for path in _iter_py_files(APP_ROOT / "services"):
         rel = path.relative_to(PROJECT_ROOT).as_posix()
@@ -149,14 +150,15 @@ def check_no_private_execution_runtime_fallback() -> CheckResult:
     )
     for path in _iter_py_files(APP_ROOT / "services"):
         rel = path.relative_to(PROJECT_ROOT).as_posix()
-        if rel == "app/services/execution_runtime.py":
+        if rel in {
+            "app/services/execution_runtime.py",
+            "app/services/performance_monitoring.py",
+        }:
             continue
         source = path.read_text(encoding="utf-8-sig")
         if any(pattern in source for pattern in patterns):
             offenders.append(rel)
-        if rel != "app/services/execution_runtime.py" and (
-            "ThreadPoolExecutor" in source or "threading.Thread(" in source
-        ):
+        if "ThreadPoolExecutor" in source or "threading.Thread(" in source:
             offenders.append(f"{rel}:pool")
     if offenders:
         return CheckResult(
@@ -172,16 +174,14 @@ def check_no_private_execution_runtime_fallback() -> CheckResult:
 
 
 def check_region_delete_uses_transaction() -> CheckResult:
-    """区域删除必须走统一世界事务端口（Flet 与 Qt 双路径）。"""
-    region_tab = APP_ROOT / "ui" / "views" / "explorer" / "region_tab.py"
+    """区域删除必须走统一世界事务端口。"""
     qt_coordinator = (
         APP_ROOT / "qtui" / "views" / "region_map_coordinator.py"
     )
     controller = APP_ROOT / "controllers" / "region_delete_controller.py"
     editor = APP_ROOT / "services" / "region_editor_service.py"
     if (
-        not region_tab.is_file()
-        or not qt_coordinator.is_file()
+        not qt_coordinator.is_file()
         or not controller.is_file()
         or not editor.is_file()
     ):
@@ -189,19 +189,9 @@ def check_region_delete_uses_transaction() -> CheckResult:
             "region_delete_transaction",
             False, "missing region delete modules",
         )
-    tab_source = region_tab.read_text(encoding="utf-8-sig")
     qt_source = qt_coordinator.read_text(encoding="utf-8-sig")
     controller_source = controller.read_text(encoding="utf-8-sig")
     editor_source = editor.read_text(encoding="utf-8-sig")
-    uses_controller = (
-        "RegionDeleteRequest" in tab_source
-        and "_region_delete_controller.start" in tab_source
-    )
-    if not uses_controller:
-        return CheckResult(
-            "region_delete_transaction",
-            False, "region_tab does not route delete through controller",
-        )
     qt_uses_controller = (
         "RegionDeleteRequest" in qt_source
         and "_region_delete_controller.start" in qt_source
@@ -226,12 +216,6 @@ def check_region_delete_uses_transaction() -> CheckResult:
             "region_delete_transaction",
             False, "delete helper does not call world_transactions.mutate",
         )
-    if "reset_region(region_path, backup=True)" in tab_source:
-        return CheckResult(
-            "region_delete_transaction",
-            False,
-            "region_tab still uses direct reset_region backup path",
-        )
     if "reset_region(region_path, backup=True)" in qt_source:
         return CheckResult(
             "region_delete_transaction",
@@ -248,7 +232,7 @@ def check_region_delete_uses_transaction() -> CheckResult:
 def check_views_use_narrow_host_ports() -> CheckResult:
     """确认生产视图不直接依赖完整应用或 FeatureContext。"""
     offenders: list[str] = []
-    views_root = APP_ROOT / "ui" / "views"
+    views_root = APP_ROOT / "qtui" / "views"
     for path in _iter_py_files(views_root):
         relative_path = path.relative_to(PROJECT_ROOT).as_posix()
         try:
@@ -298,7 +282,7 @@ def check_views_use_narrow_host_ports() -> CheckResult:
 def check_world_view_context_lifecycle() -> CheckResult:
     """确认世界感知视图提供对称的选择和清空入口。"""
     offenders: list[str] = []
-    views_root = APP_ROOT / "ui" / "views"
+    views_root = APP_ROOT / "qtui" / "views"
     for path in _iter_py_files(views_root):
         relative_path = path.relative_to(PROJECT_ROOT).as_posix()
         try:

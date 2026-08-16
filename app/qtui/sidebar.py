@@ -75,14 +75,15 @@ class _TabButton(QFrame):
     def _rebuild(self) -> None:
         """重建子控件与布局（折叠往返安全）。"""
         self._clear_layout()
-        self._icon_label = QLabel(self._icon)
-        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label = QLabel(self._icon)
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon_label = icon_label
         layout = QHBoxLayout(self)
         if self._collapsed:
             self.setFixedWidth(44)
             layout.setContentsMargins(0, 0, 0, 0)
-            self._icon_label.setFixedSize(44, 44)
-            layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignCenter)
+            icon_label.setFixedSize(44, 44)
+            layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
         else:
             self.setMinimumWidth(0)
             layout.setContentsMargins(10, 6, 10, 6)
@@ -92,20 +93,22 @@ class _TabButton(QFrame):
             icon_layout = QHBoxLayout(icon_slot)
             icon_layout.setContentsMargins(0, 0, 0, 0)
             icon_layout.addStretch(1)
-            icon_layout.addWidget(self._icon_label)
+            icon_layout.addWidget(icon_label)
             icon_layout.addStretch(1)
-            self._text_label = QLabel(self._label)
-            self._text_label.setAttribute(
+            text_label = QLabel(self._label)
+            text_label.setAttribute(
                 Qt.WidgetAttribute.WA_TransparentForMouseEvents
             )
-            self._marker = QLabel("•")
-            self._marker.setText("•" if self._selected else "")
-            self._marker.setAttribute(
+            self._text_label = text_label
+            marker = QLabel("•")
+            marker.setText("•" if self._selected else "")
+            marker.setAttribute(
                 Qt.WidgetAttribute.WA_TransparentForMouseEvents
             )
+            self._marker = marker
             layout.addWidget(icon_slot)
-            layout.addWidget(self._text_label, 1)
-            layout.addWidget(self._marker)
+            layout.addWidget(text_label, 1)
+            layout.addWidget(marker)
         self._apply_style()
 
     def set_collapsed(self, collapsed: bool) -> None:

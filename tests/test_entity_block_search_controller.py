@@ -175,14 +175,14 @@ def _controller(
 def test_view_delegates_lifecycle_and_stays_below_budget() -> None:
     project_root = Path(__file__).resolve().parents[1]
     view_source = (
-        project_root / "app/ui/views/entity_block_search.py"
+        project_root / "app/qtui/views/entity_search.py"
     ).read_text(encoding="utf-8")
     controller_source = (
         project_root / "app/controllers/entity_block_search_controller.py"
     ).read_text(encoding="utf-8")
 
     assert len(view_source.splitlines()) < 700
-    assert "EntityBlockSearchController" in view_source
+    assert "QtEntitySearchPanel" in view_source
     assert "_run_search_worker" not in view_source
     assert "flet" not in controller_source
 

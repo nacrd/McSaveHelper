@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Optional, Protocol
+from typing import Callable, Optional, Protocol, cast
 
 from app.controllers.map_controller import MapController
 from app.controllers.topview_tile_requests import (
@@ -105,9 +105,12 @@ class QtRegionMapCoordinator:
             self._region_delete_scope,
             app.world_transactions,
         )
-        create_map = getattr(app, "create_region_map_service", None)
-        if callable(create_map):
-            self._map_service = create_map()
+        create_map = cast(
+            Callable[[], RegionMapService] | None,
+            getattr(app, "create_region_map_service", None),
+        )
+        if create_map is not None:
+            self._map_service: RegionMapService = create_map()
         else:
             self._map_service = RegionMapService(app.execution_runtime)
         self._map_service.set_tile_ready_callback(self._on_topview_tile_ready)

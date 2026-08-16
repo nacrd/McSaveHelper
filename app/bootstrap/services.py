@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from app.services.data_migration import migrate_legacy_home_dir
+from app.services.auto_language_import_service import AutoLanguageImportService
 from app.services.backup_service import BackupService
 from app.services.cache_registry import CacheRegistry
 from app.services.config_service import ConfigService
@@ -16,6 +17,7 @@ from app.services.mca_cache_adapter import register_mca_chunk_cache
 from app.services.migration_service import MigrationService
 from app.services.operation_metrics import OperationMetricsStore
 from app.services.parallel_runner import create_runtime_parallel_runner
+from app.services.performance_monitoring import PerformanceMonitoringService
 from app.services.save_repair_service import SaveRepairService
 from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
@@ -66,6 +68,8 @@ class AppServices:
     cache_registry: CacheRegistry
     operation_metrics: OperationMetricsStore
     parallel_runner: ParallelRunner
+    auto_language_import: AutoLanguageImportService
+    performance_monitoring: PerformanceMonitoringService
 
 
 def _default_world_indexes(cache_registry: CacheRegistry) -> WorldIndexRegistry:
@@ -174,6 +178,13 @@ class ServiceFactories:
         [BackupService, WorldTransactionService, ExecutionRuntime],
         SaveRepairService,
     ] = SaveRepairService
+    auto_language_import: Callable[
+        [ConfigService, I18nService, ItemService, ExecutionRuntime],
+        AutoLanguageImportService,
+    ] = AutoLanguageImportService
+    performance_monitoring: Callable[[], PerformanceMonitoringService] = (
+        PerformanceMonitoringService
+    )
 
 
 def _create(service_name: str, factory: Callable[..., Any], *args: Any) -> Any:
@@ -188,6 +199,8 @@ def _close_partial_services(
     texture: Optional[TextureService],
     world_indexes: Optional[WorldIndexRegistry],
     cache_registry: Optional[CacheRegistry],
+    auto_language_import: Optional[AutoLanguageImportService] = None,
+    performance_monitoring: Optional[PerformanceMonitoringService] = None,
 ) -> None:
     """初始化失败时排空运行时，再按依赖逆序释放已创建的拥有者。
 
@@ -195,6 +208,23 @@ def _close_partial_services(
     不得覆盖导致启动失败的根因。若运行时未能按期退出，则保留仍可能被任务引用的
     缓存资源直到进程结束，避免后台任务访问已关闭对象。
     """
+    early_cleanups: list[tuple[str, Callable[[], object]]] = []
+    if auto_language_import is not None:
+        early_cleanups.append(
+            ("auto_language_import", auto_language_import.close)
+        )
+    if performance_monitoring is not None:
+        early_cleanups.append(
+            ("performance_monitoring", performance_monitoring.close)
+        )
+    for service_name, cleanup in early_cleanups:
+        try:
+            cleanup()
+        except Exception as exc:
+            logger.warning(
+                f"初始化回滚释放 {service_name} 失败: {exc}",
+                module="ServiceBootstrap",
+            )
     try:
         runtime_terminated = execution_runtime.shutdown(
             wait=True,
@@ -252,6 +282,8 @@ def create_app_services(
     cache_registry: Optional[CacheRegistry] = None
     world_indexes: Optional[WorldIndexRegistry] = None
     texture: Optional[TextureService] = None
+    auto_language_import: Optional[AutoLanguageImportService] = None
+    performance_monitoring: Optional[PerformanceMonitoringService] = None
     try:
         parallel_runner = _create(
             "parallel_runner",
@@ -318,6 +350,20 @@ def create_app_services(
             world_transactions,
             execution_runtime,
         )
+        active_performance_monitoring: PerformanceMonitoringService = _create(
+            "performance_monitoring",
+            selected.performance_monitoring,
+        )
+        performance_monitoring = active_performance_monitoring
+        active_auto_language_import: AutoLanguageImportService = _create(
+            "auto_language_import",
+            selected.auto_language_import,
+            config,
+            i18n,
+            item,
+            execution_runtime,
+        )
+        auto_language_import = active_auto_language_import
         return AppServices(
             config=config,
             i18n=i18n,
@@ -337,6 +383,8 @@ def create_app_services(
             cache_registry=active_cache_registry,
             operation_metrics=operation_metrics,
             parallel_runner=parallel_runner,
+            auto_language_import=active_auto_language_import,
+            performance_monitoring=active_performance_monitoring,
         )
     except Exception:
         _close_partial_services(
@@ -344,5 +392,7 @@ def create_app_services(
             texture,
             world_indexes,
             cache_registry,
+            auto_language_import,
+            performance_monitoring,
         )
         raise

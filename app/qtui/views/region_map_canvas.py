@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, Mapping, Optional, Sequence
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import (
     QColor,
     QMouseEvent,
@@ -396,9 +396,12 @@ class QtRegionMapCanvas(QWidget):
         self._emit_camera()
         self.update()
 
-    def _region_screen_rect(self, region_x: int, region_z: int, cell: float):
-        from PySide6.QtCore import QRect
-
+    def _region_screen_rect(
+        self,
+        region_x: int,
+        region_z: int,
+        cell: float,
+    ) -> QRect:
         left, top = self._block_to_screen(
             region_x * BLOCKS_PER_REGION,
             region_z * BLOCKS_PER_REGION,

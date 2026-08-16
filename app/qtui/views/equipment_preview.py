@@ -99,7 +99,7 @@ class QtEquipmentPreview(QWidget):
             for item in inventory:
                 raw_slot = item.get("slot", -999)
                 try:
-                    si = int(raw_slot)  # type: ignore[arg-type]
+                    si = int(raw_slot)
                 except (TypeError, ValueError):
                     continue
                 if si not in equip_slots or si not in self._slot_controls:

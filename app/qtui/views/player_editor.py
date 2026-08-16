@@ -1,6 +1,7 @@
 """Qt Explorer 玩家 HUD、编辑表单与物品格子投影。"""
 from __future__ import annotations
 
+from functools import partial
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 from PySide6.QtCore import Qt
@@ -263,7 +264,7 @@ class QtPlayerEditor(QWidget):
         for index, key, default in _SECTION_DEFS:
             button = btn_ghost(
                 self._t(key, default),
-                on_click=lambda i=index: self._set_section(i),
+                on_click=partial(self._set_section, index),
             )
             self._section_buttons.append(button)
             row.addWidget(button)

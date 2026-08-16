@@ -14,25 +14,7 @@ def test_consume_console_flag_removes_all_occurrences() -> None:
     assert argv == ["MCSaveHelper.exe", "world"]
 
 
-def test_consume_backend_flag_defaults_to_flet() -> None:
-    argv = ["MCSaveHelper.exe"]
-
-    backend = entrypoint._consume_backend_flag(argv)
-
-    assert backend == "flet"
-    assert argv == ["MCSaveHelper.exe"]
-
-
-def test_consume_backend_flag_selects_qt_and_removes_flag() -> None:
-    argv = ["MCSaveHelper.exe", "--qt", "--console"]
-
-    backend = entrypoint._consume_backend_flag(argv)
-
-    assert backend == "qt"
-    assert argv == ["MCSaveHelper.exe", "--console"]
-
-
-def test_main_routes_to_qt_backend(
+def test_main_routes_default_to_qt_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
@@ -41,13 +23,7 @@ def test_main_routes_to_qt_backend(
         "_run_qt_application",
         lambda: calls.append("qt") or 0,
     )
-    monkeypatch.setattr(
-        entrypoint,
-        "_run_application",
-        lambda: calls.append("flet"),
-    )
-
-    exit_code = entrypoint.main(["MCSaveHelper.exe", "--qt"])
+    exit_code = entrypoint.main(["MCSaveHelper.exe"])
 
     assert exit_code == 0
     assert calls == ["qt"]
@@ -65,15 +41,15 @@ def test_main_configures_console_before_running_application(
     )
     monkeypatch.setattr(
         entrypoint,
-        "_run_application",
-        lambda: events.append("application"),
+        "_run_qt_application",
+        lambda: events.append("qt") or 0,
     )
 
     exit_code = entrypoint.main(argv)
 
     assert exit_code == 0
     assert argv == ["MCSaveHelper.exe"]
-    assert events == ["console", "application"]
+    assert events == ["console", "qt"]
 
 
 def test_main_reports_missing_dependency(
@@ -81,10 +57,14 @@ def test_main_reports_missing_dependency(
 ) -> None:
     messages: list[str] = []
 
-    def raise_import_error() -> None:
+    def raise_import_error() -> int:
         raise ImportError("missing-package")
 
-    monkeypatch.setattr(entrypoint, "_run_application", raise_import_error)
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_qt_application",
+        raise_import_error,
+    )
     monkeypatch.setattr(entrypoint, "_write_error_log", messages.append)
 
     exit_code = entrypoint.main(["MCSaveHelper.exe"])
@@ -100,10 +80,14 @@ def test_main_records_unexpected_startup_traceback(
 ) -> None:
     messages: list[str] = []
 
-    def raise_runtime_error() -> None:
+    def raise_runtime_error() -> int:
         raise RuntimeError("startup failed")
 
-    monkeypatch.setattr(entrypoint, "_run_application", raise_runtime_error)
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_qt_application",
+        raise_runtime_error,
+    )
     monkeypatch.setattr(entrypoint, "_write_error_log", messages.append)
 
     exit_code = entrypoint.main(["MCSaveHelper.exe"])

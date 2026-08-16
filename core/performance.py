@@ -143,7 +143,7 @@ class PerfTracker:
         self._metrics_sink = metrics_sink
         # 尝试导入 psutil 用于内存采样
         try:
-            import psutil  # type: ignore
+            import psutil
             self._process = psutil.Process()
         except ImportError:
             self._process = None

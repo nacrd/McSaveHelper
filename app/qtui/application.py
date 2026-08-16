@@ -4,14 +4,17 @@ from __future__ import annotations
 from contextlib import ExitStack
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCloseEvent, QResizeEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices, create_app_services
+from app.models.save_context import CurrentSaveContext
 from app.models.save_store import CurrentSaveStore
 from app.qtui.context import QtFeatureContext, QtMigrationCommands
 from app.qtui.dialogs import QtFileDialogs, QtMessageDialogs
+from app.qtui.log_panel import QtLogPanel, install_qt_log_handler
 from app.qtui.migration_coordinator import QtMigrationCoordinator
 from app.qtui.registry import create_qt_registry
 from app.qtui.shell import QtShell
@@ -22,7 +25,9 @@ from app.qtui.view_actions import QtViewAction
 from app.qtui.view_manager import QtViewManager
 from app.services.ui_delivery import UiDeliveryChannel
 from app.core.save_context_manager import SaveContextManager
+from app.services.item.language_loader import LanguageImportResult
 from app.services.region_map import RegionMapService
+from core.logger import LogHandler, LogLevel, logger, setup_default_logging
 
 if TYPE_CHECKING:
     from app.models.config import ApplicationSettings
@@ -60,6 +65,7 @@ class QtApplication(QMainWindow):
         self.services = services or create_app_services()
         self.config = self.services.config
         self.i18n = self.services.i18n
+        settings = self.config.get_settings()
 
         # ─── 主题 ─────────────────────────────────
         saved_theme = self.config.ui_settings.get("theme", "dark")
@@ -111,8 +117,15 @@ class QtApplication(QMainWindow):
             on_view_action=self._on_view_action,
         )
         self._setup_window()
+        self._setup_logging(settings.show_log_panel)
         self._migration_coordinator = QtMigrationCoordinator(self)
         self._shutdown_started = False
+        self._sidebar_mode = settings.sidebar_mode
+        self._apply_sidebar_mode()
+        self.services.performance_monitoring.configure(
+            settings.enable_performance_monitor,
+            float(settings.performance_print_interval),
+        )
 
         # 壳层就绪后再加载持久化存档状态（回调需要侧边栏存在）。
         self.save_context_manager.initialize()
@@ -132,6 +145,23 @@ class QtApplication(QMainWindow):
         self.setCentralWidget(self.shell)
         self.resize(1180, 760)
         self.setMinimumSize(860, 560)
+
+    def _setup_logging(self, show_panel: bool) -> None:
+        """装配文件/控制台日志与 Qt 日志 dock。"""
+        setup_default_logging(
+            enable_console=True,
+            enable_file=True,
+            enable_ui=False,
+            level=LogLevel.INFO,
+        )
+        self.log_panel = QtLogPanel(
+            self.translate("log_panel.title", "日志"),
+            self,
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_panel)
+        self.log_panel.setVisible(show_panel)
+        self._qt_log_handler: LogHandler = install_qt_log_handler(self.log_panel)
+        logger.info("MCSaveHelper Qt 应用启动", module="QtApp")
 
     def create_settings_view(self) -> QWidget:
         """构建设置视图（显式注入应用端口）。"""
@@ -179,20 +209,28 @@ class QtApplication(QMainWindow):
         self.i18n.set_language(language)
 
     def _set_sidebar_mode(self, mode: str) -> None:
-        """侧边栏模式偏好；Qt 侧边栏暂为固定模式，仅持久化。"""
-        del mode
+        """应用固定展开、固定收窄或随窗口宽度自动切换。"""
+        self._sidebar_mode = mode
+        self._apply_sidebar_mode()
+
+    def _apply_sidebar_mode(self) -> None:
+        mode = getattr(self, "_sidebar_mode", "auto")
+        collapsed = mode == "collapsed" or (
+            mode == "auto" and self.width() < 1000
+        )
+        self.sidebar.set_collapsed(collapsed)
 
     def _set_log_panel_visible(self, visible: bool) -> None:
-        """Qt 尚无悬浮日志面板；仅持久化。"""
-        del visible
+        """显示或隐藏 Qt 日志 dock。"""
+        self.log_panel.setVisible(visible)
 
     def _configure_performance_monitor(self, enabled: bool, interval: float) -> None:
-        """性能监控尚未迁移；仅持久化。"""
-        del enabled, interval
+        """启停应用级进程资源监控。"""
+        self.services.performance_monitoring.configure(enabled, interval)
 
     def _set_performance_interval(self, seconds: float) -> None:
-        """性能监控尚未迁移；仅持久化。"""
-        del seconds
+        """更新性能摘要日志打印间隔。"""
+        self.services.performance_monitoring.set_print_interval(seconds)
 
     def _clear_application_caches(self) -> dict[str, int]:
         """清空内存与持久化瓦片缓存。"""
@@ -269,7 +307,10 @@ class QtApplication(QMainWindow):
     def _on_recent_save_select(self, path: str) -> None:
         self.save_context_manager.on_recent_save_select(path)
 
-    def _on_current_save_changed(self, context: object) -> None:
+    def _on_current_save_changed(
+        self,
+        context: Optional[CurrentSaveContext],
+    ) -> None:
         if hasattr(self, "sidebar"):
             self.sidebar.set_current_save(self.current_save_path)
         if context is None:
@@ -277,7 +318,20 @@ class QtApplication(QMainWindow):
                 self.view_manager.notify_save_cleared()
             return
         if hasattr(self, "view_manager"):
-            self.view_manager.notify_save_selected(str(getattr(context, "display_path", "")))
+            self.view_manager.notify_save_selected(context.display_path)
+        self.services.auto_language_import.schedule(
+            context,
+            self._on_auto_language_imported,
+        )
+
+    def _on_auto_language_imported(self, result: LanguageImportResult) -> None:
+        message = self.translate(
+            "settings.auto_import_mc_lang_ok",
+            "已自动导入 {count} 个 Minecraft 名称（{locale}）",
+            count=result.count,
+            locale=result.locale,
+        )
+        run_on_ui(self.shell.show_status_message, message)
 
     def _on_recent_saves_changed(self, _recent: object) -> None:
         if hasattr(self, "sidebar"):
@@ -479,11 +533,19 @@ class QtApplication(QMainWindow):
         self._shutdown()
         super().closeEvent(event)
 
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """自动侧边栏模式随窗口宽度变化。"""
+        if hasattr(self, "sidebar") and getattr(self, "_sidebar_mode", "") == "auto":
+            self._apply_sidebar_mode()
+        super().resizeEvent(event)
+
     def _shutdown(self) -> None:
         """释放视图、运行时、缓存与服务（幂等）。"""
         if self._shutdown_started:
             return
         self._shutdown_started = True
+        logger.remove_handler(self._qt_log_handler)
+        self.log_panel.dispose()
         with ExitStack() as cleanup:
             cleanup.callback(self.ui_delivery.close)
             cleanup.callback(self.texture.close)
@@ -494,5 +556,7 @@ class QtApplication(QMainWindow):
                 wait=True,
                 timeout=5.0,
             )
+            cleanup.callback(self.services.performance_monitoring.close)
+            cleanup.callback(self.services.auto_language_import.close)
             cleanup.callback(self._migration_coordinator.close)
             cleanup.callback(self.view_manager.dispose_all)

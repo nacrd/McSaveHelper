@@ -202,6 +202,7 @@ def test_player_editor_opens_nested_container_preview(
         {"slot": 0, "id": "minecraft:shulker_box", "count": 1},
     )
     assert editor._container_preview.isHidden() is False
-    assert editor._container_preview.slot_item(0) is not None
-    assert editor._container_preview.slot_item(0)["id"] == "minecraft:diamond"
+    nested_item = editor._container_preview.slot_item(0)
+    assert nested_item is not None
+    assert nested_item["id"] == "minecraft:diamond"
     editor.dispose()

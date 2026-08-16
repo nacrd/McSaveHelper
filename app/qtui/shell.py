@@ -85,10 +85,10 @@ class QtShell(QWidget):
         root_layout.addWidget(body, 1)
 
         # 状态栏 + 进度（以布局嵌入）
-        status_bar = QStatusBar()
-        status_bar.setSizeGripEnabled(False)
-        root_layout.addWidget(status_bar)
-        self._progress = QtProgressHost(status_bar)
+        self._status_bar = QStatusBar()
+        self._status_bar.setSizeGripEnabled(False)
+        root_layout.addWidget(self._status_bar)
+        self._progress = QtProgressHost(self._status_bar)
 
     @property
     def progress(self) -> QtProgressHost:
@@ -132,3 +132,7 @@ class QtShell(QWidget):
         for button in self._action_buttons:
             if button.text() == label:
                 button.setEnabled(enabled)
+
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        """在状态栏显示一条自动消失的非阻塞消息。"""
+        self._status_bar.showMessage(message, timeout_ms)

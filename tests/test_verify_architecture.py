@@ -38,7 +38,7 @@ def test_architecture_static_acceptance_checks_pass() -> None:
 
 
 def _write_view(tmp_path: Path, source: str) -> None:
-    views_root = tmp_path / "app" / "ui" / "views"
+    views_root = tmp_path / "app" / "qtui" / "views"
     views_root.mkdir(parents=True)
     (views_root / "bad_view.py").write_text(source, encoding="utf-8")
 
@@ -57,7 +57,7 @@ def test_narrow_host_check_rejects_complete_context(
     result = check_views_use_narrow_host_ports()
 
     assert result.ok is False
-    assert result.detail == "app/ui/views/bad_view.py"
+    assert result.detail == "app/qtui/views/bad_view.py"
 
 
 def test_narrow_host_check_rejects_qualified_application_type(
@@ -76,7 +76,7 @@ def test_narrow_host_check_rejects_qualified_application_type(
     result = check_views_use_narrow_host_ports()
 
     assert result.ok is False
-    assert result.detail == "app/ui/views/bad_view.py"
+    assert result.detail == "app/qtui/views/bad_view.py"
 
 
 def test_world_view_lifecycle_check_rejects_missing_clear_hook(
@@ -95,7 +95,7 @@ def test_world_view_lifecycle_check_rejects_missing_clear_hook(
     result = check_world_view_context_lifecycle()
 
     assert result.ok is False
-    assert result.detail == "app/ui/views/bad_view.py:BadView"
+    assert result.detail == "app/qtui/views/bad_view.py:BadView"
 
 
 def test_command_timeout_becomes_structured_failure(monkeypatch) -> None:
