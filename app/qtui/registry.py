@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from PySide6.QtWidgets import QWidget
 
 from app.qtui.context import QtFeatureContext
+from app.qtui.icons import glyph
 
 ViewFactory = Callable[[QtFeatureContext], QWidget]
 Translate = Callable[..., str]
@@ -170,7 +171,7 @@ def _default_registry() -> QtFeatureRegistry:
             view_id="explorer",
             translation_key="sidebar.explorer",
             default_label="存档浏览器",
-            icon_glyph="⌕",
+            icon_glyph=glyph("EXPLORE"),
             factory=lambda ctx: ExplorerView(ctx),
         ),
         QtFeatureDescriptor(
@@ -184,77 +185,77 @@ def _default_registry() -> QtFeatureRegistry:
             view_id="save_repair",
             translation_key="sidebar.save_repair",
             default_label="存档修复",
-            icon_glyph="🧱",
+            icon_glyph=glyph("BUILD"),
             factory=lambda ctx: SaveRepairView(ctx),
         ),
         QtFeatureDescriptor(
             view_id="backup_center",
             translation_key="sidebar.backup_center",
             default_label="备份与恢复",
-            icon_glyph="🕐",
+            icon_glyph=glyph("HISTORY"),
             factory=lambda ctx: BackupCenterView(ctx),
         ),
         QtFeatureDescriptor(
             view_id="compare",
             translation_key="sidebar.compare",
             default_label="存档对比",
-            icon_glyph="⚖️",
+            icon_glyph=glyph("BALANCE"),
             factory=lambda ctx: CompareView(ctx),
         ),
         QtFeatureDescriptor(
             view_id="mappings",
             translation_key="sidebar.mappings",
             default_label="映射管理",
-            icon_glyph="🔗",
+            icon_glyph=glyph("LINK"),
             factory=lambda ctx: MappingsView(ctx),
         ),
         QtFeatureDescriptor(
             view_id="settings",
             translation_key="sidebar.settings",
             default_label="设置",
-            icon_glyph="⚙️",
+            icon_glyph=glyph("SETTINGS"),
             factory=lambda ctx: ctx.create_settings_view(),
         ),
         QtFeatureDescriptor(
             view_id="server_properties",
             translation_key="sidebar.server_properties",
             default_label="服务器配置",
-            icon_glyph="📄",
+            icon_glyph=glyph("CLIPBOARD"),
             factory=lambda ctx: ServerPropertiesView(ctx),
         ),
     )
     navigation = (
         QtNavigationDescriptor(
             "world_overview", "explorer", "sidebar.group_world", "世界",
-            "explorer.tab_world_info", "概览", "🗂", "world_info",
+            "explorer.tab_world_info", "概览", glyph("WORLD_INFO"), "world_info",
         ),
         QtNavigationDescriptor(
             "world_players", "explorer", "sidebar.group_world", "世界",
-            "explorer.tab_players", "玩家", "🧍", "players",
+            "explorer.tab_players", "玩家", glyph("PLAYER"), "players",
         ),
         QtNavigationDescriptor(
             "world_map", "explorer", "sidebar.group_world", "世界",
-            "explorer.tab_map", "地图", "🗺", "map",
+            "explorer.tab_map", "地图", glyph("MAP"), "map",
         ),
         QtNavigationDescriptor(
             "world_stats", "explorer", "sidebar.group_world", "世界",
-            "explorer.tab_stats", "统计", "📊", "stats",
+            "explorer.tab_stats", "统计", glyph("STATS"), "stats",
         ),
         QtNavigationDescriptor(
             "world_search", "explorer", "sidebar.group_world", "世界",
-            "explorer.tab_search", "搜索", "🔎", "search",
+            "explorer.tab_search", "搜索", glyph("SEARCH"), "search",
         ),
         QtNavigationDescriptor(
             "world_nbt", "explorer", "sidebar.group_world", "世界",
-            "explorer.tab_nbt", "NBT", "📝", "nbt",
+            "explorer.tab_nbt", "NBT", glyph("NBT"), "nbt",
         ),
         QtNavigationDescriptor(
             "backup_center", "backup_center", "sidebar.group_safety",
-            "安全与维护", "sidebar.backup_center", "备份与恢复", "🕐",
+            "安全与维护", "sidebar.backup_center", "备份与恢复", glyph("HISTORY"),
         ),
         QtNavigationDescriptor(
             "save_repair", "save_repair", "sidebar.group_safety",
-            "安全与维护", "sidebar.save_repair", "存档修复", "🧱",
+            "安全与维护", "sidebar.save_repair", "存档修复", glyph("BUILD"),
         ),
         QtNavigationDescriptor(
             "migrator", "migrator", "sidebar.group_diagnostics",
@@ -262,19 +263,20 @@ def _default_registry() -> QtFeatureRegistry:
         ),
         QtNavigationDescriptor(
             "compare", "compare", "sidebar.group_diagnostics",
-            "转换与诊断", "sidebar.compare", "存档对比", "⚖",
+            "转换与诊断", "sidebar.compare", "存档对比", glyph("BALANCE"),
         ),
         QtNavigationDescriptor(
             "mappings", "mappings", "sidebar.group_tools", "工具",
-            "sidebar.mappings", "映射管理", "🔗",
+            "sidebar.mappings", "映射管理", glyph("LINK"),
         ),
         QtNavigationDescriptor(
             "server_properties", "server_properties", "sidebar.group_tools",
-            "工具", "sidebar.server_properties", "服务器配置", "📄",
+            "工具", "sidebar.server_properties", "服务器配置",
+            glyph("CLIPBOARD"),
         ),
         QtNavigationDescriptor(
             "settings", "settings", "sidebar.group_tools", "工具",
-            "sidebar.settings", "设置", "⚙", placement="footer",
+            "sidebar.settings", "设置", glyph("SETTINGS"), placement="footer",
         ),
     )
     return QtFeatureRegistry(features, navigation)

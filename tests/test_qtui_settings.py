@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QBoxLayout
 
 from app.adapters.file_dialogs import FileType
 from app.models.config import ApplicationSettings
@@ -164,6 +164,20 @@ def test_view_builds_sections(view: SettingsView) -> None:
     assert "更改会自动保存" in view._save_status_label.text()
     # 默认值投影
     assert view._theme_dropdown.property("value_key") == "dark"
+
+
+def test_settings_columns_stack_in_narrow_window(view: SettingsView) -> None:
+    view.resize(900, 700)
+    view.show()
+    QApplication.processEvents()
+
+    assert view._columns_layout is not None
+    assert view._columns_layout.direction() == QBoxLayout.Direction.TopToBottom
+
+    view.resize(1280, 800)
+    QApplication.processEvents()
+
+    assert view._columns_layout.direction() == QBoxLayout.Direction.LeftToRight
 
 
 def test_collect_settings_reads_controls(view: SettingsView, host: FakeHost) -> None:

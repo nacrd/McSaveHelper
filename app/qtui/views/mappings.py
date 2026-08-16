@@ -50,6 +50,7 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.icons import glyph
 from app.qtui.theme import get_theme_manager
 from app.qtui.utils import batch_widget_updates, run_on_ui
 from app.qtui.view_actions import QtViewAction
@@ -157,7 +158,7 @@ class MappingsView(QScrollArea):
         layout.addWidget(page_header(
             self._t("mappings.title", "映射管理"),
             "管理 UUID 映射和物品映射，用于存档转换和存档浏览器。",
-            icon="🔗",
+            icon=glyph("LINK"),
         ))
 
         # 布局：UUID 相关操作与物品资源映射分 tab，减少连续滚动。

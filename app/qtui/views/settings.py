@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Callable, Mapping, Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -50,6 +52,7 @@ from app.qtui.components.buttons import btn_ghost
 from app.qtui.components.cards import card, muted_label
 from app.qtui.components.fields import checkbox, dropdown, text_field
 from app.qtui.components.layout import page_header
+from app.qtui.icons import glyph
 from app.qtui.theme import get_theme_manager
 from app.qtui.utils import format_size, run_on_ui
 from app.services.cache_registry import CacheRegistryStats
@@ -141,6 +144,7 @@ class SettingsView(QScrollArea):
         super().__init__()
         self._deps = dependencies
         self._state = SettingsViewState()
+        self._columns_layout: QBoxLayout | None = None
         self._io_controller = SettingsIOController(
             SettingsIOControllerDependencies(
                 execution_runtime=dependencies.execution_runtime,
@@ -185,7 +189,7 @@ class SettingsView(QScrollArea):
         header_layout.addWidget(page_header(
             "设置",
             "管理通用选项、界面偏好、批量处理和清理规则",
-            icon="⚙️",
+            icon=glyph("SETTINGS"),
         ))
         status_text, _icon, color = self._feedback_projection()
         self._save_status_label = QLabel(status_text)
@@ -226,10 +230,25 @@ class SettingsView(QScrollArea):
         columns_layout.setSpacing(16)
         columns_layout.addWidget(left_column, 1)
         columns_layout.addWidget(right_column, 1)
+        self._columns_layout = columns_layout
         layout.addWidget(columns)
 
         layout.addStretch(1)
         self.setWidget(content)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """窄窗口时将设置分区改为单列，避免表单控件互相挤压。"""
+        super().resizeEvent(event)
+        if self._columns_layout is None:
+            return
+        width = self.viewport().width()
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if width < 1080
+            else QBoxLayout.Direction.LeftToRight
+        )
+        if self._columns_layout.direction() != direction:
+            self._columns_layout.setDirection(direction)
 
     # ─── 通用设置 ───────────────────────────────
 
@@ -642,16 +661,14 @@ class SettingsView(QScrollArea):
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(16, 16, 16, 16)
         reset_button = QPushButton("↻ 重置为默认")
-        reset_button.setStyleSheet(
-            "background-color: %s; color: %s; padding: 8px 16px;"
-            % (
-                get_theme_manager().current.warning,
-                get_theme_manager().current.text_primary,
-            )
-        )
+        reset_button.setProperty("role", "warning")
         reset_button.clicked.connect(lambda: self._reset())
         body_layout.addWidget(reset_button, alignment=Qt.AlignmentFlag.AlignLeft)
         self._sections.append(card(body, padding=0))
+
+    def refresh_theme(self) -> None:
+        """刷新设置页中随主题变化的反馈色。"""
+        self._render_feedback_state()
 
     # ─── 回调（即时生效 + 自动保存）──────────────
 

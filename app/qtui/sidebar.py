@@ -39,6 +39,7 @@ class _TabButton(QFrame):
     ) -> None:
         """构建页签按钮。"""
         super().__init__()
+        self.setObjectName("navigation_tab")
         self._view_id = view_id
         self._icon = icon
         self._label = label
@@ -51,7 +52,7 @@ class _TabButton(QFrame):
         self._text_label: QLabel | None = None
         self._marker: QLabel | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(44)
+        self.setFixedHeight(40)
         self.setToolTip(label)
         self.setMouseTracking(True)
         self._content_layout = QHBoxLayout(self)
@@ -77,7 +78,7 @@ class _TabButton(QFrame):
         if self._collapsed:
             self.setFixedWidth(44)
             layout.setContentsMargins(0, 0, 0, 0)
-            icon_label.setFixedSize(44, 44)
+            icon_label.setFixedSize(40, 40)
             layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
         else:
             # Qt 的 setFixedWidth() 同时锁定最大宽度；展开时必须显式解除。
@@ -134,10 +135,14 @@ class _TabButton(QFrame):
         self.setToolTip(f"{self._label}{suffix}")
         self._apply_style()
 
+    def refresh_theme(self) -> None:
+        """刷新页签颜色，不改变选中态或徽标。"""
+        self._apply_style()
+
     def _marker_text(self) -> str:
         if self._badge_text:
             return self._badge_text
-        return "•" if self._selected else ""
+        return ""
 
     def enterEvent(self, event: Any) -> None:
         self._hovering = True
@@ -160,14 +165,14 @@ class _TabButton(QFrame):
     def _apply_style(self) -> None:
         colors = get_theme_manager().current
         if self._collapsed:
-            bg = colors.bg_elevated if self._selected else "transparent"
-            border = colors.accent_dim if self._selected else "transparent"
+            bg = colors.accent_dim if self._selected else "transparent"
+            border = colors.accent if self._selected else "transparent"
             icon_color = (
                 colors.accent if self._selected else colors.text_secondary
             )
             self.setStyleSheet(
-                f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
-                f" border-radius: 6px; }}"
+                f"QFrame#navigation_tab {{ background-color: {bg};"
+                f" border: 1px solid {border}; border-radius: 6px; }}"
             )
             if self._icon_label is not None:
                 self._icon_label.setStyleSheet(
@@ -175,22 +180,23 @@ class _TabButton(QFrame):
                 )
             return
         if self._selected:
-            bg = colors.bg_elevated
-            border = colors.border_standard
+            bg = colors.accent_dim
+            marker_color = colors.accent
         elif self._hovering:
             bg = colors.bg_card_hover
-            border = "transparent"
+            marker_color = "transparent"
         else:
             bg = "transparent"
-            border = "transparent"
+            marker_color = "transparent"
         icon_color = colors.accent if self._selected else colors.text_muted
         text_color = (
             colors.text_primary if self._selected else colors.text_secondary
         )
         weight = "600" if self._selected else "500"
         self.setStyleSheet(
-            f"QFrame {{ background-color: {bg}; border: 1px solid {border};"
-            f" border-radius: 6px; }}"
+            f"QFrame#navigation_tab {{ background-color: {bg};"
+            f" border: none; border-left: 3px solid {marker_color};"
+            " border-radius: 6px; }"
         )
         if self._icon_label is not None:
             self._icon_label.setStyleSheet(
@@ -221,7 +227,7 @@ class _GroupLabel(QLabel):
     def __init__(self, text: str) -> None:
         super().__init__(text.upper())
         self.setProperty("role", "navigationGroup")
-        self.setContentsMargins(8, 8, 0, 2)
+        self.setContentsMargins(8, 6, 0, 2)
 
 
 class QtSidebar(QFrame):
@@ -359,6 +365,15 @@ class QtSidebar(QFrame):
         button = self._buttons.get(navigation_id)
         if button is not None:
             button.set_badge(count)
+
+    def refresh_theme(self) -> None:
+        """刷新侧栏内联样式，不改变导航选择或当前存档状态。"""
+        self._rebuild_header()
+        for button in self._buttons.values():
+            button.refresh_theme()
+        self._toggle_button.refresh_theme()
+        self._footer.refresh_theme()
+        self._apply_sidebar_style()
 
     def set_collapsed(self, collapsed: bool) -> None:
         """切换折叠态并重建头部/页签/切换/页脚。"""

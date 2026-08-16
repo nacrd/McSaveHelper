@@ -27,49 +27,29 @@ def page_header(
     Returns:
         QWidget: 头部容器（图标块 + 标题 + 副标题 + 底部边框）。
     """
-    from app.qtui.theme import get_theme_manager
-
     header = QWidget()
-    layout = QHBoxLayout(header)
-    layout.setContentsMargins(0, 0, 0, 14)
-    layout.setSpacing(12)
-    colors = get_theme_manager().current
-    root = QWidget()
-    root.setStyleSheet(
-        f"QWidget {{ border: none; border-bottom: 1px solid"
-        f" {colors.border_subtle}; }}"
-    )
-    inner = QHBoxLayout(root)
+    header.setObjectName("page_header")
+    inner = QHBoxLayout(header)
     inner.setContentsMargins(0, 0, 0, 14)
     inner.setSpacing(12)
     if icon:
         icon_box = QLabel(icon)
         icon_box.setFixedSize(40, 40)
         icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_box.setStyleSheet(
-            f"background-color: {colors.bg_elevated};"
-            f" border: 1px solid {colors.border_standard};"
-            " border-radius: 6px; font-size: 20px;"
-        )
+        icon_box.setProperty("role", "pageIcon")
         inner.addWidget(icon_box)
     text_col = QWidget()
     text_layout = QVBoxLayout(text_col)
     text_layout.setContentsMargins(0, 0, 0, 0)
     text_layout.setSpacing(2)
     title_widget = QLabel(title)
-    title_widget.setStyleSheet(
-        f"color: {colors.text_primary}; font-size: 20px; font-weight: 600;"
-    )
+    title_widget.setProperty("role", "title")
     text_layout.addWidget(title_widget)
     if subtitle:
         sub = muted_label(subtitle)
-        sub.setStyleSheet(
-            f"color: {colors.text_secondary}; font-size: 13px;"
-        )
         text_layout.addWidget(sub)
     inner.addWidget(text_col, 1)
     inner.addStretch(1)
-    layout.addWidget(root)
     return header
 
 

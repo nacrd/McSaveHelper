@@ -208,6 +208,8 @@ class QtApplication(QMainWindow):
         app = QApplication.instance()
         if isinstance(app, QApplication):
             apply_theme(app, theme)
+        self.sidebar.refresh_theme()
+        self.view_manager.refresh_theme()
 
     def _apply_language(self, language: str) -> None:
         """应用语言选择。"""

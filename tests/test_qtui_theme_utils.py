@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QLabel, QTableWidget, QTableWidgetItem
 
+from app.qtui.components.layout import page_header
 from app.qtui.theme import (
     LIGHT_THEME,
     QtThemeManager,
@@ -30,11 +31,24 @@ def test_build_qss_defines_status_roles() -> None:
     assert 'QLabel[role="error"]' in qss
     assert 'QLabel[role="success"]' in qss
     assert 'QPushButton:checked' in qss
+    assert 'QPushButton[role="warning"]' in qss
     assert 'QTabBar::tab:selected' in qss
     assert 'QListWidget::item:hover' in qss
+    assert 'QWidget#page_header' in qss
+    assert 'QWidget[role="card"]' in qss
     assert LIGHT_THEME.warning in qss
     assert LIGHT_THEME.error in qss
     assert LIGHT_THEME.success in qss
+
+
+def test_page_header_uses_theme_roles_without_nested_layouts() -> None:
+    header = page_header("备份与恢复", "管理世界快照", icon="◷")
+    labels = header.findChildren(QLabel)
+
+    assert header.objectName() == "page_header"
+    assert header.layout() is not None
+    assert any(label.property("role") == "pageIcon" for label in labels)
+    assert any(label.property("role") == "title" for label in labels)
 
 
 def test_apply_theme_switches_app_stylesheet(qt_app: QApplication) -> None:
@@ -42,6 +56,20 @@ def test_apply_theme_switches_app_stylesheet(qt_app: QApplication) -> None:
 
     assert colors.mode == "light"
     assert qt_app.styleSheet() != ""
+
+
+def test_apply_theme_keeps_default_widget_font_in_point_units(
+    qt_app: QApplication,
+) -> None:
+    apply_theme(qt_app, "light")
+    label = QLabel("default font")
+    label.show()
+    qt_app.processEvents()
+
+    assert label.font().pointSizeF() > 0
+    assert label.font().pixelSize() == -1
+
+    label.deleteLater()
 
 
 def test_theme_manager_ignores_duplicate_mode() -> None:

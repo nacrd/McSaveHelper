@@ -56,12 +56,12 @@ class QtWorldContextBar(QFrame):
         on_quick_backup: Callable[[], None],
     ) -> None:
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 8, 16, 8)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 6, 16, 6)
+        layout.setSpacing(8)
 
         icon = QLabel(glyph("SAVE"))
         icon.setObjectName("world_context_icon")
-        icon.setFixedSize(34, 34)
+        icon.setFixedSize(32, 32)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
 

@@ -26,6 +26,7 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.icons import glyph
 from app.qtui.utils import run_on_ui
 from app.qtui.view_actions import QtViewAction
 from app.services.execution_runtime import (
@@ -98,7 +99,7 @@ class ServerPropertiesView(QScrollArea):
         layout.addWidget(page_header(
             "server.properties 编辑器",
             "读取、编辑并保存 Minecraft 服务器配置文件",
-            icon="📄",
+            icon=glyph("CLIPBOARD"),
         ))
 
         # 路径卡片

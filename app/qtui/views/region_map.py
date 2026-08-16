@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.qtui.components.buttons import btn_danger, btn_ghost, btn_primary
 from app.qtui.components.cards import muted_label
+from app.qtui.icons import glyph
 from app.qtui.utils import batch_widget_updates
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
 from core.mca.map_models import MapMarker
@@ -124,46 +125,55 @@ class QtRegionMapPanel(QWidget):
         layout.addWidget(self._help)
         del on_region_selected
 
-    def _build_toolbar(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        row.addWidget(QLabel(self._t("map.dimension", "维度")))
+    def _build_toolbar(self) -> QVBoxLayout:
+        """构建分层工具栏，避免窄窗口挤压高频操作。"""
+        toolbar = QVBoxLayout()
+        toolbar.setSpacing(6)
+
+        # 布局：第一行只放筛选、搜索和定位，保证输入框有稳定宽度。
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(6)
+        filter_row.addWidget(QLabel(self._t("map.dimension", "维度")))
         self._dimension = QComboBox()
         self._dimension.setMinimumWidth(160)
         self._dimension.currentIndexChanged.connect(self._dimension_index_changed)
-        row.addWidget(self._dimension)
+        filter_row.addWidget(self._dimension)
         self._style = QComboBox()
         self._style.setToolTip(self._t("map.style", "地图样式"))
         for value, key, default in _STYLE_OPTIONS:
             self._style.addItem(self._t(key, default), value)
         self._style.setEnabled(False)
         self._style.currentIndexChanged.connect(self._style_changed)
-        row.addWidget(self._style)
+        filter_row.addWidget(self._style)
         self._search = QLineEdit()
         self._search.setPlaceholderText(self._t(
             "map.search_hint",
             "坐标 x,z / x y z / r.x.z / c.x.z / 标记名",
         ))
         self._search.returnPressed.connect(self._submit_search)
-        row.addWidget(self._search, 1)
-        row.addWidget(btn_ghost(
-            self._t("map.search", "搜索"),
-            on_click=self._submit_search,
-        ))
-        row.addWidget(btn_ghost(
-            self._t("map.zoom_in", "放大"),
-            on_click=self._zoom_in,
-        ))
-        row.addWidget(btn_ghost(
-            self._t("map.zoom_out", "缩小"),
-            on_click=self._zoom_out,
-        ))
-        row.addWidget(btn_ghost(
-            self._t("map.reset_view", "复位"),
-            on_click=self._reset_view,
-        ))
-        row.addWidget(btn_primary(
-            self._t("map.refresh", "刷新"),
+        filter_row.addWidget(self._search, 1)
+        search_button = btn_ghost(
+            glyph("SEARCH"), width=36, on_click=self._submit_search
+        )
+        search_button.setToolTip(self._t("map.search", "搜索"))
+        filter_row.addWidget(search_button)
+        toolbar.addLayout(filter_row)
+
+        # 布局：第二行集中地图命令，危险操作与导出不再贴着输入框排列。
+        action_row = QHBoxLayout()
+        action_row.setSpacing(6)
+        zoom_in = btn_ghost("+", width=36, on_click=self._zoom_in)
+        zoom_in.setToolTip(self._t("map.zoom_in", "放大"))
+        action_row.addWidget(zoom_in)
+        zoom_out = btn_ghost("−", width=36, on_click=self._zoom_out)
+        zoom_out.setToolTip(self._t("map.zoom_out", "缩小"))
+        action_row.addWidget(zoom_out)
+        reset_view = btn_ghost("↺", width=36, on_click=self._reset_view)
+        reset_view.setToolTip(self._t("map.reset_view", "复位"))
+        action_row.addWidget(reset_view)
+        action_row.addStretch(1)
+        action_row.addWidget(btn_primary(
+            f"{glyph('REFRESH')} {self._t('map.refresh', '刷新')}",
             on_click=self._on_refresh,
         ))
         self._open_nbt = btn_ghost(
@@ -171,20 +181,21 @@ class QtRegionMapPanel(QWidget):
             on_click=self._on_open_nbt,
         )
         self._open_nbt.setEnabled(False)
-        row.addWidget(self._open_nbt)
+        action_row.addWidget(self._open_nbt)
         self._delete_region = btn_danger(
             self._t("map.delete_region", "删除区域"),
             on_click=self._on_delete_region,
         )
         self._delete_region.setEnabled(False)
-        row.addWidget(self._delete_region)
+        action_row.addWidget(self._delete_region)
         self._export = btn_ghost(
             self._t("map.export", "导出地图"),
             on_click=self._on_export,
         )
         self._export.setEnabled(False)
-        row.addWidget(self._export)
-        return row
+        action_row.addWidget(self._export)
+        toolbar.addLayout(action_row)
+        return toolbar
 
     def _build_marker_side(self) -> QWidget:
         host = QWidget()

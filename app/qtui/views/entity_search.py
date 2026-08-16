@@ -24,10 +24,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.qtui.components.cards import placeholder
+from app.qtui.icons import glyph
+from app.qtui.utils import batch_widget_updates
 from app.services.entity_block_search.constants import get_preset_options
 from app.services.entity_block_search.models import SearchCondition, SearchResult
-from app.qtui.components.cards import placeholder
-from app.qtui.utils import batch_widget_updates
 
 
 Translate = Callable[..., str]
@@ -87,7 +88,7 @@ class QtEntitySearchPanel(QWidget):
         # 状态：条件栏保持稳定，内容区只显示当前可操作或可阅读的状态。
         self._content_stack = QStackedWidget()
         self._no_world_state = placeholder(
-            "🔎",
+            glyph("SEARCH"),
             self._t("entity_search.no_world", "未加载存档"),
             self._t(
                 "workspace.select_world_hint",

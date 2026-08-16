@@ -4,6 +4,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from app.qtui.icons import glyph
+
 
 def card(
     content: QWidget,
@@ -41,7 +43,7 @@ def section_title(text: str) -> QLabel:
 
 
 def placeholder(
-    icon: str = "📄",
+    icon: str = glyph("CLIPBOARD"),
     title: str = "暂无内容",
     subtitle: str = "请加载数据后查看",
     height: int = 150,

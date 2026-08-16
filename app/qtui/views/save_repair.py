@@ -39,6 +39,7 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.icons import glyph
 from app.qtui.theme import get_theme_manager
 from app.qtui.utils import run_on_ui
 from app.qtui.view_actions import QtViewAction
@@ -126,7 +127,7 @@ class SaveRepairView(QScrollArea):
         layout.addWidget(page_header(
             "存档修复",
             "检测存档状态、修复损坏的区块、玩家数据、level.dat",
-            icon="🧱",
+            icon=glyph("BUILD"),
         ))
 
         # ─── 配置卡片 ─────────────────────────────

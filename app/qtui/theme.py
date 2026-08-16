@@ -67,96 +67,96 @@ class QtThemeColors:
 
 DARK_THEME = QtThemeColors(
     mode="dark",
-    bg_primary="#11161A",
-    bg_secondary="#171E24",
-    bg_card="#1D262D",
-    bg_card_hover="#26323A",
-    bg_elevated="#2A3740",
-    border_light="#53636C",
-    border_dark="#0A0E11",
-    border_standard="#43535C",
-    border_subtle="#2D3A42",
-    border_glow="#5FE0D0",
-    accent="#57C7B5",
-    accent_hover="#73D8C8",
-    accent_dim="#2F8D83",
-    success="#67D391",
-    warning="#F4C36A",
-    error="#F07D7D",
-    info="#65B9F6",
-    text_primary="#F3F7F8",
-    text_secondary="#C5D1D5",
-    text_muted="#91A1A9",
-    text_disabled="#64737B",
-    text_invert="#0B1215",
-    terminal_green="#73D8C8",
-    terminal_yellow="#F4C36A",
-    terminal_red="#F07D7D",
-    terminal_blue="#65B9F6",
-    terminal_cyan="#5FE0D0",
-    terminal_purple="#C3A8E8",
-    mc_stone="#66747B",
+    bg_primary="#101416",
+    bg_secondary="#151B1E",
+    bg_card="#1B2327",
+    bg_card_hover="#222D31",
+    bg_elevated="#273338",
+    border_light="#506067",
+    border_dark="#090D0F",
+    border_standard="#3B4A50",
+    border_subtle="#29353A",
+    border_glow="#39C2AE",
+    accent="#2FB7A3",
+    accent_hover="#47C8B5",
+    accent_dim="#183F3B",
+    success="#57C987",
+    warning="#E5B85F",
+    error="#E66D78",
+    info="#5AADE3",
+    text_primary="#F3F6F7",
+    text_secondary="#C1CDD1",
+    text_muted="#87979D",
+    text_disabled="#5C6B70",
+    text_invert="#08110F",
+    terminal_green="#57C987",
+    terminal_yellow="#E5B85F",
+    terminal_red="#E66D78",
+    terminal_blue="#5AADE3",
+    terminal_cyan="#39C2AE",
+    terminal_purple="#B29AD8",
+    mc_stone="#64747A",
     mc_dirt="#80634E",
-    mc_grass="#57C7B5",
-    mc_wood="#252F35",
-    mc_diamond="#5FE0D0",
-    mc_gold="#F4C36A",
+    mc_grass="#2FB7A3",
+    mc_wood="#252F33",
+    mc_diamond="#39C2AE",
+    mc_gold="#E5B85F",
     mc_iron="#B5C0C4",
-    mc_coal="#171E24",
-    mc_emerald="#67D391",
-    mc_redstone="#F07D7D",
-    mc_obsidian="#0B1013",
+    mc_coal="#151B1E",
+    mc_emerald="#57C987",
+    mc_redstone="#E66D78",
+    mc_obsidian="#090D0F",
     mc_nether="#A85B66",
-    mc_end="#8C78B2",
-    log_bg="#0C1115",
-    log_border="#243139",
+    mc_end="#8874AA",
+    log_bg="#0B0F11",
+    log_border="#222E33",
 )
 
 LIGHT_THEME = QtThemeColors(
     mode="light",
-    bg_primary="#F4F7F8",
-    bg_secondary="#EAF0F2",
+    bg_primary="#F4F6F7",
+    bg_secondary="#FFFFFF",
     bg_card="#FFFFFF",
-    bg_card_hover="#F0F7F6",
-    bg_elevated="#FFFFFF",
-    border_light="#D8E2E5",
-    border_dark="#AAB9BE",
-    border_standard="#B8C8CD",
-    border_subtle="#D3DEE1",
-    border_glow="#178B7C",
-    accent="#178B7C",
-    accent_hover="#249F90",
-    accent_dim="#BDE7E1",
-    success="#197A52",
-    warning="#A36909",
-    error="#C94F5B",
-    info="#176EA7",
-    text_primary="#172126",
-    text_secondary="#43535A",
-    text_muted="#64767D",
-    text_disabled="#97A5AA",
+    bg_card_hover="#EDF3F2",
+    bg_elevated="#F1F5F5",
+    border_light="#D5DEE1",
+    border_dark="#A6B3B8",
+    border_standard="#C1CDD1",
+    border_subtle="#DCE3E5",
+    border_glow="#0E897A",
+    accent="#0E897A",
+    accent_hover="#087668",
+    accent_dim="#D8EFEB",
+    success="#237A50",
+    warning="#A96D0B",
+    error="#CB4F5D",
+    info="#287EAA",
+    text_primary="#182226",
+    text_secondary="#46565C",
+    text_muted="#6B7A80",
+    text_disabled="#9AA7AC",
     text_invert="#FFFFFF",
-    terminal_green="#197A52",
-    terminal_yellow="#A36909",
-    terminal_red="#C94F5B",
-    terminal_blue="#176EA7",
-    terminal_cyan="#178B7C",
+    terminal_green="#237A50",
+    terminal_yellow="#A96D0B",
+    terminal_red="#CB4F5D",
+    terminal_blue="#287EAA",
+    terminal_cyan="#0E897A",
     terminal_purple="#7653A6",
     mc_stone="#74858B",
     mc_dirt="#86674F",
-    mc_grass="#178B7C",
-    mc_wood="#EAF0F2",
-    mc_diamond="#178B7C",
-    mc_gold="#A36909",
+    mc_grass="#0E897A",
+    mc_wood="#EDF1F2",
+    mc_diamond="#0E897A",
+    mc_gold="#A96D0B",
     mc_iron="#74858B",
     mc_coal="#D8E2E5",
-    mc_emerald="#197A52",
-    mc_redstone="#C94F5B",
+    mc_emerald="#237A50",
+    mc_redstone="#CB4F5D",
     mc_obsidian="#172126",
     mc_nether="#98505A",
     mc_end="#765C9A",
     log_bg="#172126",
-    log_border="#B8C8CD",
+    log_border="#C1CDD1",
 )
 
 
@@ -170,13 +170,16 @@ QWidget {{
     background-color: {colors.bg_primary};
     color: {colors.text_primary};
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
-    font-size: 13px;
+    font-size: 10pt;
 }}
 QMainWindow, QDialog {{
     background-color: {colors.bg_primary};
 }}
 QWidget#top_bar {{
     background-color: {colors.bg_secondary};
+    border-bottom: 1px solid {colors.border_subtle};
+}}
+QWidget#page_header {{
     border-bottom: 1px solid {colors.border_subtle};
 }}
 QFrame#world_context_bar {{
@@ -234,6 +237,13 @@ QLabel[role="title"] {{
     font-size: 20px;
     font-weight: 600;
 }}
+QLabel[role="pageIcon"] {{
+    background-color: {colors.bg_elevated};
+    color: {colors.accent};
+    border: 1px solid {colors.border_standard};
+    border-radius: 6px;
+    font-size: 19px;
+}}
 QLabel[role="section"] {{
     font-size: 15px;
     font-weight: 600;
@@ -257,16 +267,16 @@ QLabel[role="result"] {{
     color: {colors.text_primary};
     font-family: 'Consolas', 'SFMono-Regular', monospace;
 }}
-QFrame[role="card"] {{
+QWidget[role="card"] {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_subtle};
-    border-radius: 8px;
+    border-radius: 7px;
 }}
 QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background-color: {colors.bg_elevated};
     border: 1px solid {colors.border_standard};
     border-radius: 6px;
-    padding: 7px 10px;
+    padding: 6px 10px;
     selection-background-color: {colors.accent};
     selection-color: {colors.text_invert};
 }}
@@ -316,9 +326,9 @@ QPushButton {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_standard};
     border-radius: 6px;
-    padding: 8px 14px;
+    padding: 6px 12px;
     color: {colors.text_primary};
-    min-height: 28px;
+    min-height: 20px;
 }}
 QPushButton:hover {{
     background-color: {colors.bg_card_hover};
@@ -359,6 +369,16 @@ QPushButton[role="danger"] {{
 QPushButton[role="danger"]:hover {{
     background-color: #BF5260;
 }}
+QPushButton[role="warning"] {{
+    background-color: {colors.warning};
+    border-color: {colors.warning};
+    color: {colors.text_invert};
+    font-weight: 600;
+}}
+QPushButton[role="warning"]:hover {{
+    background-color: {colors.accent_hover};
+    border-color: {colors.accent_hover};
+}}
 QPushButton[role="ghost"] {{
     background-color: transparent;
     border: 1px solid {colors.border_standard};
@@ -374,7 +394,7 @@ QToolButton {{
     background-color: transparent;
     border: 1px solid {colors.border_standard};
     border-radius: 6px;
-    padding: 7px 10px;
+    padding: 6px 10px;
     color: {colors.text_secondary};
 }}
 QToolButton:hover {{
@@ -403,23 +423,23 @@ QScrollArea {{
     background: transparent;
 }}
 QScrollBar:vertical {{
-    background: {colors.bg_secondary};
-    width: 9px;
+    background: transparent;
+    width: 6px;
 }}
 QScrollBar::handle:vertical {{
-    background: {colors.border_standard};
+    background: {colors.border_light};
     border-radius: 4px;
-    min-height: 24px;
+    min-height: 28px;
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
 }}
 QScrollBar:horizontal {{
-    background: {colors.bg_secondary};
-    height: 9px;
+    background: transparent;
+    height: 6px;
 }}
 QScrollBar::handle:horizontal {{
-    background: {colors.border_standard};
+    background: {colors.border_light};
     border-radius: 4px;
     min-width: 24px;
 }}
@@ -442,6 +462,7 @@ QStatusBar {{
     background: {colors.bg_secondary};
     border-top: 1px solid {colors.border_subtle};
     color: {colors.text_secondary};
+    padding: 2px 8px;
 }}
 QToolTip {{
     background-color: {colors.bg_elevated};
@@ -471,6 +492,7 @@ QTableWidget {{
     gridline-color: {colors.border_subtle};
     selection-background-color: {colors.accent_dim};
     selection-color: {colors.text_primary};
+    alternate-background-color: {colors.bg_card};
 }}
 QTableWidget::item:hover {{
     background: {colors.bg_card};
@@ -481,7 +503,7 @@ QHeaderView::section {{
     border: none;
     border-bottom: 1px solid {colors.border_subtle};
     border-right: 1px solid {colors.border_subtle};
-    padding: 7px 8px;
+    padding: 6px 8px;
     font-weight: 600;
 }}
 QTableCornerButton::section {{

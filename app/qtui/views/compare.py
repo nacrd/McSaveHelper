@@ -37,6 +37,7 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.icons import glyph
 from app.qtui.theme import get_theme_manager
 from app.qtui.utils import run_on_ui
 from app.qtui.view_actions import QtViewAction
@@ -101,7 +102,7 @@ class CompareView(QScrollArea):
         layout.addWidget(page_header(
             "存档对比",
             "比较两个世界的 level.dat、玩家数据和区域文件差异",
-            icon="⚖️",
+            icon=glyph("BALANCE"),
         ))
 
         # ─── 路径卡片 ─────────────────────────────

@@ -39,6 +39,7 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.icons import glyph
 from app.qtui.theme import get_theme_manager
 from app.qtui.utils import format_size, run_on_ui
 from app.qtui.view_actions import QtViewAction
@@ -131,9 +132,9 @@ class BackupCenterView(QScrollArea):
         header_layout.addWidget(page_header(
             self._t("title", "备份与恢复"),
             self._t("subtitle", "管理完整世界快照和恢复点"),
-            icon="🕐",
+            icon=glyph("HISTORY"),
         ))
-        refresh_button = QPushButton("🔄")
+        refresh_button = QPushButton(glyph("REFRESH"))
         refresh_button.setFixedWidth(36)
         refresh_button.setToolTip(self._t("refresh", "刷新备份列表"))
         refresh_button.clicked.connect(lambda: self._refresh())
@@ -168,7 +169,7 @@ class BackupCenterView(QScrollArea):
         self._label_field.setPlaceholderText(self._t("label", "备份备注"))
         create_row_layout.addWidget(self._label_field, 1)
         self._create_button = btn_primary(
-            f"💾 {self._t('create', '创建备份')}",
+            f"{glyph('SAVE')} {self._t('create', '创建备份')}",
             width=132,
             on_click=self._start_create,
         )
@@ -312,7 +313,7 @@ class BackupCenterView(QScrollArea):
 
     def _show_empty_state(self) -> None:
         empty = placeholder(
-            icon="🕐",
+            icon=glyph("HISTORY"),
             title=self._t("empty", "暂无备份"),
             subtitle=self._t("empty_subtitle", "创建的恢复点会显示在这里"),
             height=160,
@@ -336,7 +337,11 @@ class BackupCenterView(QScrollArea):
 
     def _backup_row(self, record: BackupRecord) -> QWidget:
         theme = get_theme_manager().current
-        status = ("✅", theme.success) if record.valid else ("⛔", theme.error)
+        status = (
+            (glyph("SUCCESS"), theme.success)
+            if record.valid
+            else (glyph("ERROR"), theme.error)
+        )
 
         description = QWidget()
         description_layout = QVBoxLayout(description)
@@ -403,19 +408,19 @@ class BackupCenterView(QScrollArea):
     ) -> list[tuple[str, str, Callable[[], None], bool]]:
         return [
             (
-                "✅",
+                glyph("VERIFY"),
                 self._t("verify", "验证完整性"),
                 partial(self._start_verify, record),
                 record.valid and not self._busy,
             ),
             (
-                "♻️",
+                glyph("RESTORE"),
                 self._t("restore", "恢复此备份"),
                 partial(self._confirm_restore, record),
                 record.valid and not self._busy,
             ),
             (
-                "🗑️",
+                glyph("DELETE"),
                 self._t("delete", "删除此备份"),
                 partial(self._confirm_delete, record),
                 not self._busy,

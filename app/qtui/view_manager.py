@@ -105,6 +105,13 @@ class QtViewManager:
             if callable(handler):
                 handler()
 
+    def refresh_theme(self) -> None:
+        """通知已创建视图刷新主题相关的局部样式。"""
+        for view in tuple(self._views.values()):
+            handler = getattr(view, "refresh_theme", None)
+            if callable(handler):
+                handler()
+
     def dispose_all(self) -> None:
         """释放全部视图（窗口关闭时调用）。"""
         for view_id, view in self._views.items():

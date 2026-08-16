@@ -259,6 +259,17 @@ class _ToggleButton(QPushButton):
     def set_collapsed(self, collapsed: bool) -> None:
         self.setText(glyph("ARROW_RIGHT" if collapsed else "ARROW_LEFT"))
 
+    def refresh_theme(self) -> None:
+        """刷新按钮的内联样式，使运行时主题切换立即生效。"""
+        colors = _colors()
+        self.setStyleSheet(
+            f"QPushButton {{ background-color: {colors.bg_secondary}; color:"
+            f" {colors.text_secondary}; border: none;"
+            f" border-top: 1px solid {colors.border_subtle}; font-size: 16px; }}"
+            f" QPushButton:hover {{ color: {colors.text_primary};"
+            f" background-color: {colors.bg_card_hover}; }}"
+        )
+
 
 def build_toggle_button(
     *,
@@ -267,20 +278,13 @@ def build_toggle_button(
     tooltip: str | None = None,
 ) -> _ToggleButton:
     """侧边栏折叠/展开切换按钮（顶部边框分隔）。"""
-    colors = _colors()
     button = _ToggleButton(
         glyph("ARROW_RIGHT" if collapsed else "ARROW_LEFT")
     )
     button.setFixedSize(44, 44)
     button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setToolTip(tooltip or ("展开侧边栏" if collapsed else "收起侧边栏"))
-    button.setStyleSheet(
-        f"QPushButton {{ background-color: {colors.bg_secondary}; color:"
-        f" {colors.text_secondary}; border: none;"
-        f" border-top: 1px solid {colors.border_subtle}; font-size: 16px; }}"
-        f" QPushButton:hover {{ color: {colors.text_primary};"
-        f" background-color: {colors.bg_card_hover}; }}"
-    )
+    button.refresh_theme()
     button.clicked.connect(lambda: on_toggle())
     return button
 
@@ -298,6 +302,10 @@ class _Footer(QWidget):
         if collapsed == self._collapsed:
             return
         self._collapsed = collapsed
+        self._rebuild()
+
+    def refresh_theme(self) -> None:
+        """刷新页脚版本文本颜色，使运行时主题切换立即生效。"""
         self._rebuild()
 
     def _rebuild(self) -> None:
@@ -318,11 +326,8 @@ class _Footer(QWidget):
         version.setStyleSheet(
             f"color: {colors.text_secondary}; font-size: 10px;"
         )
-        tag = QLabel("▣ stone edition")
-        tag.setStyleSheet(f"color: {colors.text_muted}; font-size: 10px;")
         layout.addWidget(version)
         layout.addStretch(1)
-        layout.addWidget(tag)
 
 
 def build_footer(collapsed: bool) -> _Footer:

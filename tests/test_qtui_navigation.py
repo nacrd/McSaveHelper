@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 
 from app.qtui.registry import create_qt_registry
 from app.qtui.sidebar import QtSidebar
+from app.qtui.theme import DARK_THEME, get_theme_manager
 from app.qtui.world_context_bar import QtWorldContextBar
 
 
@@ -94,9 +95,32 @@ def test_sidebar_reuses_layout_during_repeated_collapse_and_selection(
 
     overview = sidebar._buttons["overview"]
     assert overview._marker is not None
-    assert overview._marker.text() == "•"
+    assert overview._marker.text() == ""
     assert not any("already has a layout" in message for message in messages)
     sidebar.deleteLater()
+
+
+def test_sidebar_refreshes_inline_colors_after_theme_switch(
+    qt_app: QApplication,
+) -> None:
+    del qt_app
+    sidebar = QtSidebar(
+        tabs=[{"id": "overview", "label": "概览", "icon": "O"}],
+        translate=_translate,
+        on_tab_select=lambda _view_id: None,
+    )
+    manager = get_theme_manager()
+    previous_mode = manager.mode
+    try:
+        sidebar.select_tab("overview")
+        manager.set_mode("dark")
+        sidebar.refresh_theme()
+
+        assert DARK_THEME.bg_secondary in sidebar.styleSheet()
+        assert DARK_THEME.accent_dim in sidebar._buttons["overview"].styleSheet()
+    finally:
+        manager.set_mode(previous_mode)
+        sidebar.deleteLater()
 
 
 def test_world_context_disables_backup_until_world_is_selected(

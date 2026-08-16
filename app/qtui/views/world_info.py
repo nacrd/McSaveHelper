@@ -20,6 +20,7 @@ from app.presenters.world_info_presenter import (
 )
 from app.qtui.components.buttons import btn_ghost, btn_primary
 from app.qtui.components.cards import card, divider, muted_label, section_title
+from app.qtui.icons import glyph
 from core.omni.models import WorldInfo
 
 
@@ -60,7 +61,7 @@ class QtWorldInfoPanel(QScrollArea):
         layout.setContentsMargins(20, 40, 20, 40)
         layout.setSpacing(8)
         layout.addStretch(1)
-        icon = QLabel("📦")
+        icon = QLabel(glyph("PACKAGE"))
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setStyleSheet("font-size: 44px;")
         layout.addWidget(icon)
@@ -76,7 +77,7 @@ class QtWorldInfoPanel(QScrollArea):
         ))
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         select_button = btn_primary(
-            f"📂  {self._t('explorer.load_world', '选择存档')}",
+            f"{glyph('FOLDER_OPEN')}  {self._t('explorer.load_world', '选择存档')}",
             on_click=self._on_select_save,
         )
         button_row = QWidget()
@@ -88,7 +89,7 @@ class QtWorldInfoPanel(QScrollArea):
         layout.addWidget(subtitle)
         layout.addWidget(button_row)
         layout.addStretch(1)
-        self._replace_widget(card(body, padding=0))
+        self._replace_widget(body)
 
     def show_loading(self, message: str) -> None:
         """显示世界读取中的状态。"""

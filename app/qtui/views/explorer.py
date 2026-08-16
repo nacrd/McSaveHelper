@@ -21,6 +21,7 @@ from app.qtui.context import (
     QtRuntimePort,
     QtTranslationPort,
 )
+from app.qtui.icons import glyph
 from app.qtui.view_actions import QtViewAction
 from app.qtui.views.explorer_tasks import (
     ExplorerTaskCallbacks,
@@ -253,7 +254,7 @@ class ExplorerView(QWidget):
         )
         self._tabs.addTab(
             self._world_info,
-            self._tab_label("🗂", "explorer.tab_world_info", "存档信息"),
+            self._tab_label(glyph("WORLD_INFO"), "explorer.tab_world_info", "存档信息"),
         )
         self._player_service = PlayerService(log=self.app.log)
         self._avatar_service = PlayerAvatarService(
@@ -277,23 +278,23 @@ class ExplorerView(QWidget):
         )
         self._tabs.addTab(
             self._players,
-            self._tab_label("🧍", "explorer.tab_players", "玩家"),
+            self._tab_label(glyph("PLAYER"), "explorer.tab_players", "玩家"),
         )
         self._tabs.addTab(
             self._region_map.panel,
-            self._tab_label("🗺", "explorer.tab_map", "地图"),
+            self._tab_label(glyph("MAP"), "explorer.tab_map", "地图"),
         )
         self._tabs.addTab(
             self._stats_coordinator.panel,
-            self._tab_label("📊", "explorer.tab_stats", "统计"),
+            self._tab_label(glyph("STATS"), "explorer.tab_stats", "统计"),
         )
         self._tabs.addTab(
             self._search_coordinator.panel,
-            self._tab_label("🔎", "explorer.tab_search", "搜索"),
+            self._tab_label(glyph("SEARCH"), "explorer.tab_search", "搜索"),
         )
         self._tabs.addTab(
             self._nbt_coordinator.panel,
-            self._tab_label("📝", "explorer.tab_nbt", "NBT"),
+            self._tab_label(glyph("NBT"), "explorer.tab_nbt", "NBT"),
         )
         layout.addWidget(self._tabs, 1)
 

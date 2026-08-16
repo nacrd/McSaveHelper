@@ -26,6 +26,7 @@ from app.presenters.stats_view_state import (
     build_stats_view_state,
 )
 from app.qtui.components.cards import muted_label, placeholder
+from app.qtui.icons import glyph
 from app.qtui.utils import batch_widget_updates, format_size
 from app.services.world_stats_service import (
     PLAYER_SORT_DAMAGE,
@@ -108,7 +109,7 @@ class QtStatsPanel(QWidget):
         # 状态：未选世界、等待分析与结果区互斥，避免首屏展示空表格。
         self._content_stack = QStackedWidget()
         self._no_world_state = placeholder(
-            "📊",
+            glyph("STATS"),
             self._t("stats.no_world", "未加载存档"),
             self._t(
                 "workspace.select_world_hint",
@@ -130,10 +131,10 @@ class QtStatsPanel(QWidget):
             "🏠", "stats.tab_overview", "概览"
         ))
         self._tabs.addTab(self._build_players(), self._tab_label(
-            "🧍", "stats.tab_players", "玩家"
+            glyph("PLAYER"), "stats.tab_players", "玩家"
         ))
         self._tabs.addTab(self._build_rankings(), self._tab_label(
-            "🏆", "stats.tab_rankings", "排行"
+            "◆", "stats.tab_rankings", "排行"
         ))
         self._content_stack.addWidget(self._no_world_state)
         self._content_stack.addWidget(self._ready_state)
