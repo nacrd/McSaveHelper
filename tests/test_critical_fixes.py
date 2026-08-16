@@ -328,22 +328,6 @@ class TestMigrationControllerPublicMethods:
 
 
 class TestOmniNbtEditing:
-    def test_nbt_tree_parses_paths_and_coerces_values(self):
-        from app.ui.views.explorer.nbt_tree.parser import parse_path, coerce_value
-        from core.nbt import Int, String
-        from core.nbt.tag import IntArray
-
-        assert parse_path("Inventory[0].Count") == [
-            "Inventory", 0, "Count"]
-        assert coerce_value("64", Int(1), "Int") == Int(64)
-        assert coerce_value(
-            "diamond", String("stone"), "String") == String("diamond")
-        assert list(
-            coerce_value(
-                "[1, 2, 3]", IntArray(
-                    [0]), "IntArray")) == [
-                1, 2, 3]
-
     def test_world_session_commits_staged_player_nbt_list_path(
             self, tmp_path: Path):
         import core.nbt as nbtlib
@@ -628,116 +612,6 @@ class TestOmniNbtEditing:
         assert info.local_x == 2
         assert info.local_y == 10
         assert info.local_z == 3
-
-    def test_nbt_tree_coerces_json_values(self):
-        from app.ui.views.explorer.nbt_tree.parser import coerce_value
-
-        assert coerce_value("42", 1, "int") == 42
-        assert coerce_value("3.5", 1.0, "float") == 3.5
-        assert coerce_value("false", True, "bool") is False
-        assert coerce_value("null", None, "NoneType") is None
-
-    def test_nbt_tree_can_load_readonly_data(self):
-        from app.ui.views.explorer.nbt_tree import NBTTreeView
-
-        tree = NBTTreeView()
-        tree.load_nbt({"Entities": []}, editable=False)
-
-        assert tree.get_modified_data() == {"Entities": []}
-        assert tree._editable is False
-
-    def test_nbt_tree_expand_all_enables_full_display(self):
-        from app.ui.views.explorer.nbt_tree import NBTTreeView
-
-        tree = NBTTreeView()
-        tree.load_nbt({"Entities": [{"id": "minecraft:zombie"}]})
-        tree.expand_all()
-
-        assert tree._expand_all is True
-        assert tree._show_all_children is True
-
-        tree.collapse_all()
-
-        assert tree._expand_all is False
-        assert tree._collapse_all is True
-        assert tree._show_all_children is False
-
-    def test_nbt_tree_collects_overview_stats(self):
-        from app.ui.views.explorer.nbt_tree import NBTTreeView
-
-        stats = NBTTreeView()._collect_stats({
-            "Level": {
-                "DataVersion": 3953,
-                "Entities": [{"id": "minecraft:pig"}],
-            }
-        })
-
-        assert stats == {"fields": 5, "containers": 4, "values": 2}
-
-    def test_explorer_extracts_chunk_entities_and_block_entities(self):
-        from app.ui.views.explorer.explorer_helpers import extract_chunk_objects
-
-        chunk_data = {
-            "Entities": [
-                {"id": "minecraft:zombie", "Pos": [1.0, 64.0, 2.0]},
-            ],
-            "block_entities": [
-                {"id": "minecraft:chest", "x": 3, "y": 65, "z": 4},
-            ],
-        }
-
-        objects = extract_chunk_objects(chunk_data)
-
-        assert len(objects) == 2
-        assert objects[0]["title"] == "实体 #1: minecraft:zombie"
-        assert objects[0]["subtitle"] == "(1.0, 64.0, 2.0)"
-        assert objects[1]["title"] == "方块实体 #1: minecraft:chest"
-        assert objects[1]["subtitle"] == "(3, 65, 4)"
-
-    def test_explorer_converts_world_coords_to_region_and_local_chunk(self):
-        from app.ui.views.explorer.explorer_view import ExplorerView
-
-        assert ExplorerView._world_coords_to_region_chunk(0, 0) == (0, 0, 0, 0)
-        assert ExplorerView._world_coords_to_region_chunk(
-            511, 511) == (
-            0, 0, 31, 31)
-        assert ExplorerView._world_coords_to_region_chunk(
-            512, 512) == (
-            1, 1, 0, 0)
-        assert ExplorerView._world_coords_to_region_chunk(
-            -1, -1) == (-1, -1, 31, 31)
-        assert ExplorerView._world_coords_to_region_chunk(
-            -512, -512) == (-1, -1, 0, 0)
-
-    def test_explorer_formats_change_summary(self):
-        from app.models.nbt_edit import NbtChange
-        from app.ui.views.explorer.explorer_helpers import format_change_summary
-
-        summary = format_change_summary(0, NbtChange(
-            target="test",
-            target_label="玩家 NBT: test",
-            format="json",
-            operation="set",
-            path=("stats", "minecraft:mined", "minecraft:stone"),
-            display_path="stats.minecraft:mined.minecraft:stone",
-            old_value=1,
-            new_value=8,
-        ))
-
-        assert "#1 [JSON] 玩家 NBT: test" in summary
-        assert "stats.minecraft:mined.minecraft:stone" in summary
-        assert "- 1" in summary
-        assert "+ 8" in summary
-
-    def test_explorer_coerces_player_edit_values_like_nbt_tags(self):
-        from app.ui.views.explorer.explorer_view import ExplorerView
-        from core.nbt import Float, Int
-
-        assert ExplorerView._coerce_like_tag("20", Float(1.0)) == Float(20.0)
-        assert ExplorerView._coerce_like_tag(
-            "Float(60.0)", Float(1.0)) == Float(60.0)
-        assert ExplorerView._coerce_like_tag("12.0", Int(1)) == Int(12)
-        assert ExplorerView._tag_display_value(Float(60.0)) == "60.0"
 
     def test_block_data_service_set_block_replaces_in_palette(self):
         from app.services.block_data_service import BlockDataService

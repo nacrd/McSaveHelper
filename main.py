@@ -1,7 +1,7 @@
 """MCSaveHelper —— Minecraft 存档管理工具
 
 启动入口：确保依赖已安装，然后直接运行。
-  python main.py
+  python main.py            # Qt (PySide6) 后端（默认）
 
 打包后命令行调试：
   MCSaveHelper.exe --console
@@ -43,7 +43,7 @@ def _setup_console() -> None:
 
 
 def _consume_console_flag(argv: list[str]) -> bool:
-    """Remove the private console flag before Flet parses arguments."""
+    """Remove the private console flag before the UI backend starts."""
     if CONSOLE_FLAG not in argv:
         return False
 
@@ -60,17 +60,22 @@ def _get_log_path() -> Path:
     return log_dir / "startup_error.log"
 
 
-def _run_application() -> None:
-    """Configure shared runtime policy and start the Flet application."""
+def _run_qt_application() -> int:
+    """Configure shared runtime policy and start the PySide6 application."""
     from core.threading_runtime import configure_thread_fairness
 
     configure_thread_fairness()
 
-    import flet as ft
+    from PySide6.QtWidgets import QApplication
 
-    from app.application import Application
+    from app.qtui.application import QtApplication
+    from app.qtui.theme import apply_theme, get_theme_manager
 
-    ft.run(Application)
+    qt_app = QApplication(sys.argv)
+    apply_theme(qt_app, get_theme_manager().mode)
+    window = QtApplication()
+    window.show()
+    return qt_app.exec()
 
 
 def _report_startup_failure(message: str) -> int:
@@ -83,7 +88,7 @@ def _report_startup_failure(message: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     """应用主入口。
 
-    解析 ``--console``、配置线程公平性并启动 Flet 应用。
+    解析 ``--console``、配置线程公平性并启动 Qt 应用。
     启动失败时写入 ``startup_error.log`` 并以非零状态退出。
 
     Args:
@@ -95,9 +100,8 @@ def main(argv: list[str] | None = None) -> int:
     process_args = sys.argv if argv is None else argv
     if _consume_console_flag(process_args):
         _setup_console()
-
     try:
-        _run_application()
+        return _run_qt_application()
     except ImportError as exc:
         message = (
             f"[FATAL] 缺少依赖: {exc}\n"
@@ -108,8 +112,6 @@ def main(argv: list[str] | None = None) -> int:
         # 进程入口边界：记录完整栈并退出，避免 GUI 子系统静默失败。
         message = "[FATAL] 应用启动失败:\n" + traceback.format_exc()
         return _report_startup_failure(message)
-
-    return 0
 
 
 def _write_error_log(msg: str) -> None:

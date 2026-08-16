@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Dict
 
 from app.core.save_context_manager import SaveContextManager
-from app.application_save_ui import SaveContextUiMixin
 from app.models.save_context import CurrentSaveContext
 from app.models.save_store import CurrentSaveStore, RecentSave
 
@@ -117,22 +116,3 @@ def test_manager_removes_invalid_recent_save(tmp_path: Path) -> None:
     assert config.get_recent_saves() == []
     assert config.save_count == 1
     assert warnings and warnings[0][0] == "提示"
-
-
-def test_save_ui_clear_notifies_sidebar_and_all_cached_views() -> None:
-    sidebar_calls: list[object] = []
-    clear_calls: list[str] = []
-    adapter = SaveContextUiMixin()
-    adapter._sidebar = type("Sidebar", (), {
-        "set_current_save_name": lambda self, name: sidebar_calls.append(name),
-    })()
-    adapter.view_manager = type("Views", (), {
-        "notify_all_views_save_cleared": (
-            lambda self: clear_calls.append("clear")
-        ),
-    })()
-
-    adapter._on_current_save_changed(None)
-
-    assert sidebar_calls == [None]
-    assert clear_calls == ["clear"]

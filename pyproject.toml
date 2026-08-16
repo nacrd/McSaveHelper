@@ -13,18 +13,16 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = [
-    "flet.*",
+    "psutil.*",
     "requests.*"
 ]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
-    "app.application",
     "app.services.config_service",
     "app.services.i18n_service",
     "app.services.item_service",
-    "app.ui.*",
     "core.converter",
     "core.full_mode",
     "core.i18n",

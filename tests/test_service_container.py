@@ -12,6 +12,7 @@ from app.bootstrap.services import (
     create_app_services,
 )
 from app.services.backup_service import BackupService
+from app.services.auto_language_import_service import AutoLanguageImportService
 from app.services.cache_registry import CacheRegistry
 from app.services.config_service import ConfigService
 from app.services.execution_runtime import ExecutionRuntime
@@ -19,6 +20,7 @@ from app.services.i18n_service import I18nService
 from app.services.item_service import ItemService
 from app.services.migration_service import MigrationService
 from app.services.operation_metrics import OperationMetricsStore
+from app.services.performance_monitoring import PerformanceMonitoringService
 from app.services.save_repair_service import SaveRepairService
 from app.services.texture_service import TextureService
 from app.services.uuid_service import UUIDService
@@ -59,6 +61,11 @@ class _ServiceFactoryProbe:
         self.world_repository = cast(WorldRepository, object())
         self.world_stats = cast(WorldStatsService, object())
         self.world_compare = cast(WorldCompareService, object())
+        self.auto_language_import = cast(AutoLanguageImportService, object())
+        self.performance_monitoring = cast(
+            PerformanceMonitoringService,
+            object(),
+        )
 
     def factories(self) -> ServiceFactories:
         return ServiceFactories(
@@ -80,6 +87,8 @@ class _ServiceFactoryProbe:
             world_writes=self.create_world_writes,
             backup=self.create_backup,
             save_repair=self.create_save_repair,
+            auto_language_import=self.create_auto_language_import,
+            performance_monitoring=self.create_performance_monitoring,
         )
 
     def create_config(self) -> ConfigService:
@@ -200,6 +209,22 @@ class _ServiceFactoryProbe:
         self.events.append(("save_repair", backup, transactions, runtime))
         return self.save_repair
 
+    def create_auto_language_import(
+        self,
+        config: ConfigService,
+        i18n: I18nService,
+        item: ItemService,
+        runtime: ExecutionRuntime,
+    ) -> AutoLanguageImportService:
+        self.events.append(
+            ("auto_language_import", config, i18n, item, runtime)
+        )
+        return self.auto_language_import
+
+    def create_performance_monitoring(self) -> PerformanceMonitoringService:
+        self.events.append("performance_monitoring")
+        return self.performance_monitoring
+
     def expected_events(self) -> list[object]:
         return [
             "config",
@@ -231,6 +256,14 @@ class _ServiceFactoryProbe:
                 self.world_transactions,
                 self.execution_runtime,
             ),
+            "performance_monitoring",
+            (
+                "auto_language_import",
+                self.config,
+                self.i18n,
+                self.item,
+                self.execution_runtime,
+            ),
         ]
 
 
@@ -256,6 +289,8 @@ def test_service_container_builds_in_dependency_order() -> None:
     assert services.world_stats is probe.world_stats
     assert services.world_compare is probe.world_compare
     assert services.world_transactions is probe.world_transactions
+    assert services.auto_language_import is probe.auto_language_import
+    assert services.performance_monitoring is probe.performance_monitoring
     assert probe.invalidated_worlds == [Path("world")]
     assert probe.events == probe.expected_events()
 
