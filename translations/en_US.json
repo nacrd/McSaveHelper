@@ -106,7 +106,25 @@
     "mappings": "Mapping Manager",
     "server_properties": "Server Config",
     "settings": "Settings",
-    "import_save": "Import Save"
+    "import_save": "Import Save",
+    "group_world": "World",
+    "group_safety": "Safety & maintenance",
+    "group_diagnostics": "Conversion & diagnostics",
+    "group_tools": "Tools"
+  },
+  "workspace": {
+    "recent_worlds": "Recent worlds",
+    "no_recent_worlds": "No recent worlds",
+    "switch_world": "Switch world",
+    "quick_backup": "Quick backup",
+    "no_world": "No current world",
+    "select_world_hint": "Choose a Minecraft Java world directory containing level.dat",
+    "java_world": "Minecraft Java world",
+    "status_required": "Select a world",
+    "status_loading": "Loading",
+    "status_ready": "Ready",
+    "status_error": "Unavailable",
+    "invalid_world_detail": "The current world could not be read"
   },
   "world_info": {
     "yes": "Yes",
@@ -452,6 +470,8 @@
   },
   "mappings": {
     "title": "UUID Mapping Manager",
+    "tab_uuid": "UUID & players",
+    "tab_items": "Items & assets",
     "description": "Manage custom player name to UUID mappings here. These mappings will be used for UUID replacement during batch migration.",
     "hint": "Tip: You can batch import mappings via \"Import List\", or manually add each row.\nMapping data is saved to the config file in real time and will be applied during migration based on the toggle on the home page.",
     "column_player": "Player Name",
@@ -651,6 +671,12 @@
     "language": "en_US",
     "display_name": "English (US)"
   },
+  "migrator": {
+    "step_paths": "1  Paths & version",
+    "step_mode": "2  Mode & options",
+    "step_players": "3  Players & UUID",
+    "step_batch": "Batch conversion"
+  },
   "stats": {
     "hint_ready": "Set a current save, then use Start Analysis in the page header.",
     "summary_placeholder": "Use the page-header analysis action to inspect world data.",
@@ -739,6 +765,7 @@
     "start": "Search",
     "export": "Export Results",
     "ready": "Not searched",
+    "ready_hint": "Set a target, dimensions, and search scope, then start searching.",
     "no_world": "No save loaded",
     "searching": "Searching...",
     "done": "Search complete",
@@ -755,6 +782,7 @@
     "dimension_required": "Select at least one dimension",
     "busy": "A search or export is already running",
     "no_results": "There are no search results to export",
+    "no_results_hint": "Adjust the target ID, preset, or dimension scope and try again.",
     "export_title": "Export Search Results",
     "text_files": "Text Files",
     "export_failed": "Export failed",

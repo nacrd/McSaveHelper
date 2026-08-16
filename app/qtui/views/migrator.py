@@ -4,13 +4,12 @@ from __future__ import annotations
 from typing import Protocol
 
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QScrollArea,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from app.qtui.components.cards import card, muted_label, section_title
 from app.qtui.components.layout import page_header
 from app.qtui.context import (
     QtDialogPort,
@@ -25,12 +24,6 @@ from app.qtui.views.migrator_options import (
     version_downgrade_warning,
 )
 from app.qtui.views.migrator_sections import (
-    BatchControls,
-    DirectoryControls,
-    ModeControls,
-    OptionControls,
-    PlayerControls,
-    VersionControls,
     build_batch_section,
     build_directory_section,
     build_mode_section,
@@ -126,82 +119,63 @@ class MigratorView(QScrollArea):
             "跨版本迁移世界、玩家数据、UUID 和资源映射",
             icon="⇄",
         ))
-        layout.addWidget(self._build_guide())
-
-        columns = QWidget()
-        columns_layout = QHBoxLayout(columns)
-        columns_layout.setContentsMargins(0, 0, 0, 0)
-        columns_layout.setSpacing(14)
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(14)
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(14)
-        self._build_left(left_layout)
-        self._build_right(right_layout)
-        left_layout.addStretch(1)
-        right_layout.addStretch(1)
-        columns_layout.addWidget(left, 1)
-        columns_layout.addWidget(right, 1)
-        layout.addWidget(columns)
+        # 布局：按转换决策顺序分步展示，避免全部配置同时占据首屏。
+        layout.addWidget(self._build_workflow_tabs())
         layout.addStretch(1)
         self.setWidget(content)
 
-    @staticmethod
-    def _build_guide() -> QWidget:
-        body = QWidget()
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.addWidget(section_title("操作指南"))
-        body_layout.addWidget(muted_label(
-            "设置当前存档，选择输出目录和目标版本，然后从标题栏开始转换。"
-            "转换前建议先创建备份。"
-        ))
-        return card(body, padding=14)
-
-    def _build_left(self, layout: QVBoxLayout) -> None:
+    def _build_workflow_tabs(self) -> QTabWidget:
         config = self.app.config.migration
-        self._directory: DirectoryControls = build_directory_section(
+        self._directory = build_directory_section(
             config,
             self._sync_config,
             self.app.migration_commands.choose_destination,
         )
-        self._version: VersionControls = build_version_section(
-            config,
-            self._on_version_change,
-        )
-        self._player: PlayerControls = build_player_section(
+        self._version = build_version_section(config, self._on_version_change)
+        self._mode = build_mode_section(config, self._on_mode_change)
+        self._options = build_options_section(config, self._sync_config)
+        self._player = build_player_section(
             config,
             self._sync_config,
             self._query_uuid,
         )
-        layout.addWidget(self._directory.card)
-        layout.addWidget(self._version.card)
-        layout.addWidget(self._player.card)
-
-    def _build_right(self, layout: QVBoxLayout) -> None:
-        config = self.app.config.migration
-        self._mode: ModeControls = build_mode_section(
-            config,
-            self._on_mode_change,
-        )
-        self._options: OptionControls = build_options_section(
-            config,
-            self._sync_config,
-        )
-        self._batch: BatchControls = build_batch_section(
+        self._batch = build_batch_section(
             config,
             self._sync_config,
             self._toggle_batch,
             self.app.migration_commands.choose_batch_directory,
             self._scan_batch,
         )
-        layout.addWidget(self._mode.card)
-        layout.addWidget(self._options.card)
-        layout.addWidget(self._batch.card)
+
+        tabs = QTabWidget()
+        tabs.addTab(
+            self._tab_page(self._directory.card, self._version.card),
+            self._t("migrator.step_paths", "1  路径与版本"),
+        )
+        tabs.addTab(
+            self._tab_page(self._mode.card, self._options.card),
+            self._t("migrator.step_mode", "2  模式与选项"),
+        )
+        tabs.addTab(
+            self._tab_page(self._player.card),
+            self._t("migrator.step_players", "3  玩家与 UUID"),
+        )
+        tabs.addTab(
+            self._tab_page(self._batch.card),
+            self._t("migrator.step_batch", "批量转换"),
+        )
+        return tabs
+
+    @staticmethod
+    def _tab_page(*widgets: QWidget) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        for widget in widgets:
+            layout.addWidget(widget)
+        layout.addStretch(1)
+        return page
 
     def _t(self, key: str, default: str = "", **kwargs: object) -> str:
         return self.app.translate(key, default, **kwargs)

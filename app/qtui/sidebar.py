@@ -1,9 +1,4 @@
-"""Qt 侧边栏：品牌、当前存档、标签导航、最近存档（与 Flet 版布局一致）。
-
-布局与 ``app/ui/sidebar.py`` + ``sidebar_chrome.py`` + ``sidebar_tabs.py``
-对齐：224px 展开 / 68px 折叠、品牌块、当前存档卡片、accent 设置存档按钮、
-可折叠最近存档、图标槽 + 标签 + 选中标记的页签按钮、底部切换与页脚版本。
-"""
+"""Qt 任务分组侧边栏：世界工作区、安全、诊断与工具入口。"""
 from __future__ import annotations
 
 import os
@@ -22,9 +17,9 @@ from PySide6.QtWidgets import (
 from app.qtui.sidebar_chrome import (
     _Footer,
     _ToggleButton,
+    build_brand_block,
+    build_brand_box,
     build_footer,
-    build_header_collapsed,
-    build_header_expanded,
     build_toggle_button,
 )
 from app.qtui.theme import get_theme_manager
@@ -51,6 +46,7 @@ class _TabButton(QFrame):
         self._selected = False
         self._collapsed = False
         self._hovering = False
+        self._badge_text = ""
         self._icon_label: QLabel | None = None
         self._text_label: QLabel | None = None
         self._marker: QLabel | None = None
@@ -85,6 +81,8 @@ class _TabButton(QFrame):
             icon_label.setFixedSize(44, 44)
             layout.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignCenter)
         else:
+            # Qt 的 setFixedWidth() 同时锁定最大宽度；展开时必须显式解除。
+            self.setMaximumWidth(16777215)
             self.setMinimumWidth(0)
             layout.setContentsMargins(10, 6, 10, 6)
             layout.setSpacing(8)
@@ -101,7 +99,7 @@ class _TabButton(QFrame):
             )
             self._text_label = text_label
             marker = QLabel("•")
-            marker.setText("•" if self._selected else "")
+            marker.setText(self._marker_text())
             marker.setAttribute(
                 Qt.WidgetAttribute.WA_TransparentForMouseEvents
             )
@@ -125,8 +123,22 @@ class _TabButton(QFrame):
             return
         self._selected = selected
         if self._marker is not None:
-            self._marker.setText("•" if selected else "")
+            self._marker.setText(self._marker_text())
         self._apply_style()
+
+    def set_badge(self, count: int) -> None:
+        """显示待办数量；0 时恢复普通选中标记。"""
+        self._badge_text = str(count) if count > 0 else ""
+        if self._marker is not None:
+            self._marker.setText(self._marker_text())
+        suffix = f" ({count})" if count > 0 else ""
+        self.setToolTip(f"{self._label}{suffix}")
+        self._apply_style()
+
+    def _marker_text(self) -> str:
+        if self._badge_text:
+            return self._badge_text
+        return "•" if self._selected else ""
 
     def enterEvent(self, event: Any) -> None:
         self._hovering = True
@@ -191,16 +203,33 @@ class _TabButton(QFrame):
                 " background: transparent;"
             )
         if self._marker is not None:
-            self._marker.setStyleSheet(
-                f"color: {colors.accent}; font-size: 14px; background: transparent;"
-            )
+            if self._badge_text:
+                self._marker.setStyleSheet(
+                    f"color: {colors.text_invert}; font-size: 10px;"
+                    f" background: {colors.accent}; border-radius: 7px;"
+                    " padding: 1px 5px;"
+                )
+            else:
+                self._marker.setStyleSheet(
+                    f"color: {colors.accent}; font-size: 14px;"
+                    " background: transparent;"
+                )
+
+
+class _GroupLabel(QLabel):
+    """展开态显示的导航任务分组标题。"""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text.upper())
+        self.setProperty("role", "navigationGroup")
+        self.setContentsMargins(8, 8, 0, 2)
 
 
 class QtSidebar(QFrame):
     """左侧导航栏：品牌、当前存档、页签、最近存档与折叠开关。"""
 
-    EXPANDED_WIDTH = 224
-    COLLAPSED_WIDTH = 68
+    EXPANDED_WIDTH = 208
+    COLLAPSED_WIDTH = 64
 
     def __init__(
         self,
@@ -224,6 +253,7 @@ class QtSidebar(QFrame):
         self._collapsed = False
         self._tabs: list[dict[str, str]] = list(tabs)
         self._buttons: dict[str, _TabButton] = {}
+        self._group_labels: list[_GroupLabel] = []
         self._selected_id: Optional[str] = None
         self._current_save_path = current_save_path
         self._recent_expanded = False
@@ -252,10 +282,28 @@ class QtSidebar(QFrame):
         self._tabs_layout.setContentsMargins(14, 12, 14, 10)
         self._tabs_layout.setSpacing(4)
         self._tabs_layout.addStretch(1)
+        current_group = ""
+        footer_tabs: list[dict[str, str]] = []
         for tab in self._tabs:
-            self._add_tab_button(tab)
+            if tab.get("placement") == "footer":
+                footer_tabs.append(tab)
+                continue
+            group = tab.get("group", "")
+            if group and group != current_group:
+                self._add_group_label(group)
+                current_group = group
+            self._add_tab_button(tab, self._tabs_layout)
         self._tabs_scroll.setWidget(tabs_container)
         self._root.addWidget(self._tabs_scroll, 1)
+
+        # 布局：设置等应用级入口固定在侧栏底部，不随主导航滚动。
+        self._utility_host = QWidget()
+        self._utility_layout = QVBoxLayout(self._utility_host)
+        self._utility_layout.setContentsMargins(14, 4, 14, 4)
+        self._utility_layout.setSpacing(4)
+        for tab in footer_tabs:
+            self._add_tab_button(tab, self._utility_layout)
+        self._root.addWidget(self._utility_host)
 
         self._toggle_button: _ToggleButton = build_toggle_button(
             collapsed=self._collapsed,
@@ -304,10 +352,14 @@ class QtSidebar(QFrame):
         self._rebuild_header()
 
     def set_recent_saves(self, saves: list[dict[str, Any]]) -> None:
-        """更新最近存档列表。"""
+        """保留最近存档快照；菜单由世界上下文栏呈现。"""
         self._recent_saves = list(saves)
-        self._rebuild_recent_saves()
-        self._rebuild_header()
+
+    def set_badge(self, navigation_id: str, count: int) -> None:
+        """更新导航入口的待办数量徽标。"""
+        button = self._buttons.get(navigation_id)
+        if button is not None:
+            button.set_badge(count)
 
     def set_collapsed(self, collapsed: bool) -> None:
         """切换折叠态并重建头部/页签/切换/页脚。"""
@@ -320,11 +372,19 @@ class QtSidebar(QFrame):
         for button in self._buttons.values():
             button.set_collapsed(collapsed)
         self._tabs_layout.setContentsMargins(
-            12 if collapsed else 14,
+            10 if collapsed else 12,
             12,
-            12 if collapsed else 14,
+            10 if collapsed else 12,
             10,
         )
+        self._utility_layout.setContentsMargins(
+            10 if collapsed else 12,
+            4,
+            10 if collapsed else 12,
+            4,
+        )
+        for label in self._group_labels:
+            label.setVisible(not collapsed)
         self._rebuild_header()
         self._toggle_button.set_collapsed(collapsed)
         self._footer.set_collapsed(collapsed)
@@ -346,7 +406,16 @@ class QtSidebar(QFrame):
 
     # ─── 内部构建 ───────────────────────────────
 
-    def _add_tab_button(self, tab: dict[str, str]) -> None:
+    def _add_group_label(self, text: str) -> None:
+        label = _GroupLabel(text)
+        self._group_labels.append(label)
+        self._tabs_layout.insertWidget(self._tabs_layout.count() - 1, label)
+
+    def _add_tab_button(
+        self,
+        tab: dict[str, str],
+        layout: QVBoxLayout,
+    ) -> None:
         view_id = tab["id"]
         button = _TabButton(
             view_id=view_id,
@@ -355,7 +424,10 @@ class QtSidebar(QFrame):
             on_click=self._on_tab_select,
         )
         self._buttons[view_id] = button
-        self._tabs_layout.insertWidget(self._tabs_layout.count() - 1, button)
+        if layout is self._tabs_layout:
+            layout.insertWidget(layout.count() - 1, button)
+        else:
+            layout.addWidget(button)
 
     def _rebuild_header(self) -> None:
         """按当前折叠态重建头部。"""
@@ -365,28 +437,14 @@ class QtSidebar(QFrame):
                 widget = item.widget()
                 if widget is not None:
                     widget.deleteLater()
+        host = QWidget()
+        layout = QHBoxLayout(host)
+        layout.setContentsMargins(12, 12, 12, 8)
         if self._collapsed:
-            widget = build_header_collapsed(
-                on_set_current_save=self._on_pick_current_save,
-                recent_menu=self._build_collapsed_recent_menu(),
-                set_current_tooltip=self._t(
-                    "sidebar.set_current_save", "设置当前存档"
-                ),
-            )
-            self._header_layout.addWidget(widget)
-            return
-        widget = build_header_expanded(
-            current_save_name=self._current_save_display(),
-            current_save_label=self._t("sidebar.current_save", "当前存档"),
-            set_current_label=self._t(
-                "sidebar.set_current_save", "设置当前存档"
-            ),
-            recent_saves_label=self._t("sidebar.recent_saves", "最近存档"),
-            recent_arrow_state=self._recent_expanded,
-            on_set_current_save=self._on_pick_current_save,
-            on_toggle_recent=self.toggle_recent,
-        )
-        self._header_layout.addWidget(widget)
+            layout.addWidget(build_brand_box())
+        else:
+            layout.addWidget(build_brand_block())
+        self._header_layout.addWidget(host)
 
     def _current_save_display(self) -> str:
         path = self._current_save_path

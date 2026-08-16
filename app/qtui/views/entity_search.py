@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from app.services.entity_block_search.constants import get_preset_options
 from app.services.entity_block_search.models import SearchCondition, SearchResult
+from app.qtui.components.cards import placeholder
 from app.qtui.utils import batch_widget_updates
 
 
@@ -82,8 +84,41 @@ class QtEntitySearchPanel(QWidget):
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
         layout.addWidget(self._progress)
+        # 状态：条件栏保持稳定，内容区只显示当前可操作或可阅读的状态。
+        self._content_stack = QStackedWidget()
+        self._no_world_state = placeholder(
+            "🔎",
+            self._t("entity_search.no_world", "未加载存档"),
+            self._t(
+                "workspace.select_world_hint",
+                "选择包含 level.dat 的 Minecraft Java 世界目录",
+            ),
+            expand=True,
+        )
+        self._ready_state = placeholder(
+            "⌕",
+            self._t("entity_search.ready", "未开始搜索"),
+            self._t(
+                "entity_search.ready_hint",
+                "设置目标、维度和搜索范围后开始搜索。",
+            ),
+            expand=True,
+        )
+        self._no_results_state = placeholder(
+            "∅",
+            self._t("entity_search.no_results", "没有搜索结果"),
+            self._t(
+                "entity_search.no_results_hint",
+                "调整目标 ID、预设或维度范围后重试。",
+            ),
+            expand=True,
+        )
         self._table = self._build_result_table()
-        layout.addWidget(self._table, 1)
+        self._content_stack.addWidget(self._no_world_state)
+        self._content_stack.addWidget(self._ready_state)
+        self._content_stack.addWidget(self._no_results_state)
+        self._content_stack.addWidget(self._table)
+        layout.addWidget(self._content_stack, 1)
 
     def _build_conditions(
         self,
@@ -209,6 +244,9 @@ class QtEntitySearchPanel(QWidget):
             "entity_search.ready" if has_world else "entity_search.no_world",
             "未开始搜索" if has_world else "未加载存档",
         ))
+        self._content_stack.setCurrentWidget(
+            self._ready_state if has_world else self._no_world_state
+        )
         self._set_busy(False)
 
     def show_search_started(self) -> None:
@@ -218,6 +256,9 @@ class QtEntitySearchPanel(QWidget):
         ))
         self._count.clear()
         self._progress.setRange(0, 0)
+        self._content_stack.setCurrentWidget(
+            self._table if self._results else self._ready_state
+        )
         self._set_busy(True)
 
     def show_search_success(self, results: Sequence[SearchResult]) -> None:
@@ -263,6 +304,9 @@ class QtEntitySearchPanel(QWidget):
                 total=len(self._results),
             )
         self._count.setText(count)
+        self._content_stack.setCurrentWidget(
+            self._table if self._results else self._no_results_state
+        )
         self._finish_busy()
 
     def show_search_failure(self, error: Exception) -> None:
@@ -271,6 +315,9 @@ class QtEntitySearchPanel(QWidget):
             "entity_search.failed", "搜索失败"
         ))
         self._count.setText(str(error))
+        self._content_stack.setCurrentWidget(
+            self._table if self._results else self._ready_state
+        )
         self._finish_busy()
 
     def show_search_cancelled(self) -> None:
@@ -278,6 +325,9 @@ class QtEntitySearchPanel(QWidget):
         self._status.setText(self._t(
             "entity_search.cancelled", "搜索已取消"
         ))
+        self._content_stack.setCurrentWidget(
+            self._table if self._results else self._ready_state
+        )
         self._finish_busy()
 
     def show_export_started(self) -> None:

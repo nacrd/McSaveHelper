@@ -106,7 +106,25 @@
     "mappings": "映射管理",
     "server_properties": "服务器配置",
     "settings": "设置",
-    "import_save": "导入存档"
+    "import_save": "导入存档",
+    "group_world": "世界",
+    "group_safety": "安全与维护",
+    "group_diagnostics": "转换与诊断",
+    "group_tools": "工具"
+  },
+  "workspace": {
+    "recent_worlds": "最近世界",
+    "no_recent_worlds": "暂无最近世界",
+    "switch_world": "切换世界",
+    "quick_backup": "快速备份",
+    "no_world": "未设置当前世界",
+    "select_world_hint": "选择包含 level.dat 的 Minecraft Java 世界目录",
+    "java_world": "Minecraft Java 世界",
+    "status_required": "需要选择",
+    "status_loading": "加载中",
+    "status_ready": "已就绪",
+    "status_error": "不可用",
+    "invalid_world_detail": "无法读取当前世界"
   },
   "world_info": {
     "yes": "是",
@@ -452,6 +470,8 @@
   },
   "mappings": {
     "title": "UUID映射管理",
+    "tab_uuid": "UUID 与玩家",
+    "tab_items": "物品与资源",
     "description": "在此处管理自定义玩家名与UUID的映射关系。这些映射将用于存档转换时的UUID替换。",
     "hint": "提示：您可以通过\"导入名单\"批量导入映射，或手动添加每一行。\n映射数据会实时保存到配置文件，并在迁移时根据首页开关决定是否启用。",
     "column_player": "玩家名",
@@ -651,6 +671,12 @@
     "language": "zh_CN",
     "display_name": "简体中文"
   },
+  "migrator": {
+    "step_paths": "1  路径与版本",
+    "step_mode": "2  模式与选项",
+    "step_players": "3  玩家与 UUID",
+    "step_batch": "批量转换"
+  },
   "stats": {
     "hint_ready": "设置当前存档后可通过页面标题栏「开始统计」分析世界数据。",
     "summary_placeholder": "通过页面标题栏的统计操作分析世界数据。",
@@ -739,6 +765,7 @@
     "start": "开始搜索",
     "export": "导出结果",
     "ready": "未开始搜索",
+    "ready_hint": "设置目标、维度和搜索范围后开始搜索。",
     "no_world": "未加载存档",
     "searching": "正在搜索...",
     "done": "搜索完成",
@@ -755,6 +782,7 @@
     "dimension_required": "至少选择一个维度",
     "busy": "搜索或导出正在进行",
     "no_results": "没有可导出的搜索结果",
+    "no_results_hint": "调整目标 ID、预设或维度范围后重试。",
     "export_title": "导出搜索结果",
     "text_files": "文本文件",
     "export_failed": "导出失败",

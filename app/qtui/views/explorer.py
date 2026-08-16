@@ -127,6 +127,18 @@ class ExplorerHost(
         """返回当前选中的存档路径。"""
         ...
 
+    def navigate_to(self, navigation_id: str) -> None:
+        """切换到应用导航入口。"""
+        ...
+
+    def set_world_context_status(self, status: str, detail: str = "") -> None:
+        """更新全局世界上下文状态。"""
+        ...
+
+    def set_navigation_badge(self, navigation_id: str, count: int) -> None:
+        """更新侧边栏导航待办徽标。"""
+        ...
+
 
 def map_index_progress(frame: WorldIndexProgressFrame) -> tuple[float, str]:
     """把索引构建帧映射为 0..100 的单调进度与阶段。"""
@@ -146,6 +158,15 @@ def map_index_progress(frame: WorldIndexProgressFrame) -> tuple[float, str]:
 
 class ExplorerView(QWidget):
     """存档浏览器壳层：信息、玩家、区域地图、统计、搜索与 NBT。"""
+
+    _WORKSPACE_INDEX = {
+        "world_info": 0,
+        "players": 1,
+        "map": 2,
+        "stats": 3,
+        "search": 4,
+        "nbt": 5,
+    }
 
     _TAB_KEYS = (
         ("explorer.tab_world_info", "存档信息"),
@@ -172,6 +193,7 @@ class ExplorerView(QWidget):
         self._nbt_coordinator = QtNbtCoordinator(
             app,
             self._reload_after_nbt_commit,
+            on_stage_count_changed=self._on_stage_count_changed,
         )
         self._region_map = QtRegionMapCoordinator(
             app,
@@ -222,6 +244,7 @@ class ExplorerView(QWidget):
         layout.setSpacing(10)
         layout.addWidget(self._build_header())
         self._tabs = QTabWidget()
+        self._tabs.tabBar().hide()
         self._world_info = QtWorldInfoPanel(
             self.app.translate,
             self.app.save_context_manager.on_import_save,
@@ -274,6 +297,35 @@ class ExplorerView(QWidget):
         )
         layout.addWidget(self._tabs, 1)
 
+        self.select_workspace("world_info")
+
+    def select_workspace(self, workspace_id: str) -> bool:
+        """切换 Explorer 工作区。
+
+        Args:
+            workspace_id: ``world_info``、``players``、``map``、``stats``、
+                ``search`` 或 ``nbt``。
+
+        Returns:
+            是否成功切换到已注册工作区。
+        """
+        index = self._WORKSPACE_INDEX.get(workspace_id)
+        if index is None or index >= self._tabs.count():
+            return False
+        self._tabs.setCurrentIndex(index)
+        if hasattr(self, "_workspace_title"):
+            key, default = self._TAB_KEYS[index]
+            self._workspace_title.setText(
+                f"{self._tab_label('', key, default)}"
+            )
+        self._active_workspace_id = workspace_id
+        return True
+
+    @property
+    def active_workspace_id(self) -> str:
+        """返回当前 Explorer 工作区 id。"""
+        return getattr(self, "_active_workspace_id", "world_info")
+
     def _tab_label(self, icon: str, key: str, default: str) -> str:
         """为 Explorer tab 标题加上 Minecraft 风格图标。"""
         return f"{icon}  {self._t(key, default)}"
@@ -283,9 +335,10 @@ class ExplorerView(QWidget):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 6)
         layout.setSpacing(14)
-        layout.addWidget(title_label(
-            f"⌕  {self._t('explorer.title', '存档浏览器')}"
-        ))
+        self._workspace_title = title_label(
+            f"⌕  {self._t('explorer.tab_world_info', '概览')}"
+        )
+        layout.addWidget(self._workspace_title)
         self._world_label = muted_label(self._t(
             "sidebar.no_current_save", "未设置当前存档"
         ))
@@ -307,6 +360,7 @@ class ExplorerView(QWidget):
         if self._disposed or self._is_current_world(path):
             return
         try:
+            self._set_world_context_status("loading")
             world_path = Path(path).expanduser().resolve()
             self._loaded_world_path = world_path
             self.world_session = None
@@ -352,6 +406,7 @@ class ExplorerView(QWidget):
             regions=shell.overworld_region_count,
             dimensions=shell.dimension_hint_count,
         ))
+        self._set_world_context_status("loading")
 
     def _apply_index_progress(
         self,
@@ -408,6 +463,11 @@ class ExplorerView(QWidget):
             "当前存档: {name}",
             name=snapshot.session.world_path.name,
         ))
+        version = snapshot.world_info.version_name if snapshot.world_info else None
+        self._set_world_context_status(
+            "ready",
+            version or self._t("workspace.java_world", "Minecraft Java 世界"),
+        )
         self._world_info.show_info(snapshot.world_info, snapshot.stats)
         self._players.show_loading()
         self._player_tasks.load_players(snapshot.session)
@@ -434,6 +494,7 @@ class ExplorerView(QWidget):
             "explorer.load_error", "加载存档失败"
         ))
         self._world_info.show_empty()
+        self._set_world_context_status("required")
         self._players.show_empty()
         self.app.hide_progress()
         if isinstance(error, FileNotFoundError):
@@ -779,6 +840,10 @@ class ExplorerView(QWidget):
         self.app.hide_progress()
 
     def _open_backup_center(self) -> None:
+        navigate = getattr(self.app, "navigate_to", None)
+        if callable(navigate):
+            navigate("backup_center")
+            return
         self.app.view_manager.switch_view("backup_center")
 
     def _open_region_nbt(
@@ -794,7 +859,27 @@ class ExplorerView(QWidget):
             region_z,
             dimension_id=dimension_id,
         )
-        self._tabs.setCurrentIndex(5)
+        navigate = getattr(self.app, "navigate_to", None)
+        if callable(navigate):
+            navigate("world_nbt")
+            return
+        self._tabs.setCurrentIndex(self._WORKSPACE_INDEX["nbt"])
+
+    def _on_stage_count_changed(self, count: int) -> None:
+        """把 NBT 暂存数量投影到侧栏工作区入口。"""
+        set_badge = getattr(self.app, "set_navigation_badge", None)
+        if callable(set_badge):
+            set_badge("world_nbt", count)
+
+    def _set_world_context_status(
+        self,
+        status: str,
+        detail: str = "",
+    ) -> None:
+        """向组合根报告状态；测试宿主和旧适配器可暂时不实现。"""
+        set_status = getattr(self.app, "set_world_context_status", None)
+        if callable(set_status):
+            set_status(status, detail)
 
     def _reload_after_nbt_commit(self, world_path: Path) -> None:
         """提交发布后强制重建 Explorer 的不可变世界读会话。"""

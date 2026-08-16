@@ -204,6 +204,8 @@ def test_view_builds_form(view: SaveRepairView) -> None:
     assert view._fix_players_checkbox.isChecked() is True
     assert view._fix_level_dat_checkbox.isChecked() is True
     assert view._backup_checkbox.isChecked() is True
+    assert not view._repair_button.isEnabled()
+    assert not view._repair_options.isEnabled()
     assert view.get_top_actions() == []
     # 取消按钮初始隐藏
     assert view._cancel_button.isHidden()
@@ -243,6 +245,8 @@ def test_view_repair_passes_options(
     tmp_path: Path,
 ) -> None:
     view._world_path_field.setText(str(tmp_path))
+    view._start_detect()
+    assert _wait_until(lambda: not view._busy)
     view._fix_chunks_checkbox.setChecked(False)
     view._fix_players_checkbox.setChecked(False)
     view._fix_level_dat_checkbox.setChecked(False)

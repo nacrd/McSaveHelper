@@ -143,28 +143,30 @@ class BackupCenterView(QScrollArea):
         )
         layout.addWidget(header_row)
 
-        # ─── 创建面板 ─────────────────────────────
+        # 布局：当前世界、备注与创建命令合并为紧凑创建栏。
         create_body = QWidget()
         create_layout = QVBoxLayout(create_body)
         create_layout.setContentsMargins(0, 0, 0, 0)
-        create_layout.setSpacing(12)
+        create_layout.setSpacing(10)
+
+        create_row = QWidget()
+        create_row_layout = QHBoxLayout(create_row)
+        create_row_layout.setContentsMargins(0, 0, 0, 0)
+        create_row_layout.setSpacing(10)
 
         self._world_path_field = QLineEdit()
         self._world_path_field.setPlaceholderText(
             self._t("current_save", "当前存档")
         )
-        create_layout.addWidget(self._world_path_field)
+        self._world_path_field.setReadOnly(True)
+        self._world_path_field.setMinimumWidth(240)
+        create_row_layout.addWidget(self._world_path_field, 2)
 
         self._label_field = text_field(
             hint_text=self._t("label_hint", "例如：升级前、安装模组前"),
         )
         self._label_field.setPlaceholderText(self._t("label", "备份备注"))
-        create_layout.addWidget(self._label_field)
-
-        buttons_row = QWidget()
-        buttons_layout = QHBoxLayout(buttons_row)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(10)
+        create_row_layout.addWidget(self._label_field, 1)
         self._create_button = btn_primary(
             f"💾 {self._t('create', '创建备份')}",
             width=132,
@@ -176,10 +178,9 @@ class BackupCenterView(QScrollArea):
             on_click=self._cancel,
         )
         self._cancel_button.setVisible(False)
-        buttons_layout.addWidget(self._create_button)
-        buttons_layout.addWidget(self._cancel_button)
-        buttons_layout.addStretch(1)
-        create_layout.addWidget(buttons_row)
+        create_row_layout.addWidget(self._create_button)
+        create_row_layout.addWidget(self._cancel_button)
+        create_layout.addWidget(create_row)
 
         retention_row = QWidget()
         retention_layout = QHBoxLayout(retention_row)
@@ -422,6 +423,10 @@ class BackupCenterView(QScrollArea):
         ]
 
     # ─── 操作入口 ─────────────────────────────────
+
+    def start_quick_backup(self) -> None:
+        """从全局世界上下文栏启动当前世界备份。"""
+        self._start_create()
 
     def _start_create(self) -> None:
         if self._busy:
@@ -684,6 +689,7 @@ class BackupCenterView(QScrollArea):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self._create_button.setEnabled(not busy)
+        self._create_button.setVisible(not busy)
         self._retention_dropdown.setEnabled(not busy)
         self._cancel_button.setVisible(busy)
         self._cancel_button.setEnabled(busy)

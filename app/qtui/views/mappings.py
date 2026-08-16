@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QTabWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -159,9 +160,28 @@ class MappingsView(QScrollArea):
             icon="🔗",
         ))
 
-        self._build_uuid_query_section(layout)
-        self._build_uuid_section(layout)
-        self._build_item_section(layout)
+        # 布局：UUID 相关操作与物品资源映射分 tab，减少连续滚动。
+        tabs = QTabWidget()
+        uuid_page = QWidget()
+        uuid_layout = QVBoxLayout(uuid_page)
+        uuid_layout.setContentsMargins(0, 0, 0, 0)
+        uuid_layout.setSpacing(14)
+        self._build_uuid_query_section(uuid_layout)
+        self._build_uuid_section(uuid_layout)
+        uuid_layout.addStretch(1)
+        item_page = QWidget()
+        item_layout = QVBoxLayout(item_page)
+        item_layout.setContentsMargins(0, 0, 0, 0)
+        item_layout.setSpacing(14)
+        self._build_item_section(item_layout)
+        item_layout.addStretch(1)
+        tabs.addTab(uuid_page, self._t(
+            "mappings.tab_uuid", "UUID 与玩家"
+        ))
+        tabs.addTab(item_page, self._t(
+            "mappings.tab_items", "物品与资源"
+        ))
+        layout.addWidget(tabs, 1)
 
         layout.addStretch(1)
         self.setWidget(content)

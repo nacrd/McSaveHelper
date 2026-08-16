@@ -49,15 +49,18 @@ class QtNbtCoordinator:
         self,
         app: QtNbtHost,
         reload_world: Callable[[Path], None],
+        on_stage_count_changed: Callable[[int], None] | None = None,
     ) -> None:
         """创建 NBT 协调器。
 
         Args:
             app: NBT 工作流所需的 UI 与运行时端口。
             reload_world: 提交成功后重建世界读会话的回调。
+            on_stage_count_changed: 暂存数量变化时的导航徽标回调。
         """
         self._app = app
         self._reload_world = reload_world
+        self._on_stage_count_changed = on_stage_count_changed
         self._store = NbtStageStore()
         self._session: WorldSession | None = None
         self._document: LoadedNbtDocument | None = None
@@ -118,6 +121,7 @@ class QtNbtCoordinator:
         self._store.clear()
         self.panel.show_world(True)
         self.panel.show_stages(())
+        self._publish_stage_count()
         try:
             self._tasks.set_world(session)
         except (RuntimeError, ValueError) as error:
@@ -133,6 +137,7 @@ class QtNbtCoordinator:
         self._chunk_label = ""
         self._store.clear()
         self.panel.show_world(False)
+        self._publish_stage_count()
         if was_committing:
             self._app.hide_progress()
 
@@ -285,6 +290,7 @@ class QtNbtCoordinator:
             )
         self._store.add(change)
         self.panel.show_stages(self._store.changes)
+        self._publish_stage_count()
         self._app.log(f"已暂存 NBT 修改: {display_path}", "QUEUE")
 
     def stage_external_changes(
@@ -304,6 +310,7 @@ class QtNbtCoordinator:
         for change in changes:
             self._store.add(change)
         self.panel.show_stages(self._store.changes)
+        self._publish_stage_count()
         self._app.log(
             f"已暂存外部 NBT 修改: {len(changes)} 个",
             "QUEUE",
@@ -316,6 +323,7 @@ class QtNbtCoordinator:
         if index is None or self._store.remove(index) is None:
             return
         self.panel.show_stages(self._store.changes)
+        self._publish_stage_count()
         self.reload_document()
 
     def discard_all(self) -> None:
@@ -325,6 +333,7 @@ class QtNbtCoordinator:
             return
         self._store.clear()
         self.panel.show_stages(())
+        self._publish_stage_count()
         self.reload_document()
         self._app.info_dialog(
             self._t("nbt_editor.discarded_title", "已丢弃"),
@@ -460,6 +469,7 @@ class QtNbtCoordinator:
             return
         self._store.remove_snapshot(completion.changes)
         self.panel.show_stages(self._store.changes)
+        self._publish_stage_count()
         self._app.info_dialog(
             self._t("nbt_editor.commit_done", "提交完成"),
             self._t(
@@ -499,6 +509,12 @@ class QtNbtCoordinator:
             self._t("common.tip", "提示"),
             self._t(key, default),
         )
+
+    def _publish_stage_count(self) -> None:
+        """将暂存数量发送给壳层，避免页面间复制状态。"""
+        callback = self._on_stage_count_changed
+        if callback is not None:
+            callback(len(self._store))
 
     def _t(self, key: str, default: str = "", **kwargs: Any) -> str:
         return self._app.translate(key, default, **kwargs)

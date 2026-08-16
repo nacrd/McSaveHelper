@@ -31,7 +31,7 @@ from app.presenters.save_repair_presenter import (
     format_repair_report,
 )
 from app.qtui.components.buttons import btn_ghost, btn_primary
-from app.qtui.components.cards import card, muted_label, section_title
+from app.qtui.components.cards import card, section_title
 from app.qtui.components.layout import page_header
 from app.qtui.context import (
     QtDialogPort,
@@ -93,6 +93,7 @@ class SaveRepairView(QScrollArea):
         self.service = service or app.save_repair
         self._task_scope = app.execution_runtime.create_scope("save_repair_view")
         self._busy = False
+        self._has_detect_report = False
 
         self.setWidgetResizable(True)
         self._build_ui()
@@ -148,6 +149,7 @@ class SaveRepairView(QScrollArea):
         actions_layout.setSpacing(12)
         self._detect_button = btn_primary("检测存档", on_click=self._start_detect)
         self._repair_button = btn_primary("开始修复", on_click=self._start_repair)
+        self._repair_button.setEnabled(False)
         self._cancel_button = btn_ghost("取消", on_click=self._cancel)
         self._cancel_button.setVisible(False)
         actions_layout.addWidget(self._detect_button)
@@ -173,6 +175,8 @@ class SaveRepairView(QScrollArea):
         options_layout.addWidget(self._fix_players_checkbox)
         options_layout.addWidget(self._fix_level_dat_checkbox)
         options_layout.addWidget(self._backup_checkbox)
+        self._repair_options = options_column
+        self._repair_options.setEnabled(False)
         config_layout.addWidget(options_column)
 
         layout.addWidget(card(config_body, padding=16))
@@ -193,7 +197,11 @@ class SaveRepairView(QScrollArea):
 
         # ─── 修复结果卡片 ─────────────────────────
         self._result_text = self._result_label()
-        layout.addWidget(self._result_card("修复结果", self._result_text))
+        self._repair_result_card = self._result_card(
+            "修复结果", self._result_text
+        )
+        self._repair_result_card.setVisible(False)
+        layout.addWidget(self._repair_result_card)
 
         # ─── 执行日志卡片 ─────────────────────────
         log_body = QWidget()
@@ -206,22 +214,9 @@ class SaveRepairView(QScrollArea):
         self._log_view.setMinimumHeight(180)
         self._log_view.setFontFamily("Consolas")
         log_layout.addWidget(self._log_view)
-        layout.addWidget(card(log_body, padding=16))
-
-        # ─── 使用说明卡片 ─────────────────────────
-        info_body = QWidget()
-        info_layout = QVBoxLayout(info_body)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(10)
-        info_layout.addWidget(section_title("使用说明"))
-        info_layout.addWidget(muted_label(
-            "• 检测存档：只读扫描，报告世界信息和潜在问题，不修改任何文件\n"
-            "• 修复区块：检测损坏的区块数据，隔离无法读取的区域文件\n"
-            "• 修复玩家数据：验证并补充缺失的必需字段（Pos/Health 等）\n"
-            "• 修复 level.dat：检查并从备份恢复，补充缺失的世界配置字段\n"
-            "• 建议先执行检测，确认问题后再进行修复"
-        ))
-        layout.addWidget(card(info_body, padding=16))
+        self._log_card = card(log_body, padding=16)
+        self._log_card.setVisible(False)
+        layout.addWidget(self._log_card)
 
         layout.addStretch(1)
         self.setWidget(content)
@@ -258,7 +253,7 @@ class SaveRepairView(QScrollArea):
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
         self._detect_button.setEnabled(not busy)
-        self._repair_button.setEnabled(not busy)
+        self._repair_button.setEnabled(not busy and self._has_detect_report)
         self._cancel_button.setVisible(busy)
         self._cancel_button.setEnabled(True)
 
@@ -273,7 +268,9 @@ class SaveRepairView(QScrollArea):
             return
 
         self._set_busy(True)
+        self._reset_detected_state()
         self._log_view.clear()
+        self._log_card.setVisible(True)
         self._world_info_card.setVisible(False)
         self._detect_result_card.setVisible(False)
 
@@ -287,6 +284,9 @@ class SaveRepairView(QScrollArea):
         if self._busy:
             self.app.warn_dialog("提示", "操作正在进行中，请稍候")
             return
+        if not self._has_detect_report:
+            self.app.warn_dialog("提示", "请先检测当前存档，再选择修复项。")
+            return
         try:
             world_path = self._validate_path()
         except ValueError as exc:
@@ -295,7 +295,9 @@ class SaveRepairView(QScrollArea):
 
         self._set_busy(True)
         self._result_text.setText("")
+        self._repair_result_card.setVisible(False)
         self._log_view.clear()
+        self._log_card.setVisible(True)
 
         options = RepairOptions(
             fix_chunks=bool(self._fix_chunks_checkbox.isChecked()),
@@ -319,6 +321,7 @@ class SaveRepairView(QScrollArea):
         self._set_busy(False)
 
     def _show_detect_error(self, error: Exception) -> None:
+        self._reset_detected_state()
         self._detect_result_text.setText(f"检测失败: {error}")
         self._detect_result_card.setVisible(True)
         self.app.error_dialog("错误", f"检测失败: {error}")
@@ -329,14 +332,18 @@ class SaveRepairView(QScrollArea):
         self._world_info_card.setVisible(True)
         self._detect_result_text.setText(text.result)
         self._detect_result_card.setVisible(True)
+        self._apply_detected_options(report)
 
     def _show_repair_error(self, error: Exception) -> None:
         self._result_text.setText(f"修复失败: {error}")
+        self._repair_result_card.setVisible(True)
         self.app.error_dialog("错误", f"修复失败: {error}")
 
     def _show_repair_report(self, report: RepairReport) -> None:
         self._result_text.setText(format_repair_report(report))
+        self._repair_result_card.setVisible(True)
         if report.success:
+            self._reset_detected_state()
             self.app.info_dialog("完成", "存档修复完成！")
         elif not report.cancelled:
             self.app.error_dialog("修复失败", "修复未完成，存档未进入后续修复步骤。")
@@ -349,12 +356,36 @@ class SaveRepairView(QScrollArea):
         prefix = _LOG_PREFIXES.get(normalized, "[INFO]")
         self._log_view.append(f'<span style="color:{color}">{prefix} {msg}</span>')
 
+    def _apply_detected_options(self, report: DetectReport) -> None:
+        """只开放检测报告中确实存在问题的修复类别。"""
+        chunk_problem = report.chunks_damaged > 0 or bool(report.unreadable_regions)
+        player_problem = report.players_with_issues > 0
+        level_problem = not report.level_dat_ok
+        for checkbox, has_problem in (
+            (self._fix_chunks_checkbox, chunk_problem),
+            (self._fix_players_checkbox, player_problem),
+            (self._fix_level_dat_checkbox, level_problem),
+        ):
+            checkbox.setChecked(has_problem)
+            checkbox.setEnabled(has_problem)
+        self._has_detect_report = report.has_problems and not report.cancelled
+        self._backup_checkbox.setEnabled(self._has_detect_report)
+        self._repair_options.setEnabled(True)
+        self._repair_button.setEnabled(self._has_detect_report and not self._busy)
+
+    def _reset_detected_state(self) -> None:
+        """使检测结果失效，并阻止对未知世界状态直接执行修复。"""
+        self._has_detect_report = False
+        self._repair_options.setEnabled(False)
+        self._repair_button.setEnabled(False)
+
     # ── 存档选择回调 ──────────────────────────────
 
     def on_save_selected(self, path: str) -> None:
         """统一入口设置当前存档回调。"""
         self._controller.select_world(path)
         self._world_path_field.setText(path)
+        self._reset_detected_state()
         self._world_info_card.setVisible(False)
         self._detect_result_card.setVisible(False)
 
@@ -362,9 +393,12 @@ class SaveRepairView(QScrollArea):
         """取消旧世界修复并清空路径及结果投影。"""
         self._controller.clear_world()
         self._world_path_field.clear()
+        self._reset_detected_state()
         self._world_info_card.setVisible(False)
         self._detect_result_card.setVisible(False)
         self._result_text.setText("")
+        self._repair_result_card.setVisible(False)
+        self._log_card.setVisible(False)
 
     def dispose(self) -> None:
         """取消检测/修复任务并释放页面作用域。"""

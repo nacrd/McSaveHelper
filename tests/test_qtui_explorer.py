@@ -516,6 +516,36 @@ def test_explorer_enables_migrated_tabs(
     assert view.get_top_actions() == []
 
 
+def test_explorer_selects_workspace_by_navigation_id(
+    view: ExplorerView,
+) -> None:
+    view.select_workspace("map")
+
+    assert view.active_workspace_id == "map"
+    assert view._tabs.currentIndex() == 2
+
+    view.select_workspace("missing")
+    assert view.active_workspace_id == "map"
+
+
+def test_result_workspaces_replace_empty_tables_with_state_panels(
+    view: ExplorerView,
+) -> None:
+    stats = view._stats_coordinator.panel
+    search = view._search_coordinator.panel
+
+    assert stats._content_stack.currentWidget() is stats._no_world_state
+    assert search._content_stack.currentWidget() is search._no_world_state
+
+    stats.show_ready(True)
+    search.show_world(True)
+    assert stats._content_stack.currentWidget() is stats._ready_state
+    assert search._content_stack.currentWidget() is search._ready_state
+
+    search.show_search_success(())
+    assert search._content_stack.currentWidget() is search._no_results_state
+
+
 def test_world_load_projects_info_and_deduplicates_path(
     view: ExplorerView,
     host: FakeHost,

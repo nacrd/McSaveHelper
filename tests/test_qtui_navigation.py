@@ -1,0 +1,93 @@
+"""Qt 任务导航与世界上下文栏回归测试。"""
+from __future__ import annotations
+
+from PySide6.QtWidgets import QPushButton
+
+from app.qtui.registry import create_qt_registry
+from app.qtui.sidebar import QtSidebar
+from app.qtui.world_context_bar import QtWorldContextBar
+
+
+def _translate(_key: str, default: str = "", **_kwargs: object) -> str:
+    return default
+
+
+def test_registry_maps_world_navigation_to_shared_explorer(
+    qt_app: object,
+) -> None:
+    del qt_app
+    registry = create_qt_registry()
+    world_navigation = registry.navigation[:6]
+
+    assert [item.navigation_id for item in world_navigation] == [
+        "world_overview",
+        "world_players",
+        "world_map",
+        "world_stats",
+        "world_search",
+        "world_nbt",
+    ]
+    assert {item.view_id for item in world_navigation} == {"explorer"}
+    assert [item.workspace_id for item in world_navigation] == [
+        "world_info",
+        "players",
+        "map",
+        "stats",
+        "search",
+        "nbt",
+    ]
+
+
+def test_sidebar_restores_navigation_width_after_auto_expand(
+    qt_app: object,
+) -> None:
+    del qt_app
+    sidebar = QtSidebar(
+        tabs=[{
+            "id": "world_overview",
+            "group": "世界",
+            "label": "概览",
+            "icon": "O",
+        }],
+        translate=_translate,
+        on_tab_select=lambda _view_id: None,
+    )
+
+    sidebar.set_collapsed(True)
+    sidebar.set_collapsed(False)
+
+    button = sidebar._buttons["world_overview"]
+    assert button.maximumWidth() > 44
+    assert button._text_label is not None
+    assert button._text_label.text() == "概览"
+    sidebar.deleteLater()
+
+
+def test_world_context_disables_backup_until_world_is_selected(
+    qt_app: object,
+) -> None:
+    del qt_app
+    recent_paths: list[str] = []
+    bar = QtWorldContextBar(
+        translate=_translate,
+        on_pick_world=lambda: None,
+        on_recent_world=recent_paths.append,
+        on_quick_backup=lambda: None,
+    )
+    backup_button = next(
+        button
+        for button in bar.findChildren(QPushButton)
+        if "快速备份" in button.text()
+    )
+
+    assert not backup_button.isEnabled()
+    bar.set_current_save("C:/worlds/Demo", detail="Minecraft 1.21")
+    assert backup_button.isEnabled()
+    assert bar._world_name.text() == "Demo"
+    assert bar._world_detail.text() == "Minecraft 1.21"
+
+    bar.set_recent_saves([{"path": "C:/worlds/Recent", "name": "最近世界"}])
+    action = bar._recent_menu.actions()[0]
+    action.trigger()
+    assert recent_paths == ["C:/worlds/Recent"]
+    bar.deleteLater()

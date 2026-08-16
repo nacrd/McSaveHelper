@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QPushButton,
+    QStackedWidget,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -24,7 +25,7 @@ from app.presenters.stats_view_state import (
     StatsViewState,
     build_stats_view_state,
 )
-from app.qtui.components.cards import muted_label
+from app.qtui.components.cards import muted_label, placeholder
 from app.qtui.utils import batch_widget_updates, format_size
 from app.services.world_stats_service import (
     PLAYER_SORT_DAMAGE,
@@ -104,17 +105,40 @@ class QtStatsPanel(QWidget):
         self._progress.setValue(0)
         layout.addWidget(self._progress)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._build_overview(), self._tab_label(
+        # 状态：未选世界、等待分析与结果区互斥，避免首屏展示空表格。
+        self._content_stack = QStackedWidget()
+        self._no_world_state = placeholder(
+            "📊",
+            self._t("stats.no_world", "未加载存档"),
+            self._t(
+                "workspace.select_world_hint",
+                "选择包含 level.dat 的 Minecraft Java 世界目录",
+            ),
+            expand=True,
+        )
+        self._ready_state = placeholder(
+            "📈",
+            self._t("stats.not_analyzed", "尚未分析"),
+            self._t(
+                "stats.hint_ready",
+                "设置当前存档后可通过页面标题栏「开始统计」分析世界数据。",
+            ),
+            expand=True,
+        )
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self._build_overview(), self._tab_label(
             "🏠", "stats.tab_overview", "概览"
         ))
-        tabs.addTab(self._build_players(), self._tab_label(
+        self._tabs.addTab(self._build_players(), self._tab_label(
             "🧍", "stats.tab_players", "玩家"
         ))
-        tabs.addTab(self._build_rankings(), self._tab_label(
+        self._tabs.addTab(self._build_rankings(), self._tab_label(
             "🏆", "stats.tab_rankings", "排行"
         ))
-        layout.addWidget(tabs, 1)
+        self._content_stack.addWidget(self._no_world_state)
+        self._content_stack.addWidget(self._ready_state)
+        self._content_stack.addWidget(self._tabs)
+        layout.addWidget(self._content_stack, 1)
 
     def _tab_label(self, icon: str, key: str, default: str) -> str:
         """为统计内部 tab 标题加上图标。"""
@@ -208,6 +232,9 @@ class QtStatsPanel(QWidget):
         key = "stats.not_analyzed" if has_world else "stats.no_world"
         default = "尚未分析" if has_world else "未加载存档"
         self._status.setText(self._t(key, default))
+        self._content_stack.setCurrentWidget(
+            self._ready_state if has_world else self._no_world_state
+        )
 
     def show_analyzing(self) -> None:
         """显示统计分析运行状态。"""
@@ -217,6 +244,8 @@ class QtStatsPanel(QWidget):
         self._progress.setValue(0)
         self._start.setEnabled(False)
         self._cancel.setEnabled(True)
+        if self._stats is None:
+            self._content_stack.setCurrentWidget(self._ready_state)
 
     def update_progress(self, value: float, message: str) -> None:
         """投影 0..1 分析进度。"""
@@ -238,15 +267,22 @@ class QtStatsPanel(QWidget):
         self._fill_rankings(self._view_state)
         self._progress.setValue(100)
         self._status.setText(self._t("stats.done", "统计完成。"))
+        self._content_stack.setCurrentWidget(self._tabs)
 
     def show_error(self) -> None:
         """显示统计失败状态并保留上一份完整结果。"""
         self._status.setText(self._t("stats.error_status", "统计失败。"))
+        self._content_stack.setCurrentWidget(
+            self._tabs if self._stats is not None else self._ready_state
+        )
 
     def show_cancelled(self) -> None:
         """显示用户取消状态。"""
         self._status.setText(self._t("stats.cancelled", "统计已取消。"))
         self._progress.setValue(0)
+        self._content_stack.setCurrentWidget(
+            self._tabs if self._stats is not None else self._ready_state
+        )
         self.set_busy(False)
 
     def set_busy(self, busy: bool) -> None:

@@ -67,96 +67,96 @@ class QtThemeColors:
 
 DARK_THEME = QtThemeColors(
     mode="dark",
-    bg_primary="#111513",
-    bg_secondary="#171C19",
-    bg_card="#1D231F",
-    bg_card_hover="#252D28",
-    bg_elevated="#29312C",
-    border_light="#3B463F",
-    border_dark="#090C0A",
-    border_standard="#647269",
-    border_subtle="#3D4A42",
-    border_glow="#63D5E5",
-    accent="#63C174",
-    accent_hover="#78D28A",
-    accent_dim="#438A52",
-    success="#3FBF8A",
-    warning="#E5B454",
-    error="#E06C75",
-    info="#63D5E5",
-    text_primary="#F2F5F3",
-    text_secondary="#C3CBC6",
-    text_muted="#AAB7AF",
-    text_disabled="#718078",
-    text_invert="#0E1510",
-    terminal_green="#78D28A",
-    terminal_yellow="#E5B454",
-    terminal_red="#E06C75",
-    terminal_blue="#72A7E5",
-    terminal_cyan="#63D5E5",
-    terminal_purple="#B19CD9",
-    mc_stone="#58635D",
-    mc_dirt="#715A45",
-    mc_grass="#63C174",
-    mc_wood="#202722",
-    mc_diamond="#63D5E5",
-    mc_gold="#E5B454",
-    mc_iron="#AEB8B2",
-    mc_coal="#171C19",
-    mc_emerald="#50B86A",
-    mc_redstone="#D75A64",
-    mc_obsidian="#0A0D0B",
-    mc_nether="#7F4148",
-    mc_end="#786A91",
-    log_bg="#0D110F",
-    log_border="#28312B",
+    bg_primary="#11161A",
+    bg_secondary="#171E24",
+    bg_card="#1D262D",
+    bg_card_hover="#26323A",
+    bg_elevated="#2A3740",
+    border_light="#53636C",
+    border_dark="#0A0E11",
+    border_standard="#43535C",
+    border_subtle="#2D3A42",
+    border_glow="#5FE0D0",
+    accent="#57C7B5",
+    accent_hover="#73D8C8",
+    accent_dim="#2F8D83",
+    success="#67D391",
+    warning="#F4C36A",
+    error="#F07D7D",
+    info="#65B9F6",
+    text_primary="#F3F7F8",
+    text_secondary="#C5D1D5",
+    text_muted="#91A1A9",
+    text_disabled="#64737B",
+    text_invert="#0B1215",
+    terminal_green="#73D8C8",
+    terminal_yellow="#F4C36A",
+    terminal_red="#F07D7D",
+    terminal_blue="#65B9F6",
+    terminal_cyan="#5FE0D0",
+    terminal_purple="#C3A8E8",
+    mc_stone="#66747B",
+    mc_dirt="#80634E",
+    mc_grass="#57C7B5",
+    mc_wood="#252F35",
+    mc_diamond="#5FE0D0",
+    mc_gold="#F4C36A",
+    mc_iron="#B5C0C4",
+    mc_coal="#171E24",
+    mc_emerald="#67D391",
+    mc_redstone="#F07D7D",
+    mc_obsidian="#0B1013",
+    mc_nether="#A85B66",
+    mc_end="#8C78B2",
+    log_bg="#0C1115",
+    log_border="#243139",
 )
 
 LIGHT_THEME = QtThemeColors(
     mode="light",
-    bg_primary="#F3F6F4",
-    bg_secondary="#E9EEEB",
+    bg_primary="#F4F7F8",
+    bg_secondary="#EAF0F2",
     bg_card="#FFFFFF",
-    bg_card_hover="#F0F5F1",
+    bg_card_hover="#F0F7F6",
     bg_elevated="#FFFFFF",
-    border_light="#D8E0DB",
-    border_dark="#AEB9B2",
-    border_standard="#7D8C82",
-    border_subtle="#A8B5AD",
-    border_glow="#168FA3",
-    accent="#347A45",
-    accent_hover="#408F53",
-    accent_dim="#2C663A",
-    success="#147A5B",
-    warning="#8A5A08",
-    error="#B64049",
-    info="#0B7182",
-    text_primary="#172019",
-    text_secondary="#425047",
-    text_muted="#4E5E54",
-    text_disabled="#7A867F",
+    border_light="#D8E2E5",
+    border_dark="#AAB9BE",
+    border_standard="#B8C8CD",
+    border_subtle="#D3DEE1",
+    border_glow="#178B7C",
+    accent="#178B7C",
+    accent_hover="#249F90",
+    accent_dim="#BDE7E1",
+    success="#197A52",
+    warning="#A36909",
+    error="#C94F5B",
+    info="#176EA7",
+    text_primary="#172126",
+    text_secondary="#43535A",
+    text_muted="#64767D",
+    text_disabled="#97A5AA",
     text_invert="#FFFFFF",
-    terminal_green="#2A8A2A",
-    terminal_yellow="#B07800",
-    terminal_red="#CC3333",
-    terminal_blue="#3366AA",
-    terminal_cyan="#228888",
-    terminal_purple="#7744AA",
-    mc_stone="#7D8981",
-    mc_dirt="#785D47",
-    mc_grass="#347A45",
-    mc_wood="#E9EEEB",
-    mc_diamond="#168FA3",
-    mc_gold="#A86F12",
-    mc_iron="#7D8981",
-    mc_coal="#D8E0DB",
-    mc_emerald="#2E8A4B",
-    mc_redstone="#B64049",
-    mc_obsidian="#172019",
-    mc_nether="#8F4650",
-    mc_end="#6F5A88",
-    log_bg="#172019",
-    log_border="#7D8C82",
+    terminal_green="#197A52",
+    terminal_yellow="#A36909",
+    terminal_red="#C94F5B",
+    terminal_blue="#176EA7",
+    terminal_cyan="#178B7C",
+    terminal_purple="#7653A6",
+    mc_stone="#74858B",
+    mc_dirt="#86674F",
+    mc_grass="#178B7C",
+    mc_wood="#EAF0F2",
+    mc_diamond="#178B7C",
+    mc_gold="#A36909",
+    mc_iron="#74858B",
+    mc_coal="#D8E2E5",
+    mc_emerald="#197A52",
+    mc_redstone="#C94F5B",
+    mc_obsidian="#172126",
+    mc_nether="#98505A",
+    mc_end="#765C9A",
+    log_bg="#172126",
+    log_border="#B8C8CD",
 )
 
 
@@ -169,6 +169,7 @@ def build_qss(colors: QtThemeColors) -> str:
 QWidget {{
     background-color: {colors.bg_primary};
     color: {colors.text_primary};
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
     font-size: 13px;
 }}
 QMainWindow, QDialog {{
@@ -177,6 +178,51 @@ QMainWindow, QDialog {{
 QWidget#top_bar {{
     background-color: {colors.bg_secondary};
     border-bottom: 1px solid {colors.border_subtle};
+}}
+QFrame#world_context_bar {{
+    background-color: {colors.bg_secondary};
+    border: none;
+}}
+QLabel#world_context_icon {{
+    background-color: {colors.bg_elevated};
+    color: {colors.accent};
+    border: 1px solid {colors.border_standard};
+    border-radius: 8px;
+    font-size: 16px;
+}}
+QLabel#world_context_name {{
+    color: {colors.text_primary};
+    font-size: 14px;
+    font-weight: 600;
+}}
+QLabel[contextStatus="required"] {{
+    color: {colors.warning};
+    border: 1px solid {colors.warning};
+    border-radius: 7px;
+    padding: 2px 7px;
+}}
+QLabel[contextStatus="loading"] {{
+    color: {colors.info};
+    border: 1px solid {colors.info};
+    border-radius: 7px;
+    padding: 2px 7px;
+}}
+QLabel[contextStatus="ready"] {{
+    color: {colors.success};
+    border: 1px solid {colors.success};
+    border-radius: 7px;
+    padding: 2px 7px;
+}}
+QLabel[contextStatus="error"] {{
+    color: {colors.error};
+    border: 1px solid {colors.error};
+    border-radius: 7px;
+    padding: 2px 7px;
+}}
+QLabel[role="navigationGroup"] {{
+    color: {colors.text_muted};
+    font-size: 10px;
+    font-weight: 600;
 }}
 QLabel {{
     background: transparent;
@@ -213,20 +259,20 @@ QLabel[role="result"] {{
 }}
 QFrame[role="card"] {{
     background-color: {colors.bg_card};
-    border: 1px solid {colors.border_standard};
-    border-radius: 6px;
+    border: 1px solid {colors.border_subtle};
+    border-radius: 8px;
 }}
 QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background-color: {colors.bg_elevated};
     border: 1px solid {colors.border_standard};
-    border-radius: 4px;
-    padding: 5px 8px;
+    border-radius: 6px;
+    padding: 7px 10px;
     selection-background-color: {colors.accent};
     selection-color: {colors.text_invert};
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus,
 QComboBox:focus {{
-    border: 2px solid {colors.border_glow};
+    border: 1px solid {colors.border_glow};
 }}
 QLineEdit:disabled, QPlainTextEdit:disabled, QComboBox:disabled,
 QCheckBox:disabled, QPushButton:disabled {{
@@ -242,15 +288,15 @@ QComboBox QAbstractItemView {{
 }}
 QTabWidget::pane {{
     border: 1px solid {colors.border_subtle};
-    border-radius: 6px;
+    border-radius: 8px;
     background: {colors.bg_secondary};
 }}
 QTabBar::tab {{
     background: transparent;
     color: {colors.text_secondary};
     border: 1px solid transparent;
-    border-radius: 4px;
-    padding: 7px 16px;
+    border-radius: 6px;
+    padding: 8px 16px;
     margin-right: 2px;
 }}
 QTabBar::tab:hover {{
@@ -270,9 +316,9 @@ QPushButton {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_standard};
     border-radius: 6px;
-    padding: 10px 16px;
+    padding: 8px 14px;
     color: {colors.text_primary};
-    min-height: 22px;
+    min-height: 28px;
 }}
 QPushButton:hover {{
     background-color: {colors.bg_card_hover};
@@ -324,6 +370,17 @@ QPushButton[role="ghost"]:checked {{
     background-color: {colors.bg_card};
     border-color: {colors.accent};
 }}
+QToolButton {{
+    background-color: transparent;
+    border: 1px solid {colors.border_standard};
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: {colors.text_secondary};
+}}
+QToolButton:hover {{
+    background-color: {colors.bg_card_hover};
+    color: {colors.text_primary};
+}}
 QCheckBox {{
     spacing: 6px;
 }}
@@ -347,7 +404,7 @@ QScrollArea {{
 }}
 QScrollBar:vertical {{
     background: {colors.bg_secondary};
-    width: 10px;
+    width: 9px;
 }}
 QScrollBar::handle:vertical {{
     background: {colors.border_standard};
@@ -359,7 +416,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 }}
 QScrollBar:horizontal {{
     background: {colors.bg_secondary};
-    height: 10px;
+    height: 9px;
 }}
 QScrollBar::handle:horizontal {{
     background: {colors.border_standard};
@@ -410,7 +467,7 @@ QListWidget::item:selected, QTreeWidget::item:selected {{
 QTableWidget {{
     background: {colors.bg_secondary};
     border: 1px solid {colors.border_subtle};
-    border-radius: 5px;
+    border-radius: 7px;
     gridline-color: {colors.border_subtle};
     selection-background-color: {colors.accent_dim};
     selection-color: {colors.text_primary};
@@ -424,7 +481,7 @@ QHeaderView::section {{
     border: none;
     border-bottom: 1px solid {colors.border_subtle};
     border-right: 1px solid {colors.border_subtle};
-    padding: 5px 8px;
+    padding: 7px 8px;
     font-weight: 600;
 }}
 QTableCornerButton::section {{

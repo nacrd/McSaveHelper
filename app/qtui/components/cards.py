@@ -45,6 +45,8 @@ def placeholder(
     title: str = "暂无内容",
     subtitle: str = "请加载数据后查看",
     height: int = 150,
+    *,
+    expand: bool = False,
 ) -> QWidget:
     """创建美化的空状态占位符（与 Flet ``placeholder`` 布局一致）。
 
@@ -53,6 +55,7 @@ def placeholder(
         title: 主标题。
         subtitle: 副标题说明。
         height: 容器高度。
+        expand: 是否填满父内容区并保持内容居中。
 
     Returns:
         QWidget: 居中图标 + 标题 + 副标题的占位容器。
@@ -61,7 +64,14 @@ def placeholder(
 
     colors = get_theme_manager().current
     host = QWidget()
-    host.setFixedHeight(height)
+    if expand:
+        host.setMinimumHeight(height)
+        host.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+    else:
+        host.setFixedHeight(height)
     layout = QVBoxLayout(host)
     layout.setContentsMargins(20, 30, 20, 30)
     layout.setSpacing(0)

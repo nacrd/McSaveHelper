@@ -257,6 +257,18 @@ class QtHost(
         """构建设置视图（由组合根提供端口）。"""
         ...
 
+    def navigate_to(self, navigation_id: str) -> None:
+        """切换到侧边栏导航入口。"""
+        ...
+
+    def set_world_context_status(self, status: str, detail: str = "") -> None:
+        """更新全局世界上下文状态。"""
+        ...
+
+    def set_navigation_badge(self, navigation_id: str, count: int) -> None:
+        """更新侧边栏导航待办徽标。"""
+        ...
+
 
 @dataclass(frozen=True)
 class QtFeatureContext:
@@ -407,6 +419,18 @@ class QtFeatureContext:
     def create_settings_view(self) -> QWidget:
         """构建设置视图。"""
         return self.host.create_settings_view()
+
+    def navigate_to(self, navigation_id: str) -> None:
+        """切换到侧边栏导航入口。"""
+        self.host.navigate_to(navigation_id)
+
+    def set_world_context_status(self, status: str, detail: str = "") -> None:
+        """更新全局世界上下文状态。"""
+        self.host.set_world_context_status(status, detail)
+
+    def set_navigation_badge(self, navigation_id: str, count: int) -> None:
+        """更新侧边栏导航待办徽标。"""
+        self.host.set_navigation_badge(navigation_id, count)
 
     def update_uuid_mappings(self, mappings: dict[str, str]) -> None:
         self.host.update_uuid_mappings(mappings)

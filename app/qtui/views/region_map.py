@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.qtui.components.buttons import btn_danger, btn_ghost, btn_primary
-from app.qtui.components.cards import muted_label, section_title
+from app.qtui.components.cards import muted_label
 from app.qtui.utils import batch_widget_updates
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
 from core.mca.map_models import MapMarker
@@ -97,7 +97,6 @@ class QtRegionMapPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
-        layout.addWidget(section_title(self._t("explorer.tab_map", "地图")))
         layout.addLayout(self._build_toolbar())
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)

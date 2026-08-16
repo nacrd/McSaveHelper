@@ -10,7 +10,6 @@ from typing import Callable, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
-    QLabel,
     QPushButton,
     QStackedWidget,
     QStatusBar,
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 from app.qtui.progress import QtProgressHost
 from app.qtui.sidebar import QtSidebar
 from app.qtui.view_actions import QtViewAction
+from app.qtui.world_context_bar import QtWorldContextBar
 
 Translate = Callable[..., str]
 
@@ -38,6 +38,9 @@ class QtShell(QWidget):
         sidebar: QtSidebar,
         view_stack: QStackedWidget,
         on_view_action: Callable[[QtViewAction], None],
+        on_pick_world: Callable[[], None],
+        on_recent_world: Callable[[str], None],
+        on_quick_backup: Callable[[], None],
     ) -> None:
         """构建壳层。
 
@@ -46,6 +49,9 @@ class QtShell(QWidget):
             sidebar: 侧边栏控件。
             view_stack: 视图堆栈。
             on_view_action: 顶栏动作点击回调。
+            on_pick_world: 选择当前世界回调。
+            on_recent_world: 最近世界选择回调。
+            on_quick_backup: 快速备份回调。
         """
         super().__init__()
         self._translate = translate
@@ -56,23 +62,24 @@ class QtShell(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        # 顶栏
+        # 布局：固定世界上下文栏，右侧承载当前页面主动作。
         top_bar = QWidget()
         top_bar.setObjectName("top_bar")
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(16, 8, 16, 8)
+        top_layout.setContentsMargins(0, 0, 8, 0)
         top_layout.setSpacing(8)
-        self._title_label = QLabel("MCSaveHelper")
-        self._title_label.setStyleSheet(
-            "font-size: 15px; font-weight: 700; font-family: 'Segoe UI', 'Microsoft YaHei';"
+        self._world_context = QtWorldContextBar(
+            translate=translate,
+            on_pick_world=on_pick_world,
+            on_recent_world=on_recent_world,
+            on_quick_backup=on_quick_backup,
         )
-        top_layout.addWidget(self._title_label)
+        top_layout.addWidget(self._world_context, 1)
         self._action_host = QWidget()
         self._action_layout = QHBoxLayout(self._action_host)
         self._action_layout.setContentsMargins(0, 0, 0, 0)
         self._action_layout.setSpacing(6)
         top_layout.addWidget(self._action_host)
-        top_layout.addStretch(1)
         root_layout.addWidget(top_bar)
 
         # 主体
@@ -95,14 +102,27 @@ class QtShell(QWidget):
         """返回进度宿主。"""
         return self._progress
 
-    def set_title(self, text: str) -> None:
-        """设置顶栏标题。"""
-        self._title_label.setText(text)
+    def set_current_save(
+        self,
+        path: Optional[str],
+        *,
+        status: str = "ready",
+        detail: str = "",
+    ) -> None:
+        """更新固定世界上下文。"""
+        self._world_context.set_current_save(
+            path,
+            status=status,
+            detail=detail,
+        )
 
-    def set_current_save(self, path: Optional[str]) -> None:
-        """在顶栏显示当前存档路径。"""
-        del path
-        # 当前存档已由侧边栏展示；顶栏保持标题简洁。
+    def set_world_status(self, status: str, detail: str = "") -> None:
+        """更新当前世界的加载或错误状态。"""
+        self._world_context.set_status(status, detail)
+
+    def set_recent_saves(self, saves: list[dict[str, object]]) -> None:
+        """更新世界上下文栏中的最近世界菜单。"""
+        self._world_context.set_recent_saves(saves)
 
     def set_view_actions(self, actions: list[QtViewAction]) -> None:
         """重建顶栏视图动作按钮。"""

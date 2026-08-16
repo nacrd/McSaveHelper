@@ -23,6 +23,7 @@ from app.qtui.theme import get_theme_manager
 from app.qtui.utils import run_on_ui
 from app.qtui.view_actions import QtViewAction
 from app.qtui.view_manager import QtViewManager
+from app.qtui.registry import QtNavigationDescriptor
 from app.services.ui_delivery import UiDeliveryChannel
 from app.core.save_context_manager import SaveContextManager
 from app.services.item.language_loader import LanguageImportResult
@@ -101,6 +102,7 @@ class QtApplication(QMainWindow):
 
         # ─── 视图管理器与壳层 ──────────────────────
         self.registry = create_qt_registry()
+        self._active_navigation_id: Optional[str] = None
         self._stack = QStackedWidget()
         self.feature_context = QtFeatureContext(self)
         self.view_manager = QtViewManager(
@@ -115,6 +117,9 @@ class QtApplication(QMainWindow):
             sidebar=self.sidebar,
             view_stack=self._stack,
             on_view_action=self._on_view_action,
+            on_pick_world=self._on_pick_current_save,
+            on_recent_world=self._on_recent_save_select,
+            on_quick_backup=self._on_quick_backup,
         )
         self._setup_window()
         self._setup_logging(settings.show_log_panel)
@@ -131,9 +136,9 @@ class QtApplication(QMainWindow):
         self.save_context_manager.initialize()
 
         # ─── 默认视图 ─────────────────────────────
-        first_view_id = self.registry.features[0].view_id
-        self.view_manager.switch_view(first_view_id)
-        self.sidebar.select_tab(first_view_id)
+        self.shell.set_recent_saves(self._recent_saves())
+        first_navigation_id = self.registry.navigation[0].navigation_id
+        self.navigate_to(first_navigation_id)
 
     # ════════════════════════════════════════════
     #  壳层构建
@@ -286,12 +291,62 @@ class QtApplication(QMainWindow):
     #  侧边栏事件
     # ════════════════════════════════════════════
 
-    def _on_tab_select(self, view_id: str) -> None:
-        self.view_manager.switch_view(view_id)
+    def navigate_to(self, navigation_id: str) -> None:
+        """切换到导航入口，并在 Explorer 中打开指定工作区。
+
+        Args:
+            navigation_id: 注册表中的导航入口 id。
+
+        Raises:
+            KeyError: 导航入口不存在。
+        """
+        navigation = self.registry.get_navigation(navigation_id)
+        if navigation is None:
+            raise KeyError(f"未注册的 Qt 导航入口: {navigation_id}")
+        was_created = self.view_manager.get_view(navigation.view_id) is not None
+        self._active_navigation_id = navigation_id
+        self.view_manager.switch_view(navigation.view_id)
+        if not was_created:
+            self._notify_new_view_of_current_save(navigation.view_id)
+        self._select_navigation_workspace(navigation)
+        self.sidebar.select_tab(navigation_id)
+
+    def _on_tab_select(self, navigation_id: str) -> None:
+        self.navigate_to(navigation_id)
 
     def _on_view_changed(self, view_id: str) -> None:
-        self.sidebar.select_tab(view_id)
+        navigation = self.registry.get_navigation(self._active_navigation_id or "")
+        if navigation is None or navigation.view_id != view_id:
+            navigation = self.registry.default_navigation_for_view(view_id)
+            self._active_navigation_id = (
+                navigation.navigation_id if navigation is not None else None
+            )
+        if navigation is not None:
+            self.sidebar.select_tab(navigation.navigation_id)
+            self._select_navigation_workspace(navigation)
         self._refresh_top_actions(view_id)
+
+    def _select_navigation_workspace(
+        self,
+        navigation: QtNavigationDescriptor,
+    ) -> None:
+        """调用页面公开的工作区选择端口。"""
+        if not navigation.workspace_id:
+            return
+        view = self.view_manager.get_view(navigation.view_id)
+        selector = getattr(view, "select_workspace", None)
+        if callable(selector):
+            selector(navigation.workspace_id)
+
+    def _notify_new_view_of_current_save(self, view_id: str) -> None:
+        """为惰性创建的页面补发当前世界上下文。"""
+        path = self.current_save_path
+        if not path:
+            return
+        view = self.view_manager.get_view(view_id)
+        handler = getattr(view, "on_save_selected", None)
+        if callable(handler):
+            handler(path)
 
     def _refresh_top_actions(self, view_id: str) -> None:
         actions = self.view_manager.get_top_actions(view_id)
@@ -309,12 +364,28 @@ class QtApplication(QMainWindow):
     def _on_recent_save_select(self, path: str) -> None:
         self.save_context_manager.on_recent_save_select(path)
 
+    def _on_quick_backup(self) -> None:
+        """从固定世界上下文栏直接启动快速备份。"""
+        if not self.current_save_path:
+            self._on_pick_current_save()
+            return
+        self.navigate_to("backup_center")
+        view = self.view_manager.get_view("backup_center")
+        start = getattr(view, "start_quick_backup", None)
+        if callable(start):
+            start()
+
     def _on_current_save_changed(
         self,
         context: Optional[CurrentSaveContext],
     ) -> None:
         if hasattr(self, "sidebar"):
             self.sidebar.set_current_save(self.current_save_path)
+        if hasattr(self, "shell"):
+            self.shell.set_current_save(
+                self.current_save_path,
+                status="ready" if context is not None else "required",
+            )
         if context is None:
             if hasattr(self, "view_manager"):
                 self.view_manager.notify_save_cleared()
@@ -338,6 +409,18 @@ class QtApplication(QMainWindow):
     def _on_recent_saves_changed(self, _recent: object) -> None:
         if hasattr(self, "sidebar"):
             self.sidebar.set_recent_saves(self._recent_saves())
+        if hasattr(self, "shell"):
+            self.shell.set_recent_saves(self._recent_saves())
+
+    def set_world_context_status(self, status: str, detail: str = "") -> None:
+        """由页面报告世界加载或校验状态。"""
+        if hasattr(self, "shell"):
+            self.shell.set_world_status(status, detail)
+
+    def set_navigation_badge(self, navigation_id: str, count: int) -> None:
+        """更新侧栏导航待办数量。"""
+        if hasattr(self, "sidebar"):
+            self.sidebar.set_badge(navigation_id, count)
 
     def _recent_saves(self) -> list[dict[str, Any]]:
         return [
