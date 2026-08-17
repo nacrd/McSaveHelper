@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDockWidget,
     QFileDialog,
-    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -147,11 +146,8 @@ class QtLogPanel(QDockWidget):
                     ("time", "时间"),
                     ("level", "级别"),
                     ("module", "模块"),
-                    ("logger", "记录器"),
-                    ("process", "进程"),
-                    ("thread", "线程"),
-                    ("exception", "异常"),
                     ("message", "消息"),
+                    ("thread", "线程"),
                 )
             ),
         )
@@ -161,30 +157,14 @@ class QtLogPanel(QDockWidget):
         self._table.setAlternatingRowColors(True)
         self._table.setSortingEnabled(False)
         self._table.clicked.connect(self._on_row_clicked)
-        header = self._table.horizontalHeader()
-        header.setStretchLastSection(True)
-        for column in range(self._model.columnCount() - 1):
-            header.setSectionResizeMode(
-                column,
-                QHeaderView.ResizeMode.Interactive,
-            )
-        header.setSectionResizeMode(
-            self._model.columnCount() - 1,
-            QHeaderView.ResizeMode.Stretch,
-        )
-        for column, width in (
-            (0, 170), (1, 68), (2, 110), (3, 145),
-            (4, 68), (5, 145), (6, 120),
-        ):
-            self._table.setColumnWidth(column, width)
+        self._table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self._table, 4)
 
         detail_label = QLabel(self._t("log_panel.details", "日志详情"))
         layout.addWidget(detail_label)
         self._details = QPlainTextEdit()
         self._details.setReadOnly(True)
-        self._details.setMinimumHeight(120)
-        self._details.setMaximumHeight(280)
+        self._details.setMaximumHeight(150)
         layout.addWidget(self._details, 1)
 
         self._content = QTextEdit()

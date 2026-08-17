@@ -96,29 +96,18 @@ class LogTableModel(QAbstractTableModel):
             return None
         entry = self.entries[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
-            thread = entry.thread_name or "-"
-            if entry.thread_id:
-                thread = f"{thread} [{entry.thread_id}]"
             values = (
-                entry.timestamp.astimezone().strftime(
-                    "%Y-%m-%d %H:%M:%S.%f"
-                )[:-3],
+                entry.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                 entry.category,
-                entry.module or "-",
-                entry.logger_name or "-",
-                str(entry.process_id or "-"),
-                thread,
-                entry.exception_type or "-",
+                entry.module,
                 entry.message,
+                entry.thread_name or str(entry.thread_id),
             )
             return values[index.column()]
         if role == Qt.ItemDataRole.ForegroundRole and index.column() == 1:
             return QBrush(QColor(LOG_COLORS.get(entry.category, "#CFD8DC")))
-        if role == Qt.ItemDataRole.ToolTipRole:
-            if index.column() == 7:
-                return entry.message
-            if index.column() == 6 and entry.stack_trace:
-                return entry.stack_trace
+        if role == Qt.ItemDataRole.ToolTipRole and index.column() == 3:
+            return entry.message
         return None
 
     def headerData(
