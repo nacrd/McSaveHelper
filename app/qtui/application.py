@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from contextlib import ExitStack
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from PySide6.QtCore import QSettings, Qt
-from PySide6.QtGui import QCloseEvent, QResizeEvent
+from PySide6.QtGui import QCloseEvent, QIcon, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -165,6 +166,9 @@ class QtApplication(QMainWindow):
     def _setup_window(self) -> None:
         """设置窗口标题、尺寸与中央壳层。"""
         self.setWindowTitle("MCSaveHelper")
+        icon = QIcon(str(Path(__file__).resolve().parents[2] / "mcsavehelper_icon.ico"))
+        if not icon.isNull():
+            self.setWindowIcon(icon)
         self.setCentralWidget(self.shell)
         self.resize(1180, 760)
         self.setMinimumSize(860, 560)
@@ -229,7 +233,10 @@ class QtApplication(QMainWindow):
                 username=os.environ.get("MCSAVEHELPER_SMTP_USER", ""),
                 sender=os.environ.get("MCSAVEHELPER_SMTP_FROM", ""),
             ))
-        if QSystemTrayIcon.isSystemTrayAvailable():
+        if (
+            QSystemTrayIcon.isSystemTrayAvailable()
+            and not self.windowIcon().isNull()
+        ):
             tray_icon = QSystemTrayIcon(self.windowIcon(), self)
             tray_icon.show()
             self._tray_icon = tray_icon

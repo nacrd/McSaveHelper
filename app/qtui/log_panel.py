@@ -108,6 +108,7 @@ class QtLogPanel(QDockWidget):
         self._translate = translate
         self._alert_dialog: QWidget | None = None
         self._pool = QThreadPool.globalInstance()
+        self._active_workers: dict[int, LogWorker] = {}
         self._generation = 0
         self._disposed = False
         self._live_mode = True
@@ -312,7 +313,7 @@ class QtLogPanel(QDockWidget):
         worker = LogWorker(lambda: query_service.query(query))
         worker.signals.finished.connect(lambda page: self._on_page(generation, page))
         worker.signals.failed.connect(lambda message: self._on_error(generation, message))
-        self._pool.start(worker)
+        self._start_worker(worker)
         now = datetime.now().astimezone()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         stats_start = today_start - timedelta(days=6)
@@ -321,7 +322,32 @@ class QtLogPanel(QDockWidget):
             lambda: query_service.statistics(stats_start, stats_end)
         )
         stats_worker.signals.finished.connect(lambda stats: self._on_stats(generation, stats))
-        self._pool.start(stats_worker)
+        self._start_worker(stats_worker)
+
+    def _start_worker(self, worker: LogWorker) -> None:
+        """Own a Qt runnable until its queued completion signal is handled.
+
+        PySide can otherwise collect a short-lived Python ``QRunnable`` wrapper
+        while the global thread pool still executes it.  Keeping ownership and
+        disabling C++ auto-deletion avoids that cross-runtime lifetime race.
+
+        Args:
+            worker: Prepared log operation worker with result slots connected.
+        """
+        worker_id = id(worker)
+        worker.setAutoDelete(False)
+        self._active_workers[worker_id] = worker
+        worker.signals.finished.connect(
+            lambda _result, key=worker_id: self._release_worker(key)
+        )
+        worker.signals.failed.connect(
+            lambda _message, key=worker_id: self._release_worker(key)
+        )
+        self._pool.start(worker)
+
+    def _release_worker(self, worker_id: int) -> None:
+        """Release a completed runnable on the Qt main thread."""
+        self._active_workers.pop(worker_id, None)
 
     def _on_page(self, generation: int, page: object) -> None:
         if self._disposed or generation != self._generation or not isinstance(page, LogPage):
@@ -488,7 +514,7 @@ class QtLogPanel(QDockWidget):
         worker = LogWorker(lambda: export_service.export_jsonl(query, path))
         worker.signals.finished.connect(self._on_exported)
         worker.signals.failed.connect(self._show_worker_error)
-        self._pool.start(worker)
+        self._start_worker(worker)
 
     def _open_alerts(self) -> None:
         if self._alert_service is None:
@@ -516,7 +542,7 @@ class QtLogPanel(QDockWidget):
         worker = LogWorker(lambda: query_service.aggregate_errors(start, end))
         worker.signals.finished.connect(self._on_aggregates)
         worker.signals.failed.connect(self._show_worker_error)
-        self._pool.start(worker)
+        self._start_worker(worker)
 
     def _on_aggregates(self, result: object) -> None:
         if self._disposed or not isinstance(result, tuple):
@@ -570,7 +596,7 @@ class QtLogPanel(QDockWidget):
         worker = LogWorker(self._clear_logs)
         worker.signals.finished.connect(self._on_cleared)
         worker.signals.failed.connect(self._show_worker_error)
-        self._pool.start(worker)
+        self._start_worker(worker)
 
     def _on_cleared(self, count: object) -> None:
         if self._disposed:

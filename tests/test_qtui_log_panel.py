@@ -4,10 +4,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime
+from PySide6.QtCore import QDateTime, QEventLoop, QTimer
 
 from app.qtui.log_alerts import QtAlertDialog
 from app.qtui.log_panel import QtLogPanel, install_qt_log_handler
+from app.qtui.log_viewer_support import LogWorker
 from app.services.log_alert_service import AlertRule, AlertService
 from app.services.log_query_service import LogQueryService
 from core.logger import logger
@@ -101,4 +102,25 @@ def test_live_record_advances_query_end_time(
 
     assert panel._end_edit.dateTime() > old_end
     panel._live_refresh_timer.stop()
+    panel.dispose()
+
+
+def test_log_worker_is_owned_until_queued_result_is_delivered(
+    qt_app: object,
+) -> None:
+    del qt_app
+    panel = QtLogPanel("日志")
+    loop = QEventLoop()
+    results: list[object] = []
+    worker = LogWorker(lambda: "done")
+    worker.signals.finished.connect(results.append)
+    worker.signals.finished.connect(lambda _result: loop.quit())
+
+    panel._start_worker(worker)
+
+    assert panel._active_workers == {id(worker): worker}
+    QTimer.singleShot(2000, loop.quit)
+    loop.exec()
+    assert results == ["done"]
+    assert panel._active_workers == {}
     panel.dispose()
