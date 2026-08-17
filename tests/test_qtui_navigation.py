@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from PySide6.QtCore import qInstallMessageHandler
-from PySide6.QtWidgets import QApplication, QPushButton
+from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget
 
 from app.qtui.registry import create_qt_registry
+from app.qtui.shell import QtShell
 from app.qtui.sidebar import QtSidebar
 from app.qtui.theme import DARK_THEME, get_theme_manager
+from app.qtui.view_actions import QtViewAction
 from app.qtui.world_context_bar import QtWorldContextBar
 
 
@@ -121,6 +123,32 @@ def test_sidebar_refreshes_inline_colors_after_theme_switch(
     finally:
         manager.set_mode(previous_mode)
         sidebar.deleteLater()
+
+
+def test_shell_projects_initial_action_enabled_state(qt_app: object) -> None:
+    del qt_app
+    sidebar = QtSidebar(
+        tabs=[{"id": "overview", "label": "概览", "icon": "O"}],
+        translate=_translate,
+        on_tab_select=lambda _view_id: None,
+    )
+    shell = QtShell(
+        translate=_translate,
+        sidebar=sidebar,
+        view_stack=QStackedWidget(),
+        on_view_action=lambda _action: None,
+        on_pick_world=lambda: None,
+        on_recent_world=lambda _path: None,
+        on_quick_backup=lambda: None,
+    )
+
+    shell.set_view_actions([
+        QtViewAction("取消迁移", lambda: None, "danger", enabled=False)
+    ])
+
+    assert len(shell._action_buttons) == 1
+    assert shell._action_buttons[0].isEnabled() is False
+    shell.deleteLater()
 
 
 def test_world_context_disables_backup_until_world_is_selected(

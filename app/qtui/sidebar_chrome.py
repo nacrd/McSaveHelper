@@ -63,6 +63,7 @@ def build_brand_block() -> QWidget:
 
 def build_current_save_block(
     current_save_name: str,
+    is_set: bool,
     label: str,
 ) -> QWidget:
     """当前存档块：bg_primary 卡片 + 保存图标 + 标签 + 名称。"""
@@ -90,7 +91,6 @@ def build_current_save_block(
     label_row.addStretch(1)
     layout.addLayout(label_row)
     name = QLabel(current_save_name)
-    is_set = current_save_name != "未设置当前存档"
     name_color = colors.mc_gold if is_set else colors.text_secondary
     name.setStyleSheet(
         f"color: {name_color}; font-size: 13px; font-weight: 600;"
@@ -177,6 +177,7 @@ def build_header_expanded(
     *,
     current_save_name: str,
     current_save_label: str,
+    is_current_save_set: bool,
     set_current_label: str,
     recent_saves_label: str,
     recent_arrow_state: bool,
@@ -196,7 +197,13 @@ def build_header_expanded(
     spacer = QWidget()
     spacer.setFixedHeight(16)
     layout.addWidget(spacer)
-    layout.addWidget(build_current_save_block(current_save_name, current_save_label))
+    layout.addWidget(
+        build_current_save_block(
+            current_save_name,
+            is_current_save_set,
+            current_save_label,
+        )
+    )
     set_button = build_set_current_save_button(on_set_current_save, set_current_label)
     margin_widget = QWidget()
     ml = QVBoxLayout(margin_widget)

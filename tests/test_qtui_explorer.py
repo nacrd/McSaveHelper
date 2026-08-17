@@ -20,6 +20,7 @@ from app.qtui.views.explorer import (
     ExplorerView,
     map_index_progress,
 )
+from app.qtui.icons import glyph
 from app.qtui.views.explorer_tasks import ExplorerWorldSnapshot
 from app.qtui.views.player_tasks import PlayerDetailResult
 from app.services.backup_service import BackupRecord
@@ -523,6 +524,9 @@ def test_explorer_selects_workspace_by_navigation_id(
 
     assert view.active_workspace_id == "map"
     assert view._tabs.currentIndex() == 2
+    assert view._workspace_title.text() == "地图"
+    assert view._workspace_icon.text() == glyph("MAP")
+    assert view._world_label.property("role") == "statusChip"
 
     view.select_workspace("missing")
     assert view.active_workspace_id == "map"
@@ -793,7 +797,7 @@ def test_player_export_writes_summary_file(
     host.save_path = str(output)
     view._export_player_summary()
 
-    assert _wait_until(lambda: output.exists())
+    assert _wait_until(lambda: output.exists() and bool(host.infos))
     payload = output.read_text(encoding="utf-8")
     assert "Alex" in payload
     assert any("导出成功" in title for title, _message in host.infos)

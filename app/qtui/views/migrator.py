@@ -101,11 +101,13 @@ class MigratorView(QScrollArea):
             QtViewAction(
                 self._t("top_bar.start_conversion", "开始转换"),
                 self._start,
+                enabled=self._start_enabled,
             ),
             QtViewAction(
                 self._t("top_bar.cancel_migration", "取消迁移"),
                 self._cancel,
                 "danger",
+                enabled=not self._start_enabled,
             ),
         ]
 

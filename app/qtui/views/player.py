@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSplitter,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -30,7 +31,13 @@ from app.presenters.player_list_state import (
     build_player_list_state,
 )
 from app.qtui.components.buttons import btn_ghost
-from app.qtui.components.cards import muted_label, section_title
+from app.qtui.components.cards import (
+    loading_placeholder,
+    muted_label,
+    placeholder,
+    section_title,
+)
+from app.qtui.icons import glyph
 from app.qtui.utils import batch_widget_updates, run_on_ui
 from app.qtui.views.player_editor import QtPlayerEditor
 from app.qtui.views.player_tasks import PlayerDetailResult
@@ -65,6 +72,7 @@ class QtPlayerPanel(QWidget):
         *,
         on_import_usercache: Command | None = None,
         on_lookup_names: Command | None = None,
+        on_select_save: Command | None = None,
         item_service: ItemService | None = None,
         texture_service: TextureService | None = None,
         player_service: PlayerService | None = None,
@@ -76,6 +84,7 @@ class QtPlayerPanel(QWidget):
         self._on_player_selected = on_player_selected
         self._on_import_usercache = on_import_usercache
         self._on_lookup_names = on_lookup_names
+        self._on_select_save = on_select_save
         self._avatar_service = avatar_service
         self._avatar_state = PlayerAvatarState()
         self._avatar_paths: dict[str, str] = {}
@@ -145,6 +154,67 @@ class QtPlayerPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(0)
+        self._stack = QStackedWidget()
+        state_pages = self._build_state_pages()
+        self._workspace = self._build_workspace()
+        for widget in (*state_pages, self._workspace):
+            self._stack.addWidget(widget)
+        layout.addWidget(self._stack)
+
+    def _build_state_pages(self) -> tuple[QWidget, ...]:
+        """构建未加载、加载中、无数据和错误四种全页状态。"""
+        self._no_world_state = placeholder(
+            icon=glyph("PLAYER"),
+            title=self._t("player.no_world", "加载存档后可查看玩家"),
+            subtitle=self._t(
+                "explorer.select_world_subtitle",
+                "选择包含 level.dat 的 Minecraft 世界目录",
+            ),
+            height=320,
+            expand=True,
+            surface=False,
+            action_text=(
+                self._t("explorer.load_world", "选择存档")
+                if self._on_select_save is not None
+                else ""
+            ),
+            on_action=self._on_select_save,
+        )
+        self._loading_state = loading_placeholder(
+            title=self._t("player.loading_list", "正在加载玩家列表..."),
+            subtitle="",
+            height=320,
+            expand=True,
+            surface=False,
+        )
+        self._no_players_state = placeholder(
+            icon=glyph("PLAYER"),
+            title=self._t("player.no_players", "当前存档没有玩家数据"),
+            subtitle="",
+            height=320,
+            expand=True,
+            surface=False,
+        )
+        self._error_state = placeholder(
+            icon=glyph("ERROR"),
+            title=self._t("player.list_load_error", "玩家列表加载失败"),
+            subtitle="",
+            height=320,
+            expand=True,
+            surface=False,
+        )
+        return (
+            self._no_world_state,
+            self._loading_state,
+            self._no_players_state,
+            self._error_state,
+        )
+
+    def _build_workspace(self) -> QWidget:
+        """构建仅在玩家数据可用时显示的列表与编辑工作区。"""
+        workspace = QWidget()
+        layout = QVBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_player_list())
@@ -153,6 +223,7 @@ class QtPlayerPanel(QWidget):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter)
+        return workspace
 
     def _build_player_list(self) -> QWidget:
         host = QWidget()
@@ -223,6 +294,7 @@ class QtPlayerPanel(QWidget):
         self.set_name_lookup_busy(False)
         self.set_name_lookup_status("")
         self._list.clear()
+        self._filter.clear()
         self._filter.setEnabled(False)
         self._import_usercache_btn.setEnabled(False)
         self._lookup_names_btn.setEnabled(False)
@@ -232,6 +304,7 @@ class QtPlayerPanel(QWidget):
         self._previous.setEnabled(False)
         self._next.setEnabled(False)
         self._editor.show_empty()
+        self._stack.setCurrentWidget(self._loading_state)
 
     def show_players(self, refs: Sequence[PlayerRef]) -> None:
         """投影玩家列表并在有数据时选择首项。"""
@@ -242,6 +315,7 @@ class QtPlayerPanel(QWidget):
         self._lookup_names_btn.setEnabled(not self._name_lookup_pending)
         self._apply_list()
         if self._list.count() > 0:
+            self._stack.setCurrentWidget(self._workspace)
             if self._current_uuid is None:
                 self._list.setCurrentRow(0)
             else:
@@ -252,6 +326,7 @@ class QtPlayerPanel(QWidget):
             self._editor.show_message(self._t(
                 "player.no_players", "当前存档没有玩家数据"
             ))
+            self._stack.setCurrentWidget(self._no_players_state)
 
     def show_empty(self) -> None:
         """恢复未加载世界的空状态。"""
@@ -273,6 +348,7 @@ class QtPlayerPanel(QWidget):
         self._previous.setEnabled(False)
         self._next.setEnabled(False)
         self._editor.show_empty()
+        self._stack.setCurrentWidget(self._no_world_state)
 
     def dispose(self) -> None:
         """释放编辑器与头像回调。"""
@@ -294,6 +370,7 @@ class QtPlayerPanel(QWidget):
         ))
         self._previous.setEnabled(False)
         self._next.setEnabled(False)
+        self._stack.setCurrentWidget(self._error_state)
 
     def show_detail_loading(self, uuid: str) -> None:
         """显示选中玩家详情加载状态。"""

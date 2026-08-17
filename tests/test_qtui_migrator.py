@@ -193,12 +193,20 @@ def test_top_actions_start_and_cancel_commands(
 ) -> None:
     start, cancel = view.get_top_actions()
 
+    assert start.enabled is True
+    assert cancel.enabled is False
+
     start.handler()
     cancel.handler()
 
     assert host.starts == 1
     assert host.cancels == 1
     assert host.warns == [("提示", "当前没有运行中的迁移任务")]
+
+    view.set_start_enabled(False)
+    start, cancel = view.get_top_actions()
+    assert start.enabled is False
+    assert cancel.enabled is True
 
 
 def test_public_path_updates_sync_config(

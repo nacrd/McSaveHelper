@@ -83,6 +83,21 @@ def test_apply_resolved_names_updates_list(panel: QtPlayerPanel) -> None:
     assert panel.player_refs[1].name == "Steve"
 
 
+def test_player_panel_switches_between_full_page_states(
+    panel: QtPlayerPanel,
+) -> None:
+    assert panel._stack.currentWidget() is panel._no_world_state
+
+    panel.show_loading()
+    assert panel._stack.currentWidget() is panel._loading_state
+
+    panel.show_players(())
+    assert panel._stack.currentWidget() is panel._no_players_state
+
+    panel.show_list_error()
+    assert panel._stack.currentWidget() is panel._error_state
+
+
 def test_cached_list_avatar_does_not_submit_duplicate_request(
     qt_app: object,
 ) -> None:

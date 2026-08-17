@@ -19,7 +19,14 @@ from app.presenters.world_info_presenter import (
     build_world_info_sections,
 )
 from app.qtui.components.buttons import btn_ghost, btn_primary
-from app.qtui.components.cards import card, divider, muted_label, section_title
+from app.qtui.components.cards import (
+    card,
+    divider,
+    loading_placeholder,
+    muted_label,
+    placeholder,
+    section_title,
+)
 from app.qtui.icons import glyph
 from core.omni.models import WorldInfo
 
@@ -56,50 +63,36 @@ class QtWorldInfoPanel(QScrollArea):
 
     def show_empty(self) -> None:
         """显示尚未选择世界的空状态（图标 + 标题 + 副标题 + 按钮）。"""
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(20, 40, 20, 40)
-        layout.setSpacing(8)
-        layout.addStretch(1)
-        icon = QLabel(glyph("PACKAGE"))
-        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setStyleSheet("font-size: 44px;")
-        layout.addWidget(icon)
-        title = QLabel(self._t(
-            "explorer.select_world_title",
-            "请先设置当前存档以查看信息",
-        ))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-size: 16px; font-weight: 600;")
-        subtitle = muted_label(self._t(
-            "explorer.select_world_subtitle",
-            "选择包含 level.dat 的 Minecraft 世界目录",
-        ))
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        select_button = btn_primary(
-            f"{glyph('FOLDER_OPEN')}  {self._t('explorer.load_world', '选择存档')}",
-            on_click=self._on_select_save,
+        body = placeholder(
+            icon=glyph("WORLD_INFO"),
+            title=self._t(
+                "explorer.select_world_title",
+                "请先设置当前存档以查看信息",
+            ),
+            subtitle=self._t(
+                "explorer.select_world_subtitle",
+                "选择包含 level.dat 的 Minecraft 世界目录",
+            ),
+            height=320,
+            expand=True,
+            surface=False,
+            action_text=(
+                f"{glyph('FOLDER_OPEN')}  "
+                f"{self._t('explorer.load_world', '选择存档')}"
+            ),
+            on_action=self._on_select_save,
         )
-        button_row = QWidget()
-        button_layout = QHBoxLayout(button_row)
-        button_layout.addStretch(1)
-        button_layout.addWidget(select_button)
-        button_layout.addStretch(1)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addWidget(button_row)
-        layout.addStretch(1)
         self._replace_widget(body)
 
     def show_loading(self, message: str) -> None:
         """显示世界读取中的状态。"""
-        label = muted_label(message)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.addStretch(1)
-        layout.addWidget(label)
-        layout.addStretch(1)
+        body = loading_placeholder(
+            title=message,
+            subtitle="",
+            height=320,
+            expand=True,
+            surface=False,
+        )
         self._replace_widget(body)
 
     def show_info(
@@ -123,22 +116,17 @@ class QtWorldInfoPanel(QScrollArea):
         self._replace_widget(body)
 
     def _show_missing_info(self) -> None:
-        body = QWidget()
-        layout = QVBoxLayout(body)
-        layout.addStretch(1)
-        title = QLabel(self._t(
-            "explorer.info_missing_title", "未找到存档信息"
-        ))
-        title.setProperty("role", "section")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle = muted_label(self._t(
-            "explorer.info_missing_subtitle",
-            "该目录可能不是有效的 Minecraft 世界存档",
-        ))
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addStretch(1)
+        body = placeholder(
+            icon=glyph("WARNING"),
+            title=self._t("explorer.info_missing_title", "未找到存档信息"),
+            subtitle=self._t(
+                "explorer.info_missing_subtitle",
+                "该目录可能不是有效的 Minecraft 世界存档",
+            ),
+            height=320,
+            expand=True,
+            surface=False,
+        )
         self._replace_widget(body)
 
     def _section_card(self, section: InfoSection) -> QWidget:

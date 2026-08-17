@@ -698,6 +698,8 @@ class QtApplication(QMainWindow):
             setter(enabled)
         label = self.translate("top_bar.start_conversion", "开始转换")
         self.shell.set_action_enabled(label, enabled)
+        cancel_label = self.translate("top_bar.cancel_migration", "取消迁移")
+        self.shell.set_action_enabled(cancel_label, not enabled)
 
     def update_migration_progress(self, value: float) -> None:
         """更新状态栏中的迁移进度。"""

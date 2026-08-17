@@ -1,6 +1,8 @@
 """Qt 卡片与标题组件。"""
 from __future__ import annotations
 
+from typing import Callable
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -11,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.qtui.components.buttons import btn_primary
 from app.qtui.icons import glyph
 
 
@@ -56,6 +59,9 @@ def placeholder(
     height: int = 150,
     *,
     expand: bool = False,
+    surface: bool = True,
+    action_text: str = "",
+    on_action: Callable[[], None] | None = None,
 ) -> QWidget:
     """创建美化的空状态占位符（与 Flet ``placeholder`` 布局一致）。
 
@@ -65,12 +71,16 @@ def placeholder(
         subtitle: 副标题说明。
         height: 容器高度。
         expand: 是否填满父内容区并保持内容居中。
+        surface: 是否绘制卡片背景和边框。
+        action_text: 可选主操作文案。
+        on_action: 可选主操作回调。
 
     Returns:
         QWidget: 居中图标 + 标题 + 副标题的占位容器。
     """
     host = QWidget()
     host.setProperty("role", "state")
+    host.setProperty("surface", "raised" if surface else "flat")
     if expand:
         host.setMinimumHeight(height)
         host.setSizePolicy(
@@ -102,6 +112,11 @@ def placeholder(
     sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
     sub.setWordWrap(True)
     layout.addWidget(sub)
+    if action_text and on_action is not None:
+        action = btn_primary(action_text, on_click=on_action)
+        action.setMinimumWidth(120)
+        layout.addSpacing(12)
+        layout.addWidget(action, alignment=Qt.AlignmentFlag.AlignCenter)
     layout.addStretch(1)
     return host
 
@@ -112,6 +127,7 @@ def loading_placeholder(
     height: int = 150,
     *,
     expand: bool = False,
+    surface: bool = True,
 ) -> QWidget:
     """创建统一的加载状态面板。"""
     host = placeholder(
@@ -120,6 +136,7 @@ def loading_placeholder(
         subtitle=subtitle,
         height=height,
         expand=expand,
+        surface=surface,
     )
     layout = host.layout()
     if not isinstance(layout, QVBoxLayout):

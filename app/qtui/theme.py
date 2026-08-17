@@ -272,6 +272,10 @@ QWidget[role="state"] {{
     border: 1px solid {colors.border_subtle};
     border-radius: 7px;
 }}
+QWidget[role="state"][surface="flat"] {{
+    background-color: transparent;
+    border: none;
+}}
 QLabel[role="stateIcon"] {{
     color: {colors.text_muted};
     font-size: 36px;
@@ -445,6 +449,12 @@ QPushButton[role="danger"] {{
     background-color: {colors.error};
     border-color: {colors.border_dark};
     color: {colors.text_invert};
+}}
+QPushButton[role="primary"]:disabled,
+QPushButton[role="danger"]:disabled {{
+    background-color: {colors.bg_secondary};
+    border-color: {colors.border_subtle};
+    color: {colors.text_disabled};
 }}
 QPushButton:focus, QToolButton:focus {{
     border: 1px solid {colors.border_glow};

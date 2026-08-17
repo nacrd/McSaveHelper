@@ -44,6 +44,7 @@ def test_build_qss_defines_status_roles() -> None:
     assert 'QLabel[role="statusChip"]' in qss
     assert 'QWidget[role="interactiveCard"]' in qss
     assert 'QWidget[role="state"]' in qss
+    assert 'QWidget[role="state"][surface="flat"]' in qss
     assert 'QProgressBar[role="stateLoading"]' in qss
     assert 'QTabBar::tab:selected' in qss
     assert 'QListWidget::item:hover' in qss

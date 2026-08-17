@@ -6,14 +6,16 @@ from os.path import normcase
 from pathlib import Path
 from typing import Protocol
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from app.qtui.components.cards import muted_label, title_label
+from app.qtui.components.cards import muted_label
 from app.qtui.context import (
     QtDialogPort,
     QtFileDialogPort,
@@ -177,6 +179,7 @@ class ExplorerView(QWidget):
         ("explorer.tab_search", "搜索"),
         ("explorer.tab_nbt", "NBT"),
     )
+    _TAB_ICONS = ("WORLD_INFO", "PLAYER", "MAP", "STATS", "SEARCH", "NBT")
 
     def __init__(self, app: ExplorerHost) -> None:
         """构建 Explorer 并创建世界读取任务所有者。
@@ -271,6 +274,7 @@ class ExplorerView(QWidget):
             self._export_player_summary,
             on_import_usercache=self._import_usercache,
             on_lookup_names=self._lookup_player_names_online,
+            on_select_save=self.app.save_context_manager.on_import_save,
             item_service=self.app.item,
             texture_service=self.app.texture,
             player_service=self._player_service,
@@ -316,9 +320,8 @@ class ExplorerView(QWidget):
         self._tabs.setCurrentIndex(index)
         if hasattr(self, "_workspace_title"):
             key, default = self._TAB_KEYS[index]
-            self._workspace_title.setText(
-                f"{self._tab_label('', key, default)}"
-            )
+            self._workspace_title.setText(self._t(key, default))
+            self._workspace_icon.setText(glyph(self._TAB_ICONS[index]))
         self._active_workspace_id = workspace_id
         return True
 
@@ -333,16 +336,25 @@ class ExplorerView(QWidget):
 
     def _build_header(self) -> QWidget:
         header = QWidget()
+        header.setObjectName("page_header")
         layout = QHBoxLayout(header)
-        layout.setContentsMargins(0, 0, 0, 6)
-        layout.setSpacing(14)
-        self._workspace_title = title_label(
-            f"⌕  {self._t('explorer.tab_world_info', '概览')}"
+        layout.setContentsMargins(0, 0, 0, 14)
+        layout.setSpacing(12)
+        self._workspace_icon = QLabel(glyph("WORLD_INFO"))
+        self._workspace_icon.setFixedSize(40, 40)
+        self._workspace_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._workspace_icon.setProperty("role", "pageIcon")
+        layout.addWidget(self._workspace_icon)
+        self._workspace_title = QLabel(
+            self._t("explorer.tab_world_info", "存档信息")
         )
+        self._workspace_title.setProperty("role", "title")
         layout.addWidget(self._workspace_title)
         self._world_label = muted_label(self._t(
             "sidebar.no_current_save", "未设置当前存档"
         ))
+        self._world_label.setProperty("role", "statusChip")
+        self._world_label.setProperty("feedbackStatus", "neutral")
         layout.addWidget(self._world_label)
         layout.addStretch(1)
         return header
@@ -878,6 +890,15 @@ class ExplorerView(QWidget):
         detail: str = "",
     ) -> None:
         """向组合根报告状态；测试宿主和旧适配器可暂时不实现。"""
+        feedback_status = {
+            "loading": "pending",
+            "ready": "saved",
+            "error": "failed",
+        }.get(status, "neutral")
+        self._world_label.setProperty("feedbackStatus", feedback_status)
+        style = self._world_label.style()
+        style.unpolish(self._world_label)
+        style.polish(self._world_label)
         set_status = getattr(self.app, "set_world_context_status", None)
         if callable(set_status):
             set_status(status, detail)

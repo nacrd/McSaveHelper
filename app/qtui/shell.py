@@ -137,6 +137,7 @@ class QtShell(QWidget):
             else:
                 button.setProperty("role", "primary")
             button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setEnabled(action.enabled)
             button.clicked.connect(
                 lambda _checked, act=action: self._on_view_action(act)
             )
