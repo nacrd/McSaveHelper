@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Lock
+from types import SimpleNamespace
 
 from PySide6.QtCore import QBuffer, QByteArray
 from PySide6.QtGui import QPixmap
@@ -100,6 +101,37 @@ def test_canvas_coalesces_drag_camera_callbacks(qt_app: object) -> None:
     assert canvas._camera_emit_pending is False
 
 
+def test_canvas_reuses_revision_and_bounds_native_tile_cache(qt_app: object) -> None:
+    del qt_app
+    canvas = QtRegionMapCanvas(lambda *_args: None)
+    pix = QPixmap(32, 32)
+    pix.fill()
+    payload = QByteArray()
+    buffer = QBuffer(payload)
+    buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+    pix.save(buffer, "PNG")
+    png = bytes(payload.data())
+
+    assert canvas.set_tile((0, 0), png, revision=1) is True
+    original = canvas._tiles[(0, 0)]
+    original_bytes = canvas._tile_memory_bytes
+    for _index in range(1000):
+        assert canvas.set_tile((0, 0), b"invalid", revision=1) is True
+
+    assert canvas._tiles[(0, 0)] is original
+    assert canvas._tile_memory_bytes == original_bytes
+
+    canvas.__dict__["_TILE_CACHE_ENTRY_LIMIT"] = 2
+    canvas.__dict__["_TILE_CACHE_MEMORY_LIMIT"] = original_bytes * 2
+    assert canvas.set_tile((1, 0), png, revision=2) is True
+    canvas.set_tile((0, 0), b"invalid", revision=1)
+    assert canvas.set_tile((2, 0), png, revision=3) is True
+
+    assert tuple(canvas._tiles) == ((0, 0), (2, 0))
+    assert (1, 0) not in canvas._tile_revisions
+    assert canvas._tile_memory_bytes <= canvas._TILE_CACHE_MEMORY_LIMIT
+
+
 def test_region_map_coalesces_tile_ready_ui_dispatches(monkeypatch) -> None:
     coordinator = object.__new__(coordinator_module.QtRegionMapCoordinator)
     coordinator._tile_ready_lock = Lock()
@@ -119,3 +151,63 @@ def test_region_map_coalesces_tile_ready_ui_dispatches(monkeypatch) -> None:
 
     assert len(dispatched) == 1
     assert coordinator._pending_tile_ready == {(0, 0), (1, 0)}
+
+
+def test_region_map_flush_applies_only_currently_visible_tiles() -> None:
+    class _Canvas:
+        def __init__(self) -> None:
+            self.applied: list[tuple[tuple[int, int], bytes, int]] = []
+
+        @staticmethod
+        def visible_regions() -> list[tuple[int, int]]:
+            return [(0, 0)]
+
+        def set_tile(
+            self,
+            coord: tuple[int, int],
+            png: bytes,
+            *,
+            revision: int,
+        ) -> None:
+            self.applied.append((coord, png, revision))
+
+    class _MapService:
+        def __init__(self) -> None:
+            self.snapshot_coords: list[tuple[int, int]] = []
+
+        def get_topview_snapshot(
+            self,
+            coords: list[tuple[int, int]],
+        ) -> tuple[
+            int,
+            dict[tuple[int, int], bytes],
+            dict[tuple[int, int], int],
+        ]:
+            self.snapshot_coords = list(coords)
+            return 1, {(0, 0): b"visible"}, {(0, 0): 7}
+
+    class _Requests:
+        def __init__(self) -> None:
+            self.completed: list[tuple[int, int]] = []
+
+        def on_tile_ready(self, coord: tuple[int, int]) -> bool:
+            self.completed.append(coord)
+            return False
+
+    canvas = _Canvas()
+    service = _MapService()
+    requests = _Requests()
+    coordinator = object.__new__(coordinator_module.QtRegionMapCoordinator)
+    coordinator._tile_ready_lock = Lock()
+    coordinator._pending_tile_ready = {(0, 0), (99, 99)}
+    coordinator._tile_ready_dispatch_pending = True
+    coordinator._closed = False
+    coordinator.__dict__["panel"] = SimpleNamespace(canvas=canvas)
+    coordinator.__dict__["_map_service"] = service
+    coordinator.__dict__["_tile_requests"] = requests
+
+    coordinator._flush_tile_ready()
+
+    assert service.snapshot_coords == [(0, 0)]
+    assert canvas.applied == [((0, 0), b"visible", 7)]
+    assert set(requests.completed) == {(0, 0), (99, 99)}

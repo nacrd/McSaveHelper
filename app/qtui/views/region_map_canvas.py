@@ -1,6 +1,7 @@
 """Qt 区域地图画布：活动热力 + 俯视瓦片。"""
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Callable, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QPoint, QRect, QTimer, Qt
@@ -31,6 +32,8 @@ MarkerSelected = Callable[[Optional[MapMarker]], None]
 class QtRegionMapCanvas(QWidget):
     """用区域文件大小绘制热力格子，并支持平移、缩放与选择。"""
 
+    _TILE_CACHE_ENTRY_LIMIT: int = 1024
+    _TILE_CACHE_MEMORY_LIMIT: int = 64 * 1024 * 1024
     _MIN_SCALE = 0.01
     _MAX_SCALE = 4.0
     _DEFAULT_SCALE = 0.08
@@ -72,7 +75,9 @@ class QtRegionMapCanvas(QWidget):
         self._camera_timer.timeout.connect(self._flush_camera)
         self._max_size = 1
         self._display_mode = "activity"
-        self._tiles: dict[RegionCoord, QPixmap] = {}
+        self._tiles: OrderedDict[RegionCoord, QPixmap] = OrderedDict()
+        self._tile_revisions: dict[RegionCoord, int] = {}
+        self._tile_memory_bytes = 0
         self.setMinimumSize(320, 240)
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -117,6 +122,8 @@ class QtRegionMapCanvas(QWidget):
         self._regions = {}
         self._markers = ()
         self._tiles.clear()
+        self._tile_revisions.clear()
+        self._tile_memory_bytes = 0
         self._selected = None
         self._selected_marker_id = None
         self._max_size = 1
@@ -204,18 +211,68 @@ class QtRegionMapCanvas(QWidget):
         """返回当前显示模式。"""
         return self._display_mode
 
-    def set_tile(self, coord: RegionCoord, png_bytes: bytes) -> None:
-        """写入或替换一个区域的俯视 PNG 瓦片。"""
+    def set_tile(
+        self,
+        coord: RegionCoord,
+        png_bytes: bytes,
+        *,
+        revision: int = 0,
+    ) -> bool:
+        """写入或替换一个区域的俯视 PNG 瓦片。
+
+        Args:
+            coord: 区域坐标。
+            png_bytes: 完整 PNG 数据。
+            revision: 服务端单调修订号；相同修订不会重复原生解码。
+
+        Returns:
+            成功加入缓存或命中已有修订时为 True，PNG 无效时为 False。
+        """
+        current_revision = self._tile_revisions.get(coord)
+        if revision > 0 and current_revision == revision and coord in self._tiles:
+            self._tiles.move_to_end(coord)
+            return True
         pixmap = QPixmap()
         if not pixmap.loadFromData(png_bytes):
-            return
+            return False
+        previous = self._tiles.pop(coord, None)
+        if previous is not None:
+            self._tile_memory_bytes -= self._pixmap_bytes(previous)
         self._tiles[coord] = pixmap
+        if revision > 0:
+            self._tile_revisions[coord] = revision
+        else:
+            self._tile_revisions.pop(coord, None)
+        self._tile_memory_bytes += self._pixmap_bytes(pixmap)
+        self._trim_tile_cache()
         self.update()
+        return True
 
     def clear_tiles(self) -> None:
         """清空俯视瓦片缓存。"""
         self._tiles.clear()
+        self._tile_revisions.clear()
+        self._tile_memory_bytes = 0
         self.update()
+
+    @staticmethod
+    def _pixmap_bytes(pixmap: QPixmap) -> int:
+        """估算 QPixmap 的原生像素存储大小。"""
+        bytes_per_pixel = max(1, (max(1, pixmap.depth()) + 7) // 8)
+        return max(0, pixmap.width()) * max(0, pixmap.height()) * bytes_per_pixel
+
+    def _trim_tile_cache(self) -> None:
+        """按条目数和原生像素字节数限制画布 LRU。"""
+        while (
+            self._tiles
+            and (
+                len(self._tiles) > self._TILE_CACHE_ENTRY_LIMIT
+                or self._tile_memory_bytes > self._TILE_CACHE_MEMORY_LIMIT
+            )
+        ):
+            old_coord, old_pixmap = self._tiles.popitem(last=False)
+            self._tile_memory_bytes -= self._pixmap_bytes(old_pixmap)
+            self._tile_revisions.pop(old_coord, None)
 
     def visible_regions(self) -> list[RegionCoord]:
         """返回当前视口相交的区域坐标（按中心距离排序）。"""

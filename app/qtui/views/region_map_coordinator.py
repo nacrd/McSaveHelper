@@ -648,6 +648,9 @@ class QtRegionMapCoordinator:
         visible = self.panel.canvas.visible_regions()
         if not visible:
             return
+        _generation, tiles, revisions = self._map_service.get_topview_snapshot(
+            visible
+        )
         tile_scale = self.panel.canvas.tile_scale
         needed = self._tile_requests.visible_base_tile_size(tile_scale)
         center = (
@@ -656,9 +659,13 @@ class QtRegionMapCoordinator:
         )
         missing: list[tuple[int, int]] = []
         for coord in visible:
-            raw = self._map_service.get_topview_tile(coord)
+            raw = tiles.get(coord)
             if raw:
-                self.panel.canvas.set_tile(coord, raw)
+                self.panel.canvas.set_tile(
+                    coord,
+                    raw,
+                    revision=revisions.get(coord, 0),
+                )
             if not self._map_service.has_topview_tile(coord, min_size=needed):
                 missing.append(coord)
         if missing:
@@ -694,11 +701,20 @@ class QtRegionMapCoordinator:
             self._tile_ready_dispatch_pending = False
             if self._closed:
                 return
+        visible = set(self.panel.canvas.visible_regions())
+        visible_ready = [coord for coord in coords if coord in visible]
+        _generation, tiles, revisions = self._map_service.get_topview_snapshot(
+            visible_ready
+        )
         should_retry = False
         for coord in coords:
-            raw = self._map_service.get_topview_tile(coord)
+            raw = tiles.get(coord)
             if raw:
-                self.panel.canvas.set_tile(coord, raw)
+                self.panel.canvas.set_tile(
+                    coord,
+                    raw,
+                    revision=revisions.get(coord, 0),
+                )
             should_retry = self._tile_requests.on_tile_ready(coord) or should_retry
         if should_retry:
             self._request_visible_tiles()
