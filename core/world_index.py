@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
+from fnmatch import fnmatch
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -192,38 +195,28 @@ class WorldIndexBuilder:
         )
         return operation.build(world_path)
 
-    @staticmethod
-    def _iter_glob_files(
-        directories: Iterable[Path],
-        pattern: str,
-    ) -> Iterable[Path]:
-        """逐项枚举直接文件，避免渐进扫描先物化整个目录。"""
-        for directory in directories:
-            if not directory.is_dir():
-                continue
-            try:
-                for path in directory.glob(pattern):
-                    if path.is_file():
-                        yield path
-            except OSError:
-                continue
-
     def _build_snapshot(
         self,
         world: Path,
         probe: WorldIndexProbe,
     ) -> WorldIndexSnapshot:
         """从同一份文件探针派生路径索引，避免扫描与签名发生漂移。"""
-        player_files = self._player_files_from_probe(world, probe)
-        region_files = self._region_files_from_probe(world, probe)
-        data_files = self._data_files_from_probe(world, probe)
-        stats_files = self._probe_paths(world, probe, "stats")
-        advancement_files = self._probe_paths(
-            world,
-            probe,
-            "advancements",
+        paths = self._probe_paths_by_category(world, probe)
+        player_files = tuple(sorted(
+            self._select_player_files(world, paths["players"]).items()
+        ))
+        region_files = tuple(
+            path for path in paths["regions"]
+            if path.suffix.lower() == ".mca"
         )
-        usercache = self._load_usercache(world, player_files, probe)
+        data_files = self._select_data_files(world, paths["data"])
+        stats_files = paths["stats"]
+        advancement_files = paths["advancements"]
+        usercache = self._load_usercache(
+            world,
+            player_files,
+            paths["usercache"],
+        )
         dimensions = self._build_dimensions(region_files, probe.dimensions)
         return WorldIndexSnapshot(
             world_path=world,
@@ -275,13 +268,13 @@ class WorldIndexBuilder:
         self,
         world: Path,
         player_files: tuple[tuple[str, Path], ...],
-        probe: WorldIndexProbe,
+        available_paths: tuple[Path, ...],
     ) -> tuple[tuple[str, str], ...]:
         """Load names from the exact candidates represented by the probe."""
         from core.omni.world_scanner import load_usercache_candidate
 
         player_ids = {player_id for player_id, _path in player_files}
-        available = set(self._probe_paths(world, probe, "usercache"))
+        available = set(available_paths)
         candidates = tuple(
             path for path in self._usercache_candidates(world)
             if path in available
@@ -321,6 +314,30 @@ class WorldIndexBuilder:
             if self._path_category(stamp.relative_path) == category
         }
         return tuple(sorted(paths, key=str))
+
+    def _probe_paths_by_category(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+    ) -> dict[str, tuple[Path, ...]]:
+        """Partition all probe paths in one pass for a cold snapshot build."""
+        categories: dict[str, set[Path]] = {
+            "players": set(),
+            "regions": set(),
+            "data": set(),
+            "stats": set(),
+            "advancements": set(),
+            "usercache": set(),
+        }
+        for stamp in probe.files:
+            category = self._path_category(stamp.relative_path)
+            paths = categories.get(category)
+            if paths is not None:
+                paths.add(self._path_from_probe(world, stamp.relative_path))
+        return {
+            category: tuple(sorted(paths, key=str))
+            for category, paths in categories.items()
+        }
 
     @staticmethod
     def _path_from_probe(world: Path, value: str) -> Path:
@@ -379,11 +396,11 @@ class WorldIndexBuilder:
     def _current_probe(self, world: Path) -> WorldIndexProbe:
         """为已经验证的世界生成当前完整探针。"""
         dimensions = tuple(discover_dimension_region_dirs(world))
-        paths, active_dimensions = self._enumerate_stamped_paths(
+        stamps, active_dimensions = self._enumerate_stamped_paths(
             world,
             dimensions,
         )
-        return self._probe_from_paths(world, paths, active_dimensions)
+        return self._probe_from_stamps(world, stamps, active_dimensions)
 
     def is_cache_guard_current(self, snapshot: WorldIndexSnapshot) -> bool:
         """Return whether index membership can be reused without a full scan.
@@ -475,7 +492,7 @@ class WorldIndexBuilder:
             usercache = self._load_usercache(
                 world,
                 player_files,
-                current_probe,
+                self._probe_paths(world, current_probe, "usercache"),
             )
 
         return WorldIndexSnapshot(
@@ -555,9 +572,14 @@ class WorldIndexBuilder:
         self,
         world: Path,
         dimensions: tuple[DimensionRegionDirectory, ...],
-    ) -> tuple[tuple[Path, ...], tuple[DimensionRegionDirectory, ...]]:
-        """枚举会影响读模型的全部文件路径。"""
-        player_files = self._glob_files(find_player_data_dirs(world), "*.dat")
+    ) -> tuple[tuple[WorldFileStamp, ...], tuple[DimensionRegionDirectory, ...]]:
+        """枚举相关文件，并复用安全检查读取的属性生成签名。"""
+        metadata_by_path: dict[Path, os.stat_result] = {}
+        player_files = self._glob_files(
+            find_player_data_dirs(world),
+            "*.dat",
+            metadata_by_path,
+        )
         region_files = tuple(
             sorted(
                 {
@@ -568,31 +590,49 @@ class WorldIndexBuilder:
                 key=str,
             )
         )
-        data_files = self._glob_files(find_data_dirs(world), "*.dat")
-        stats_files = self._glob_files(find_stats_dirs(world), "*.json")
+        data_files = self._glob_files(
+            find_data_dirs(world),
+            "*.dat",
+            metadata_by_path,
+        )
+        stats_files = self._glob_files(
+            find_stats_dirs(world),
+            "*.json",
+            metadata_by_path,
+        )
         advancement_files = self._glob_files(
             find_advancements_dirs(world),
             "*.json",
+            metadata_by_path,
         )
-        paths = self._stamped_paths(
+        stamps_by_path = self._stamped_paths(
             world,
             player_files=player_files,
             region_files=region_files,
             data_files=data_files,
             stats_files=stats_files,
             advancement_files=advancement_files,
+            metadata_by_path=metadata_by_path,
         )
-        safe_paths = set(paths)
+        safe_paths = set(stamps_by_path)
         active_region_dirs = {
             path.parent for path in region_files if path in safe_paths
         }
-        paths = tuple(sorted({*paths, *active_region_dirs}, key=str))
+        directory_safety: dict[Path, bool] = {}
+        for region_dir in active_region_dirs:
+            stamp = self._world_content_stamp(
+                world,
+                region_dir,
+                directory_safety,
+            )
+            if stamp is not None:
+                stamps_by_path[region_dir] = stamp
         active_dimensions = tuple(
             dimension
             for dimension in dimensions
             if dimension.region_dir in active_region_dirs
         )
-        return paths, active_dimensions
+        return tuple(sorted(stamps_by_path.values())), active_dimensions
 
     def _build_dimensions(
         self,
@@ -637,8 +677,9 @@ class WorldIndexBuilder:
         stats_files: Iterable[Path],
         advancement_files: Iterable[Path],
         extra_paths: Iterable[Path] = (),
-    ) -> tuple[Path, ...]:
-        """汇总所有会改变读模型的文件路径。"""
+        metadata_by_path: Optional[dict[Path, os.stat_result]] = None,
+    ) -> dict[Path, WorldFileStamp]:
+        """汇总安全路径，并保留其已读取的文件属性。"""
         world_paths = {
             world / "level.dat",
             *player_files,
@@ -649,24 +690,79 @@ class WorldIndexBuilder:
             *extra_paths,
         }
         directory_safety: dict[Path, bool] = {}
-        paths = {
-            path for path in world_paths
-            if self._is_safe_world_content_path_cached(
+        known_metadata = metadata_by_path or {}
+        stamps_by_path: dict[Path, WorldFileStamp] = {}
+        for path in world_paths:
+            stamp = self._world_content_stamp(
                 world,
                 path,
                 directory_safety,
+                metadata=known_metadata.get(path),
             )
-        }
+            if stamp is not None:
+                stamps_by_path[path] = stamp
         for candidate in self._usercache_candidates(world):
             if self._is_lexically_within(candidate, world):
-                if self._is_safe_world_content_path(world, candidate):
-                    paths.add(candidate)
+                stamp = self._world_content_stamp(
+                    world,
+                    candidate,
+                    directory_safety,
+                )
             else:
-                paths.add(candidate)
-        return tuple(sorted(
-            (path for path in paths if path.is_file() or path.is_dir()),
-            key=str,
-        ))
+                stamp = self._external_file_stamp(world, candidate)
+            if stamp is not None:
+                stamps_by_path[candidate] = stamp
+        return stamps_by_path
+
+    @staticmethod
+    def _world_content_stamp(
+        world: Path,
+        path: Path,
+        directory_safety: dict[Path, bool],
+        *,
+        metadata: Optional[os.stat_result] = None,
+    ) -> Optional[WorldFileStamp]:
+        """Return one stamp after validating a world-contained path once."""
+        candidate = path.absolute()
+        metadata = WorldIndexBuilder._safe_world_content_metadata(
+            world,
+            candidate,
+            directory_safety,
+            metadata=metadata,
+        )
+        if metadata is None:
+            return None
+        relative_path = os.path.relpath(candidate, world).replace(os.sep, "/")
+        return WorldIndexBuilder._stamp_from_metadata(relative_path, metadata)
+
+    @staticmethod
+    def _external_file_stamp(
+        world: Path,
+        path: Path,
+    ) -> Optional[WorldFileStamp]:
+        """Return a stamp for an explicit external user-cache candidate."""
+        try:
+            metadata = path.stat()
+        except OSError:
+            return None
+        if not stat.S_ISREG(metadata.st_mode):
+            return None
+        return WorldIndexBuilder._stamp_from_metadata(
+            WorldIndexBuilder._display_path(world, path),
+            metadata,
+        )
+
+    @staticmethod
+    def _stamp_from_metadata(
+        relative_path: str,
+        metadata: os.stat_result,
+    ) -> WorldFileStamp:
+        """Build a deterministic file stamp without another filesystem call."""
+        return WorldFileStamp(
+            relative_path=relative_path,
+            size=metadata.st_size,
+            modified_ns=metadata.st_mtime_ns,
+        )
 
     def _build_cache_guard(
         self,
@@ -701,12 +797,38 @@ class WorldIndexBuilder:
         directory_safety: dict[Path, bool],
     ) -> bool:
         """Validate each parent chain once, then reject linked leaf files."""
+        return WorldIndexBuilder._safe_world_content_metadata(
+            world,
+            path,
+            directory_safety,
+        ) is not None
+
+    @staticmethod
+    def _safe_world_content_metadata(
+        world: Path,
+        path: Path,
+        directory_safety: dict[Path, bool],
+        *,
+        metadata: Optional[os.stat_result] = None,
+    ) -> Optional[os.stat_result]:
+        """Validate one path and return the metadata already read for it."""
         candidate = path.absolute()
-        try:
-            candidate.relative_to(world)
-        except ValueError:
-            return False
-        is_directory = candidate.is_dir()
+        if metadata is None:
+            try:
+                metadata = candidate.lstat()
+            except OSError:
+                return None
+        file_attributes = getattr(metadata, "st_file_attributes", 0)
+        reparse_attribute = getattr(
+            stat,
+            "FILE_ATTRIBUTE_REPARSE_POINT",
+            0x400,
+        )
+        if stat.S_ISLNK(metadata.st_mode) or file_attributes & reparse_attribute:
+            return None
+        is_directory = stat.S_ISDIR(metadata.st_mode)
+        if not is_directory and not stat.S_ISREG(metadata.st_mode):
+            return None
         directory = candidate if is_directory else candidate.parent
         is_safe_directory = directory_safety.get(directory)
         if is_safe_directory is None:
@@ -716,12 +838,8 @@ class WorldIndexBuilder:
             )
             directory_safety[directory] = is_safe_directory
         if not is_safe_directory:
-            return False
-        if not is_directory:
-            is_junction = getattr(candidate, "is_junction", lambda: False)
-            if candidate.is_symlink() or bool(is_junction()):
-                return False
-        return True
+            return None
+        return metadata
 
     @staticmethod
     def _is_safe_world_directory(world: Path, directory: Path) -> bool:
@@ -752,38 +870,15 @@ class WorldIndexBuilder:
             return False
 
     @staticmethod
-    def _probe_from_paths(
-        world: Path,
-        paths: Iterable[Path],
-        dimensions: tuple[DimensionRegionDirectory, ...],
-    ) -> WorldIndexProbe:
-        """为有序路径生成确定性 SHA-256 签名。"""
-        stamps: list[WorldFileStamp] = []
-        for path in paths:
-            try:
-                stats = path.stat()
-                relative = WorldIndexBuilder._display_path(world, path)
-                stamps.append(
-                    WorldFileStamp(
-                        relative_path=relative,
-                        size=stats.st_size,
-                        modified_ns=stats.st_mtime_ns,
-                    )
-                )
-            except OSError:
-                continue
-        stamps.sort()
-        return WorldIndexBuilder._probe_from_stamps(world, stamps, dimensions)
-
-    @staticmethod
     def _probe_from_stamps(
         world: Path,
-        stamps: list[WorldFileStamp],
+        stamps: Iterable[WorldFileStamp],
         dimensions: tuple[DimensionRegionDirectory, ...],
     ) -> WorldIndexProbe:
         """从已读取的文件签名生成确定性探针。"""
+        ordered_stamps = tuple(sorted(stamps))
         digest = hashlib.sha256()
-        for stamp in stamps:
+        for stamp in ordered_stamps:
             digest.update(
                 f"{stamp.relative_path}\0{stamp.size}\0{stamp.modified_ns}\n".encode(
                     "utf-8"
@@ -799,7 +894,7 @@ class WorldIndexBuilder:
             )
         return WorldIndexProbe(
             digest.hexdigest(),
-            tuple(stamps),
+            ordered_stamps,
             dimensions,
         )
 
@@ -818,9 +913,28 @@ class WorldIndexBuilder:
     def _glob_files(
         directories: Iterable[Path],
         pattern: str,
+        metadata_by_path: Optional[dict[Path, os.stat_result]] = None,
     ) -> tuple[Path, ...]:
-        """确定性枚举存在目录中的直接文件。"""
-        files = set(WorldIndexBuilder._iter_glob_files(directories, pattern))
+        """Enumerate direct files and retain their non-following metadata."""
+        files: set[Path] = set()
+        for directory in directories:
+            try:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if not fnmatch(entry.name, pattern):
+                            continue
+                        try:
+                            metadata = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if not stat.S_ISREG(metadata.st_mode):
+                            continue
+                        path = directory / entry.name
+                        files.add(path)
+                        if metadata_by_path is not None:
+                            metadata_by_path[path] = metadata
+            except OSError:
+                continue
         return tuple(sorted(files, key=str))
 
     @staticmethod

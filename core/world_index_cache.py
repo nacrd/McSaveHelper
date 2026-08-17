@@ -88,8 +88,9 @@ def _cache_watch_directories(
 ) -> tuple[Path, ...]:
     """Collect existing and expected directories affecting membership."""
     directories = _fixed_watch_directories(world)
-    for path in indexed_paths:
-        _add_world_ancestors(world, path.parent, directories)
+    indexed_parents = {path.parent for path in indexed_paths}
+    for parent in indexed_parents:
+        _add_world_ancestors(world, parent, directories)
     for region_dir in dimension_region_dirs:
         _add_world_ancestors(world, region_dir, directories)
     _add_dimension_topology(world, directories)

@@ -1,9 +1,11 @@
 """可取消的 WorldIndex 渐进构建协议与批次实现。"""
 from __future__ import annotations
 
+import os
 import stat
 from dataclasses import dataclass
 from enum import Enum
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable, Optional
 
@@ -22,6 +24,7 @@ from core.utils import (
 if TYPE_CHECKING:
     from core.world_index import (
         WorldIndexBuilder,
+        WorldFileStamp,
         WorldIndexProbe,
         WorldIndexSnapshot,
     )
@@ -94,8 +97,11 @@ class ProgressiveWorldIndexBuild:
         )
         self._check_cancel()
         dimensions = tuple(discover_dimension_region_dirs(world))
-        paths, active_dimensions = self._enumerate_paths(world, dimensions)
-        probe = self._probe_paths(world, paths, active_dimensions)
+        paths, stamps, active_dimensions = self._enumerate_paths(
+            world,
+            dimensions,
+        )
+        probe = self._probe_stamps(world, stamps, active_dimensions)
         self._check_cancel()
         self._publish(
             WorldIndexProgressFrame(
@@ -137,27 +143,39 @@ class ProgressiveWorldIndexBuild:
         self,
         world: Path,
         dimensions: tuple[DimensionRegionDirectory, ...],
-    ) -> tuple[tuple[Path, ...], tuple[DimensionRegionDirectory, ...]]:
+    ) -> tuple[
+        tuple[Path, ...],
+        tuple[WorldFileStamp, ...],
+        tuple[DimensionRegionDirectory, ...],
+    ]:
         """分批枚举并验证影响索引的路径。"""
         paths: set[Path] = set()
+        stamps_by_path: dict[Path, WorldFileStamp] = {}
         directory_safety: dict[Path, bool] = {}
         discovered = 0
         pending = 0
 
-        def collect(path: Path, *, allow_external: bool = False) -> None:
+        def collect(
+            path: Path,
+            *,
+            allow_external: bool = False,
+            metadata: Optional[os.stat_result] = None,
+        ) -> None:
             nonlocal discovered, pending
             self._check_cancel()
             discovered += 1
             if allow_external:
-                is_accepted = path.is_file()
+                stamp = self._builder._external_file_stamp(world, path)
             else:
-                is_accepted = self._is_safe_path(
+                stamp = self._builder._world_content_stamp(
                     world,
                     path,
                     directory_safety,
+                    metadata=metadata,
                 )
-            if is_accepted:
+            if stamp is not None:
                 paths.add(path)
+                stamps_by_path[path] = stamp
             pending += 1
             if pending >= self._batch_size:
                 self._publish_discovery(world, discovered, len(paths))
@@ -165,8 +183,8 @@ class ProgressiveWorldIndexBuild:
 
         collect(world / "level.dat")
         for directories, pattern in self._path_sources(world):
-            for path in self._iter_glob_files(directories, pattern):
-                collect(path)
+            for path, metadata in self._iter_glob_files(directories, pattern):
+                collect(path, metadata=metadata)
         for dimension in dimensions:
             for path in scan_region_dir(dimension.region_dir):
                 collect(path)
@@ -180,38 +198,25 @@ class ProgressiveWorldIndexBuild:
         active_region_dirs = {
             path.parent for path in paths if path.suffix.lower() == ".mca"
         }
-        paths.update(active_region_dirs)
+        for region_dir in active_region_dirs:
+            stamp = self._builder._world_content_stamp(
+                world,
+                region_dir,
+                directory_safety,
+            )
+            if stamp is not None:
+                paths.add(region_dir)
+                stamps_by_path[region_dir] = stamp
         active_dimensions = tuple(
             dimension
             for dimension in dimensions
             if dimension.region_dir in active_region_dirs
         )
-        return tuple(sorted(paths, key=str)), active_dimensions
-
-    def _is_safe_path(
-        self,
-        world: Path,
-        path: Path,
-        directory_safety: dict[Path, bool],
-    ) -> bool:
-        """用一次 lstat 验证世界内常规文件及其父目录。"""
-        candidate = path.absolute()
-        try:
-            candidate.relative_to(world)
-            metadata = candidate.lstat()
-        except (OSError, ValueError):
-            return False
-        if not stat.S_ISREG(metadata.st_mode):
-            return False
-        directory = candidate.parent
-        is_safe_directory = directory_safety.get(directory)
-        if is_safe_directory is None:
-            is_safe_directory = self._builder._is_safe_world_directory(
-                world,
-                directory,
-            )
-            directory_safety[directory] = is_safe_directory
-        return is_safe_directory
+        return (
+            tuple(sorted(paths, key=str)),
+            tuple(sorted(stamps_by_path.values())),
+            active_dimensions,
+        )
 
     @staticmethod
     def _path_sources(
@@ -229,14 +234,20 @@ class ProgressiveWorldIndexBuild:
     def _iter_glob_files(
         directories: Iterable[Path],
         pattern: str,
-    ) -> Iterable[Path]:
-        """逐项枚举直接文件，避免先物化整个目录。"""
+    ) -> Iterable[tuple[Path, os.stat_result]]:
+        """逐项枚举直接文件及属性，避免后续重复访问文件系统。"""
         for directory in directories:
-            if not directory.is_dir():
-                continue
             try:
-                for path in directory.glob(pattern):
-                    yield path
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if not fnmatch(entry.name, pattern):
+                            continue
+                        try:
+                            metadata = entry.stat(follow_symlinks=False)
+                        except OSError:
+                            continue
+                        if stat.S_ISREG(metadata.st_mode):
+                            yield directory / entry.name, metadata
             except OSError:
                 continue
 
@@ -258,30 +269,16 @@ class ProgressiveWorldIndexBuild:
             )
         )
 
-    def _probe_paths(
+    def _probe_stamps(
         self,
         world: Path,
-        paths: tuple[Path, ...],
+        stamps: tuple[WorldFileStamp, ...],
         dimensions: tuple[DimensionRegionDirectory, ...],
     ) -> WorldIndexProbe:
-        """分批读取文件属性并生成最终探针。"""
-        from core.world_index import WorldFileStamp
-
-        stamps: list[WorldFileStamp] = []
-        total = len(paths)
-        for index, path in enumerate(paths, start=1):
+        """分批确认已读取的文件签名并生成最终探针。"""
+        total = len(stamps)
+        for index in range(1, total + 1):
             self._check_cancel()
-            try:
-                stats = path.stat()
-                stamps.append(
-                    WorldFileStamp(
-                        self._builder._display_path(world, path),
-                        stats.st_size,
-                        stats.st_mtime_ns,
-                    )
-                )
-            except OSError:
-                continue
             if index % self._batch_size == 0 or index == total:
                 self._publish(
                     WorldIndexProgressFrame(
@@ -290,10 +287,9 @@ class ProgressiveWorldIndexBuild:
                         index,
                         total,
                         total,
-                        len(stamps),
+                        index,
                     )
                 )
-        stamps.sort()
         return self._builder._probe_from_stamps(world, stamps, dimensions)
 
 

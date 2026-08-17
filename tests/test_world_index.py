@@ -280,6 +280,34 @@ def test_builder_reuses_probe_dimension_descriptors(
     assert snapshot.dimensions[0].region_files == snapshot.region_files
 
 
+@pytest.mark.parametrize("progressive", [False, True])
+def test_builder_reuses_scandir_metadata_for_bulk_files(
+    tmp_path: Path,
+    monkeypatch,
+    progressive: bool,
+) -> None:
+    world = _world(tmp_path)
+    stats_dir = world / "stats"
+    original_lstat = Path.lstat
+    bulk_lstat_calls = 0
+
+    def counting_lstat(path: Path):
+        nonlocal bulk_lstat_calls
+        if path.parent == stats_dir:
+            bulk_lstat_calls += 1
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", counting_lstat)
+    builder = WorldIndexBuilder()
+
+    if progressive:
+        builder.build_progressive(world, batch_size=1)
+    else:
+        builder.build(world)
+
+    assert bulk_lstat_calls == 0
+
+
 def test_builder_excludes_region_deleted_during_probe(
     tmp_path: Path,
     monkeypatch,
