@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QDateTime, QEventLoop, QTimer
+from PySide6.QtCore import QDateTime, QEventLoop, QTimer, Qt
 
 from app.qtui.log_alerts import QtAlertDialog
 from app.qtui.log_panel import QtLogPanel, install_qt_log_handler
@@ -13,7 +13,12 @@ from app.services.log_alert_service import AlertRule, AlertService
 from app.services.log_query_service import LogQueryService
 from core.logger import logger
 from core.logging.models import LogLevel, LogRecord
-from core.logging.storage import JsonlLogStore, LogStatistics, LogTrendPoint
+from core.logging.storage import (
+    JsonlLogStore,
+    LogStatistics,
+    LogTrendPoint,
+    StoredLog,
+)
 
 
 def test_log_panel_appends_escaped_text_and_bounds_history(qt_app: object) -> None:
@@ -123,4 +128,50 @@ def test_log_worker_is_owned_until_queued_result_is_delivered(
     loop.exec()
     assert results == ["done"]
     assert panel._active_workers == {}
+    panel.dispose()
+
+
+def test_log_table_exposes_runtime_context_and_exception_details(
+    qt_app: object,
+) -> None:
+    del qt_app
+    panel = QtLogPanel("日志")
+    entry = StoredLog(
+        record_id="test:0",
+        source_file="app.jsonl",
+        source_offset=0,
+        timestamp=datetime(2026, 1, 2, 3, 4, 5, 678000),
+        timestamp_utc_us=0,
+        level="ERROR",
+        category="ERROR",
+        module="Core",
+        logger_name="core.worker",
+        process_id=1234,
+        thread_id=5678,
+        thread_name="worker-1",
+        message="请求失败",
+        exception_type="TimeoutError",
+        exception_message="deadline exceeded",
+        stack_trace="Traceback...",
+    )
+    panel._model.replace((entry,))
+
+    values = [
+        panel._model.data(panel._model.index(0, column))
+        for column in range(panel._model.columnCount())
+    ]
+
+    assert values == [
+        "2026-01-02 03:04:05.678",
+        "ERROR",
+        "Core",
+        "core.worker",
+        "1234",
+        "worker-1 [5678]",
+        "TimeoutError",
+        "请求失败",
+    ]
+    assert panel._model.data(
+        panel._model.index(0, 6), Qt.ItemDataRole.ToolTipRole
+    ) == "Traceback..."
     panel.dispose()

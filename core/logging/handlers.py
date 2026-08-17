@@ -1,4 +1,5 @@
 """Log handlers: base, console, file, UI."""
+import json
 import os
 import sys
 from pathlib import Path
@@ -85,15 +86,35 @@ class ConsoleHandler(LogHandler):
         if not self.can_handle(record):
             return
         color = self._COLORS.get(record.level, "")
-        ts = record.timestamp.strftime("%H:%M:%S")
+        ts = record.timestamp.strftime("%H:%M:%S.%f")[:-3]
         module_str = f" [{record.module}]" if record.module else ""
+        logger_str = f" [logger={record.logger_name}]" if record.logger_name else ""
+        thread_name = record.thread_name or "-"
+        context = (
+            f" [pid={record.process_id}]"
+            f" [thread={thread_name}:{record.thread_id}]"
+        )
         msg = record.format_text(
             include_timestamp=False, include_module=False, include_level=False
         )
         output = (
-            f"{color}[{ts}] [{record.level.name}]{module_str} "
+            f"{color}[{ts}] [{record.level.name}]{module_str}"
+            f"{logger_str}{context} "
             f"{msg}{self._RESET}"
         )
+        if record.extra:
+            try:
+                extra = json.dumps(
+                    record.extra,
+                    ensure_ascii=False,
+                    default=str,
+                    separators=(",", ":"),
+                )
+            except (TypeError, ValueError):
+                extra = str(record.extra)
+            output += f" extra={extra}"
+        if record.stack_trace:
+            output += f"\n{record.stack_trace.rstrip()}"
         if record.level >= LogLevel.ERROR:
             print(output, file=sys.__stderr__)
         else:
