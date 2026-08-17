@@ -8,6 +8,7 @@ from concurrent.futures import CancelledError
 
 import pytest
 
+import app.services.execution_runtime as execution_runtime_module
 from app.services.execution_runtime import (
     DEFAULT_MAX_RUNTIME_WORKERS,
     ExecutionLane,
@@ -65,6 +66,62 @@ def test_submit_returns_result_and_releases_capacity() -> None:
         assert snapshot.queue_wait_max_ms >= 0.0
     finally:
         runtime.shutdown(wait=True)
+
+
+def test_runtime_logs_submission_and_visible_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[tuple[str, str, dict[str, object]]] = []
+
+    class LogCollector:
+        def debug(
+            self,
+            message: str,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            events.append(("debug", message % args, kwargs))
+
+        def info(
+            self,
+            message: str,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            events.append(("info", message % args, kwargs))
+
+        def error(
+            self,
+            message: str,
+            *args: object,
+            **kwargs: object,
+        ) -> None:
+            events.append(("error", message % args, kwargs))
+
+    monkeypatch.setattr(
+        execution_runtime_module,
+        "_RUNTIME_LOGGER",
+        LogCollector(),
+    )
+    runtime = _single_lane_runtime(queue_capacity=0)
+    try:
+        handle = runtime.submit(
+            "load_world",
+            lambda context: "ready",
+            priority=TaskPriority.VISIBLE,
+            feature="explorer",
+            world_id="world",
+        )
+        assert handle.result(timeout=1) == "ready"
+    finally:
+        runtime.shutdown(wait=True)
+
+    assert [event[0] for event in events] == ["debug", "info"]
+    assert "后台任务已提交: load_world" in events[0][1]
+    assert "后台任务结束: load_world [ok]" in events[1][1]
+    log_extra = events[1][2]["extra"]
+    assert isinstance(log_extra, dict)
+    assert log_extra["_mc_module"] == "Task.explorer"
 
 
 def test_submit_releases_capacity_when_metadata_copy_fails() -> None:

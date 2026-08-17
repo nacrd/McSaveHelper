@@ -420,6 +420,7 @@ class QtApplication(QMainWindow):
         navigation = self.registry.get_navigation(navigation_id)
         if navigation is None:
             raise KeyError(f"未注册的 Qt 导航入口: {navigation_id}")
+        previous_navigation_id = self._active_navigation_id
         was_created = self.view_manager.get_view(navigation.view_id) is not None
         self._active_navigation_id = navigation_id
         self.view_manager.switch_view(navigation.view_id)
@@ -427,6 +428,19 @@ class QtApplication(QMainWindow):
             self._notify_new_view_of_current_save(navigation.view_id)
         self._select_navigation_workspace(navigation)
         self.sidebar.select_tab(navigation_id)
+        if previous_navigation_id != navigation_id:
+            logger.info(
+                f"页面切换: {previous_navigation_id or 'startup'} -> "
+                f"{navigation_id}",
+                module="Navigation",
+                extra={
+                    "from": previous_navigation_id or "",
+                    "to": navigation_id,
+                    "view": navigation.view_id,
+                    "workspace": navigation.workspace_id or "",
+                    "created": not was_created,
+                },
+            )
 
     def _on_tab_select(self, navigation_id: str) -> None:
         self.navigate_to(navigation_id)
@@ -470,7 +484,24 @@ class QtApplication(QMainWindow):
         self.shell.set_view_actions(actions)
 
     def _on_view_action(self, action: QtViewAction) -> None:
-        action.handler()
+        logger.info(
+            f"执行页面操作: {action.label}",
+            module="Navigation",
+            extra={
+                "navigation": self._active_navigation_id or "",
+                "action": action.label,
+                "style": action.style,
+            },
+        )
+        try:
+            action.handler()
+        except Exception:
+            logger.error(
+                f"页面操作失败: {action.label}",
+                module="Navigation",
+                exc_info=True,
+            )
+            raise
 
     def _on_import_save(self) -> None:
         self.save_context_manager.on_import_save()
@@ -496,6 +527,18 @@ class QtApplication(QMainWindow):
         self,
         context: Optional[CurrentSaveContext],
     ) -> None:
+        if context is None:
+            logger.info("已清除当前存档", module="SaveContext")
+        else:
+            logger.info(
+                f"当前存档已切换: {context.name}",
+                module="SaveContext",
+                extra={
+                    "name": context.name,
+                    "path": context.display_path,
+                    "valid": context.is_valid,
+                },
+            )
         if hasattr(self, "sidebar"):
             self.sidebar.set_current_save(self.current_save_path)
         if hasattr(self, "shell"):
@@ -531,6 +574,12 @@ class QtApplication(QMainWindow):
 
     def set_world_context_status(self, status: str, detail: str = "") -> None:
         """由页面报告世界加载或校验状态。"""
+        logger.debug(
+            f"存档上下文状态: {status}"
+            + (f" ({detail})" if detail else ""),
+            module="SaveContext",
+            extra={"status": status, "detail": detail},
+        )
         if hasattr(self, "shell"):
             self.shell.set_world_status(status, detail)
 
@@ -746,6 +795,14 @@ class QtApplication(QMainWindow):
         if self._shutdown_started:
             return
         self._shutdown_started = True
+        logger.info(
+            "MCSaveHelper Qt 应用开始退出",
+            module="QtApp",
+            extra={
+                "active_navigation": self._active_navigation_id or "",
+                "active_tasks": self.services.execution_runtime.active_task_count,
+            },
+        )
         self._qt_settings.setValue("log_viewer/main_window_state", self.saveState())
         self._qt_settings.sync()
         logger.remove_handler(self._qt_log_handler)

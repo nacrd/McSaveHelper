@@ -1,6 +1,7 @@
 """Explicit construction of application services."""
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -212,10 +213,26 @@ class ServiceFactories:
 
 
 def _create(service_name: str, factory: Callable[..., Any], *args: Any) -> Any:
+    started = time.perf_counter()
     try:
-        return factory(*args)
+        service = factory(*args)
     except Exception as exc:
+        logger.error(
+            f"应用服务初始化失败: {service_name}",
+            module="ServiceBootstrap",
+            extra={"service": service_name},
+            exc_info=True,
+        )
         raise ServiceInitializationError(service_name, exc) from exc
+    logger.debug(
+        f"应用服务已初始化: {service_name}",
+        module="ServiceBootstrap",
+        extra={
+            "service": service_name,
+            "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+        },
+    )
+    return service
 
 
 def _close_partial_services(
@@ -396,7 +413,7 @@ def create_app_services(
             execution_runtime,
         )
         auto_language_import = active_auto_language_import
-        return AppServices(
+        services = AppServices(
             config=config,
             i18n=i18n,
             migration=migration,
@@ -422,6 +439,12 @@ def create_app_services(
             log_export=log_export,
             log_alerts=log_alerts,
         )
+        logger.info(
+            "应用服务装配完成",
+            module="ServiceBootstrap",
+            extra={"service_count": len(AppServices.__dataclass_fields__)},
+        )
+        return services
     except Exception:
         _close_partial_services(
             execution_runtime,

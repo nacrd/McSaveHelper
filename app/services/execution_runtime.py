@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 import queue
 import threading
@@ -25,6 +26,7 @@ from app.services.operation_progress import (
 
 ResultT = TypeVar("ResultT")
 OperationRecordSink = Callable[[OperationRecord], None]
+_RUNTIME_LOGGER = logging.getLogger("mcsavehelper.runtime")
 
 # The application owns one runtime.  Keep a process-visible budget for its
 # lazily-created lane workers so a permissive per-lane configuration cannot
@@ -1025,6 +1027,7 @@ class ExecutionRuntime:
                 finally:
                     timing.mark_finished()
 
+            self._log_task_submitted(context, lane, priority)
             future = self._submit_locked(
                 state,
                 lane,
@@ -1164,10 +1167,7 @@ class ExecutionRuntime:
         outcome: OperationOutcome,
         error: Optional[BaseException],
     ) -> None:
-        """向可选接收器发布一次任务终态，不影响任务主要语义。"""
-        sink = self._operation_sink
-        if sink is None:
-            return
+        """记录任务终态，并向可选指标接收器发布。"""
         queue_wait_ms, run_ms = timing.snapshot()
         metadata = dict(context.metadata)
         metadata.update(
@@ -1194,11 +1194,73 @@ class ExecutionRuntime:
             outcome=outcome,
             metadata=metadata,
         )
+        self._log_task_finished(record, priority, error)
+        sink = self._operation_sink
+        if sink is None:
+            return
         try:
             sink(record)
         except Exception:
             # Observability is best-effort and must not change task results.
             pass
+
+    @staticmethod
+    def _log_task_submitted(
+        context: OperationContext,
+        lane: ExecutionLane,
+        priority: TaskPriority,
+    ) -> None:
+        """记录所有统一运行时任务的提交事件。"""
+        _RUNTIME_LOGGER.debug(
+            "后台任务已提交: %s",
+            context.operation,
+            extra={
+                "_mc_module": f"Task.{context.feature}",
+                "_mc_extra": {
+                    "task_id": context.task_id,
+                    "operation": context.operation,
+                    "feature": context.feature,
+                    "world_id": context.world_id,
+                    "lane": lane.value,
+                    "priority": priority.name.lower(),
+                    "generation": context.generation,
+                },
+            },
+        )
+
+    @staticmethod
+    def _log_task_finished(
+        record: OperationRecord,
+        priority: TaskPriority,
+        error: Optional[BaseException],
+    ) -> None:
+        """按任务终态选择日志级别并保留异常堆栈。"""
+        operation = str(record.metadata.get("operation", record.operation_id))
+        message = (
+            f"后台任务结束: {operation} [{record.outcome.value}] "
+            f"排队 {record.queue_wait_ms:.1f}ms / 执行 {record.run_ms:.1f}ms"
+        )
+        log_extra = {
+            "_mc_module": f"Task.{record.feature}",
+            "_mc_extra": record.to_dict(),
+        }
+        if error is not None:
+            _RUNTIME_LOGGER.error(
+                message,
+                exc_info=(type(error), error, error.__traceback__),
+                extra=log_extra,
+            )
+            return
+        if record.outcome is OperationOutcome.CANCELLED:
+            _RUNTIME_LOGGER.info(message, extra=log_extra)
+            return
+        if record.outcome is OperationOutcome.ERROR:
+            _RUNTIME_LOGGER.error(message, extra=log_extra)
+            return
+        if priority <= TaskPriority.INTERACTIVE:
+            _RUNTIME_LOGGER.info(message, extra=log_extra)
+        else:
+            _RUNTIME_LOGGER.debug(message, extra=log_extra)
 
     @staticmethod
     def _future_error(future: Future[object]) -> Optional[BaseException]:
