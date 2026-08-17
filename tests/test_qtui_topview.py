@@ -80,6 +80,35 @@ def test_canvas_tile_scale_and_grid_thresholds(qt_app: object) -> None:
     assert canvas.tile_scale >= canvas._BLOCK_GRID_TILE_SCALE
 
 
+def test_canvas_culls_large_region_inventory_by_viewport(qt_app: object) -> None:
+    del qt_app
+    canvas = QtRegionMapCanvas(lambda *_args: None)
+    canvas.resize(512, 512)
+    regions = {
+        (index + 10_000, 10_000): index + 1
+        for index in range(20_000)
+    }
+    regions.update({
+        (-1, -1): 1,
+        (-1, 0): 1,
+        (0, -1): 1,
+        (0, 0): 1,
+    })
+    canvas.set_regions(regions)
+    canvas.set_camera(0.0, 0.0, 1.0)
+
+    visible = canvas.visible_regions()
+    cached_snapshot = canvas._visible_cache
+
+    assert set(visible) == {(-1, -1), (-1, 0), (0, -1), (0, 0)}
+    assert len(visible) == 4
+    assert canvas.visible_regions() == visible
+    assert canvas._visible_cache is cached_snapshot
+
+    canvas.set_regions({(0, 0): 1})
+    assert canvas._visible_cache_key is None
+
+
 def test_canvas_coalesces_drag_camera_callbacks(qt_app: object) -> None:
     del qt_app
     events: list[tuple[float, float, float]] = []

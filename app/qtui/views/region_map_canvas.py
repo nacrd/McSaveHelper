@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import math
 from typing import Callable, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QPoint, QRect, QTimer, Qt
@@ -58,6 +59,8 @@ class QtRegionMapCanvas(QWidget):
         self._on_camera_changed = on_camera_changed
         self._on_marker_selected = on_marker_selected
         self._regions: dict[RegionCoord, int] = {}
+        self._visible_cache_key: tuple[object, ...] | None = None
+        self._visible_cache: tuple[RegionCoord, ...] = ()
         self._markers: tuple[MapMarker, ...] = ()
         self._selected: Optional[RegionCoord] = None
         self._selected_marker_id: Optional[str] = None
@@ -112,6 +115,7 @@ class QtRegionMapCanvas(QWidget):
     def set_regions(self, regions: Mapping[RegionCoord, int]) -> None:
         """替换区域大小数据并尽量保持选择。"""
         self._regions = dict(regions)
+        self._invalidate_visible_cache()
         self._max_size = max(self._regions.values(), default=1)
         if self._selected is not None and self._selected not in self._regions:
             self._selected = None
@@ -125,6 +129,7 @@ class QtRegionMapCanvas(QWidget):
         self._camera_timer.stop()
         self._camera_emit_pending = False
         self._regions = {}
+        self._invalidate_visible_cache()
         self._markers = ()
         self._tiles.clear()
         self._tile_revisions.clear()
@@ -281,21 +286,71 @@ class QtRegionMapCanvas(QWidget):
 
     def visible_regions(self) -> list[RegionCoord]:
         """返回当前视口相交的区域坐标（按中心距离排序）。"""
-        cell = max(2.0, BLOCKS_PER_REGION * self._scale)
+        cache_key = self._visible_region_cache_key()
+        if cache_key == self._visible_cache_key:
+            return list(self._visible_cache)
+        visible = self._compute_visible_regions()
+        self._visible_cache_key = cache_key
+        self._visible_cache = tuple(visible)
+        return visible
+
+    def _compute_visible_regions(self) -> list[RegionCoord]:
+        """按视口边界筛选区域，避免逐帧扫描整个存档。"""
         visible: list[tuple[float, RegionCoord]] = []
         center = (
             int(self._center_x // BLOCKS_PER_REGION),
             int(self._center_z // BLOCKS_PER_REGION),
         )
-        view = self.rect()
-        for coord in self._regions:
-            rect = self._region_screen_rect(coord[0], coord[1], cell)
-            if not rect.intersects(view):
+        min_x, max_x, min_z, max_z = self._visible_region_bounds()
+        candidate_count = (max_x - min_x + 1) * (max_z - min_z + 1)
+        grid_limit = min(200_000, max(1, len(self._regions) * 2))
+        use_grid = candidate_count <= grid_limit
+        if use_grid:
+            candidates = (
+                (region_x, region_z)
+                for region_x in range(min_x, max_x + 1)
+                for region_z in range(min_z, max_z + 1)
+            )
+        else:
+            candidates = (
+                coord
+                for coord in self._regions
+                if min_x <= coord[0] <= max_x
+                and min_z <= coord[1] <= max_z
+            )
+        for coord in candidates:
+            if coord not in self._regions:
                 continue
             dist = abs(coord[0] - center[0]) + abs(coord[1] - center[1])
             visible.append((float(dist), coord))
         visible.sort(key=lambda item: item[0])
         return [coord for _dist, coord in visible]
+
+    def _visible_region_cache_key(self) -> tuple[object, ...]:
+        """返回影响视口候选集合的稳定键。"""
+        return (
+            self.width(),
+            self.height(),
+            self._center_x,
+            self._center_z,
+            self._scale,
+        )
+
+    def _visible_region_bounds(self) -> tuple[int, int, int, int]:
+        """返回可能与视口相交的区域坐标边界。"""
+        scale = max(self._scale, self._MIN_SCALE)
+        half_width = self.width() / (2.0 * scale)
+        half_height = self.height() / (2.0 * scale)
+        min_x = math.floor((self._center_x - half_width) / BLOCKS_PER_REGION)
+        max_x = math.floor((self._center_x + half_width) / BLOCKS_PER_REGION)
+        min_z = math.floor((self._center_z - half_height) / BLOCKS_PER_REGION)
+        max_z = math.floor((self._center_z + half_height) / BLOCKS_PER_REGION)
+        return int(min_x), int(max_x), int(min_z), int(max_z)
+
+    def _invalidate_visible_cache(self) -> None:
+        """使区域数据变化后的可见坐标快照失效。"""
+        self._visible_cache_key = None
+        self._visible_cache = ()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         """绘制背景、热力/俯视瓦片、网格与选中边框。"""
@@ -308,10 +363,9 @@ class QtRegionMapCanvas(QWidget):
             painter.end()
             return
         use_tiles = self._display_mode == "topview"
-        for coord, size in self._regions.items():
+        for coord in self.visible_regions():
+            size = self._regions[coord]
             rect = self._region_screen_rect(coord[0], coord[1], cell)
-            if not rect.intersects(self.rect()):
-                continue
             tile = self._tiles.get(coord) if use_tiles else None
             if tile is not None and not tile.isNull():
                 painter.drawPixmap(rect, tile)
@@ -338,16 +392,13 @@ class QtRegionMapCanvas(QWidget):
         show_block = tile_scale >= self._BLOCK_GRID_TILE_SCALE
         if not show_chunk:
             return
-        view = self.rect()
         chunk_pen = QPen(QColor(255, 255, 255, 40), 1)
         block_pen = QPen(QColor(255, 255, 255, 28), 1)
-        for coord in self._regions:
+        for coord in self.visible_regions():
             cell_px = max(2.0, BLOCKS_PER_REGION * self._scale)
             rect = self._region_screen_rect(
                 coord[0], coord[1], cell_px
             )
-            if not rect.intersects(view):
-                continue
             painter.setPen(chunk_pen)
             for i in range(1, CHUNKS_PER_REGION):
                 x = rect.left() + (i / CHUNKS_PER_REGION) * rect.width()
