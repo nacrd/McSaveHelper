@@ -1,10 +1,298 @@
 """Top-view cache completeness tests."""
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+import threading
+from typing import Any, Callable, Optional
 
 import pytest
 
 from core.mca import topview_renderer
+
+
+def _observed_waiter_cancel_check(
+    observed: threading.Event,
+    cancelled: Optional[threading.Event] = None,
+) -> Callable[[], bool]:
+    checks = 0
+
+    def check() -> bool:
+        nonlocal checks
+        checks += 1
+        if checks >= 3:
+            observed.set()
+        return cancelled is not None and cancelled.is_set()
+
+    return check
+
+
+def test_concurrent_equal_tiles_share_one_render(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    started = threading.Event()
+    release = threading.Event()
+    waiter_checks = [threading.Event() for _ in range(3)]
+    render_calls = 0
+    calls_lock = threading.Lock()
+
+    def fake_render(*args: Any) -> bytes:
+        nonlocal render_calls
+        with calls_lock:
+            render_calls += 1
+        args[5].append(True)
+        started.set()
+        assert release.wait(2.0)
+        return b"shared-png"
+
+    monkeypatch.setattr(topview_renderer, "_render_topview_png", fake_render)
+
+    statuses = [[] for _ in range(4)]
+    waiter_probes = [
+        _observed_waiter_cancel_check(event) for event in waiter_checks
+    ]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        owner = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+            status_out=statuses[0],
+        )
+        assert started.wait(1.0)
+        waiters = [
+            executor.submit(
+                topview_renderer.render_region_topview,
+                region_path,
+                64,
+                use_disk_cache=False,
+                cancel_check=waiter_probes[index],
+                status_out=statuses[index + 1],
+            )
+            for index in range(3)
+        ]
+        assert all(event.wait(1.0) for event in waiter_checks)
+        release.set()
+        results = [owner.result(timeout=1.0)] + [
+            waiter.result(timeout=1.0) for waiter in waiters
+        ]
+
+    assert results == [b"shared-png"] * 4
+    assert statuses == [[True]] * 4
+    assert render_calls == 1
+
+
+def test_cancelled_waiter_leaves_shared_render_running(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    started = threading.Event()
+    release = threading.Event()
+    waiter_checked = threading.Event()
+    waiter_cancelled = threading.Event()
+
+    def fake_render(*_args: Any) -> bytes:
+        started.set()
+        assert release.wait(2.0)
+        return b"owner-png"
+
+    monkeypatch.setattr(topview_renderer, "_render_topview_png", fake_render)
+    waiter_cancel_check = _observed_waiter_cancel_check(
+        waiter_checked,
+        waiter_cancelled,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        owner = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+        )
+        assert started.wait(1.0)
+        waiter = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+            cancel_check=waiter_cancel_check,
+        )
+        assert waiter_checked.wait(1.0)
+        waiter_cancelled.set()
+        assert waiter.result(timeout=1.0) is None
+        release.set()
+        assert owner.result(timeout=1.0) == b"owner-png"
+
+
+def test_cancelled_owner_does_not_cancel_active_waiter(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    started = threading.Event()
+    check_shared_cancel = threading.Event()
+    shared_cancel_checked = threading.Event()
+    release = threading.Event()
+    owner_cancelled = threading.Event()
+    waiter_checked = threading.Event()
+
+    def fake_render(*args: Any) -> bytes:
+        shared_cancel_check = args[3]
+        started.set()
+        assert check_shared_cancel.wait(2.0)
+        assert shared_cancel_check() is False
+        shared_cancel_checked.set()
+        assert release.wait(2.0)
+        return b"waiter-png"
+
+    monkeypatch.setattr(topview_renderer, "_render_topview_png", fake_render)
+    waiter_cancel_check = _observed_waiter_cancel_check(waiter_checked)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        owner = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+            cancel_check=owner_cancelled.is_set,
+        )
+        assert started.wait(1.0)
+        waiter = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+            cancel_check=waiter_cancel_check,
+        )
+        assert waiter_checked.wait(1.0)
+        owner_cancelled.set()
+        check_shared_cancel.set()
+        assert shared_cancel_checked.wait(1.0)
+        release.set()
+
+        assert owner.result(timeout=1.0) is None
+        assert waiter.result(timeout=1.0) == b"waiter-png"
+
+
+def test_failed_owner_wakes_waiter_and_allows_retry(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    started = threading.Event()
+    release = threading.Event()
+    waiter_checked = threading.Event()
+    render_calls = 0
+
+    def fake_render(*_args: Any) -> bytes:
+        nonlocal render_calls
+        render_calls += 1
+        if render_calls == 1:
+            started.set()
+            assert release.wait(2.0)
+            raise RuntimeError("render failed")
+        return b"retry-png"
+
+    monkeypatch.setattr(topview_renderer, "_render_topview_png", fake_render)
+    waiter_cancel_check = _observed_waiter_cancel_check(waiter_checked)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        owner = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+        )
+        assert started.wait(1.0)
+        waiter = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+            cancel_check=waiter_cancel_check,
+        )
+        assert waiter_checked.wait(1.0)
+        release.set()
+        with pytest.raises(RuntimeError, match="render failed"):
+            owner.result(timeout=1.0)
+        assert waiter.result(timeout=1.0) is None
+
+    retry = topview_renderer.render_region_topview(
+        region_path,
+        tile_size=64,
+        use_disk_cache=False,
+    )
+
+    assert retry == b"retry-png"
+    assert render_calls == 2
+
+
+def test_different_tile_keys_render_concurrently(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    both_started = threading.Barrier(2)
+
+    def fake_render(*args: Any) -> bytes:
+        tile_size = int(args[1])
+        both_started.wait(timeout=1.0)
+        return str(tile_size).encode("ascii")
+
+    monkeypatch.setattr(topview_renderer, "_render_topview_png", fake_render)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        small = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            32,
+            use_disk_cache=False,
+        )
+        large = executor.submit(
+            topview_renderer.render_region_topview,
+            region_path,
+            64,
+            use_disk_cache=False,
+        )
+
+        assert small.result(timeout=2.0) == b"32"
+        assert large.result(timeout=2.0) == b"64"
+
+
+def test_external_stream_tiles_do_not_share_inflight_render(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    region_path = tmp_path / "r.0.0.mca"
+    region_path.write_bytes(b"placeholder")
+    both_started = threading.Barrier(2)
+    render_calls = 0
+    calls_lock = threading.Lock()
+
+    def fake_render(*_args: Any) -> bytes:
+        nonlocal render_calls
+        with calls_lock:
+            render_calls += 1
+        both_started.wait(timeout=1.0)
+        return b"external-png"
+
+    monkeypatch.setattr(topview_renderer, "_uses_external_streams", lambda _path: True)
+    monkeypatch.setattr(topview_renderer, "_render_topview_png", fake_render)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(
+            lambda _index: topview_renderer.render_region_topview(region_path),
+            range(2),
+        ))
+
+    assert results == [b"external-png", b"external-png"]
+    assert render_calls == 2
 
 
 def test_partial_mod_tile_is_returned_but_not_persisted(

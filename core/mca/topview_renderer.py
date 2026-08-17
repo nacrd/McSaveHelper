@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -14,6 +15,10 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from core.mca.surface import DEFAULT_PROGRESS_BATCH_CHUNKS
 from core.mca.texture_palette import average_block_texture
+from core.mca.topview_inflight import (
+    TopviewRenderCoordinator,
+    TopviewRenderResult,
+)
 
 try:
     from PIL import Image
@@ -138,6 +143,9 @@ ColorProgressCallback = Callable[
     [ColorGrid, Set[Tuple[int, int]], int, int],
     None,
 ]
+TopviewRenderKey = Tuple[str, int, int, int, bool, str]
+
+_TOPVIEW_RENDER_COORDINATOR = TopviewRenderCoordinator()
 
 _MATERIAL_RULES: Tuple[Tuple[Tuple[str, ...], Color], ...] = (
     (("leaves",), (0, 100, 0)),
@@ -574,6 +582,33 @@ def _uses_external_streams(region_path: Path) -> bool:
         return False
 
 
+def _topview_render_key(
+    region_path: Path,
+    tile_size: int,
+    cache_allowed: bool,
+) -> Optional[TopviewRenderKey]:
+    """Build the identity of one complete top-view render."""
+    try:
+        stat = region_path.stat()
+        normalized_path = os.path.normcase(str(region_path.resolve()))
+    except OSError:
+        return None
+    try:
+        from core.mca.texture_palette import texture_palette_signature
+
+        texture_signature = texture_palette_signature()
+    except (ImportError, RuntimeError, AttributeError, TypeError, ValueError):
+        texture_signature = "fallback"
+    return (
+        normalized_path,
+        stat.st_mtime_ns,
+        stat.st_size,
+        tile_size,
+        cache_allowed,
+        texture_signature,
+    )
+
+
 def _sample_surface_grid(
     region_path: Path,
     tile_size: int,
@@ -783,6 +818,34 @@ def _render_topview_png(
     return png
 
 
+def _render_coalesced_topview(
+    render_key: TopviewRenderKey,
+    region_path: Path,
+    tile_size: int,
+    cache_allowed: bool,
+    cancel_check: Optional[Callable[[], bool]],
+    decode_workers: Optional[int],
+) -> TopviewRenderResult:
+    """Render or join one equivalent non-progressive tile request."""
+
+    def render(shared_cancel_check: Callable[[], bool]) -> TopviewRenderResult:
+        shared_status: List[bool] = []
+        png = _render_topview_png(
+            region_path,
+            tile_size,
+            cache_allowed,
+            shared_cancel_check,
+            decode_workers,
+            shared_status,
+            None,
+            None,
+            DEFAULT_PROGRESS_BATCH_CHUNKS,
+        )
+        return TopviewRenderResult(png, tuple(shared_status))
+
+    return _TOPVIEW_RENDER_COORDINATOR.run(render_key, cancel_check, render)
+
+
 def render_region_topview(
     region_file: Path | str,
     tile_size: int = DEFAULT_TILE_SIZE,
@@ -824,7 +887,8 @@ def render_region_topview(
     tile_size = max(8, min(LEAF_TILE_SIZE, int(tile_size)))
     render_status = status_out if status_out is not None else []
 
-    cache_allowed = use_disk_cache and not _uses_external_streams(region_path)
+    uses_external_streams = _uses_external_streams(region_path)
+    cache_allowed = use_disk_cache and not uses_external_streams
     cached = _load_cached_topview(
         region_path,
         tile_size,
@@ -836,6 +900,22 @@ def render_region_topview(
         return cached
     if cancel_check is not None and cancel_check():
         return None
+    render_key = _topview_render_key(region_path, tile_size, cache_allowed)
+    if (
+        progress_callback is None
+        and not uses_external_streams
+        and render_key is not None
+    ):
+        result = _render_coalesced_topview(
+            render_key,
+            region_path,
+            tile_size,
+            cache_allowed,
+            cancel_check,
+            decode_workers,
+        )
+        render_status.extend(result.status)
+        return result.png
     return _render_topview_png(
         region_path,
         tile_size,
