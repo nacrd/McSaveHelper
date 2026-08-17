@@ -62,6 +62,10 @@ class TopviewTileServicePort(Protocol):
         """
         ...
 
+    def retain_topview_requests(self, coords: Set[RegionCoord]) -> int:
+        """丢弃不再属于视口的排队渲染任务。"""
+        ...
+
 
 @dataclass(frozen=True)
 class TopviewTileRequestPolicy:
@@ -82,8 +86,8 @@ class TopviewTileRequestPolicy:
 class TopviewTileRequestCoordinator:
     """协调可见瓦片、聚焦细节及队列容量重试。
 
-    线程安全：账本由内部锁保护。不取消服务已接收任务；``reset`` 只清视图侧
-    账本。完成回调与 UI 重建之间的线程切换由视图负责。
+    线程安全：账本由内部锁保护。可见瓦片按批次按需请求，不在完成回调中
+    自动追满整个大视口。完成回调与 UI 重建之间的线程切换由视图负责。
     """
 
     def __init__(
@@ -137,7 +141,7 @@ class TopviewTileRequestCoordinator:
                     self._requested_sizes[coord] = state.requested_size
             else:
                 self._requested_sizes.pop(coord, None)
-            return self._has_deferred_requests
+            return self._has_deferred_requests and not self._requested_sizes
 
     def visible_tile_size(self, scale: float) -> int:
         """返回当前显示所需 LOD；512 仅用于后续聚焦升级。
@@ -183,6 +187,8 @@ class TopviewTileRequestCoordinator:
             scale: 地图缩放。
             center: 视口中心区域坐标。
         """
+        visible_coords = set(visible_regions)
+        self._service.retain_topview_requests(visible_coords)
         requests = plan_visible_requests(
             missing,
             screen_tile_pixels=self._screen_tile_pixels(scale),
@@ -190,7 +196,6 @@ class TopviewTileRequestCoordinator:
             ladder=self._tile_ladder(scale),
         )
         missing_coords = {request.coord for request in requests}
-        visible_coords = set(visible_regions)
         with self._state_lock:
             self._reconcile_visible_ledger(missing_coords, visible_coords)
             grouped, selected_count, has_more = self._select_visible_batch(requests)

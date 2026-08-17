@@ -22,6 +22,7 @@ class _TileService:
         self.cached_sizes: dict[RegionCoord, int] = {}
         self.pending_sizes: dict[RegionCoord, int] = {}
         self.calls: list[_RequestCall] = []
+        self.retained: list[Set[RegionCoord]] = []
 
     def get_topview_tile_state(self, coord: RegionCoord) -> TopviewTileState:
         return TopviewTileState(
@@ -49,6 +50,15 @@ class _TileService:
             self.pending_sizes[coord] = max(size, self.pending_sizes.get(coord, 0))
             accepted.add(coord)
         return accepted
+
+    def retain_topview_requests(self, coords: Set[RegionCoord]) -> int:
+        self.retained.append(set(coords))
+        removed = {
+            coord for coord in self.pending_sizes if coord not in coords
+        }
+        for coord in removed:
+            self.pending_sizes.pop(coord, None)
+        return len(removed)
 
     def finish(self, coord: RegionCoord, size: int) -> None:
         self.pending_sizes.pop(coord, None)
@@ -120,6 +130,25 @@ def test_intermediate_tile_callback_keeps_visible_request_ledger() -> None:
     assert coordinator.requested_sizes == {}
 
 
+def test_deferred_visible_batch_retries_only_after_all_accepted_tiles_finish() -> None:
+    service = _TileService(accept_limit=2)
+    coordinator = TopviewTileRequestCoordinator(service)
+    coords = [(0, 0), (1, 0), (2, 0)]
+
+    coordinator.request_visible(
+        coords,
+        visible_regions=coords,
+        scale=1.0,
+        center=(0, 0),
+    )
+
+    service.finish((0, 0), 16)
+    assert coordinator.on_tile_ready((0, 0)) is False
+
+    service.finish((1, 0), 16)
+    assert coordinator.on_tile_ready((1, 0)) is True
+
+
 def test_leaf_lod_upgrades_only_selected_or_center_region() -> None:
     service = _TileService()
     coordinator = TopviewTileRequestCoordinator(service)
@@ -181,9 +210,9 @@ def test_rejected_visible_tail_stays_deferred_and_evicted_ledger_retries() -> No
 
     assert coordinator.requested_sizes == {(0, 0): 16}
     assert coordinator.has_deferred_requests is True
-    assert coordinator.on_tile_ready((99, 99)) is True
+    service.finish((0, 0), 16)
+    assert coordinator.on_tile_ready((0, 0)) is True
 
-    service.pending_sizes.clear()
     coordinator.request_visible(
         coords,
         visible_regions=coords,
@@ -191,8 +220,9 @@ def test_rejected_visible_tail_stays_deferred_and_evicted_ledger_retries() -> No
         center=(0, 0),
     )
 
-    assert len(service.calls) == 2
-    assert coordinator.requested_sizes == {(0, 0): 16}
+    assert len(service.calls) == 3
+    assert coordinator.requested_sizes == {(0, 0): 32, (1, 0): 16}
+    assert service.retained[-1] == set(coords)
 
 
 def test_visible_lod_switches_to_leaf_target_only_at_scale_eight() -> None:

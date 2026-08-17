@@ -99,6 +99,11 @@ class QtRegionMapCanvas(QWidget):
         return self._scale
 
     @property
+    def is_dragging(self) -> bool:
+        """当前是否正通过鼠标平移地图。"""
+        return self._dragging
+
+    @property
     def tile_scale(self) -> float:
         """映射到 Flet/瓦片协调器使用的区域相对缩放。"""
         region_px = max(1.0, BLOCKS_PER_REGION * self._scale)
@@ -422,7 +427,7 @@ class QtRegionMapCanvas(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self._dragging:
             self._dragging = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
-            self._flush_camera()
+            self._emit_camera()
             release = event.position().toPoint()
             moved = (release - self._press_pos).manhattanLength()
             if not self._dragged and moved < 6:

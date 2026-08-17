@@ -5,6 +5,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Callable, Optional, Protocol, cast
 
+from PySide6.QtCore import QTimer
+
 from app.controllers.map_controller import MapController
 from app.controllers.topview_tile_requests import (
     TopviewTileRequestCoordinator,
@@ -65,6 +67,8 @@ class QtRegionMapHost(
 
 class QtRegionMapCoordinator:
     """连接区域地图面板、维度会话、扫描任务与标记操作。"""
+
+    _TILE_READY_COALESCE_MS = 80
 
     def __init__(
         self,
@@ -138,6 +142,10 @@ class QtRegionMapCoordinator:
             on_style_changed=self._on_style_changed,
         )
         self.panel.set_style("topview")
+        self._tile_ready_timer = QTimer(self.panel)
+        self._tile_ready_timer.setSingleShot(True)
+        self._tile_ready_timer.setInterval(self._TILE_READY_COALESCE_MS)
+        self._tile_ready_timer.timeout.connect(self._flush_tile_ready)
         self._tasks = RegionMapTasks(
             app.execution_runtime,
             RegionMapTaskCallbacks(
@@ -590,6 +598,10 @@ class QtRegionMapCoordinator:
         scale: float,
     ) -> None:
         self._map_controller.update_camera(center_x, center_z, scale)
+        if self.panel.canvas.is_dragging:
+            self._map_service.retain_topview_requests(set())
+            self._tile_requests.reset()
+            return
         self._request_visible_tiles()
 
     def _scan_ready(self, result: RegionScanResult, generation: int) -> None:
@@ -691,7 +703,15 @@ class QtRegionMapCoordinator:
             if self._tile_ready_dispatch_pending:
                 return
             self._tile_ready_dispatch_pending = True
-        run_on_ui(self._flush_tile_ready)
+        run_on_ui(self._schedule_tile_ready_flush)
+
+    def _schedule_tile_ready_flush(self) -> None:
+        """在 UI 线程短暂合并密集的瓦片完成通知。"""
+        with self._tile_ready_lock:
+            if self._closed:
+                return
+        if not self._tile_ready_timer.isActive():
+            self._tile_ready_timer.start()
 
     def _flush_tile_ready(self) -> None:
         """在一次 UI 刷新中应用所有已完成瓦片。"""
@@ -706,7 +726,6 @@ class QtRegionMapCoordinator:
         _generation, tiles, revisions = self._map_service.get_topview_snapshot(
             visible_ready
         )
-        should_retry = False
         for coord in coords:
             raw = tiles.get(coord)
             if raw:
@@ -715,9 +734,7 @@ class QtRegionMapCoordinator:
                     raw,
                     revision=revisions.get(coord, 0),
                 )
-            should_retry = self._tile_requests.on_tile_ready(coord) or should_retry
-        if should_retry:
-            self._request_visible_tiles()
+            self._tile_requests.on_tile_ready(coord)
 
     def _t(self, key: str, default: str = "", **kwargs: object) -> str:
         return self._app.translate(key, default, **kwargs)
@@ -732,6 +749,7 @@ class QtRegionMapCoordinator:
             self._tile_ready_dispatch_pending = False
         self._host_generation += 1
         self._map_export_dialog.dispose()
+        self._tile_ready_timer.stop()
         self._region_delete_controller.cancel()
         self.panel.set_region_delete_busy(False)
         self._tasks.close()

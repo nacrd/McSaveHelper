@@ -313,6 +313,23 @@ def test_full_topview_queue_reports_only_retained_requests() -> None:
     service.close()
 
 
+def test_retain_topview_requests_discards_obsolete_queued_tiles() -> None:
+    service = RegionMapService(ExecutionRuntime())
+    service._topview_active = service._topview_max_workers
+    coords = [(index, 0) for index in range(8)]
+    service._region_paths = {
+        coord: f"r.{coord[0]}.{coord[1]}.mca" for coord in coords
+    }
+    service.request_topview_tiles(coords, tile_size=32)
+
+    removed = service.retain_topview_requests({(1, 0), (3, 0)})
+
+    assert removed == 6
+    assert [job[0] for job in service._topview_queue] == [(1, 0), (3, 0)]
+    assert set(service._topview_pending) == {(1, 0), (3, 0)}
+    service.close()
+
+
 def test_priority_eviction_removes_dropped_request_from_pending_state() -> None:
     service = RegionMapService(ExecutionRuntime())
     service._topview_active = service._topview_max_workers

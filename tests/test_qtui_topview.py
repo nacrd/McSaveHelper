@@ -153,6 +153,56 @@ def test_region_map_coalesces_tile_ready_ui_dispatches(monkeypatch) -> None:
     assert coordinator._pending_tile_ready == {(0, 0), (1, 0)}
 
 
+def test_region_map_pauses_queued_tiles_while_dragging() -> None:
+    class _Canvas:
+        is_dragging = True
+
+    class _MapController:
+        def __init__(self) -> None:
+            self.camera_updates: list[tuple[float, float, float]] = []
+
+        def update_camera(self, x: float, z: float, scale: float) -> None:
+            self.camera_updates.append((x, z, scale))
+
+    class _MapService:
+        def __init__(self) -> None:
+            self.retained: list[set[tuple[int, int]]] = []
+
+        def retain_topview_requests(self, coords: set[tuple[int, int]]) -> int:
+            self.retained.append(coords)
+            return 0
+
+    class _Requests:
+        def __init__(self) -> None:
+            self.reset_count = 0
+
+        def reset(self) -> None:
+            self.reset_count += 1
+
+    canvas = _Canvas()
+    controller = _MapController()
+    service = _MapService()
+    requests = _Requests()
+    coordinator = object.__new__(coordinator_module.QtRegionMapCoordinator)
+    coordinator.__dict__["panel"] = SimpleNamespace(canvas=canvas)
+    coordinator.__dict__["_map_controller"] = controller
+    coordinator.__dict__["_map_service"] = service
+    coordinator.__dict__["_tile_requests"] = requests
+
+    coordinator._on_camera_changed(128.0, 256.0, 0.5)
+
+    assert controller.camera_updates == [(128.0, 256.0, 0.5)]
+    assert service.retained == [set()]
+    assert requests.reset_count == 1
+
+    canvas.is_dragging = False
+    requested: list[bool] = []
+    coordinator.__dict__["_request_visible_tiles"] = lambda: requested.append(True)
+    coordinator._on_camera_changed(128.0, 256.0, 0.5)
+
+    assert requested == [True]
+
+
 def test_region_map_flush_applies_only_currently_visible_tiles() -> None:
     class _Canvas:
         def __init__(self) -> None:
@@ -192,7 +242,7 @@ def test_region_map_flush_applies_only_currently_visible_tiles() -> None:
 
         def on_tile_ready(self, coord: tuple[int, int]) -> bool:
             self.completed.append(coord)
-            return False
+            return True
 
     canvas = _Canvas()
     service = _MapService()

@@ -110,8 +110,9 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._stale_callback_discards = 0
 
     def _init_topview_workers(self) -> None:
-        # 渲染统一使用应用计算通道，局部并发上限仅用于请求泵的可见预算。
-        self._topview_max_workers: int = 2
+        # 地图渲染是重 CPU 的 Python 工作。限制为一个工作者可避免它在
+        # 大地图拖拽期间与 Qt 事件循环争夺 CPU/GIL。
+        self._topview_max_workers: int = 1
         self._topview_active: int = 0
         self._topview_cancel_event = threading.Event()
         self._topview_queue: Deque[
@@ -728,6 +729,39 @@ class RegionMapTopviewMixin(RegionMapHost):
         self._pump_topview_queue()
         return accepted
 
+    def retain_topview_requests(
+        self,
+        coords: set[TopviewCoord],
+    ) -> int:
+        """丢弃不再属于当前视口的排队瓦片任务。
+
+        已经开始渲染的任务不能安全地逐个中断，仍由现有 generation/取消
+        机制收尾；本方法只回收尚未进入工作线程的任务，防止快速平移后旧
+        视口长期占满本地队列。
+
+        Args:
+            coords: 仍应保留的区域坐标；空集合会清空全部待执行任务。
+
+        Returns:
+            被移除的排队任务数量。
+        """
+        with self._data_lock:
+            generation = self._topview_generation
+            retained: Deque[TopviewJob] = deque()
+            removed = 0
+            for job in self._topview_queue:
+                if job[0] in coords:
+                    retained.append(job)
+                    continue
+                removed += 1
+                if self._topview_pending.get(job[0]) == generation:
+                    self._topview_pending.pop(job[0], None)
+                    self._topview_pending_sizes.pop(job[0], None)
+                    self._topview_upgrade_sizes.pop(job[0], None)
+                    self._topview_progress_chunks.pop(job[0], None)
+            self._topview_queue = retained
+        return removed
+
     def _enqueue_topview_coord_locked(
         self,
         *,
@@ -820,7 +854,7 @@ class RegionMapTopviewMixin(RegionMapHost):
                     "render_topview_tile",
                     self._make_topview_work(job, started),
                     lane=ExecutionLane.CPU,
-                    priority=TaskPriority.VISIBLE,
+                    priority=TaskPriority.BACKGROUND,
                 )
                 self._track_topview_handle(handle, job, started)
             except (RuntimeError, ValueError):

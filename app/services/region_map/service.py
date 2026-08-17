@@ -34,7 +34,7 @@ class RegionMapService(
     - 按需渲染俯视瓦片
     """
 
-    TOPVIEW_QUEUE_LIMIT = 128
+    TOPVIEW_QUEUE_LIMIT = 32
     TOPVIEW_CACHE_ENTRY_LIMIT = 1024
     TOPVIEW_MEMORY_LIMIT = 32 * 1024 * 1024
     TOPVIEW_FAILURE_LIMIT = 2
