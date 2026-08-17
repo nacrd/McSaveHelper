@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Callable, Optional
@@ -78,6 +80,7 @@ class QtLogPanel(QDockWidget):
     """显示本地 JSONL 日志的可停靠、可筛选面板。"""
 
     MAX_LINES = 300
+    LIVE_REFRESH_INTERVAL_MS = 500
 
     def __init__(
         self,
@@ -115,12 +118,19 @@ class QtLogPanel(QDockWidget):
         self._new_count = 0
         self._selected: Optional[StoredLog] = None
         self._current_query = LogQuery()
+        self._pending_record_lock = threading.Lock()
+        self._pending_records: deque[LogRecord] = deque(maxlen=self.MAX_LINES)
+        self._pending_record_count = 0
+        self._record_delivery_scheduled = False
+        self._has_loaded_once = False
+        self._needs_reload_when_visible = True
         self._live_refresh_timer = QTimer(self)
         self._live_refresh_timer.setSingleShot(True)
-        self._live_refresh_timer.setInterval(100)
-        self._live_refresh_timer.timeout.connect(self.reload)
+        self._live_refresh_timer.setInterval(self.LIVE_REFRESH_INTERVAL_MS)
+        self._live_refresh_timer.timeout.connect(self._reload_live)
         self._build_ui(title)
         self._restore_settings()
+        self.visibilityChanged.connect(self._on_visibility_changed)
 
     def _t(self, key: str, default: str, **kwargs: object) -> str:
         """Translate through the application catalog with a Qt fallback."""
@@ -273,7 +283,7 @@ class QtLogPanel(QDockWidget):
         self._module.setPlaceholderText(self._t("log_panel.module", "模块"))
         filters.addWidget(self._module)
         filter_button = QPushButton(self._t("log_panel.filter", "筛选"))
-        filter_button.clicked.connect(self.reload)
+        filter_button.clicked.connect(lambda: self.reload())
         filters.addWidget(filter_button)
         self._realtime = QPushButton(self._t("log_panel.realtime", "实时"))
         self._realtime.setCheckable(True)
@@ -298,10 +308,17 @@ class QtLogPanel(QDockWidget):
             descending=False,
         )
 
-    def reload(self) -> None:
-        """后台重新加载当前筛选条件。"""
+    def reload(self, *, include_statistics: bool = True) -> None:
+        """后台重新加载当前筛选条件。
+
+        Args:
+            include_statistics: 是否同时重算七天统计。实时刷新仅查询日志页，
+                避免每批新日志都完整扫描归档两次。
+        """
         if self._query_service is None or self._disposed:
             return
+        self._has_loaded_once = True
+        self._needs_reload_when_visible = False
         self._generation += 1
         generation = self._generation
         self._current_query = self._build_query()
@@ -314,6 +331,16 @@ class QtLogPanel(QDockWidget):
         worker.signals.finished.connect(lambda page: self._on_page(generation, page))
         worker.signals.failed.connect(lambda message: self._on_error(generation, message))
         self._start_worker(worker)
+        if not include_statistics:
+            return
+        self._start_statistics_reload(generation, query_service)
+
+    def _start_statistics_reload(
+        self,
+        generation: int,
+        query_service: LogQueryService,
+    ) -> None:
+        """后台重算低频日志统计。"""
         now = datetime.now().astimezone()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         stats_start = today_start - timedelta(days=6)
@@ -323,6 +350,13 @@ class QtLogPanel(QDockWidget):
         )
         stats_worker.signals.finished.connect(lambda stats: self._on_stats(generation, stats))
         self._start_worker(stats_worker)
+
+    def _reload_live(self) -> None:
+        """在面板可见时执行一次合并后的实时列表刷新。"""
+        if self._disposed or not self.isVisible():
+            self._needs_reload_when_visible = True
+            return
+        self.reload(include_statistics=False)
 
     def _start_worker(self, worker: LogWorker) -> None:
         """Own a Qt runnable until its queued completion signal is handled.
@@ -426,29 +460,83 @@ class QtLogPanel(QDockWidget):
             self._reload_after_new_logs()
 
     def append_record(self, record: LogRecord) -> None:
-        """从后台 handler 接收一条记录并投递到 Qt 主线程。"""
-        if self._disposed:
+        """从后台 handler 接收记录，并合并为单次 Qt 主线程投递。"""
+        should_schedule = False
+        with self._pending_record_lock:
+            if self._disposed:
+                return
+            self._pending_records.append(record)
+            self._pending_record_count += 1
+            if not self._record_delivery_scheduled:
+                self._record_delivery_scheduled = True
+                should_schedule = True
+        if should_schedule:
+            run_on_ui(self._drain_pending_records_ui)
+
+    def _drain_pending_records_ui(self) -> None:
+        """在 UI 线程一次性消费所有已排队日志通知。"""
+        with self._pending_record_lock:
+            records = tuple(self._pending_records)
+            count = self._pending_record_count
+            self._pending_records.clear()
+            self._pending_record_count = 0
+            self._record_delivery_scheduled = False
+        if self._disposed or count == 0:
             return
-        run_on_ui(self._append_record_ui, record)
+        self._apply_record_batch(records, count)
 
     def _append_record_ui(self, record: LogRecord) -> None:
+        """应用一条直接投递的记录，供兼容入口和测试使用。"""
+        self._apply_record_batch((record,), 1)
+
+    def _apply_record_batch(
+        self,
+        records: tuple[LogRecord, ...],
+        count: int,
+    ) -> None:
+        """把一批日志投影为一次轻量界面状态变化。"""
         if self._disposed:
             return
-        self._append(record.format_text(), _category_for_level(record.level).lower())
-        if not self._live_mode and self._query_service:
-            self._new_count += 1
-            self._new_logs_button.setText(
-                self._t(
-                    "log_panel.new_logs",
-                    "有 {count} 条新日志",
-                    count=self._new_count,
+        if self._query_service is None:
+            for record in records:
+                self._append(
+                    record.format_text(),
+                    _category_for_level(record.level).lower(),
                 )
-            )
-            self._new_logs_button.setVisible(True)
             return
-        if self._query_service:
-            self._end_edit.setDateTime(QDateTime.currentDateTime())
-            self._live_refresh_timer.start()
+        self._end_edit.setDateTime(QDateTime.currentDateTime())
+        if not self._live_mode or not self.isVisible():
+            self._mark_new_records(count)
+            self._needs_reload_when_visible = True
+            return
+        self._live_refresh_timer.start()
+
+    def _mark_new_records(self, count: int) -> None:
+        """累计尚未呈现的记录数量。"""
+        self._new_count += count
+        self._new_logs_button.setText(
+            self._t(
+                "log_panel.new_logs",
+                "有 {count} 条新日志",
+                count=self._new_count,
+            )
+        )
+        self._new_logs_button.setVisible(True)
+
+    def _on_visibility_changed(self, visible: bool) -> None:
+        """面板重新显示时一次性同步隐藏期间的日志。"""
+        if not visible or self._disposed or self._query_service is None:
+            return
+        if not self._needs_reload_when_visible:
+            return
+        if not self._live_mode:
+            if not self._has_loaded_once:
+                self.reload()
+            return
+        self._new_count = 0
+        self._new_logs_button.setVisible(False)
+        self._end_edit.setDateTime(QDateTime.currentDateTime())
+        self.reload()
 
     def log(self, message: str, tag: str = "info") -> None:
         """兼容旧 UI handler 回调。"""
@@ -706,11 +794,18 @@ class QtLogPanel(QDockWidget):
 
     def dispose(self) -> None:
         """阻止迟到查询和日志写入，操作幂等。"""
-        if self._disposed:
-            return
+        with self._pending_record_lock:
+            if self._disposed:
+                return
+            self._disposed = True
+            self._pending_records.clear()
+            self._pending_record_count = 0
+            self._record_delivery_scheduled = False
         self._save_settings()
-        self._disposed = True
         self._generation += 1
+        self._live_refresh_timer.stop()
+        for worker in self._active_workers.values():
+            worker.cancel_delivery()
 
 
 def install_qt_log_handler(

@@ -18,6 +18,11 @@ from core.utils import (
     find_stats_dirs,
 )
 from core.uuid_utils import normalize_uuid
+from core.world_index_cache import (
+    WorldIndexCacheGuard,
+    build_world_index_cache_guard,
+    is_world_index_cache_guard_current,
+)
 from core.world_index_progress import (
     WorldIndexBuildCancelledError,
     WorldIndexBuildPhase,
@@ -73,6 +78,7 @@ class WorldIndexSnapshot:
 
     world_path: Path
     probe: WorldIndexProbe
+    cache_guard: WorldIndexCacheGuard
     player_files: tuple[tuple[str, Path], ...]
     region_files: tuple[Path, ...]
     data_files: tuple[Path, ...]
@@ -222,6 +228,7 @@ class WorldIndexBuilder:
         return WorldIndexSnapshot(
             world_path=world,
             probe=probe,
+            cache_guard=self._build_cache_guard(world, probe),
             player_files=player_files,
             region_files=region_files,
             data_files=data_files,
@@ -378,6 +385,25 @@ class WorldIndexBuilder:
         )
         return self._probe_from_paths(world, paths, active_dimensions)
 
+    def is_cache_guard_current(self, snapshot: WorldIndexSnapshot) -> bool:
+        """Return whether index membership can be reused without a full scan.
+
+        File content changes do not invalidate path indexes. Directory metadata
+        detects additions, removals, and renames, while ``level.dat`` and the
+        parsed user-cache candidates are checked directly.
+
+        Args:
+            snapshot: Previously completed world index.
+
+        Returns:
+            True when the snapshot still describes the same indexed paths.
+        """
+        world = self._validate_world(snapshot.world_path)
+        return is_world_index_cache_guard_current(
+            world,
+            snapshot.cache_guard,
+        )
+
     def refresh(
         self,
         previous: WorldIndexSnapshot,
@@ -455,6 +481,7 @@ class WorldIndexBuilder:
         return WorldIndexSnapshot(
             world_path=world,
             probe=current_probe,
+            cache_guard=self._build_cache_guard(world, current_probe),
             player_files=player_files,
             region_files=region_files,
             data_files=data_files,
@@ -641,6 +668,23 @@ class WorldIndexBuilder:
             key=str,
         ))
 
+    def _build_cache_guard(
+        self,
+        world: Path,
+        probe: WorldIndexProbe,
+    ) -> WorldIndexCacheGuard:
+        """Capture the directory and mutable-file state for a snapshot."""
+        indexed_paths = (
+            self._path_from_probe(world, stamp.relative_path)
+            for stamp in probe.files
+        )
+        return build_world_index_cache_guard(
+            world,
+            indexed_paths,
+            (dimension.region_dir for dimension in probe.dimensions),
+            (world / "level.dat", *self._usercache_candidates(world)),
+        )
+
     @staticmethod
     def _is_safe_world_content_path(world: Path, path: Path) -> bool:
         """Reject linked or escaped paths discovered inside the world tree."""
@@ -806,6 +850,7 @@ class WorldIndexBuilder:
 __all__ = [
     "WorldIndexBuildCancelledError",
     "WorldIndexBuildPhase",
+    "WorldIndexCacheGuard",
     "WorldDimensionIndex",
     "WorldFileStamp",
     "WorldIndexBuilder",

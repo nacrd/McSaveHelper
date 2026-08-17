@@ -71,7 +71,7 @@ def _run_qt_application() -> int:
     setup_default_logging(
         enable_console=True,
         enable_file=True,
-        level=LogLevel.DEBUG,
+        level=LogLevel.INFO,
         capture_stdlib=True,
         capture_print=True,
     )

@@ -6,7 +6,7 @@ from threading import Lock
 from types import SimpleNamespace
 
 from PySide6.QtCore import QBuffer, QByteArray
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QImage, QPixmap
 
 from app.qtui.views.region_map_canvas import QtRegionMapCanvas
 from app.qtui.views import region_map_coordinator as coordinator_module
@@ -66,7 +66,7 @@ def test_seed_region_inventory_enables_topview_path(tmp_path: Path) -> None:
     runtime.shutdown(wait=True, timeout=3.0)
 
 
-def test_canvas_tile_scale_and_grid_thresholds(qt_app: object) -> None:
+def test_canvas_tile_scale_tracks_camera_scale(qt_app: object) -> None:
     del qt_app
     canvas = QtRegionMapCanvas(lambda *_args: None)
     canvas.resize(640, 480)
@@ -75,9 +75,41 @@ def test_canvas_tile_scale_and_grid_thresholds(qt_app: object) -> None:
     canvas.set_camera(256.0, 256.0, 0.1)
     assert abs(canvas.tile_scale - 1.6) < 1e-6
     canvas.set_camera(256.0, 256.0, 0.5)
-    assert canvas.tile_scale >= canvas._CHUNK_GRID_TILE_SCALE
-    canvas.set_camera(256.0, 256.0, 1.5)
-    assert canvas.tile_scale >= canvas._BLOCK_GRID_TILE_SCALE
+    assert abs(canvas.tile_scale - 8.0) < 1e-6
+
+
+def test_canvas_paints_fractional_tiles_without_grid_or_seam(
+    qt_app: object,
+) -> None:
+    del qt_app
+    canvas = QtRegionMapCanvas(lambda *_args: None)
+    canvas.resize(110, 60)
+    canvas.set_regions({(0, 0): 1, (1, 0): 1})
+    canvas.set_display_mode("topview")
+    canvas.set_camera(492.0, 260.0, 0.1)
+
+    payloads: list[bytes] = []
+    for color in (QColor("#E53935"), QColor("#1E88E5")):
+        pixmap = QPixmap(8, 8)
+        pixmap.fill(color)
+        payload = QByteArray()
+        buffer = QBuffer(payload)
+        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+        assert pixmap.save(buffer, "PNG") is True
+        payloads.append(bytes(payload.data()))
+    assert canvas.set_tile((0, 0), payloads[0]) is True
+    assert canvas.set_tile((1, 0), payloads[1]) is True
+
+    image = QImage(canvas.size(), QImage.Format.Format_RGB32)
+    image.fill(QColor("#000000"))
+    canvas.render(image)
+
+    first = canvas._region_screen_rect(0, 0)
+    second = canvas._region_screen_rect(1, 0)
+    sample_y = first.center().y()
+    assert first.right() + 1 >= second.left()
+    assert image.pixelColor(first.right(), sample_y) == QColor("#E53935")
+    assert image.pixelColor(second.left(), sample_y) == QColor("#1E88E5")
 
 
 def test_canvas_culls_large_region_inventory_by_viewport(qt_app: object) -> None:

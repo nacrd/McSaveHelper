@@ -363,6 +363,84 @@ def test_registry_reuses_snapshot_until_relevant_file_changes(
     assert stats.builds == 2
 
 
+def test_registry_warm_hit_skips_full_world_probe(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    world = _world(tmp_path)
+    builder = WorldIndexBuilder()
+    registry = WorldIndexRegistry(builder=builder)
+    first = registry.get(world)
+
+    monkeypatch.setattr(
+        builder,
+        "probe",
+        lambda _world: (_ for _ in ()).throw(
+            AssertionError("热缓存命中不应执行完整文件探针")
+        ),
+    )
+
+    assert registry.get(world) is first
+    assert registry.stats().hits == 1
+
+
+def test_registry_detects_usercache_content_change_with_stable_membership(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    registry = WorldIndexRegistry()
+    first = registry.get(world)
+    usercache = world / "usercache.json"
+
+    usercache.write_text(
+        json.dumps([{"uuid": "aabb", "name": "Steve"}]),
+        encoding="utf-8",
+    )
+    refreshed = registry.get(world)
+
+    assert refreshed is not first
+    assert refreshed.usercache_map() == {"aabb": "Steve"}
+
+
+def test_registry_reuses_path_index_when_region_content_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    world = _world(tmp_path)
+    builder = WorldIndexBuilder()
+    registry = WorldIndexRegistry(builder=builder)
+    first = registry.get(world)
+    (world / "region" / "r.0.0.mca").write_bytes(b"changed-region")
+
+    monkeypatch.setattr(
+        builder,
+        "probe",
+        lambda _world: (_ for _ in ()).throw(
+            AssertionError("文件内容变化不应重扫路径索引")
+        ),
+    )
+
+    assert registry.get(world) is first
+
+
+def test_registry_detects_region_added_to_empty_custom_dimension(
+    tmp_path: Path,
+) -> None:
+    world = _world(tmp_path)
+    dimension = world / "dimensions" / "example" / "moon"
+    dimension.mkdir(parents=True)
+    registry = WorldIndexRegistry()
+    first = registry.get(world)
+
+    region_dir = dimension / "region"
+    region_dir.mkdir()
+    (region_dir / "r.0.0.mca").write_bytes(b"region")
+    refreshed = registry.get(world)
+
+    assert refreshed is not first
+    assert refreshed.dimensions[-1].id == "example:moon"
+
+
 class _BlockingBuilder:
     def __init__(self, snapshot: WorldIndexSnapshot) -> None:
         self.snapshot = snapshot
@@ -380,6 +458,10 @@ class _BlockingBuilder:
     def probe(self, world_path: Path):
         del world_path
         return self.snapshot.probe
+
+    def is_cache_guard_current(self, snapshot: WorldIndexSnapshot) -> bool:
+        del snapshot
+        return True
 
 
 class _InvalidateDuringBuildBuilder:
@@ -402,6 +484,9 @@ class _InvalidateDuringBuildBuilder:
 
     def probe(self, world_path: Path):
         return self.delegate.probe(world_path)
+
+    def is_cache_guard_current(self, snapshot: WorldIndexSnapshot) -> bool:
+        return self.delegate.is_cache_guard_current(snapshot)
 
 
 def test_registry_coalesces_concurrent_builds(tmp_path: Path) -> None:

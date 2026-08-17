@@ -19,7 +19,6 @@ from PySide6.QtWidgets import QWidget
 
 from core.mca.map_models import (
     BLOCKS_PER_REGION,
-    CHUNKS_PER_REGION,
     MapMarker,
 )
 
@@ -38,8 +37,6 @@ class QtRegionMapCanvas(QWidget):
     _MIN_SCALE = 0.01
     _MAX_SCALE = 4.0
     _DEFAULT_SCALE = 0.08
-    _CHUNK_GRID_TILE_SCALE = 6.5
-    _BLOCK_GRID_TILE_SCALE = 20.0
 
     def __init__(
         self,
@@ -353,7 +350,7 @@ class QtRegionMapCanvas(QWidget):
         self._visible_cache = ()
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        """绘制背景、热力/俯视瓦片、网格与选中边框。"""
+        """绘制背景、热力/俯视瓦片与选中边框。"""
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
@@ -365,66 +362,20 @@ class QtRegionMapCanvas(QWidget):
         use_tiles = self._display_mode == "topview"
         for coord in self.visible_regions():
             size = self._regions[coord]
-            rect = self._region_screen_rect(coord[0], coord[1], cell)
+            rect = self._region_screen_rect(coord[0], coord[1])
             tile = self._tiles.get(coord) if use_tiles else None
             if tile is not None and not tile.isNull():
                 painter.drawPixmap(rect, tile)
             else:
                 painter.fillRect(rect, self._heat_color(size))
-            if cell >= 8:
-                painter.setPen(QPen(QColor("#1A221C"), 1))
-                painter.drawRect(rect)
         if self._selected is not None and self._selected in self._regions:
             rect = self._region_screen_rect(
-                self._selected[0], self._selected[1], cell
+                self._selected[0], self._selected[1]
             )
             painter.setPen(QPen(QColor("#FFD54F"), 2))
             painter.drawRect(rect.adjusted(1, 1, -1, -1))
-        self._paint_detail_grids(painter, cell)
         self._paint_markers(painter)
         painter.end()
-
-    def _paint_detail_grids(self, painter: QPainter, cell: float) -> None:
-        """高缩放时绘制区块/方块网格，便于检查俯视细节。"""
-        del cell
-        tile_scale = self.tile_scale
-        show_chunk = tile_scale >= self._CHUNK_GRID_TILE_SCALE
-        show_block = tile_scale >= self._BLOCK_GRID_TILE_SCALE
-        if not show_chunk:
-            return
-        chunk_pen = QPen(QColor(255, 255, 255, 40), 1)
-        block_pen = QPen(QColor(255, 255, 255, 28), 1)
-        for coord in self.visible_regions():
-            cell_px = max(2.0, BLOCKS_PER_REGION * self._scale)
-            rect = self._region_screen_rect(
-                coord[0], coord[1], cell_px
-            )
-            painter.setPen(chunk_pen)
-            for i in range(1, CHUNKS_PER_REGION):
-                x = rect.left() + (i / CHUNKS_PER_REGION) * rect.width()
-                z = rect.top() + (i / CHUNKS_PER_REGION) * rect.height()
-                painter.drawLine(int(x), rect.top(), int(x), rect.bottom())
-                painter.drawLine(rect.left(), int(z), rect.right(), int(z))
-            if not show_block:
-                continue
-            focus = self._selected
-            if focus is None:
-                focus = (
-                    int(self._center_x // BLOCKS_PER_REGION),
-                    int(self._center_z // BLOCKS_PER_REGION),
-                )
-            if coord != focus:
-                continue
-            painter.setPen(block_pen)
-            step = max(1, rect.width() // BLOCKS_PER_REGION)
-            if step < 2:
-                continue
-            stride = 1 if step >= 4 else 4
-            for i in range(stride, BLOCKS_PER_REGION, stride):
-                x = rect.left() + (i / BLOCKS_PER_REGION) * rect.width()
-                z = rect.top() + (i / BLOCKS_PER_REGION) * rect.height()
-                painter.drawLine(int(x), rect.top(), int(x), rect.bottom())
-                painter.drawLine(rect.left(), int(z), rect.right(), int(z))
 
     def _paint_markers(self, painter: QPainter) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -521,13 +472,25 @@ class QtRegionMapCanvas(QWidget):
         self,
         region_x: int,
         region_z: int,
-        cell: float,
     ) -> QRect:
         left, top = self._block_to_screen(
             region_x * BLOCKS_PER_REGION,
             region_z * BLOCKS_PER_REGION,
         )
-        return QRect(int(left), int(top), max(1, int(cell)), max(1, int(cell)))
+        right, bottom = self._block_to_screen(
+            (region_x + 1) * BLOCKS_PER_REGION,
+            (region_z + 1) * BLOCKS_PER_REGION,
+        )
+        left_px = math.floor(left)
+        top_px = math.floor(top)
+        right_px = math.ceil(right)
+        bottom_px = math.ceil(bottom)
+        return QRect(
+            left_px,
+            top_px,
+            max(1, right_px - left_px),
+            max(1, bottom_px - top_px),
+        )
 
     def _block_to_screen(self, block_x: float, block_z: float) -> tuple[float, float]:
         x = (block_x - self._center_x) * self._scale + self.width() / 2.0

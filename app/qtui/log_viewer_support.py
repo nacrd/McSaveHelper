@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Callable
 
 from PySide6.QtCore import (
@@ -148,12 +149,39 @@ class LogWorker(QRunnable):
         super().__init__()
         self.signals = _WorkerSignals()
         self._operation = operation
+        self._delivery_cancelled = threading.Event()
+
+    def cancel_delivery(self) -> None:
+        """Stop delivering a result when the owning panel is disposed."""
+        self._delivery_cancelled.set()
 
     def run(self) -> None:
         try:
-            self.signals.finished.emit(self._operation())
+            result = self._operation()
         except Exception as exc:  # worker boundary reports failure to the UI
-            self.signals.failed.emit(str(exc))
+            self._emit_failure(str(exc))
+            return
+        self._emit_result(result)
+
+    def _emit_result(self, result: object) -> None:
+        """Deliver a completed result only while the UI signal source is valid."""
+        if self._delivery_cancelled.is_set():
+            return
+        try:
+            self.signals.finished.emit(result)
+        except RuntimeError:
+            # Qt may tear down the signal object during interpreter shutdown.
+            return
+
+    def _emit_failure(self, message: str) -> None:
+        """Deliver an operation failure unless the owning UI has gone away."""
+        if self._delivery_cancelled.is_set():
+            return
+        try:
+            self.signals.failed.emit(message)
+        except RuntimeError:
+            # A deleted signal source means there is no remaining UI consumer.
+            return
 
 
 __all__ = ["LOG_COLORS", "LogTableModel", "LogTrendChart", "LogWorker"]

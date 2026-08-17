@@ -179,7 +179,7 @@ class QtApplication(QMainWindow):
             enable_console=True,
             enable_file=True,
             enable_ui=False,
-            level=LogLevel.DEBUG,
+            level=LogLevel.INFO,
             capture_print=True,
         )
         self._qt_settings = QSettings("MCSaveHelper", "MCSaveHelper")
@@ -200,7 +200,8 @@ class QtApplication(QMainWindow):
             if isinstance(handler, DailyJsonlHandler):
                 handler.set_status_callback(self.log_panel.show_storage_warning)
         logger.info("MCSaveHelper Qt 应用启动", module="QtApp")
-        self.log_panel.reload()
+        if show_panel:
+            self.log_panel.reload()
         dock_state = self._qt_settings.value("log_viewer/main_window_state")
         if dock_state is not None:
             self.restoreState(dock_state)

@@ -193,23 +193,48 @@ class WorldIndexRegistry:
         key: str,
         world: Path,
     ) -> Optional[_CacheInspection]:
-        """Probe one cached entry once and return a reusable inspection."""
+        """Validate one cached entry and retain any required full probe."""
         with self._lock:
             self._ensure_open_locked()
             cached = self._entries.get(key)
         if cached is None:
             return None
         try:
+            if self._builder.is_cache_guard_current(cached):
+                return self._record_cache_hit(key, cached, cached.probe)
             probe = self._builder.probe(world)
         except (OSError, ValueError, RuntimeError, FileNotFoundError):
             return None
+        return self._record_cache_inspection(key, cached, probe)
+
+    def _record_cache_hit(
+        self,
+        key: str,
+        cached: WorldIndexSnapshot,
+        probe: WorldIndexProbe,
+    ) -> Optional[_CacheInspection]:
+        """Record a hit if the inspected snapshot is still the active entry."""
         with self._lock:
             self._ensure_open_locked()
             current = self._entries.get(key)
-            if current is cached and cached.probe == probe:
+            if current is cached:
                 self._entries.move_to_end(key)
                 self._hits += 1
                 return _CacheInspection(cached, probe, True)
+        return None
+
+    def _record_cache_inspection(
+        self,
+        key: str,
+        cached: WorldIndexSnapshot,
+        probe: WorldIndexProbe,
+    ) -> Optional[_CacheInspection]:
+        """Record the result of a full probe without re-reading the world."""
+        if cached.probe == probe:
+            return self._record_cache_hit(key, cached, probe)
+        with self._lock:
+            self._ensure_open_locked()
+            current = self._entries.get(key)
             if current is cached:
                 return _CacheInspection(cached, probe, False)
         return None
@@ -455,6 +480,13 @@ class WorldIndexRegistry:
         total += sum(
             128 + len(stamp.relative_path) * 2
             for stamp in snapshot.probe.files
+        )
+        total += sum(
+            160 + len(state.relative_path) * 2
+            for state in (
+                *snapshot.cache_guard.directories,
+                *snapshot.cache_guard.mutable_files,
+            )
         )
         total += sum(
             192 + len(player_id) * 2 + len(str(path)) * 2
