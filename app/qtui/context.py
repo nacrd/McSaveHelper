@@ -126,6 +126,14 @@ class QtProgressPort(Protocol):
         ...
 
 
+class QtFeedbackPort(Protocol):
+    """非阻塞全局反馈端口。"""
+
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        """在主窗口状态栏显示短暂消息。"""
+        ...
+
+
 class QtRuntimePort(Protocol):
     """后台执行运行时端口。"""
 
@@ -164,6 +172,7 @@ class QtHost(
     QtTranslationPort,
     QtDialogPort,
     QtFileDialogPort,
+    QtFeedbackPort,
     QtProgressPort,
     QtRuntimePort,
     QtMigrationPort,
@@ -379,6 +388,10 @@ class QtFeatureContext:
     ) -> None:
         self.host.handle_exception(exception, title, log, show_dialog)
 
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        """显示非阻塞全局反馈。"""
+        self.host.show_status_message(message, timeout_ms)
+
     def pick_directory(self) -> Optional[str]:
         return self.host.pick_directory()
 
@@ -458,6 +471,7 @@ class QtMigrationCommands:
 __all__ = [
     "QtDialogPort",
     "QtFeatureContext",
+    "QtFeedbackPort",
     "QtFileDialogPort",
     "QtHost",
     "QtMapPort",

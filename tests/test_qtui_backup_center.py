@@ -41,6 +41,7 @@ class FakeHost:
         self.infos: list[tuple[str, str]] = []
         self.warns: list[tuple[str, str]] = []
         self.errors: list[tuple[str, str]] = []
+        self.statuses: list[tuple[str, int]] = []
 
     def translate(self, key: str, default: str = "", **kwargs: Any) -> str:
         del kwargs
@@ -51,6 +52,9 @@ class FakeHost:
 
     def info_dialog(self, title: str, message: str) -> None:
         self.infos.append((title, message))
+
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        self.statuses.append((message, timeout_ms))
 
     def warn_dialog(self, title: str, message: str) -> None:
         self.warns.append((title, message))
@@ -214,6 +218,16 @@ def test_backup_center_busy_state_disables_actions(
     view._set_busy(False)
     assert view._create_button.isEnabled()
     assert view._cancel_button.isHidden()
+
+
+def test_backup_success_uses_non_blocking_status_feedback(
+    view: BackupCenterView,
+    host: FakeHost,
+) -> None:
+    view._finish_success("备份创建完成", object(), False)
+
+    assert host.statuses == [("备份创建完成", 5000)]
+    assert host.infos == []
 
 
 def test_backup_center_dispose_is_idempotent(view: BackupCenterView) -> None:

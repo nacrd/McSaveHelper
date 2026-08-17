@@ -30,17 +30,22 @@ from app.controllers.backup_operation_controller import (
     BackupOperationUiPorts,
 )
 from app.qtui.components.buttons import btn_danger, btn_primary
-from app.qtui.components.cards import card, placeholder, section_title
+from app.qtui.components.cards import (
+    card,
+    loading_placeholder,
+    placeholder,
+    section_title,
+)
 from app.qtui.components.fields import dropdown, text_field
 from app.qtui.components.layout import page_header
 from app.qtui.context import (
     QtDialogPort,
+    QtFeedbackPort,
     QtProgressPort,
     QtRuntimePort,
     QtTranslationPort,
 )
 from app.qtui.icons import glyph
-from app.qtui.theme import get_theme_manager
 from app.qtui.utils import format_size, run_on_ui
 from app.qtui.view_actions import QtViewAction
 from app.services.backup_service import (
@@ -61,6 +66,7 @@ from app.services.execution_runtime import (
 class BackupHost(
     QtTranslationPort,
     QtDialogPort,
+    QtFeedbackPort,
     QtProgressPort,
     QtRuntimePort,
     Protocol,
@@ -247,6 +253,17 @@ class BackupCenterView(QScrollArea):
             return
         self._refresh_generation += 1
         generation = self._refresh_generation
+        self._summary.setText(self._t("loading", "正在加载恢复点…"))
+        self._rebuild_backup_list([
+            loading_placeholder(
+                title=self._t("loading", "正在加载恢复点…"),
+                subtitle=self._t(
+                    "loading_subtitle",
+                    "正在读取备份清单，请稍候",
+                ),
+                height=160,
+            )
+        ])
         try:
             handle = self._task_scope.submit(
                 "list_backups",
@@ -336,11 +353,10 @@ class BackupCenterView(QScrollArea):
     # ─── 列表行 ───────────────────────────────────
 
     def _backup_row(self, record: BackupRecord) -> QWidget:
-        theme = get_theme_manager().current
         status = (
-            (glyph("SUCCESS"), theme.success)
+            (glyph("SUCCESS"), "success")
             if record.valid
-            else (glyph("ERROR"), theme.error)
+            else (glyph("ERROR"), "error")
         )
 
         description = QWidget()
@@ -349,7 +365,7 @@ class BackupCenterView(QScrollArea):
         description_layout.setSpacing(3)
 
         title = QLabel(record.label or self._t("untitled", "未命名恢复点"))
-        title.setStyleSheet("font-size: 14px; font-weight: 600;")
+        title.setProperty("role", "cardTitle")
         created = record.created_at.astimezone().strftime("%Y-%m-%d %H:%M:%S")
         details = self._t(
             "details",
@@ -365,12 +381,13 @@ class BackupCenterView(QScrollArea):
             else self._t("integrity_legacy", "旧版无清单")
         )
         details_label = QLabel(f"{details} · {integrity}")
-        details_label.setStyleSheet(f"font-size: 11px; color: {theme.text_secondary};")
+        details_label.setProperty("role", "caption")
         description_layout.addWidget(title)
         description_layout.addWidget(details_label)
         if not record.valid:
             error_label = QLabel(record.validation_error)
-            error_label.setStyleSheet(f"font-size: 11px; color: {theme.error};")
+            error_label.setProperty("role", "error")
+            error_label.setProperty("size", "caption")
             description_layout.addWidget(error_label)
 
         actions = QWidget()
@@ -379,7 +396,10 @@ class BackupCenterView(QScrollArea):
         actions_layout.setSpacing(4)
         for glyph_text, tooltip, callback, enabled in self._backup_action_specs(record):
             button = QPushButton(glyph_text)
-            button.setFixedWidth(34)
+            button.setFixedSize(34, 34)
+            button.setProperty("role", "icon")
+            if glyph_text == glyph("DELETE"):
+                button.setProperty("tone", "danger")
             button.setToolTip(tooltip)
             button.setEnabled(enabled)
             button.clicked.connect(lambda _checked, cb=callback: cb())
@@ -390,13 +410,14 @@ class BackupCenterView(QScrollArea):
         row_layout.setContentsMargins(14, 12, 8, 12)
         row_layout.setSpacing(12)
         status_label = QLabel(status[0])
-        status_label.setStyleSheet(f"font-size: 20px; color: {status[1]};")
+        status_label.setProperty("role", "statusIcon")
+        status_label.setProperty("tone", status[1])
         row_layout.addWidget(status_label)
         row_layout.addWidget(description, 1)
         row_layout.addWidget(actions)
 
         frame = QWidget()
-        frame.setProperty("role", "card")
+        frame.setProperty("role", "interactiveCard")
         frame_layout = QVBoxLayout(frame)
         frame_layout.setContentsMargins(0, 0, 0, 0)
         frame_layout.addWidget(row)
@@ -681,7 +702,7 @@ class BackupCenterView(QScrollArea):
             self._label_field.clear()
         self._refresh()
         resolved_message = message(result) if callable(message) else message
-        self.app.info_dialog(self._t("completed", "完成"), resolved_message)
+        self.app.show_status_message(resolved_message)
 
     def _finish_error(self, error: Exception) -> None:
         self.app.handle_exception(

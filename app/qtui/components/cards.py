@@ -2,7 +2,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QLabel,
+    QProgressBar,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.qtui.icons import glyph
 
@@ -62,10 +69,8 @@ def placeholder(
     Returns:
         QWidget: 居中图标 + 标题 + 副标题的占位容器。
     """
-    from app.qtui.theme import get_theme_manager
-
-    colors = get_theme_manager().current
     host = QWidget()
+    host.setProperty("role", "state")
     if expand:
         host.setMinimumHeight(height)
         host.setSizePolicy(
@@ -79,27 +84,58 @@ def placeholder(
     layout.setSpacing(0)
     layout.addStretch(1)
     icon_label = QLabel(icon)
+    icon_label.setProperty("role", "stateIcon")
     icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    icon_label.setStyleSheet(f"font-size: 36px; color: {colors.text_muted};")
     layout.addWidget(icon_label)
     spacer_icon = QWidget()
     spacer_icon.setFixedHeight(10)
     layout.addWidget(spacer_icon)
     title_label = QLabel(title)
+    title_label.setProperty("role", "stateTitle")
     title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    title_label.setStyleSheet(
-        f"font-size: 16px; font-weight: 600; color: {colors.text_primary};"
-    )
     layout.addWidget(title_label)
     spacer_title = QWidget()
     spacer_title.setFixedHeight(6)
     layout.addWidget(spacer_title)
     sub = QLabel(subtitle)
+    sub.setProperty("role", "stateSubtitle")
     sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    sub.setStyleSheet(f"font-size: 14px; color: {colors.text_muted};")
     sub.setWordWrap(True)
     layout.addWidget(sub)
     layout.addStretch(1)
+    return host
+
+
+def loading_placeholder(
+    title: str = "正在加载",
+    subtitle: str = "请稍候…",
+    height: int = 150,
+    *,
+    expand: bool = False,
+) -> QWidget:
+    """创建统一的加载状态面板。"""
+    host = placeholder(
+        icon=glyph("REFRESH"),
+        title=title,
+        subtitle=subtitle,
+        height=height,
+        expand=expand,
+    )
+    layout = host.layout()
+    if not isinstance(layout, QVBoxLayout):
+        return host
+    progress = QProgressBar()
+    progress.setRange(0, 0)
+    progress.setFixedHeight(5)
+    progress.setMaximumWidth(240)
+    progress.setProperty("role", "stateLoading")
+    insert_at = max(0, layout.count() - 1)
+    layout.insertSpacing(insert_at, 10)
+    layout.insertWidget(
+        insert_at + 1,
+        progress,
+        alignment=Qt.AlignmentFlag.AlignCenter,
+    )
     return host
 
 

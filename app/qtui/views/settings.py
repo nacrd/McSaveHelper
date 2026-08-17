@@ -53,7 +53,6 @@ from app.qtui.components.cards import card, muted_label
 from app.qtui.components.fields import checkbox, dropdown, text_field
 from app.qtui.components.layout import page_header
 from app.qtui.icons import glyph
-from app.qtui.theme import get_theme_manager
 from app.qtui.utils import format_size, run_on_ui
 from app.services.cache_registry import CacheRegistryStats
 from app.services.execution_runtime import ExecutionRuntime, ExecutionRuntimeSnapshot
@@ -63,6 +62,7 @@ Translate = Callable[..., str]
 DialogCallback = Callable[[str, str], None]
 CacheSnapshot = Callable[[], CacheRegistryStats]
 CacheClear = Callable[[], Mapping[str, int]]
+SETTINGS_STACK_BREAKPOINT = 960
 
 
 @dataclass(frozen=True)
@@ -104,18 +104,16 @@ class CollapsibleSection(QFrame):
             expanded: 是否默认展开。
         """
         super().__init__()
+        self._title = title
+        self._expanded = expanded
         self.setProperty("role", "card")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        self._toggle = QPushButton(f"{'▾' if expanded else '▸'} {title}")
-        self._toggle.setFlat(True)
+        self._toggle = QPushButton()
+        self._toggle.setProperty("role", "sectionToggle")
         self._toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._toggle.setStyleSheet(
-            "text-align: left; font-size: 14px; font-weight: 600;"
-            "padding: 10px 14px;"
-        )
         self._toggle.clicked.connect(self._on_toggle)
         root.addWidget(self._toggle)
 
@@ -124,12 +122,21 @@ class CollapsibleSection(QFrame):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.addWidget(content)
         root.addWidget(self._content_host)
-        self._content_host.setVisible(expanded)
+        self._render_state()
 
     def _on_toggle(self) -> None:
-        visible = not self._content_host.isVisible()
-        self._content_host.setVisible(visible)
-        self._toggle.setText(f"{'▾' if visible else '▸'} {self._toggle.text()[2:]}")
+        self._expanded = not self._expanded
+        self._render_state()
+
+    def _render_state(self) -> None:
+        """同步标题图标、展开属性和内容可见性。"""
+        icon = glyph("CHEVRON_DOWN" if self._expanded else "CHEVRON_RIGHT")
+        self._toggle.setText(f"{icon}  {self._title}")
+        self._toggle.setProperty("expanded", self._expanded)
+        self._content_host.setVisible(self._expanded)
+        style = self._toggle.style()
+        style.unpolish(self._toggle)
+        style.polish(self._toggle)
 
 
 class SettingsView(QScrollArea):
@@ -190,15 +197,15 @@ class SettingsView(QScrollArea):
             "设置",
             "管理通用选项、界面偏好、批量处理和清理规则",
             icon=glyph("SETTINGS"),
-        ))
-        status_text, _icon, color = self._feedback_projection()
+        ), 1)
+        status_text, _icon, status = self._feedback_projection()
         self._save_status_label = QLabel(status_text)
-        self._save_status_label.setStyleSheet(f"color: {color};")
+        self._save_status_label.setProperty("role", "statusChip")
+        self._save_status_label.setProperty("feedbackStatus", status)
         header_layout.addWidget(
             self._save_status_label,
             alignment=Qt.AlignmentFlag.AlignVCenter,
         )
-        header_layout.addStretch(1)
         layout.addWidget(header_row)
 
         # 两个内容列
@@ -244,7 +251,7 @@ class SettingsView(QScrollArea):
         width = self.viewport().width()
         direction = (
             QBoxLayout.Direction.TopToBottom
-            if width < 1080
+            if width < SETTINGS_STACK_BREAKPOINT
             else QBoxLayout.Direction.LeftToRight
         )
         if self._columns_layout.direction() != direction:
@@ -764,41 +771,43 @@ class SettingsView(QScrollArea):
 
     def _render_feedback_state(self) -> None:
         """把不可变反馈状态投影到保存状态标签。"""
-        text, _icon, color = self._feedback_projection()
+        text, _icon, status = self._feedback_projection()
         self._save_status_label.setText(text)
-        self._save_status_label.setStyleSheet(f"color: {color};")
+        self._save_status_label.setProperty("feedbackStatus", status)
+        style = self._save_status_label.style()
+        style.unpolish(self._save_status_label)
+        style.polish(self._save_status_label)
 
     def _feedback_projection(self) -> tuple[str, str, str]:
-        theme = get_theme_manager().current
         phase = self._state.feedback
         if phase is SettingsFeedbackPhase.PENDING:
             return (
                 self._t("settings.save_status.pending", "等待保存"),
                 "INFO",
-                theme.warning,
+                "pending",
             )
         if phase is SettingsFeedbackPhase.SAVED:
             return (
                 self._t("settings.save_status.saved", "已保存"),
                 "SUCCESS",
-                theme.success,
+                "saved",
             )
         if phase is SettingsFeedbackPhase.FAILED:
             return (
                 self._t("settings.save_status.failed", "保存失败"),
                 "ERROR",
-                theme.error,
+                "failed",
             )
         if phase is SettingsFeedbackPhase.RESETTING:
             return (
                 self._t("settings.save_status.resetting", "正在重置"),
                 "INFO",
-                theme.warning,
+                "pending",
             )
         return (
             self._t("settings.save_status.auto", "更改会自动保存"),
             "INFO",
-            theme.text_muted,
+            "neutral",
         )
 
     # ─── 字段变更处理器 ──────────────────────────

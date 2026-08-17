@@ -6,11 +6,15 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
 
 import pytest
-from PySide6.QtWidgets import QApplication, QBoxLayout
+from PySide6.QtWidgets import QApplication, QBoxLayout, QWidget
 
 from app.adapters.file_dialogs import FileType
 from app.models.config import ApplicationSettings
-from app.qtui.views.settings import SettingsView, SettingsViewDependencies
+from app.qtui.views.settings import (
+    CollapsibleSection,
+    SettingsView,
+    SettingsViewDependencies,
+)
 from app.services.cache_registry import CacheRegistry
 from app.services.config_service import ConfigService
 from app.services.execution_runtime import (
@@ -162,8 +166,24 @@ def view(host: FakeHost) -> Iterator[SettingsView]:
 def test_view_builds_sections(view: SettingsView) -> None:
     assert len(view._sections) == 6
     assert "更改会自动保存" in view._save_status_label.text()
+    assert view._save_status_label.property("role") == "statusChip"
+    assert view._save_status_label.property("feedbackStatus") == "neutral"
     # 默认值投影
     assert view._theme_dropdown.property("value_key") == "dark"
+
+
+def test_collapsible_section_projects_expanded_state() -> None:
+    section = CollapsibleSection("界面", QWidget(), expanded=True)
+
+    assert section._toggle.property("role") == "sectionToggle"
+    assert section._toggle.property("expanded") is True
+    assert not section._content_host.isHidden()
+
+    section._toggle.click()
+
+    assert section._toggle.property("expanded") is False
+    assert section._content_host.isHidden()
+    section.deleteLater()
 
 
 def test_settings_columns_stack_in_narrow_window(view: SettingsView) -> None:

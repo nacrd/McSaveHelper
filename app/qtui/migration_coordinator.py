@@ -71,6 +71,10 @@ class MigrationCoordinatorHost(Protocol):
         """显示成功信息。"""
         ...
 
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        """显示非阻塞成功反馈。"""
+        ...
+
     def log(self, msg: str, level: str = "INFO") -> None:
         """记录应用日志。"""
         ...
@@ -122,7 +126,10 @@ class QtMigrationCoordinator:
                 warn_dialog=host.warn_dialog,
                 error_dialog=host.error_dialog,
                 handle_exception=host.handle_exception,
-                show_success=host.info_dialog,
+                show_success=lambda _title, message: host.show_status_message(
+                    message,
+                    7000,
+                ),
                 set_start_enabled=host.set_migration_start_enabled,
                 update_page=lambda: None,
                 log=host.log,

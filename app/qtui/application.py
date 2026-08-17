@@ -630,6 +630,10 @@ class QtApplication(QMainWindow):
     ) -> None:
         self.message_dialogs.error_dialog(title, message, exception, show_details)
 
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        """在主窗口底部显示短暂的非阻塞反馈。"""
+        self.shell.show_status_message(message, timeout_ms)
+
     def handle_exception(
         self,
         exception: Exception,

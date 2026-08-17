@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication, QLabel, QTableWidget, QTableWidgetItem
+from PySide6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QProgressBar,
+    QTableWidget,
+    QTableWidgetItem,
+)
 
+from app.qtui.components.cards import loading_placeholder
 from app.qtui.components.layout import page_header
 from app.qtui.theme import (
     LIGHT_THEME,
@@ -32,6 +39,12 @@ def test_build_qss_defines_status_roles() -> None:
     assert 'QLabel[role="success"]' in qss
     assert 'QPushButton:checked' in qss
     assert 'QPushButton[role="warning"]' in qss
+    assert 'QPushButton[role="sectionToggle"]' in qss
+    assert 'QPushButton[role="icon"]' in qss
+    assert 'QLabel[role="statusChip"]' in qss
+    assert 'QWidget[role="interactiveCard"]' in qss
+    assert 'QWidget[role="state"]' in qss
+    assert 'QProgressBar[role="stateLoading"]' in qss
     assert 'QTabBar::tab:selected' in qss
     assert 'QListWidget::item:hover' in qss
     assert 'QWidget#page_header' in qss
@@ -49,6 +62,20 @@ def test_page_header_uses_theme_roles_without_nested_layouts() -> None:
     assert header.layout() is not None
     assert any(label.property("role") == "pageIcon" for label in labels)
     assert any(label.property("role") == "title" for label in labels)
+
+
+def test_loading_placeholder_exposes_theme_roles() -> None:
+    state = loading_placeholder("读取中", "正在扫描备份")
+    labels = state.findChildren(QLabel)
+    progress = state.findChild(QProgressBar)
+
+    assert state.property("role") == "state"
+    assert any(label.property("role") == "stateTitle" for label in labels)
+    assert any(label.property("role") == "stateSubtitle" for label in labels)
+    assert progress is not None
+    assert progress.property("role") == "stateLoading"
+    assert progress.minimum() == 0
+    assert progress.maximum() == 0
 
 
 def test_apply_theme_switches_app_stylesheet(qt_app: QApplication) -> None:

@@ -311,6 +311,8 @@
     "no_save": "No save selected",
     "select_valid_save": "Select a valid save first",
     "load_failed": "Failed to load backups",
+    "loading": "Loading restore points…",
+    "loading_subtitle": "Reading the backup manifest, please wait",
     "count": "{count} restore points",
     "empty": "No backups",
     "empty_subtitle": "Created restore points will appear here",

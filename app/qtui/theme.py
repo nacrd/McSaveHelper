@@ -167,7 +167,7 @@ def build_qss(colors: QtThemeColors) -> str:
     """根据色板生成应用级 QSS 样式表。"""
     return f"""
 QWidget {{
-    background-color: {colors.bg_primary};
+    background-color: transparent;
     color: {colors.text_primary};
     font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
     font-size: 10pt;
@@ -233,6 +233,10 @@ QLabel {{
 QLabel[role="muted"] {{
     color: {colors.text_muted};
 }}
+QLabel[role="caption"], QLabel[size="caption"] {{
+    color: {colors.text_muted};
+    font-size: 9pt;
+}}
 QLabel[role="title"] {{
     font-size: 20px;
     font-weight: 600;
@@ -263,6 +267,73 @@ QLabel[role="info"] {{
 QLabel[role="success"] {{
     color: {colors.success};
 }}
+QWidget[role="state"] {{
+    background-color: {colors.bg_card};
+    border: 1px solid {colors.border_subtle};
+    border-radius: 7px;
+}}
+QLabel[role="stateIcon"] {{
+    color: {colors.text_muted};
+    font-size: 36px;
+}}
+QLabel[role="stateTitle"] {{
+    color: {colors.text_primary};
+    font-size: 16px;
+    font-weight: 600;
+}}
+QLabel[role="stateSubtitle"] {{
+    color: {colors.text_muted};
+    font-size: 10pt;
+}}
+QProgressBar[role="stateLoading"] {{
+    border: none;
+    border-radius: 3px;
+    background: {colors.bg_elevated};
+}}
+QProgressBar[role="stateLoading"]::chunk {{
+    background: {colors.accent};
+    border-radius: 3px;
+}}
+QLabel[role="cardTitle"] {{
+    color: {colors.text_primary};
+    font-size: 10pt;
+    font-weight: 600;
+}}
+QLabel[role="statusIcon"] {{
+    font-size: 15pt;
+}}
+QLabel[role="statusIcon"][tone="success"] {{
+    color: {colors.success};
+}}
+QLabel[role="statusIcon"][tone="error"] {{
+    color: {colors.error};
+}}
+QLabel[role="statusChip"] {{
+    border: 1px solid {colors.border_subtle};
+    border-radius: 8px;
+    padding: 3px 8px;
+    font-size: 9pt;
+    font-weight: 600;
+}}
+QLabel[role="statusChip"][feedbackStatus="neutral"] {{
+    background-color: {colors.bg_elevated};
+    color: {colors.text_muted};
+}}
+QLabel[role="statusChip"][feedbackStatus="pending"] {{
+    background-color: {colors.bg_elevated};
+    border-color: {colors.warning};
+    color: {colors.warning};
+}}
+QLabel[role="statusChip"][feedbackStatus="saved"] {{
+    background-color: {colors.accent_dim};
+    border-color: {colors.success};
+    color: {colors.success};
+}}
+QLabel[role="statusChip"][feedbackStatus="failed"] {{
+    background-color: {colors.bg_elevated};
+    border-color: {colors.error};
+    color: {colors.error};
+}}
 QLabel[role="result"] {{
     color: {colors.text_primary};
     font-family: 'Consolas', 'SFMono-Regular', monospace;
@@ -271,6 +342,15 @@ QWidget[role="card"] {{
     background-color: {colors.bg_card};
     border: 1px solid {colors.border_subtle};
     border-radius: 7px;
+}}
+QWidget[role="interactiveCard"] {{
+    background-color: {colors.bg_card};
+    border: 1px solid {colors.border_subtle};
+    border-radius: 7px;
+}}
+QWidget[role="interactiveCard"]:hover {{
+    background-color: {colors.bg_card_hover};
+    border-color: {colors.border_standard};
 }}
 QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background-color: {colors.bg_elevated};
@@ -366,6 +446,9 @@ QPushButton[role="danger"] {{
     border-color: {colors.border_dark};
     color: {colors.text_invert};
 }}
+QPushButton:focus, QToolButton:focus {{
+    border: 1px solid {colors.border_glow};
+}}
 QPushButton[role="danger"]:hover {{
     background-color: #BF5260;
 }}
@@ -389,6 +472,34 @@ QPushButton[role="ghost"]:hover {{
 QPushButton[role="ghost"]:checked {{
     background-color: {colors.bg_card};
     border-color: {colors.accent};
+}}
+QPushButton[role="sectionToggle"] {{
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    color: {colors.text_primary};
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+}}
+QPushButton[role="sectionToggle"]:hover {{
+    background-color: {colors.bg_card_hover};
+}}
+QPushButton[role="sectionToggle"][expanded="true"] {{
+    color: {colors.accent};
+}}
+QPushButton[role="icon"] {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px;
+}}
+QPushButton[role="icon"]:hover {{
+    background-color: {colors.bg_elevated};
+    border-color: {colors.border_standard};
+}}
+QPushButton[role="icon"][tone="danger"] {{
+    color: {colors.error};
 }}
 QToolButton {{
     background-color: transparent;

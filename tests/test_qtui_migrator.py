@@ -84,6 +84,7 @@ class FakeHost:
         self.logs: list[tuple[str, str]] = []
         self.warns: list[tuple[str, str]] = []
         self.errors: list[tuple[str, str]] = []
+        self.statuses: list[tuple[str, int]] = []
         self.starts = 0
         self.cancels = 0
         self.cancel_result = False
@@ -108,6 +109,9 @@ class FakeHost:
 
     def info_dialog(self, title: str, message: str) -> None:
         del title, message
+
+    def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
+        self.statuses.append((message, timeout_ms))
 
     def error_dialog(
         self,

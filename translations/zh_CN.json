@@ -311,6 +311,8 @@
     "no_save": "尚未选择存档",
     "select_valid_save": "请先选择有效存档",
     "load_failed": "备份列表加载失败",
+    "loading": "正在加载恢复点…",
+    "loading_subtitle": "正在读取备份清单，请稍候",
     "count": "共 {count} 个恢复点",
     "empty": "暂无备份",
     "empty_subtitle": "创建的恢复点会显示在这里",
