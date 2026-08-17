@@ -27,7 +27,10 @@ from app.services.world_repository import WorldRepository, WorldSessionPorts
 from app.services.world_stats_service import WorldStatsService
 from app.services.world_transaction import WorldTransactionService
 from app.services.world_write_coordinator import WorldWriteCoordinator
+from app.services.log_query_service import LogExportService, LogQueryService
+from app.services.log_alert_service import AlertService
 from core.logger import logger
+from core.logging.storage import JsonlLogStore
 from core.parallel import ParallelRunner
 
 
@@ -70,6 +73,10 @@ class AppServices:
     parallel_runner: ParallelRunner
     auto_language_import: AutoLanguageImportService
     performance_monitoring: PerformanceMonitoringService
+    log_store: JsonlLogStore | None = None
+    log_query: LogQueryService | None = None
+    log_export: LogExportService | None = None
+    log_alerts: AlertService | None = None
 
 
 def _default_world_indexes(cache_registry: CacheRegistry) -> WorldIndexRegistry:
@@ -137,6 +144,11 @@ def _default_world_stats(runtime: ExecutionRuntime) -> WorldStatsService:
     return WorldStatsService(runtime=runtime)
 
 
+def _default_log_store() -> JsonlLogStore:
+    """创建应用共享的 JSONL 日志存储端口。"""
+    return JsonlLogStore(Path.home() / ".mc_save_helper" / "logs")
+
+
 @dataclass(frozen=True)
 class ServiceFactories:
     """可替换的服务工厂表，便于测试注入替身。"""
@@ -193,6 +205,10 @@ class ServiceFactories:
     performance_monitoring: Callable[[], PerformanceMonitoringService] = (
         PerformanceMonitoringService
     )
+    log_store: Callable[[], JsonlLogStore] = _default_log_store
+    log_query: Callable[[JsonlLogStore], LogQueryService] = LogQueryService
+    log_export: Callable[[JsonlLogStore], LogExportService] = LogExportService
+    log_alerts: Callable[[JsonlLogStore], AlertService] = AlertService
 
 
 def _create(service_name: str, factory: Callable[..., Any], *args: Any) -> Any:
@@ -276,6 +292,10 @@ def create_app_services(
     selected = factories or ServiceFactories()
     config = _create("config", selected.config)
     i18n = _create("i18n", selected.i18n, config)
+    log_store = _create("log_store", selected.log_store)
+    log_query = _create("log_query", selected.log_query, log_store)
+    log_export = _create("log_export", selected.log_export, log_store)
+    log_alerts = _create("log_alerts", selected.log_alerts, log_store)
     world_writes = _create("world_writes", selected.world_writes)
     backup = _create("backup", selected.backup, world_writes)
     operation_metrics = _create(
@@ -397,6 +417,10 @@ def create_app_services(
             parallel_runner=parallel_runner,
             auto_language_import=active_auto_language_import,
             performance_monitoring=active_performance_monitoring,
+            log_store=log_store,
+            log_query=log_query,
+            log_export=log_export,
+            log_alerts=log_alerts,
         )
     except Exception:
         _close_partial_services(

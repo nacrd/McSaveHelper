@@ -66,6 +66,16 @@ def _run_qt_application() -> int:
 
     configure_thread_fairness()
 
+    from core.logger import LogLevel, setup_default_logging
+
+    setup_default_logging(
+        enable_console=True,
+        enable_file=True,
+        level=LogLevel.DEBUG,
+        capture_stdlib=True,
+        capture_print=True,
+    )
+
     from PySide6.QtWidgets import QApplication
 
     from app.qtui.application import QtApplication

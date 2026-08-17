@@ -9,11 +9,12 @@ import threading
 import traceback
 from collections.abc import Mapping
 from datetime import datetime
-from queue import Empty, Queue
-from typing import Any, Callable, Dict, List, Optional
+from queue import Empty, Full, Queue
+from typing import Any, Callable, Dict, List, Optional, TextIO
 
 from .handlers import LogHandler
 from .models import LogLevel, LogRecord
+from .streams import LoggingTextStream
 
 logging.addLevelName(LogLevel.API.value, "API")
 logging.addLevelName(LogLevel.SUCCESS.value, "SUCCESS")
@@ -58,9 +59,10 @@ class LogManager:
             return
         self.handlers: List[LogHandler] = []
         self.min_level = LogLevel.INFO
-        self._queue: Queue[object] = Queue()
+        self._queue: Queue[object] = Queue(maxsize=20_000)
         self._worker_thread: Optional[threading.Thread] = None
         self._running = False
+        self._state_lock = threading.Lock()
         self._module_levels: Dict[str, LogLevel] = {}
         self._handlers_lock = threading.RLock()
         self._stdlib_logger = logging.getLogger("mcsavehelper")
@@ -69,6 +71,11 @@ class LogManager:
         self._ingress_handler = _ForwardingHandler(self._enqueue_stdlib_record)
         self._stdlib_logger.addHandler(self._ingress_handler)
         self._stdlib_bridge: Optional[_ForwardingHandler] = None
+        self._root_level_before_bridge: Optional[int] = None
+        self._stdout_redirect: Optional[LoggingTextStream] = None
+        self._stderr_redirect: Optional[LoggingTextStream] = None
+        self._original_stdout: Optional[TextIO] = None
+        self._original_stderr: Optional[TextIO] = None
         self._start_worker()
         self._initialized = True
 
@@ -81,10 +88,20 @@ class LogManager:
         )
         self._worker_thread.start()
 
+    def start(self) -> None:
+        """启动或重新启动已关闭的日志 worker。"""
+        with self._state_lock:
+            if self._running:
+                return
+            if self._ingress_handler not in self._stdlib_logger.handlers:
+                self._stdlib_logger.addHandler(self._ingress_handler)
+            self._start_worker()
+
     def install_stdlib_bridge(self) -> None:
         """将 root logger 的记录接入本地异步管线。"""
         root_logger = logging.getLogger()
         if self._stdlib_bridge is None:
+            self._root_level_before_bridge = root_logger.level
             self._stdlib_bridge = _ForwardingHandler(self._enqueue_stdlib_record)
             root_logger.addHandler(self._stdlib_bridge)
         root_logger.setLevel(min(root_logger.level or logging.WARNING, logging.DEBUG))
@@ -93,9 +110,46 @@ class LogManager:
         """移除 root logger 桥接，供测试和关闭路径使用。"""
         if self._stdlib_bridge is None:
             return
-        logging.getLogger().removeHandler(self._stdlib_bridge)
+        root_logger = logging.getLogger()
+        root_logger.removeHandler(self._stdlib_bridge)
         self._stdlib_bridge.close()
         self._stdlib_bridge = None
+        if self._root_level_before_bridge is not None:
+            root_logger.setLevel(self._root_level_before_bridge)
+        self._root_level_before_bridge = None
+
+    def install_stream_redirects(self) -> None:
+        """可逆地把 stdout/stderr 行接入 INFO/ERROR 日志。"""
+        if self._stdout_redirect is not None:
+            return
+        self._original_stdout = sys.stdout
+        self._original_stderr = sys.stderr
+        self._stdout_redirect = LoggingTextStream(
+            sys.stdout,
+            lambda message: self.info(message, module="stdout"),
+        )
+        self._stderr_redirect = LoggingTextStream(
+            sys.stderr,
+            lambda message: self.error(message, module="stderr"),
+        )
+        sys.stdout = self._stdout_redirect
+        sys.stderr = self._stderr_redirect
+
+    def remove_stream_redirects(self) -> None:
+        """刷新并恢复安装前的标准流。"""
+        if self._stdout_redirect is None:
+            return
+        self._stdout_redirect.flush()
+        if self._stderr_redirect is not None:
+            self._stderr_redirect.flush()
+        if self._original_stdout is not None:
+            sys.stdout = self._original_stdout
+        if self._original_stderr is not None:
+            sys.stderr = self._original_stderr
+        self._stdout_redirect = None
+        self._stderr_redirect = None
+        self._original_stdout = None
+        self._original_stderr = None
 
     def _write_internal_error(self, message: str) -> None:
         try:
@@ -136,9 +190,22 @@ class LogManager:
                 )
 
     def _enqueue_stdlib_record(self, record: logging.LogRecord) -> None:
-        if not self._running:
-            return
-        self._queue.put(self._convert_stdlib_record(record))
+        converted = self._convert_stdlib_record(record)
+        with self._state_lock:
+            if not self._running:
+                return
+            try:
+                self._queue.put_nowait(converted)
+            except Full:
+                if converted.level < LogLevel.ERROR:
+                    return
+                try:
+                    self._queue.put(converted, timeout=0.05)
+                except Full:
+                    self._write_internal_error(
+                        f"日志队列已满，无法持久化 {converted.level.name}: "
+                        f"{converted.message}"
+                    )
 
     @staticmethod
     def _record_timestamp(record: logging.LogRecord) -> datetime:
@@ -296,11 +363,18 @@ class LogManager:
 
     def close(self) -> None:
         """停止 worker、排空队列并关闭全部 handler，操作幂等。"""
-        if self._running:
+        self.remove_stream_redirects()
+        should_stop = False
+        with self._state_lock:
+            if self._running:
+                self._running = False
+                should_stop = True
+        if should_stop:
+            self._queue.join()
             self._queue.put(self._STOP)
-            self._running = False
+            self._queue.join()
             if self._worker_thread is not None:
-                self._worker_thread.join(timeout=2.0)
+                self._worker_thread.join()
         self.remove_stdlib_bridge()
         if self._ingress_handler in self._stdlib_logger.handlers:
             self._stdlib_logger.removeHandler(self._ingress_handler)

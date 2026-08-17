@@ -2,11 +2,19 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import os
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QCloseEvent, QResizeEvent
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QSystemTrayIcon,
+    QWidget,
+)
 
 from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices, create_app_services
@@ -15,6 +23,7 @@ from app.models.save_store import CurrentSaveStore
 from app.qtui.context import QtFeatureContext, QtMigrationCommands
 from app.qtui.dialogs import QtFileDialogs, QtMessageDialogs
 from app.qtui.log_panel import QtLogPanel, install_qt_log_handler
+from app.qtui.log_alerts import QtAlertController
 from app.qtui.migration_coordinator import QtMigrationCoordinator
 from app.qtui.registry import create_qt_registry
 from app.qtui.shell import QtShell
@@ -29,6 +38,8 @@ from app.core.save_context_manager import SaveContextManager
 from app.services.item.language_loader import LanguageImportResult
 from app.services.region_map import RegionMapService
 from core.logger import LogHandler, LogLevel, logger, setup_default_logging
+from core.logging.storage import DailyJsonlHandler
+from app.services.log_alert_service import SmtpEmailNotifier, SmtpSettings
 
 if TYPE_CHECKING:
     from app.models.config import ApplicationSettings
@@ -123,6 +134,10 @@ class QtApplication(QMainWindow):
         )
         self._setup_window()
         self._setup_logging(settings.show_log_panel)
+        self._alert_controller: Optional[QtAlertController] = None
+        self._tray_icon: Optional[QSystemTrayIcon] = None
+        self._alert_message_boxes: list[QMessageBox] = []
+        self._setup_alerts()
         self._migration_coordinator = QtMigrationCoordinator(self)
         self._shutdown_started = False
         self._sidebar_mode = settings.sidebar_mode
@@ -139,6 +154,9 @@ class QtApplication(QMainWindow):
         self.shell.set_recent_saves(self._recent_saves())
         first_navigation_id = self.registry.navigation[0].navigation_id
         self.navigate_to(first_navigation_id)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.aboutToQuit.connect(self._shutdown)
 
     # ════════════════════════════════════════════
     #  壳层构建
@@ -157,16 +175,106 @@ class QtApplication(QMainWindow):
             enable_console=True,
             enable_file=True,
             enable_ui=False,
-            level=LogLevel.INFO,
+            level=LogLevel.DEBUG,
+            capture_print=True,
         )
+        self._qt_settings = QSettings("MCSaveHelper", "MCSaveHelper")
         self.log_panel = QtLogPanel(
             self.translate("log_panel.title", "日志"),
             self,
+            query_service=self.services.log_query,
+            export_service=self.services.log_export,
+            alert_service=self.services.log_alerts,
+            settings=self._qt_settings,
+            clear_logs=self._clear_log_archives,
+            translate=self.translate,
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_panel)
         self.log_panel.setVisible(show_panel)
         self._qt_log_handler: LogHandler = install_qt_log_handler(self.log_panel)
+        for handler in logger.handlers:
+            if isinstance(handler, DailyJsonlHandler):
+                handler.set_status_callback(self.log_panel.show_storage_warning)
         logger.info("MCSaveHelper Qt 应用启动", module="QtApp")
+        self.log_panel.reload()
+        dock_state = self._qt_settings.value("log_viewer/main_window_state")
+        if dock_state is not None:
+            self.restoreState(dock_state)
+
+    def _clear_log_archives(self) -> int:
+        """安全清理当前日志管线管理的所有 JSONL 文件。"""
+        logger.flush()
+        deleted = 0
+        for handler in logger.handlers:
+            if isinstance(handler, DailyJsonlHandler):
+                deleted += handler.clear_archives()
+        return deleted
+
+    def _setup_alerts(self) -> None:
+        """装配本地告警调度和可选系统/SMTP通知端口。"""
+        alert_service = self.services.log_alerts
+        if alert_service is None:
+            return
+        email_notify = None
+        smtp_host = os.environ.get("MCSAVEHELPER_SMTP_HOST", "")
+        if smtp_host:
+            try:
+                smtp_port = int(os.environ.get("MCSAVEHELPER_SMTP_PORT", "587"))
+            except ValueError:
+                smtp_port = 587
+                logger.warning("SMTP 端口无效，已使用默认端口", module="LogAlert")
+            email_notify = SmtpEmailNotifier(SmtpSettings(
+                host=smtp_host,
+                port=smtp_port,
+                username=os.environ.get("MCSAVEHELPER_SMTP_USER", ""),
+                sender=os.environ.get("MCSAVEHELPER_SMTP_FROM", ""),
+            ))
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            tray_icon = QSystemTrayIcon(self.windowIcon(), self)
+            tray_icon.show()
+            self._tray_icon = tray_icon
+        self._alert_controller = QtAlertController(
+            alert_service,
+            self._show_log_alert,
+            email_notify=email_notify,
+            parent=self,
+        )
+        self._alert_controller.check_failed.connect(
+            lambda message: logger.warning(message, module="LogAlert")
+        )
+        self._alert_controller.start()
+
+    def _show_log_alert(self, event: object) -> None:
+        """在主线程显示系统告警；无托盘时回退非模态消息框。"""
+        rule_name = getattr(event, "rule_name", self.tr("日志告警"))
+        count = getattr(event, "count", 0)
+        level = getattr(event, "level", "ERROR")
+        title = self.translate("log_alerts.alert_title", self.tr("日志告警"))
+        message = self.translate(
+            "log_alerts.alert_message",
+            self.tr("规则 {rule}：{level} 级别在窗口内出现 {count} 次"),
+            rule=str(rule_name),
+            level=str(level),
+            count=str(count),
+        )
+        if self._tray_icon is not None:
+            self._tray_icon.showMessage(title, message)
+        else:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Information)
+            box.setWindowTitle(title)
+            box.setText(message)
+            box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            self._alert_message_boxes.append(box)
+            box.finished.connect(self._remove_alert_message_box)
+            box.show()
+
+    def _remove_alert_message_box(self, result: int) -> None:
+        """Drop a closed non-modal alert box from the ownership list."""
+        del result
+        self._alert_message_boxes[:] = [
+            box for box in self._alert_message_boxes if not box.isVisible()
+        ]
 
     def create_settings_view(self) -> QWidget:
         """构建设置视图（显式注入应用端口）。"""
@@ -631,9 +739,14 @@ class QtApplication(QMainWindow):
         if self._shutdown_started:
             return
         self._shutdown_started = True
+        self._qt_settings.setValue("log_viewer/main_window_state", self.saveState())
+        self._qt_settings.sync()
         logger.remove_handler(self._qt_log_handler)
         self.log_panel.dispose()
         with ExitStack() as cleanup:
+            if self._alert_controller is not None:
+                cleanup.callback(self._alert_controller.dispose)
+            cleanup.callback(logger.shutdown)
             cleanup.callback(self.ui_delivery.close)
             cleanup.callback(self.texture.close)
             cleanup.callback(self.services.cache_registry.close)

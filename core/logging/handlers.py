@@ -95,9 +95,9 @@ class ConsoleHandler(LogHandler):
             f"{msg}{self._RESET}"
         )
         if record.level >= LogLevel.ERROR:
-            print(output, file=sys.stderr)
+            print(output, file=sys.__stderr__)
         else:
-            print(output, file=sys.stdout)
+            print(output, file=sys.__stdout__)
 
 
 class FileHandler(LogHandler):

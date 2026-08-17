@@ -7,8 +7,18 @@ from core.logging import logger, setup_default_logging
 from core.logging.models import LogLevel, LogRecord
 from core.logging.handlers import ConsoleHandler, FileHandler, LogHandler, UIHandler
 from core.logging.manager import LogManager
+from core.logging.storage import (
+    DailyJsonlHandler,
+    JsonlLogStore,
+    LogPage,
+    LogQuery,
+    LogStatistics,
+    StoredLog,
+)
 
 __all__ = [
     "logger", "LogLevel", "LogRecord", "LogHandler", "LogManager",
-    "ConsoleHandler", "FileHandler", "UIHandler", "setup_default_logging",
+    "ConsoleHandler", "DailyJsonlHandler", "FileHandler", "UIHandler",
+    "JsonlLogStore", "LogPage", "LogQuery", "LogStatistics", "StoredLog",
+    "setup_default_logging",
 ]
