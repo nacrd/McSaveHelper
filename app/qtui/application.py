@@ -21,6 +21,7 @@ from app.adapters.file_dialogs import FileType
 from app.bootstrap.services import AppServices, create_app_services
 from app.models.save_context import CurrentSaveContext
 from app.models.save_store import CurrentSaveStore
+from app.qtui.animation import QtAnimationSystem
 from app.qtui.context import QtFeatureContext, QtMigrationCommands
 from app.qtui.dialogs import QtFileDialogs, QtMessageDialogs
 from app.qtui.log_panel import QtLogPanel, install_qt_log_handler
@@ -116,11 +117,16 @@ class QtApplication(QMainWindow):
         self.registry = create_qt_registry()
         self._active_navigation_id: Optional[str] = None
         self._stack = QStackedWidget()
+        self.animations = QtAnimationSystem(
+            reduced_motion=settings.reduced_motion,
+            parent=self,
+        )
         self.feature_context = QtFeatureContext(self)
         self.view_manager = QtViewManager(
             registry=self.registry,
             stack=self._stack,
             context=self.feature_context,
+            animations=self.animations,
             on_view_changed=self._on_view_changed,
         )
         self.sidebar = self._build_sidebar()
@@ -128,6 +134,7 @@ class QtApplication(QMainWindow):
             translate=self.translate,
             sidebar=self.sidebar,
             view_stack=self._stack,
+            animations=self.animations,
             on_view_action=self._on_view_action,
             on_pick_world=self._on_pick_current_save,
             on_recent_world=self._on_recent_save_select,
@@ -297,6 +304,7 @@ class QtApplication(QMainWindow):
             apply_language=self._apply_language,
             set_sidebar_mode=self._set_sidebar_mode,
             set_log_panel_visible=self._set_log_panel_visible,
+            set_reduced_motion=self.animations.set_reduced_motion,
             configure_performance_monitor=self._configure_performance_monitor,
             set_performance_interval=self._set_performance_interval,
             info_dialog=self.info_dialog,
@@ -389,6 +397,7 @@ class QtApplication(QMainWindow):
             recent_saves=self._recent_saves(),
             current_save_path=self.current_save_path,
             on_pick_current_save=self._on_pick_current_save,
+            animations=self.animations,
         )
 
     def _apply_theme_style(self) -> None:
@@ -422,6 +431,9 @@ class QtApplication(QMainWindow):
         if navigation is None:
             raise KeyError(f"未注册的 Qt 导航入口: {navigation_id}")
         previous_navigation_id = self._active_navigation_id
+        navigation_changed = previous_navigation_id != navigation_id
+        if navigation_changed and previous_navigation_id is not None:
+            self.shell.capture_navigation_snapshot()
         was_created = self.view_manager.get_view(navigation.view_id) is not None
         self._active_navigation_id = navigation_id
         self.view_manager.switch_view(navigation.view_id)
@@ -429,7 +441,8 @@ class QtApplication(QMainWindow):
             self._notify_new_view_of_current_save(navigation.view_id)
         self._select_navigation_workspace(navigation)
         self.sidebar.select_tab(navigation_id)
-        if previous_navigation_id != navigation_id:
+        if navigation_changed:
+            self.shell.play_navigation_transition()
             logger.info(
                 f"页面切换: {previous_navigation_id or 'startup'} -> "
                 f"{navigation_id}",
@@ -830,4 +843,5 @@ class QtApplication(QMainWindow):
             cleanup.callback(self.services.performance_monitoring.close)
             cleanup.callback(self.services.auto_language_import.close)
             cleanup.callback(self._migration_coordinator.close)
+            cleanup.callback(self.animations.dispose)
             cleanup.callback(self.view_manager.dispose_all)

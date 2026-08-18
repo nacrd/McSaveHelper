@@ -22,6 +22,7 @@ from app.qtui.sidebar_chrome import (
     build_footer,
     build_toggle_button,
 )
+from app.qtui.animation import QtAnimationSystem
 from app.qtui.theme import get_theme_manager
 
 Translate = Callable[..., str]
@@ -247,11 +248,13 @@ class QtSidebar(QFrame):
         recent_saves: Optional[list[dict[str, Any]]] = None,
         current_save_path: Optional[str] = None,
         on_pick_current_save: Optional[Callable[[], None]] = None,
+        animations: Optional[QtAnimationSystem] = None,
     ) -> None:
         """构建与 Flet 布局一致的 Qt 侧边栏。"""
         super().__init__()
         self._translate = translate
         self._on_tab_select = on_tab_select
+        self._animations = animations
         self._on_import_save = on_import_save
         self._on_recent_save_select = on_recent_save_select
         self._recent_saves: list[dict[str, Any]] = list(recent_saves or [])
@@ -283,6 +286,7 @@ class QtSidebar(QFrame):
         self._tabs_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._tabs_scroll.setStyleSheet("QScrollArea { background: transparent; }")
         tabs_container = QWidget()
+        self._tabs_container = tabs_container
         self._tabs_layout = QVBoxLayout(tabs_container)
         self._tabs_layout.setContentsMargins(14, 12, 14, 10)
         self._tabs_layout.setSpacing(4)
@@ -299,6 +303,11 @@ class QtSidebar(QFrame):
                 current_group = group
             self._add_tab_button(tab, self._tabs_layout)
         self._tabs_scroll.setWidget(tabs_container)
+        self._selection_indicator = QFrame(tabs_container)
+        self._selection_indicator.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self._selection_indicator.hide()
         self._root.addWidget(self._tabs_scroll, 1)
 
         # 布局：设置等应用级入口固定在侧栏底部，不随主导航滚动。
@@ -336,6 +345,9 @@ class QtSidebar(QFrame):
             f"QFrame#sidebar {{ background-color: {colors.bg_secondary};"
             f" border: none; border-right: 1px solid {colors.border_subtle}; }}"
         )
+        self._selection_indicator.setStyleSheet(
+            f"background: {colors.accent}; border-radius: 1px;"
+        )
 
     # ─── 公开操作 ───────────────────────────────
 
@@ -350,6 +362,7 @@ class QtSidebar(QFrame):
         button = self._buttons.get(view_id)
         if button is not None:
             button.set_selected(True)
+            self._animate_selection(previous, button)
 
     def set_current_save(self, path: Optional[str]) -> None:
         """更新当前存档显示（设为金色名称，匹配 Flet）。"""
@@ -375,14 +388,54 @@ class QtSidebar(QFrame):
         self._footer.refresh_theme()
         self._apply_sidebar_style()
 
+    def _animate_selection(
+        self,
+        previous: Optional[_TabButton],
+        current: _TabButton,
+    ) -> None:
+        """让侧栏指示条从旧导航项滑向新导航项。"""
+        if current.parentWidget() is not self._tabs_container:
+            self._selection_indicator.hide()
+            if self._animations is not None:
+                self._animations.reveal(
+                    current,
+                    start_opacity=0.35,
+                    duration_ms=220,
+                )
+            return
+        target = current.geometry().adjusted(0, 6, 0, -6)
+        target.setWidth(3)
+        if previous is None or not self._selection_indicator.isVisible():
+            self._selection_indicator.setGeometry(target)
+            self._selection_indicator.show()
+            self._selection_indicator.raise_()
+            return
+        self._selection_indicator.show()
+        self._selection_indicator.raise_()
+        if self._animations is None:
+            self._selection_indicator.setGeometry(target)
+        else:
+            self._animations.animate_geometry(
+                self._selection_indicator,
+                target,
+                duration_ms=240,
+            )
+            self._animations.reveal(
+                current,
+                start_opacity=0.55,
+                duration_ms=220,
+            )
+
     def set_collapsed(self, collapsed: bool) -> None:
         """切换折叠态并重建头部/页签/切换/页脚。"""
         if collapsed == self._collapsed:
             return
         self._collapsed = collapsed
-        self.setFixedWidth(
-            self.COLLAPSED_WIDTH if collapsed else self.EXPANDED_WIDTH
-        )
+        target_width = self.COLLAPSED_WIDTH if collapsed else self.EXPANDED_WIDTH
+        if self._animations is None:
+            self.setFixedWidth(target_width)
+        else:
+            self._animations.animate_width(self, target_width)
         for button in self._buttons.values():
             button.set_collapsed(collapsed)
         self._tabs_layout.setContentsMargins(
@@ -403,6 +456,9 @@ class QtSidebar(QFrame):
         self._toggle_button.set_collapsed(collapsed)
         self._footer.set_collapsed(collapsed)
         self._apply_sidebar_style()
+        selected = self._buttons.get(self._selected_id or "")
+        if selected is not None:
+            self._animate_selection(None, selected)
 
     def toggle_collapsed(self) -> None:
         """切换折叠状态。"""

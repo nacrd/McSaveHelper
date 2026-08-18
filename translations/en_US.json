@@ -597,6 +597,7 @@
       "language": "Language",
       "auto_clear_log": "Auto Clear Old Logs",
       "sidebar_mode": "Sidebar Mode",
+      "reduced_motion": "Reduce interface motion",
       "minecraft_dir": "Minecraft directory",
       "minecraft_dir_hint": "e.g. F:\\Game\\minecraft\\.minecraft (leave empty to auto-detect)",
       "minecraft_dir_help": "Used when importing language/textures. Prefer this path; if empty, walk up from the current save or use the default directory.",

@@ -5,6 +5,7 @@ from typing import Callable, Optional
 
 from PySide6.QtWidgets import QStackedWidget, QWidget
 
+from app.qtui.animation import QtAnimationSystem
 from app.qtui.context import QtFeatureContext
 from app.qtui.registry import QtFeatureRegistry
 from app.qtui.view_actions import QtViewAction
@@ -25,6 +26,7 @@ class QtViewManager:
         registry: QtFeatureRegistry,
         stack: QStackedWidget,
         context: QtFeatureContext,
+        animations: Optional[QtAnimationSystem] = None,
         on_view_changed: Optional[Callable[[str], None]] = None,
     ) -> None:
         """构建视图管理器。
@@ -33,11 +35,13 @@ class QtViewManager:
             registry: 功能注册表（工厂来源）。
             stack: 承载视图的 QStackedWidget。
             context: 传给所有视图的端口包。
+            animations: 可选的全局动效系统。
             on_view_changed: 视图切换回调（view_id）。
         """
         self._registry = registry
         self._stack = stack
         self._context = context
+        self._animations = animations
         self._on_view_changed = on_view_changed
         self._views: dict[str, QWidget] = {}
         self._current_id: Optional[str] = None
@@ -58,8 +62,11 @@ class QtViewManager:
         view = self._views.get(view_id)
         if view is None:
             view = self._create_view(view_id)
+        is_initial_view = self._current_id is None
         self._stack.setCurrentWidget(view)
         self._current_id = view_id
+        if self._animations is not None and not is_initial_view:
+            self._animations.fade_in(view)
         if self._on_view_changed is not None:
             self._on_view_changed(view_id)
 
@@ -68,6 +75,8 @@ class QtViewManager:
         view = self._views.pop(view_id, None)
         if view is None:
             return
+        if self._animations is not None:
+            self._animations.stop(view)
         self._dispose_view(view)
         self._stack.removeWidget(view)
         view.deleteLater()
@@ -114,6 +123,8 @@ class QtViewManager:
 
     def dispose_all(self) -> None:
         """释放全部视图（窗口关闭时调用）。"""
+        if self._animations is not None:
+            self._animations.stop_all()
         for view_id, view in self._views.items():
             self._dispose_view(view)
         self._views.clear()

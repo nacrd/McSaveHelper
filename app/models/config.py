@@ -50,6 +50,7 @@ class ApplicationSettings:
     sidebar_mode: str = "auto"
     auto_clear_log: bool = True
     show_log_panel: bool = True
+    reduced_motion: bool = False
     enable_performance_monitor: bool = False
     performance_print_interval: int = 60
     max_concurrent: int = 2

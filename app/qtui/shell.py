@@ -7,9 +7,10 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QStackedWidget,
     QStatusBar,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.qtui.animation import QtAnimationSystem
 from app.qtui.progress import QtProgressHost
 from app.qtui.sidebar import QtSidebar
 from app.qtui.view_actions import QtViewAction
@@ -37,6 +39,7 @@ class QtShell(QWidget):
         translate: Translate,
         sidebar: QtSidebar,
         view_stack: QStackedWidget,
+        animations: Optional[QtAnimationSystem] = None,
         on_view_action: Callable[[QtViewAction], None],
         on_pick_world: Callable[[], None],
         on_recent_world: Callable[[str], None],
@@ -56,6 +59,8 @@ class QtShell(QWidget):
         super().__init__()
         self._translate = translate
         self._on_view_action = on_view_action
+        self._view_stack = view_stack
+        self._animations = animations
         self._action_buttons: list[QPushButton] = []
 
         root_layout = QVBoxLayout(self)
@@ -96,6 +101,13 @@ class QtShell(QWidget):
         self._status_bar.setSizeGripEnabled(False)
         root_layout.addWidget(self._status_bar)
         self._progress = QtProgressHost(self._status_bar)
+        self._navigation_transition = QLabel(self)
+        self._navigation_transition.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
+        self._navigation_transition.setScaledContents(True)
+        self._navigation_snapshot_ready = False
+        self._navigation_transition.hide()
 
     @property
     def progress(self) -> QtProgressHost:
@@ -157,3 +169,38 @@ class QtShell(QWidget):
     def show_status_message(self, message: str, timeout_ms: int = 5000) -> None:
         """在状态栏显示一条自动消失的非阻塞消息。"""
         self._status_bar.showMessage(message, timeout_ms)
+
+    def capture_navigation_snapshot(self) -> None:
+        """在导航切换前捕获当前主内容区。"""
+        animations = self._animations
+        if animations is None or animations.reduced_motion:
+            self._navigation_snapshot_ready = False
+            self._navigation_transition.hide()
+            return
+        animations.stop(self._navigation_transition)
+        self._navigation_transition.hide()
+        origin = self._view_stack.mapTo(self, QPoint(0, 0))
+        bounds = QRect(origin, self._view_stack.size())
+        if bounds.width() <= 0 or bounds.height() <= 0:
+            self._navigation_snapshot_ready = False
+            self._navigation_transition.hide()
+            return
+        self._navigation_transition.setPixmap(self._view_stack.grab())
+        self._navigation_transition.setGeometry(bounds)
+        self._navigation_snapshot_ready = True
+
+    def play_navigation_transition(self) -> None:
+        """让旧内容快照滑出并淡出，显露切换后的页面。"""
+        animations = self._animations
+        if animations is None or not self._navigation_snapshot_ready:
+            self._navigation_transition.hide()
+            return
+        self._navigation_snapshot_ready = False
+        self._navigation_transition.show()
+        self._navigation_transition.raise_()
+        animations.fade_out(
+            self._navigation_transition,
+            offset_px=-36,
+            duration_ms=280,
+            on_finished=self._navigation_transition.hide,
+        )

@@ -77,6 +77,7 @@ class SettingsViewDependencies:
     apply_language: Callable[[str], None]
     set_sidebar_mode: Callable[[str], None]
     set_log_panel_visible: Callable[[bool], None]
+    set_reduced_motion: Callable[[bool], None]
     configure_performance_monitor: Callable[[bool, float], None]
     set_performance_interval: Callable[[float], None]
     info_dialog: DialogCallback
@@ -383,6 +384,13 @@ class SettingsView(QScrollArea):
             on_changed=self._on_show_log_panel_change,
         )
         body_layout.addWidget(self._show_log_panel_var)
+
+        self._reduced_motion_var = checkbox(
+            self._t("settings.ui.reduced_motion", "减少界面动效"),
+            value=cfg.reduced_motion,
+            on_changed=self._on_reduced_motion_change,
+        )
+        body_layout.addWidget(self._reduced_motion_var)
 
         self._perf_monitor_var = checkbox(
             self._t("settings.ui.enable_performance_monitor", "启用性能监控"),
@@ -717,6 +725,7 @@ class SettingsView(QScrollArea):
             ),
             auto_clear_log=bool(self._auto_clear_var.isChecked()),
             show_log_panel=bool(self._show_log_panel_var.isChecked()),
+            reduced_motion=bool(self._reduced_motion_var.isChecked()),
             enable_performance_monitor=bool(self._perf_monitor_var.isChecked()),
             performance_print_interval=self._performance_interval(),
             max_concurrent=self._bounded_int(
@@ -844,6 +853,10 @@ class SettingsView(QScrollArea):
     def _on_show_log_panel_change(self, value: bool) -> None:
         if self._persist():
             self._deps.set_log_panel_visible(value)
+
+    def _on_reduced_motion_change(self, value: bool) -> None:
+        if self._persist():
+            self._deps.set_reduced_motion(value)
 
     def _on_perf_monitor_change(self, value: bool) -> None:
         if self._persist():

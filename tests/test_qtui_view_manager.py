@@ -7,6 +7,7 @@ import pytest
 from PySide6.QtWidgets import QStackedWidget, QWidget
 
 from app.qtui.context import QtFeatureContext
+from app.qtui.animation import QtAnimationSystem
 from app.qtui.registry import QtFeatureDescriptor, QtFeatureRegistry
 from app.qtui.view_manager import QtViewManager
 
@@ -169,3 +170,24 @@ def test_switch_view_unknown_id_raises(qt_app: object) -> None:
 
     with pytest.raises(KeyError):
         manager.switch_view("missing")
+
+
+def test_switch_view_uses_injected_animation(qt_app: object) -> None:
+    del qt_app
+    animations = QtAnimationSystem(reduced_motion=True)
+    manager, registry, stack = _make_manager({
+        "alpha": lambda _ctx: QWidget(),
+        "beta": lambda _ctx: QWidget(),
+    })
+    manager = QtViewManager(
+        registry=registry,
+        stack=stack,
+        context=QtFeatureContext({}),  # type: ignore[arg-type]
+        animations=animations,
+    )
+
+    manager.switch_view("alpha")
+    manager.switch_view("beta")
+
+    assert stack.currentWidget() is manager.get_view("beta")
+    assert animations.active_count == 0

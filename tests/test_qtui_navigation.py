@@ -5,6 +5,7 @@ from PySide6.QtCore import qInstallMessageHandler
 from PySide6.QtWidgets import QApplication, QPushButton, QStackedWidget
 
 from app.qtui.registry import create_qt_registry
+from app.qtui.animation import QtAnimationSystem
 from app.qtui.shell import QtShell
 from app.qtui.sidebar import QtSidebar
 from app.qtui.theme import DARK_THEME, get_theme_manager
@@ -99,6 +100,30 @@ def test_sidebar_reuses_layout_during_repeated_collapse_and_selection(
     assert overview._marker is not None
     assert overview._marker.text() == ""
     assert not any("already has a layout" in message for message in messages)
+    sidebar.deleteLater()
+
+
+def test_sidebar_animates_indicator_between_navigation_items(
+    qt_app: QApplication,
+) -> None:
+    animations = QtAnimationSystem()
+    sidebar = QtSidebar(
+        tabs=[
+            {"id": "overview", "label": "概览", "icon": "O"},
+            {"id": "players", "label": "玩家", "icon": "P"},
+        ],
+        translate=_translate,
+        on_tab_select=lambda _view_id: None,
+        animations=animations,
+    )
+    sidebar.show()
+    qt_app.processEvents()
+    sidebar.select_tab("overview")
+    sidebar.select_tab("players")
+
+    assert sidebar._selection_indicator.isVisible()
+    assert animations.active_count == 2
+    animations.dispose()
     sidebar.deleteLater()
 
 

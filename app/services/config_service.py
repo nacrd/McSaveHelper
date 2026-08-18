@@ -109,6 +109,7 @@ class ConfigService:
                 "language": "zh_CN",
                 "sidebar_mode": "auto",
                 "show_log_panel": True,
+                "reduced_motion": False,
                 "enable_performance_monitor": False,
                 "performance_print_interval": 60},
             "api_timeout": 10,
@@ -394,6 +395,7 @@ class ConfigService:
                 sidebar_mode=str(ui.get("sidebar_mode", "auto")),
                 auto_clear_log=bool(ui.get("auto_clear_log", True)),
                 show_log_panel=bool(ui.get("show_log_panel", True)),
+                reduced_motion=bool(ui.get("reduced_motion", False)),
                 enable_performance_monitor=bool(
                     ui.get("enable_performance_monitor", False)
                 ),
@@ -428,6 +430,7 @@ class ConfigService:
                 "sidebar_mode": settings.sidebar_mode,
                 "auto_clear_log": settings.auto_clear_log,
                 "show_log_panel": settings.show_log_panel,
+                "reduced_motion": settings.reduced_motion,
                 "enable_performance_monitor": (
                     settings.enable_performance_monitor
                 ),

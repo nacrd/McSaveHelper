@@ -55,6 +55,7 @@ class FakeHost:
         self.languages: list[str] = []
         self.sidebar_modes: list[str] = []
         self.log_panel_visible: list[bool] = []
+        self.reduced_motion: list[bool] = []
         self.perf_monitor: list[tuple[bool, float]] = []
         self.perf_intervals: list[float] = []
 
@@ -73,6 +74,9 @@ class FakeHost:
 
     def set_log_panel_visible(self, visible: bool) -> None:
         self.log_panel_visible.append(visible)
+
+    def set_reduced_motion(self, enabled: bool) -> None:
+        self.reduced_motion.append(enabled)
 
     def configure_performance_monitor(self, enabled: bool, interval: float) -> None:
         self.perf_monitor.append((enabled, interval))
@@ -127,6 +131,7 @@ class FakeHost:
             apply_language=self.apply_language,
             set_sidebar_mode=self.set_sidebar_mode,
             set_log_panel_visible=self.set_log_panel_visible,
+            set_reduced_motion=self.set_reduced_motion,
             configure_performance_monitor=self.configure_performance_monitor,
             set_performance_interval=self.set_performance_interval,
             info_dialog=self.info_dialog,
